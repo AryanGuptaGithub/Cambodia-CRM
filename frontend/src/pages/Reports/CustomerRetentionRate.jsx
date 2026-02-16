@@ -49,7 +49,7 @@ const CustomerRetentionRate = () => {
   );
 
   const itemsPerPage = 7;
-  
+
   // Calculate if export should be disabled
   const isExportDisabled = exporting || loading || data.records.length === 0;
 
@@ -83,7 +83,7 @@ const CustomerRetentionRate = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/customer-retention`,
+        `${backendUrl}/api/reports/customer-retention`,
         {
           params,
         }
@@ -186,7 +186,7 @@ const CustomerRetentionRate = () => {
 
       // Create URL with query parameters
       const queryString = new URLSearchParams(params).toString();
-      const exportUrl = `${backendUrl}/api/customer-retention/export?${queryString}`;
+      const exportUrl = `${backendUrl}/api/reports/customer-retention/export?${queryString}`;
 
       // Use axios with responseType 'blob' for file download
       const response = await axios.get(exportUrl, {
@@ -197,7 +197,7 @@ const CustomerRetentionRate = () => {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       const fileName = `Customer_Retention_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
-      
+
       link.href = url;
       link.setAttribute('download', fileName);
       document.body.appendChild(link);
@@ -213,9 +213,9 @@ const CustomerRetentionRate = () => {
     }
   };
 
-  // Render Pagination Component
+  // Render Pagination Component - Only show when there are records and more than one page
   const renderPagination = () => {
-    if (pagination.totalPages <= 1) return null;
+    if (data.records.length === 0 || pagination.totalPages <= 1) return null;
 
     return (
       <div className="flex items-center justify-start gap-2 mt-6">
@@ -278,19 +278,20 @@ const CustomerRetentionRate = () => {
     </div>
   );
 
+  // FIXED: Summary Cards - No <div> inside <p>
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
             <p className="text-sm text-gray-600">Total Customers</p>
-            <p className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                data.summary.totalCustomers?.toLocaleString() || 0
-              )}
-            </p>
+            {loading ? (
+              <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+            ) : (
+              <p className="text-2xl font-bold text-gray-800">
+                {data.summary.totalCustomers?.toLocaleString() || 0}
+              </p>
+            )}
           </div>
           <Users className="w-8 h-8 text-green-500" />
         </div>
@@ -299,13 +300,13 @@ const CustomerRetentionRate = () => {
         <div className="flex justify-between items-center">
           <div>
             <p className="text-sm text-gray-600">Retained Customers</p>
-            <p className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                data.summary.retainedCustomers?.toLocaleString() || 0
-              )}
-            </p>
+            {loading ? (
+              <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+            ) : (
+              <p className="text-2xl font-bold text-gray-800">
+                {data.summary.retainedCustomers?.toLocaleString() || 0}
+              </p>
+            )}
           </div>
           <Repeat className="w-8 h-8 text-blue-500" />
         </div>
@@ -314,13 +315,13 @@ const CustomerRetentionRate = () => {
         <div className="flex justify-between items-center">
           <div>
             <p className="text-sm text-gray-600">Retention Rate</p>
-            <p className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                `${data.summary.retentionRate?.toFixed(1) || 0}%`
-              )}
-            </p>
+            {loading ? (
+              <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+            ) : (
+              <p className="text-2xl font-bold text-gray-800">
+                {`${data.summary.retentionRate?.toFixed(1) || 0}%`}
+              </p>
+            )}
           </div>
           <BarChart3 className="w-8 h-8 text-purple-500" />
         </div>
@@ -329,13 +330,13 @@ const CustomerRetentionRate = () => {
         <div className="flex justify-between items-center">
           <div>
             <p className="text-sm text-gray-600">Repeat Customers</p>
-            <p className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                data.summary.repeatCustomers?.toLocaleString() || 0
-              )}
-            </p>
+            {loading ? (
+              <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+            ) : (
+              <p className="text-2xl font-bold text-gray-800">
+                {data.summary.repeatCustomers?.toLocaleString() || 0}
+              </p>
+            )}
           </div>
           <Target className="w-8 h-8 text-orange-500" />
         </div>
@@ -347,7 +348,7 @@ const CustomerRetentionRate = () => {
   const renderZoneHeader = (record, index) => {
     const isLastRowOnPage = (index + 1) % itemsPerPage === 0 || index + 1 === data.records.length;
     const zoneId = record._id || `zone-${index}`; // Use _id instead of zoneId
-    
+
     return (
       <tr
         key={`zone-${zoneId}-${index}`} // Add index to ensure uniqueness
@@ -421,7 +422,7 @@ const CustomerRetentionRate = () => {
     return record.customers.map((customer, customerIndex) => {
       const isLastCustomerRow = customerIndex === record.customers.length - 1;
       const isLastZoneRow = zoneIndex === data.records.length - 1;
-      
+
       return (
         <tr
           key={`customer-${customer.customerId || customer.customerCode || `customer-${zoneIndex}-${customerIndex}`}`} // Fallback keys
@@ -461,13 +462,13 @@ const CustomerRetentionRate = () => {
           <td className="p-3">
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <Calendar size={14} />
-              {customer.firstPurchaseDate ? 
+              {customer.firstPurchaseDate ?
                 new Date(customer.firstPurchaseDate).toLocaleDateString() : "N/A"}
             </div>
           </td>
           <td className="p-3">
             <div className="text-sm text-gray-600">
-              {customer.lastPurchaseDate ? 
+              {customer.lastPurchaseDate ?
                 new Date(customer.lastPurchaseDate).toLocaleDateString() : "N/A"}
             </div>
           </td>
@@ -522,14 +523,14 @@ const CustomerRetentionRate = () => {
     const allRows = [];
     data.records.forEach((record, index) => {
       const zoneId = record._id || `zone-${index}`;
-      
+
       // Add zone header row
       allRows.push(
         <React.Fragment key={`zone-header-${zoneId}-${index}`}>
           {renderZoneHeader(record, index)}
         </React.Fragment>
       );
-      
+
       // Add customer rows if zone is expanded
       const customerRows = renderCustomerRows(record, index);
       if (customerRows && customerRows.length > 0) {

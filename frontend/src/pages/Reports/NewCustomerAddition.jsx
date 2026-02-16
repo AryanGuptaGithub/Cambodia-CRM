@@ -68,7 +68,7 @@ const NewCustomerAddition = () => {
         params.search = search.trim();
       }
 
-      const response = await axios.get(`${backendUrl}/api/new-customers`, {
+      const response = await axios.get(`${backendUrl}/api/reports/new-customers`, {
         params,
       });
       setData(
@@ -174,7 +174,7 @@ const NewCustomerAddition = () => {
 
       // Create URL with query parameters
       const queryString = new URLSearchParams(params).toString();
-      const exportUrl = `${backendUrl}/api/new-customers/export?${queryString}`;
+      const exportUrl = `${backendUrl}/api/reports/new-customers/export?${queryString}`;
 
       // Use axios with responseType 'blob' for file download
       const response = await axios.get(exportUrl, {

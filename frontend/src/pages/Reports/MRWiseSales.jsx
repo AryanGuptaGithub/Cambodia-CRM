@@ -54,7 +54,6 @@ const MRWiseSales = () => {
     pagination.totalPages
   );
 
-  // Calculate serial number based on current page and items per page
   const getSerialNumber = (index) => {
     const itemsPerPage = 7;
     return (pagination.currentPage - 1) * itemsPerPage + index + 1;
@@ -87,7 +86,7 @@ const MRWiseSales = () => {
       };
     }
 
-    const endDate = new Date(currentYear, currentMonth, 0);
+    const endDate = new Date(Date.UTC(currentYear, currentMonth, 0));
     return {
       startDate: `${currentYear}-01-01`,
       endDate: endDate.toISOString().split("T")[0],
@@ -102,8 +101,9 @@ const MRWiseSales = () => {
 
     switch (selectedTab) {
       case "currentMonth":
-        const firstDay = new Date(currentYear, currentMonth, 1);
-        const lastDay = new Date(currentYear, currentMonth + 1, 0);
+        // Use UTC to avoid timezone shifts
+        const firstDay = new Date(Date.UTC(currentYear, currentMonth, 1));
+        const lastDay = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
         return {
           startDate: firstDay.toISOString().split("T")[0],
           endDate: lastDay.toISOString().split("T")[0],
@@ -141,7 +141,6 @@ const MRWiseSales = () => {
         limit: 7,
       };
 
-      // Only add date parameters for tabs that require them
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -151,8 +150,7 @@ const MRWiseSales = () => {
           showToast("warning", "Please select both start and end dates for custom filter");
           return;
         }
-        
-        // Add date parameters for all non-"all" tabs
+
         params = {
           ...params,
           startDate: dateRange.startDate,
@@ -165,13 +163,21 @@ const MRWiseSales = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/mr-wise-sales`,
-        {
-          params,
-        }
+        `${backendUrl}/api/reports/mr-wise-sales/sales`,
+        { params }
       );
 
-      setData(response.data.data || { summary: {}, records: [] });
+      setData({
+        summary: {
+          totalSalesAmount: parseFloat(response.data.data?.summary?.totalSalesAmount) || 0,
+          totalOrders: parseInt(response.data.data?.summary?.totalOrders) || 0,
+          totalMRs: parseInt(response.data.data?.summary?.totalMRs) || 0,
+          averageOrderValue: parseFloat(response.data.data?.summary?.averageOrderValue) || 0,
+          totalCustomers: parseInt(response.data.data?.summary?.totalCustomers) || 0,
+        },
+        records: response.data.data?.records || [],
+      });
+
       setPagination(
         response.data.pagination || {
           currentPage: 1,
@@ -183,9 +189,14 @@ const MRWiseSales = () => {
       );
     } catch (error) {
       console.error("Error fetching MR wise sales:", error);
+      // Log detailed error response for debugging
+      if (error.response) {
+        console.error("Response data:", error.response.data);
+        console.error("Response status:", error.response.status);
+        console.error("Response headers:", error.response.headers);
+      }
       showToast("error", "Failed to fetch MR wise sales data");
 
-      // Reset data on error
       setData({
         summary: {
           totalSalesAmount: 0,
@@ -208,14 +219,15 @@ const MRWiseSales = () => {
     }
   };
 
-  // Fetch data when tab changes
+  useEffect(() => {
+    fetchMRWiseSales(1);
+  }, []);
+
   useEffect(() => {
     if (selectedTab === "custom") {
-      // For custom tab, don't fetch until dates are selected
       if (customDateRange.startDate && customDateRange.endDate) {
         fetchMRWiseSales(1);
       } else {
-        // Clear data when custom tab is selected but no dates are chosen
         setData({
           summary: {
             totalSalesAmount: 0,
@@ -235,12 +247,10 @@ const MRWiseSales = () => {
         });
       }
     } else {
-      // For other tabs, fetch immediately
       fetchMRWiseSales(1);
     }
   }, [selectedTab]);
 
-  // Fetch data when custom dates change (only for custom tab)
   useEffect(() => {
     if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
       fetchMRWiseSales(1);
@@ -266,12 +276,10 @@ const MRWiseSales = () => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   };
 
-  // Debounced search effect
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       fetchMRWiseSales(1);
     }, 500);
-
     return () => clearTimeout(delayDebounce);
   }, [searchTerm]);
 
@@ -286,12 +294,10 @@ const MRWiseSales = () => {
       showToast("warning", "Please select both start and end dates");
       return;
     }
-
     if (customDateRange.startDate > customDateRange.endDate) {
       showToast("warning", "Start date cannot be after end date");
       return;
     }
-
     setSelectedTab("custom");
     setShowCustomFilter(false);
   };
@@ -322,34 +328,28 @@ const MRWiseSales = () => {
     try {
       const dateRange = getDateRange();
       const params = new URLSearchParams();
-      
-      // Add search term if present
+
       if (searchTerm && searchTerm.trim() !== "") {
         params.append("search", searchTerm.trim());
       }
-      
-      // Add date parameters for non-"all" tabs
+
       if (selectedTab !== "all") {
         if (selectedTab === "custom" && (!dateRange.startDate || !dateRange.endDate)) {
           showToast("warning", "Please select both start and end dates for export");
           return;
         }
-        
         if (dateRange.startDate) params.append("startDate", dateRange.startDate);
         if (dateRange.endDate) params.append("endDate", dateRange.endDate);
       }
-      
-      // Create the download URL
-      const downloadUrl = `${backendUrl}/api/mr-wise-sales/export/excel${params.toString() ? `?${params.toString()}` : ''}`;
-      
-      // Create a temporary anchor element to trigger download
+
+      const downloadUrl = `${backendUrl}/api/reports/mr-wise-sales/export/excel${params.toString() ? `?${params.toString()}` : ''}`;
       const link = document.createElement('a');
       link.href = downloadUrl;
       link.setAttribute('download', '');
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
+
       showToast("success", "Excel file downloaded successfully");
     } catch (error) {
       console.error("Error exporting to Excel:", error);
@@ -365,27 +365,20 @@ const MRWiseSales = () => {
     switch (selectedTab) {
       case "currentMonth":
         return `${getCurrentMonthName()} ${getCurrentYear()}`;
-
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange().label;
-
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
-          return `${formatDateForDisplay(
-            customDateRange.startDate
-          )} to ${formatDateForDisplay(customDateRange.endDate)}`;
+          return `${formatDateForDisplay(customDateRange.startDate)} to ${formatDateForDisplay(customDateRange.endDate)}`;
         }
         return "Select custom dates";
-
       default:
         return "All Records";
     }
   };
 
-  // Render Pagination Component
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
-
     return (
       <div className="flex items-center justify-start gap-2 mt-6">
         <button
@@ -401,7 +394,6 @@ const MRWiseSales = () => {
           Prev
         </button>
 
-        {/* Page Numbers */}
         <div className="flex gap-1">
           {visiblePages.map((page, index) => (
             <button
@@ -423,7 +415,6 @@ const MRWiseSales = () => {
           ))}
         </div>
 
-        {/* Next Button */}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
@@ -445,9 +436,7 @@ const MRWiseSales = () => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <TrendingUp className="w-8 h-8 text-green-600" />
-          <h1 className="text-2xl font-bold text-gray-800">
-            MR Wise Sales
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-800">MR Wise Sales</h1>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -486,7 +475,6 @@ const MRWiseSales = () => {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           <button
@@ -531,7 +519,6 @@ const MRWiseSales = () => {
           </button>
         </div>
 
-        {/* Active Filter Display */}
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <Filter size={16} />
           <span>Active Filter: </span>
@@ -539,7 +526,6 @@ const MRWiseSales = () => {
         </div>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
           <div className="flex justify-between items-center">
@@ -587,7 +573,6 @@ const MRWiseSales = () => {
         </div>
       </div>
 
-      {/* Data Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -680,7 +665,6 @@ const MRWiseSales = () => {
               </h2>
 
               <div className="space-y-4 mb-6">
-                {/* Date Range */}
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">

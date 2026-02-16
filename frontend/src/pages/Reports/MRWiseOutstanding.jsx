@@ -166,7 +166,7 @@ const MRWiseOutstanding = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/mr-wise-outstanding`,
+        `${backendUrl}/api/reports/mr-wise-outstanding`,
         {
           params,
         }
@@ -336,7 +336,7 @@ const MRWiseOutstanding = () => {
       }
             
       // Make the export request
-      const response = await axios.get(`${backendUrl}/api/mr-wise-outstanding/export/excel`, {
+      const response = await axios.get(`${backendUrl}/api/reports/mr-wise-outstanding/export/excel`, {
         params: params,
         responseType: 'blob'
       });

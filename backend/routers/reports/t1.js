@@ -633,32 +633,14 @@ router.post("/", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error saving daily sample report:", error);
-
-    // 👇 NEW: Return insufficient stock error as a 400 with clear message
-    if (error.message && error.message.startsWith('Insufficient stock')) {
-      return res.status(400).json({ 
-        success: false, 
-        message: error.message 
-      });
-    }
-
     if (error.name === "ValidationError") {
       const validationErrors = {};
       for (const field in error.errors) {
         validationErrors[field] = error.errors[field].message;
       }
-      return res.status(400).json({ 
-        success: false, 
-        message: "Validation failed", 
-        errors: validationErrors 
-      });
+      return res.status(400).json({ success: false, message: "Validation failed", errors: validationErrors });
     }
-
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while creating report", 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: "Server error while creating report", error: error.message });
   }
 });
 
@@ -726,29 +708,14 @@ router.put("/:id", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Update error:", err);
-
-    // 👇 NEW: Return insufficient stock error as a 400 with clear message
-    if (err.message && err.message.startsWith('Insufficient stock')) {
-      return res.status(400).json({ success: false, message: err.message });
-    }
-
     if (err.name === "ValidationError") {
       const validationErrors = {};
       for (const field in err.errors) {
         validationErrors[field] = err.errors[field].message;
       }
-      return res.status(400).json({ 
-        success: false, 
-        message: "Validation failed", 
-        errors: validationErrors 
-      });
+      return res.status(400).json({ success: false, message: "Validation failed", errors: validationErrors });
     }
-
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while updating report", 
-      error: err.message 
-    });
+    res.status(500).json({ success: false, message: "Server error while updating report", error: err.message });
   }
 });
 
@@ -785,17 +752,7 @@ router.delete("/:id", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Delete Error:", err);
-
-    // Optional: handle insufficient stock on delete if ever needed
-    if (err.message && err.message.startsWith('Insufficient stock')) {
-      return res.status(400).json({ success: false, message: err.message });
-    }
-
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while deleting record", 
-      error: err.message 
-    });
+    res.status(500).json({ success: false, message: "Server error while deleting record", error: err.message });
   }
 });
 
@@ -850,11 +807,7 @@ router.delete("/", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Bulk delete error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while deleting records", 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: "Server error while deleting records", error: error.message });
   }
 });
 

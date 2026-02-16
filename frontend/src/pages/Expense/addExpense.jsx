@@ -223,73 +223,95 @@ const AddExpense = ({
     [errors]
   );
 
+  // Fixed fetchDropdownOptions to handle wrapped responses
   const fetchDropdownOptions = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const catResp = await axios.get(`${backendUrl}/api/expense-categary`);
-
+      // Fetch expense categories
+      const catResp = await axios.get(`${backendUrl}/api/expense-categories`);
       let categories = [];
 
-      if (catResp.data && catResp.data.success) {
-        const responseData = catResp.data.data;
+      if (catResp.data) {
+        // If response has success and data, use data; otherwise use response itself
+        let catData = catResp.data.success ? catResp.data.data : catResp.data;
 
-        if (Array.isArray(responseData)) {
-          categories = responseData
+        if (Array.isArray(catData)) {
+          categories = catData
             .filter((c) => c && (c.Category || c.category))
             .map((c, index) => ({
-              value: c.Sr || c._id || c.id || `cat-${index}`,
+              value: c._id || c.id || c.Sr || `cat-${index}`,
               label: c.Category || c.category,
             }));
-        } else if (responseData && typeof responseData === "object") {
-          if (responseData.Category || responseData.category) {
+        } else if (catData && typeof catData === "object") {
+          // If it's an object but not array, try to find an array property
+          const possibleArrays = Object.values(catData).filter(Array.isArray);
+          if (possibleArrays.length > 0) {
+            categories = possibleArrays[0]
+              .filter((c) => c && (c.Category || c.category))
+              .map((c, index) => ({
+                value: c._id || c.id || `cat-${index}`,
+                label: c.Category || c.category,
+              }));
+          } else if (catData.Category || catData.category) {
+            // Single category object
             categories = [
               {
-                value:
-                  responseData.Sr ||
-                  responseData._id ||
-                  responseData.id ||
-                  "cat-1",
-                label: responseData.Category || responseData.category,
+                value: catData._id || catData.id || catData.Sr || "cat-1",
+                label: catData.Category || catData.category,
               },
             ];
-          } else {
-            const arrayKeys = Object.keys(responseData).filter((key) =>
-              Array.isArray(responseData[key])
-            );
-
-            if (arrayKeys.length > 0) {
-              const firstArray = responseData[arrayKeys[0]];
-              categories = firstArray
-                .filter((c) => c && (c.Category || c.category))
-                .map((c, index) => ({
-                  value: c._id || c.id || `cat-${index}`,
-                  label: c.Category || c.category,
-                }));
-            }
           }
         }
-        setCategoryOptions(categories);
-      } else {
-        setCategoryOptions([]);
       }
+      setCategoryOptions(categories);
 
+      // Fetch source accounts (destinations)
       const destResp = await axios.get(
         `${backendUrl}/api/accounts/destinations`
       );
-      if (destResp.status === 200 && Array.isArray(destResp.data)) {
-        const destinations = destResp.data
-          .filter((d) => d && d._id && d.name)
-          .map((d) => ({
-            value: d._id,
-            label: d.name,
-            totalAmount: d.totalAmount || 0,
-          }));
-        setSourceAccountOptions(destinations);
-      } else {
-        setSourceAccountOptions([]);
+      console.log("values of destRes", destResp);
+      let destinations = [];
+
+      if (destResp.data) {
+        // Handle wrapped response
+        let destData = destResp.data.success ? destResp.data.data : destResp.data;
+
+        if (Array.isArray(destData)) {
+          destinations = destData
+            .filter((d) => d && d._id && d.name)
+            .map((d) => ({
+              value: d._id,
+              label: d.name,
+              totalAmount: d.totalAmount || 0,
+            }));
+        } else if (destData && typeof destData === "object") {
+          // Try to find an array inside the object
+          const possibleArrays = Object.values(destData).filter(Array.isArray);
+          if (possibleArrays.length > 0) {
+            destinations = possibleArrays[0]
+              .filter((d) => d && d._id && d.name)
+              .map((d) => ({
+                value: d._id,
+                label: d.name,
+                totalAmount: d.totalAmount || 0,
+              }));
+          } else {
+            // Maybe it's a single account object? (unlikely but safe)
+            if (destData._id && destData.name) {
+              destinations = [
+                {
+                  value: destData._id,
+                  label: destData.name,
+                  totalAmount: destData.totalAmount || 0,
+                },
+              ];
+            }
+          }
+        }
       }
+      setSourceAccountOptions(destinations);
     } catch (err) {
       console.error("Error loading dropdowns:", err);
       setError(err.message);
@@ -342,8 +364,6 @@ const AddExpense = ({
     return Object.keys(newErrors).length === 0;
   }, [formData, validateAmountAgainstBalance, getSelectedAccountBalance]);
 
-  // REMOVED: updateDestinationAccount function (not needed anymore)
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -363,16 +383,12 @@ const AddExpense = ({
       let resp;
 
       if (isEditing && initialData?._id) {
-        // For editing, just send the update request
         resp = await axios.put(
           `${backendUrl}/api/expenses/${initialData._id}`,
           submitData
         );
-        // The backend handles the balance update automatically
       } else {
-        // For creating, just send the create request
         resp = await axios.post(`${backendUrl}/api/expenses`, submitData);
-        // The backend handles the balance update automatically
       }
 
       if (resp.data.success) {

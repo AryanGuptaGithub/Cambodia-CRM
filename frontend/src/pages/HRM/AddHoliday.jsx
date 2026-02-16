@@ -225,7 +225,7 @@ export default function AddHoliday() {
     }
 
     try {
-      const response = await fetch(`${backendUrl}/api/holidays`, {
+      const response = await fetch(`${backendUrl}/api/hrm/holidays`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

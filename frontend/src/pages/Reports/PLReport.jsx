@@ -113,7 +113,7 @@ const PLReport = () => {
       if (startDate) params.startDate = startDate.toISOString().split("T")[0];
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
-      const response = await axios.get(`${backendUrl}/api/pl-report/summary`, { params });
+      const response = await axios.get(`${backendUrl}/api/reports/profit-and-loss/summary`, { params });
       if (response.data.success && response.data.data) {
         setData({
           summary: response.data.data || {
@@ -136,7 +136,7 @@ const PLReport = () => {
       if (startDate) params.startDate = startDate.toISOString().split("T")[0];
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
-      const response = await axios.get(`${backendUrl}/api/pl-report`, { params });
+      const response = await axios.get(`${backendUrl}/api/reports/profit-and-loss`, { params });
 
       if (response.data.success) {
         const responseData = response.data.data || [];

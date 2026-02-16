@@ -14,7 +14,7 @@ import ReactDOM from "react-dom";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const expenseCategoryAPI = {
   fetchExpenseCategories: async () => {
-    const response = await fetch(`${backendUrl}/api/expense-categary`);
+    const response = await fetch(`${backendUrl}/api/expense-categories`);
     if (!response.ok) {
       throw new Error("Failed to fetch categories");
     }
@@ -32,7 +32,7 @@ const expenseCategoryAPI = {
   },
 
   createExpenseCategory: async (categoryData) => {
-    const response = await fetch(`${backendUrl}/api/expense-categary`, {
+    const response = await fetch(`${backendUrl}/api/expense-categories`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -47,7 +47,7 @@ const expenseCategoryAPI = {
 
   // Update category
   updateExpenseCategory: async (id, categoryData) => {
-    const response = await fetch(`${backendUrl}/api/expense-categary/${id}`, {
+    const response = await fetch(`${backendUrl}/api/expense-categories/${id}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -62,7 +62,7 @@ const expenseCategoryAPI = {
 
   // Delete category
   deleteExpenseCategory: async (id) => {
-    const response = await fetch(`${backendUrl}/api/expense-categary/${id}`, {
+    const response = await fetch(`${backendUrl}/api/expense-categories/${id}`, {
       method: "DELETE",
     });
     if (!response.ok) {

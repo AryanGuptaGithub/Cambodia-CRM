@@ -23,7 +23,6 @@ const MONGO_URI = process.env.MONGODB_URI;
 async function connectDB() {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log("✅ MongoDB connected successfully");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -53,7 +52,6 @@ async function seedUsers() {
     const user = new User(u);
     await user.save();
   }
-  console.log("✅ Users seeded successfully");
 }
 
 async function seedDestinations() {
@@ -64,7 +62,6 @@ async function seedDestinations() {
     { name: "Company Account", code: "company_account", totalAmount: 0 },
   ];
   await Destination.insertMany(destinations);
-  console.log("✅ Destinations seeded successfully");
 }
 
 async function seedCategoryTypes() {
@@ -78,7 +75,6 @@ async function seedCategoryTypes() {
     { name: "Payment Inward", code: "payment_inward" },
   ];
   await CategoryType.insertMany(categoryTypes);
-  console.log("✅ Category types seeded successfully");
 }
 
 async function seedTransactionTypes() {
@@ -90,7 +86,6 @@ async function seedTransactionTypes() {
     { name: "Adjustment", code: "adjustment" },
   ];
   await TransactionType.insertMany(transactionTypes);
-  console.log("✅ Transaction types seeded successfully");
 }
 
 // seedCambodia.js
@@ -133,7 +128,6 @@ async function seedProvinces() {
     // { name: "Tbong Khmum", code: "tbong_khmum" },
   ];
   await Province.insertMany(provinces);
-  console.log("✅ Provinces seeded successfully");
 }
 
 async function seedZones() {
@@ -410,9 +404,6 @@ async function seedZones() {
           name: province.name,
           province: provinceKey,
         });
-        console.log(
-          `ℹ️  Added ${province.name} as its own zone (no districts defined)`
-        );
       }
     });
 
@@ -434,7 +425,6 @@ async function seedZones() {
     });
 
     await Zone.insertMany(formattedZones);
-    console.log(`✅ ${formattedZones.length} zones seeded successfully`);
   } catch (error) {
     console.error("❌ Error seeding zones:", error.message);
     throw error;
@@ -451,7 +441,6 @@ async function seedSaleTypes() {
   ];
 
   await SaleType.insertMany(saleTypes);
-  console.log("✅ Sale types seeded successfully");
 }
 
 async function seedOrderStatuses() {
@@ -480,7 +469,6 @@ async function seedOrderStatuses() {
   ];
 
   await OrderStatus.insertMany(orderStatuses);
-  console.log("✅ Order statuses seeded successfully");
 }
 
 async function seedBusinessTypes() {
@@ -502,7 +490,6 @@ async function seedBusinessTypes() {
   ];
 
   await BusinessType.insertMany(businessTypes);
-  console.log("✅ Business types seeded successfully");
 }
 
 async function seedProductTypes() {
@@ -518,7 +505,6 @@ async function seedProductTypes() {
     ];
 
     await ProductType.insertMany(productTypes);
-    console.log("✅ Product types seeded successfully");
   } catch (error) {
     console.error("❌ Error seeding product types:", error);
   }
@@ -542,7 +528,6 @@ async function seedProductPackingTypes() {
     ];
 
     await ProductPackingType.insertMany(packingTypes);
-    console.log("✅ Product packing types seeded successfully");
   } catch (error) {
     console.error("❌ Error seeding product packing types:", error);
   }
@@ -566,7 +551,6 @@ async function seedAllowanceTypes() {
     ];
 
     await AllowanceType.insertMany(allowanceTypes);
-    console.log("✅ Allowance types seeded successfully");
   } catch (error) {
     console.error("❌ Error seeding allowance types:", error);
   }
@@ -1467,14 +1451,11 @@ async function seedHTabs() {
 
   await HTab.insertMany(sampleTabs);
   const count = await HTab.countDocuments();
-  console.log(`✅ ${count} tabs seeded successfully`);
 }
 
 async function seedMRCash() {
   try {
     const deleteResult = await MRCash.deleteMany({});
-    console.log(`🗑️  Deleted ${deleteResult.deletedCount} existing MRCash records`);
-
     const staffList = await Staff.find({});
 
     let mrStaffList = staffList.filter((staff) => {
@@ -1513,7 +1494,6 @@ async function seedMRCash() {
     });
 
     const result = await MRCash.insertMany(mrCashDocs);
-    console.log(`✅ ${result.length} MRCash records seeded successfully`);
   } catch (error) {
     console.error("❌ Error seeding MRCash:", error.message);
   }
@@ -1524,8 +1504,6 @@ async function runSeeders() {
   await connectDB();
 
   try {
-    console.log("🌱 Starting seeding process...\n");
-
     await seedUsers();
     await seedSaleTypes();
     await seedOrderStatuses();
@@ -1540,13 +1518,10 @@ async function runSeeders() {
     await seedAllowanceTypes();
     await seedHTabs();
     await seedMRCash();
-
-    console.log("\n✅ All seeding completed successfully!");
   } catch (error) {
     console.error("\n❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
-    console.log("🔌 Database disconnected");
     process.exit(0);
   }
 }

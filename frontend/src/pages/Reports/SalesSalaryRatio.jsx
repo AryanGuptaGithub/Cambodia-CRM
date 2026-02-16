@@ -203,7 +203,7 @@ const SalesSalaryRatio = () => {
         params.search = search.trim();
       }
 
-      const response = await axios.get(`${backendUrl}/api/sales-salary-ratio`, {
+      const response = await axios.get(`${backendUrl}/api/reports/sales-and-salary`, {
         params,
       });
 
@@ -397,7 +397,7 @@ const SalesSalaryRatio = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/sales-salary-ratio/export`,
+        `${backendUrl}/api/reports/sales-and-salary/export`,
         {
           params,
           responseType: "blob",

@@ -57,7 +57,7 @@ const ExpiryStockReport = () => {
     setLoading(true);
     try {
       const response = await axios.get(
-        `${backendUrl}/api/expiry-stock-report`,
+        `${backendUrl}/api/reports/expiry-stock`,
         {
           params: {
             page: page,
@@ -190,7 +190,7 @@ const ExpiryStockReport = () => {
       showToast("info", "Preparing Excel file...");
 
       const response = await axios.get(
-        `${backendUrl}/api/expiry-stock-report/export`,
+        `${backendUrl}/api/reports/expiry-stock/export`,
         {
           params: {
             filter: filter,

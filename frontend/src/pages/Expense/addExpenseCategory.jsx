@@ -40,7 +40,6 @@ const InputField = ({
   </div>
 );
 
-// New TextAreaField component
 const TextAreaField = ({
   label,
   name,
@@ -76,7 +75,7 @@ const AddExpenseCategory = ({
   onCancel,
   initialData = null,
   isEditing = false,
-  onSuccess, // Callback for successful submission
+  onSuccess,
 }) => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -101,14 +100,12 @@ const AddExpenseCategory = ({
     }
   }, [initialData]);
 
-  // Handle form field changes
   const handleInputChange = useCallback(
     (field, value) => {
       setFormData((prev) => ({
         ...prev,
         [field]: value,
       }));
-
       if (errors[field]) {
         setErrors((prev) => ({ ...prev, [field]: "" }));
       }
@@ -116,49 +113,6 @@ const AddExpenseCategory = ({
     [errors]
   );
 
-  const fetchDropdownOptions = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Fetch category options
-      const categoryResponse = await axios.get(
-        `${backendUrl}/api/expense-categary`
-      );
-
-      const categories = categoryResponse.data.map((cat) => ({
-        value: cat._id,
-        label: cat.name,
-      }));
-      setCategoryOptions(categories);
-
-      // Fetch destination options
-      const destinationResponse = await axios.get(
-        `${backendUrl}/api/accounts/destinations`
-      );
-
-      const destinations = destinationResponse.data.map((dest) => ({
-        value: dest._id,
-        label: dest.name,
-        totalAmount: dest.totalAmount || 0,
-      }));
-      setDestinationOptions(destinations);
-      setSourceOptions(destinations);
-    } catch (err) {
-      console.error("Error fetching dropdown options:", err);
-      setError(err.message);
-      setCategoryOptions([]);
-      setSourceOptions([]);
-      setDestinationOptions([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDropdownOptions();
-  }, []);
-  // Validate form before submission
   const validate = useCallback(() => {
     const newErrors = {};
 
@@ -178,7 +132,6 @@ const AddExpenseCategory = ({
     return Object.keys(newErrors).length === 0;
   }, [formData]);
 
-  // Handle form submit - Direct API call like your sales example
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -194,19 +147,20 @@ const AddExpenseCategory = ({
       let response;
 
       if (isEditing && initialData?._id) {
+        // Use backendUrl for consistency
         response = await axios.put(
-          `/api/expense-categary/${initialData._id}`,
+          `${backendUrl}/api/expense-categories/${initialData._id}`,
           submitData
         );
       } else {
         response = await axios.post(
-          `${backendUrl}/api/expense-categary`,
+          `${backendUrl}/api/expense-categories`,
           submitData
         );
       }
 
       if (response.data.success) {
-        showToast("success", `${response.data.message}`);
+        showToast("success", response.data.message);
         navigate("/expenselayout/expensecategories");
       } else {
         throw new Error(response.data.message || "Operation failed");
@@ -221,7 +175,6 @@ const AddExpenseCategory = ({
 
       setErrors({ submit: errorMessage });
 
-      // Handle duplicate category error specifically
       if (error.response?.status === 409) {
         setErrors({
           category:
@@ -233,7 +186,6 @@ const AddExpenseCategory = ({
     }
   };
 
-  // Handle cancel with fallback
   const handleCancelClick = useCallback(() => {
     if (typeof onCancel === "function") {
       onCancel();
@@ -280,8 +232,6 @@ const AddExpenseCategory = ({
                   autoComplete="off"
                   required
                 />
-
-                {/* Changed from InputField to TextAreaField */}
                 <TextAreaField
                   label="Description"
                   name="description"
@@ -318,8 +268,7 @@ const AddExpenseCategory = ({
                 type="button"
                 onClick={handleCancelClick}
                 disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600
-                 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>

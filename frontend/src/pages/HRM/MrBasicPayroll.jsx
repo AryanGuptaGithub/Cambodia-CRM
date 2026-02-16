@@ -58,7 +58,7 @@ const MrBasicPayroll = () => {
       setLoading(true);
       setError(null);
 
-      const url = `${backendUrl}/api/mr-basic-payrolls`;
+      const url = `${backendUrl}/api/hrm/mr-basic-payrolls`;
       const response = await axios.get(url);
       if (response.data.success) {
         const payrollData = response.data.data || [];
@@ -190,7 +190,7 @@ const MrBasicPayroll = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/mr-basic-payrolls`, {
+        const res = await axios.delete(`${backendUrl}/api/hrm/mr-basic-payrolls`, {
           data: { ids: selected.map((s) => s.id) },
         });
 
@@ -223,7 +223,7 @@ const MrBasicPayroll = () => {
     if (confirmDelete.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/mr-basic-payrolls/${payroll._id}`
+          `${backendUrl}/api/hrm/mr-basic-payrolls/${payroll._id}`
         );
 
         if (res.data.success) {
@@ -335,7 +335,7 @@ const MrBasicPayroll = () => {
       };
 
       const res = await axios.put(
-        `${backendUrl}/api/mr-basic-payrolls/${editingPayroll._id}`,
+        `${backendUrl}/api/hrm/mr-basic-payrolls/${editingPayroll._id}`,
         updateData
       );
 
@@ -467,7 +467,7 @@ const MrBasicPayroll = () => {
 
     try {
       const res = await axios.post(
-        `${backendUrl}/api/mr-basic-payrolls/import`,
+        `${backendUrl}/api/hrm/mr-basic-payrolls/import`,
         { payrolls: parsedData }
       );
 

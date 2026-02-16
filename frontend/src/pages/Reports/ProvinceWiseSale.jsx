@@ -45,7 +45,7 @@ const ProvinceWiseSale = () => {
   const fetchProvinceData = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${backendUrl}/api/province-wise-sale`, {
+      const response = await axios.get(`${backendUrl}/api/reports/province-wise-sales`, {
         params: {
           page: currentPage,
           limit: itemsPerPage,
@@ -79,7 +79,7 @@ const ProvinceWiseSale = () => {
     try {
       setExportLoading(true);
       
-      const response = await axios.get(`${backendUrl}/api/province-wise-sale/export`, {
+      const response = await axios.get(`${backendUrl}/api/reports/province-wise-sales/export`, {
         params: {
           search: searchTerm,
           period: period,

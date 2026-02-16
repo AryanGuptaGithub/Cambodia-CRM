@@ -85,7 +85,7 @@ const Remittance = () => {
       const response = await axios.get(`${backendUrl}/api/suppliers`);
 
       // Adjust based on your API response structure
-      const suppliers = response.data || [];
+      const suppliers = response.data.data || [];
 
       const options = suppliers.map((supplier) => ({
         value: supplier._id,

@@ -1,20 +1,12 @@
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 
-const dailySampleReportSchema = new mongoose.Schema(
-  {
-    requestNumber: { type: String, required: true },         // Request #
-    date: { type: Date, required: true },                    // Date
-    mrName: { type: String, required: true },                // MR Name
-    description: { type: String },                            // Description
-    productName: { type: String, required: true },           // Product Name
-    qtyBigBox: { type: Number, default: 0 },                 // Quantity (Big Box)
-    qtySmallBox: { type: Number, default: 0 },               // Quantity (Small Box)
-    totalQty: { type: Number, default: 0 },                  // Total Qty
-    qtyPerBox: { type: Number, default: 0 },                 // Qty per Box (Strip)
-    remark: { type: String },                                 // Remark
-  },
-  { timestamps: true }
-);
+const dailySampleSchema = new mongoose.Schema({
+  date: { type: Date, required: true },
+  mrName: { type: String, required: true },
+  mrId: { type: mongoose.Schema.Types.ObjectId, ref: 'Staff' }, // used for stock updates
+  productName: { type: String, required: true },
+  totalQty: { type: Number, default: 0, min: 0 },
+  remark: { type: String, default: '' }
+}, { timestamps: true });
 
-export default mongoose.model("DailySampleReport", dailySampleReportSchema);
-
+export default mongoose.model('DailySampleReport', dailySampleSchema);

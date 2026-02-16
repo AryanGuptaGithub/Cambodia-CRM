@@ -91,7 +91,7 @@ function MRCash() {
     try {
       setMrListLoading(true);
       const response = await axios.get(
-        `${backendUrl}/api/mrcash/mr-list-with-cash`
+        `${backendUrl}/api/mr-cash/mr-list-with-cash`
       );
       if (response.data.success) {
         setMrList(response.data.data || []);
@@ -109,7 +109,7 @@ function MRCash() {
     try {
       setTransferHistoryLoading(true);
       const response = await axios.get(
-        `${backendUrl}/api/mrcash/${mrCashId}/transfers`,
+        `${backendUrl}/api/mr-cash/${mrCashId}/transfers`,
         {
           params: {
             limit: 30,
@@ -135,7 +135,7 @@ function MRCash() {
       setLoading(true);
       setError(null);
 
-      const response = await axios.get(`${backendUrl}/api/mrcash`, {
+      const response = await axios.get(`${backendUrl}/api/mr-cash`, {
         params: {
           limit: 1000, // Get all records in one request
           page: 1,
@@ -358,7 +358,7 @@ function MRCash() {
 
     try {
       const response = await axios.post(
-        `${backendUrl}/api/mrcash/${formData.mrCashId}/transfer`,
+        `${backendUrl}/api/mr-cash/${formData.mrCashId}/transfer`,
         {
           amount: transferAmount,
           notes: formData.notes,
@@ -408,7 +408,7 @@ function MRCash() {
 
     try {
       const response = await axios.post(
-        `${backendUrl}/api/mrcash/${selectedRecord._id}/transfer`,
+        `${backendUrl}/api/mr-cash/${selectedRecord._id}/transfer`,
         {
           amount: transferAmount,
           notes: transferForm.notes,

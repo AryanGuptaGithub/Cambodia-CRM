@@ -190,7 +190,7 @@ const OperationCostCOGSRatio = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/operation-cost-cogs-ratio`,
+        `${backendUrl}/api/reports/operation-cost-cogs-ratio`,
         {
           params,
         }
@@ -406,7 +406,7 @@ const OperationCostCOGSRatio = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/operation-cost-cogs-ratio/export`,
+        `${backendUrl}/api/reports/operation-cost-cogs-ratio/export`,
         {
           params,
           responseType: "blob",

@@ -137,25 +137,60 @@ const useDropdownOptions = () => {
 
   const fetchDropdownOptions = async () => {
     try {
+      setLoading(true); // Add this - you were setting it to false but never true
       setError(null);
 
-      // Fetch category options
+      // Fetch category options - FIXED: Handle different response structures
       const categoryResponse = await axios.get(
         `${backendUrl}/api/accounts/category-type`,
       );
+      console.log("values of categoryResponse", categoryResponse);
 
-      const categories = categoryResponse.data.map((cat) => ({
+      // Handle different possible response structures for categories
+      let categoriesData = [];
+      if (categoryResponse.data && Array.isArray(categoryResponse.data)) {
+        categoriesData = categoryResponse.data;
+      } else if (
+        categoryResponse.data &&
+        categoryResponse.data.data &&
+        Array.isArray(categoryResponse.data.data)
+      ) {
+        categoriesData = categoryResponse.data.data;
+      } else if (
+        categoryResponse.data &&
+        Array.isArray(categoryResponse.data.categories)
+      ) {
+        categoriesData = categoryResponse.data.categories;
+      }
+
+      const categories = categoriesData.map((cat) => ({
         value: cat._id,
         label: cat.name,
       }));
       setCategoryOptions(categories);
 
-      // Fetch destination options
+      // Fetch destination options - FIXED: Add same protection
       const destinationResponse = await axios.get(
         `${backendUrl}/api/accounts/destinations`,
       );
+    
+      let destinationsData = [];
+      if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
+        destinationsData = destinationResponse.data;
+      } else if (
+        destinationResponse.data &&
+        destinationResponse.data.data &&
+        Array.isArray(destinationResponse.data.data)
+      ) {
+        destinationsData = destinationResponse.data.data;
+      } else if (
+        destinationResponse.data &&
+        Array.isArray(destinationResponse.data.destinations)
+      ) {
+        destinationsData = destinationResponse.data.destinations;
+      }
 
-      const destinations = destinationResponse.data.map((dest) => ({
+      const destinations = destinationsData.map((dest) => ({
         value: dest._id,
         label: dest.name,
         totalAmount: dest.totalAmount || 0,
@@ -163,34 +198,31 @@ const useDropdownOptions = () => {
       setDestinationOptions(destinations);
       setSourceOptions(destinations);
 
-      // Fetch supplier options - FIXED: Handle different response structures
+      // Fetch supplier options
       const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
+      console.log("values of supplierResponse", supplierResponse);
 
-      // Handle different possible response structures
       let suppliers = [];
       if (supplierResponse.data && Array.isArray(supplierResponse.data)) {
-        // If response is directly an array
         suppliers = supplierResponse.data;
       } else if (
         supplierResponse.data &&
         supplierResponse.data.data &&
         Array.isArray(supplierResponse.data.data)
       ) {
-        // If response has { data: [] } structure
         suppliers = supplierResponse.data.data;
       } else if (
         supplierResponse.data &&
         Array.isArray(supplierResponse.data.suppliers)
       ) {
-        // If response has { suppliers: [] } structure
         suppliers = supplierResponse.data.suppliers;
       }
 
-      const supplierOptions = suppliers.map((supplier) => ({
+      const supplierOpts = suppliers.map((supplier) => ({
         value: supplier._id,
         label: supplier.name,
       }));
-      setSupplierOptions(supplierOptions);
+      setSupplierOptions(supplierOpts);
     } catch (err) {
       console.error("Error fetching dropdown options:", err);
       setError(err.message);
@@ -417,6 +449,7 @@ const AddTransactionModal = ({
   const [isFetchingSales, setIsFetchingSales] = useState(false);
   const [invoiceDataFetched, setInvoiceDataFetched] = useState(false);
   const [sourceAccountBalance, setSourceAccountBalance] = useState(0);
+  const [destinationAccountBalance, setDestinationAccountBalance] = useState(0); // ✅ ADDED
   const [originalAmount, setOriginalAmount] = useState(0);
 
   // Get category name for filtering
@@ -806,6 +839,7 @@ const AddTransactionModal = ({
         setForm(initializeFormData());
         setInvoiceDataFetched(false);
         setSourceAccountBalance(0);
+        setDestinationAccountBalance(0); // ✅ ADDED
         setOriginalAmount(0);
       }
       setErrors({});
@@ -842,6 +876,19 @@ const AddTransactionModal = ({
       setSourceAccountBalance(0);
     }
   }, [form.source, sourceOptions]);
+
+  useEffect(() => {
+    if (form.destination) {
+      const selectedDestination = destinationOptions.find(
+        (option) => option.value === form.destination,
+      );
+      if (selectedDestination) {
+        setDestinationAccountBalance(selectedDestination.totalAmount || 0);
+      }
+    } else {
+      setDestinationAccountBalance(0);
+    }
+  }, [form.destination, destinationOptions]);
 
   // Handle category type change - reset relevant fields
   useEffect(() => {
@@ -919,7 +966,7 @@ const AddTransactionModal = ({
       // For Cash Sale and Credit Collection: get data from filtered sales
       if (requiresInvoiceDropdown) {
         const saleRecord = findSaleByInvoice(invoiceNumber);
-
+         console.log('values of saleRecords 969', saleRecord);
         if (saleRecord) {
           // Check if invoice already exists in current data
           const existingTransaction =
@@ -942,15 +989,26 @@ const AddTransactionModal = ({
             return;
           }
 
+          // ✅ FIXED: Log the sale record to debug
+          console.log("Sale Record Data:", saleRecord);
+
           setForm((prev) => ({
             ...prev,
-            invoiceNumber: saleRecord.invoiceNumber,
+            invoiceNumber: saleRecord.invoiceNumber || "",
             invoiceDate:
               saleRecord.invoiceDate?.split("T")[0] ||
               new Date().toISOString().split("T")[0],
-            customerName: saleRecord.customerName || "",
-            customerAddress: saleRecord.customerAddress || "",
-            amount: saleRecord.totalAmount || "",
+            customerName:
+              saleRecord.customerName || saleRecord.customer?.name || "",
+            // ✅ FIXED: Check multiple possible field names for customer address
+            customerAddress:
+              saleRecord.customerAddress ||
+              saleRecord.customer?.address ||
+              saleRecord.billingAddress ||
+              saleRecord.shippingAddress ||
+              saleRecord.address || // ✅ ADDED THIS LINE
+              "",
+            amount: saleRecord.totalAmount || saleRecord.amount || "",
           }));
           setInvoiceDataFetched(true);
         } else {
@@ -1000,6 +1058,7 @@ const AddTransactionModal = ({
         const salesResponse = await axios.get(
           `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`,
         );
+        console.log('values of salesResponse', salesResponse);
         const salesData = salesResponse.data;
 
         if (salesData.data && salesData.data.length > 0) {
@@ -1024,14 +1083,25 @@ const AddTransactionModal = ({
           }
 
           const saleRecord = salesData.data[0];
+
+          // ✅ FIXED: Log the API response to debug
+          console.log("API Sale Record Data:", saleRecord);
+
           setForm((prev) => ({
             ...prev,
             invoiceDate:
               saleRecord.invoiceDate?.split("T")[0] ||
               new Date().toISOString().split("T")[0],
-            customerName: saleRecord.customerName || "",
-            customerAddress: saleRecord.customerAddress || "",
-            amount: saleRecord.amount || "",
+            customerName:
+              saleRecord.customerName || saleRecord.customer?.name || "",
+            // ✅ FIXED: Check multiple possible field names for customer address
+            customerAddress:
+              saleRecord.customerAddress ||
+              saleRecord.customer?.address ||
+              saleRecord.billingAddress ||
+              saleRecord.shippingAddress ||
+              "",
+            amount: saleRecord.amount || saleRecord.totalAmount || "",
           }));
           setInvoiceDataFetched(true);
         } else {
@@ -1088,7 +1158,6 @@ const AddTransactionModal = ({
       }));
     }
 
-    // When category type changes, reset related fields
     if (field === "categoryType") {
       setForm((prev) => ({
         ...prev,
@@ -1105,6 +1174,7 @@ const AddTransactionModal = ({
       }));
       setInvoiceDataFetched(false);
       setSourceAccountBalance(0);
+      setDestinationAccountBalance(0); // ✅ ADDED
       setOriginalAmount(0);
     }
 
@@ -1115,6 +1185,15 @@ const AddTransactionModal = ({
       );
       if (selectedSource) {
         setSourceAccountBalance(selectedSource.totalAmount || 0);
+      }
+    }
+
+    if (field === "destination" && value) {
+      const selectedDestination = destinationOptions.find(
+        (option) => option.value === value,
+      );
+      if (selectedDestination) {
+        setDestinationAccountBalance(selectedDestination.totalAmount || 0);
       }
     }
 
@@ -1278,12 +1357,12 @@ const AddTransactionModal = ({
       let response;
       if (isEdit && editData) {
         response = await axios.put(
-          `${backendUrl}/api/transaction/${editData._id}`,
+          `${backendUrl}/api/transactions/${editData._id}`,
           transactionData,
         );
       } else {
         response = await axios.post(
-          `${backendUrl}/api/transaction`,
+          `${backendUrl}/api/transactions`,
           transactionData,
         );
       }
@@ -1372,6 +1451,20 @@ const AddTransactionModal = ({
               disabled={field.disabled || false}
               placeholder={field.placeholder || `Select ${field.label}`}
             />
+            {/* ✅ ADDED: Show balance for destination account */}
+            {field.key === "destination" &&
+              value &&
+              destinationAccountBalance > 0 && (
+                <div className="mt-1 text-xs text-blue-600 font-medium">
+                  Current Balance: ${destinationAccountBalance.toFixed(2)}
+                </div>
+              )}
+            {/* ✅ ADDED: Show balance for source account */}
+            {field.key === "source" && value && sourceAccountBalance > 0 && (
+              <div className="mt-1 text-xs text-green-600 font-medium">
+                Current Balance: ${sourceAccountBalance.toFixed(2)}
+              </div>
+            )}
           </div>
         );
 
@@ -1572,7 +1665,7 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   // Function to download template from backend
   const downloadTemplate = () => {
     // Construct the URL with query parameters
-    const templateUrl = `${backendUrl}/api/transaction/import-template?accountType=${encodeURIComponent(activeTab)}`;
+    const templateUrl = `${backendUrl}/api/transactions/import-template?accountType=${encodeURIComponent(activeTab)}`;
 
     // Create a temporary anchor element
     const link = document.createElement("a");
@@ -1632,7 +1725,7 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
 
     try {
       const response = await axios.post(
-        `${backendUrl}/api/transaction/import`,
+        `${backendUrl}/api/transactions/import`,
         formData,
         {
           headers: {
@@ -2142,7 +2235,7 @@ const CashAndBank = () => {
   const fetchTransactions = async () => {
     try {
       // Remove all parameters including searchTerm
-      const response = await axios.get(`${backendUrl}/api/transaction`);
+      const response = await axios.get(`${backendUrl}/api/transactions`);
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
 
@@ -2213,7 +2306,7 @@ const CashAndBank = () => {
     try {
       if (isEdit && editingTransaction) {
         const response = await axios.put(
-          `${backendUrl}/api/transaction/${editingTransaction._id}`,
+          `${backendUrl}/api/transactions/${editingTransaction._id}`,
           transactionData,
         );
 
@@ -2255,7 +2348,7 @@ const CashAndBank = () => {
 
     try {
       const response = await axios.delete(
-        `${backendUrl}/api/transaction/${transaction._id}`,
+        `${backendUrl}/api/transactions/${transaction._id}`,
       );
 
       if (response.data.success) {
@@ -2438,13 +2531,16 @@ const CashAndBank = () => {
   const handleExport = async () => {
     setExportLoading(true);
     try {
-      const response = await axios.get(`${backendUrl}/api/transaction/export`, {
-        params: {
-          accountType: activeTab,
-          ...(searchTerm && { search: searchTerm }),
+      const response = await axios.get(
+        `${backendUrl}/api/transactions/export`,
+        {
+          params: {
+            accountType: activeTab,
+            ...(searchTerm && { search: searchTerm }),
+          },
+          responseType: "blob",
         },
-        responseType: "blob",
-      });
+      );
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");

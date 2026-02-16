@@ -152,7 +152,7 @@ const TotalExpense = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/reports/financial-summary`,
+        `${backendUrl}/api/reports/total-expense/`,
         {
           params,
         }
@@ -298,7 +298,7 @@ const TotalExpense = () => {
       if (dateRange.endDate) params.append("endDate", dateRange.endDate);
       if (searchTerm) params.append("search", searchTerm);
 
-      const downloadUrl = `${backendUrl}/api/reports/financial-summary/export/excel?${params.toString()}`;
+      const downloadUrl = `${backendUrl}/api/reports/total-expense/export/excel?${params.toString()}`;
 
       const response = await axios.get(downloadUrl, {
         responseType: "blob",

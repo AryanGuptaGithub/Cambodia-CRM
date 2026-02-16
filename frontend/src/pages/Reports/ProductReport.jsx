@@ -81,7 +81,7 @@ const ProductReport = () => {
         params.append('category', categoryFilter);
       }
 
-      const response = await fetch(`${backendUrl}/api/product-report/report?${params.toString()}`);
+      const response = await fetch(`${backendUrl}/api/reports/product-report/report?${params.toString()}`);
       if (!response.ok) throw new Error("Failed to fetch product report");
       const data = await response.json();
       

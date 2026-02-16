@@ -84,7 +84,7 @@ const ZoneWiseCustomers = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/zone-wise-customers`,
+        `${backendUrl}/api/reports/zone-wise-customers`,
         {
           params,
         }
@@ -194,7 +194,7 @@ const ZoneWiseCustomers = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/zone-wise-customers/export`,
+        `${backendUrl}/api/reports/zone-wise-customers/export`,
         {
           params,
           responseType: 'blob',
@@ -238,7 +238,7 @@ const ZoneWiseCustomers = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/zone-wise-customers/export-customers`,
+        `${backendUrl}/api/reports/zone-wise-customers/export-customers`,
         {
           params,
           responseType: 'blob',

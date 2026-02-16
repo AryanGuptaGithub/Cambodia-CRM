@@ -71,7 +71,7 @@ const Holidays = () => {
     setError(null);
 
     try {
-      const response = await axios.get(`${backendUrl}/api/holidays`);
+      const response = await axios.get(`${backendUrl}/api/hrm/holidays`);
       if (response.data && response.data.success !== false) {
         const holidaysData =
           response.data.holidays || response.data.data || response.data;
@@ -303,7 +303,7 @@ const Holidays = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/holidays`, {
+        const res = await axios.delete(`${backendUrl}/api/hrm/holidays`, {
           data: { ids: selected.map((s) => s.id) },
         });
 
@@ -339,7 +339,7 @@ const Holidays = () => {
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/holidays/${holiday._id}`,
+          `${backendUrl}/api/hrm/holidays/${holiday._id}`,
         );
         if (res.status === 200) {
           showToast("success", `${holiday.name} deleted successfully`);
@@ -537,7 +537,7 @@ const Holidays = () => {
     setIsUploading(true);
     try {
       const res = await axios.post(
-        `${backendUrl}/api/holidays/import`,
+        `${backendUrl}/api/hrm/holidays/import`,
         parsedData,
       );
       if (res.status === 200 || res.status === 201) {
@@ -586,7 +586,7 @@ const Holidays = () => {
         description: form.description,
       };
 
-      const res = await axios.post(`${backendUrl}/api/holidays`, payload);
+      const res = await axios.post(`${backendUrl}/api/hrm/holidays`, payload);
       if (res.status === 201 || res.status === 200) {
         showToast("success", "Holiday added successfully");
         setIsAddModalOpen(false);
@@ -624,7 +624,7 @@ const Holidays = () => {
       };
 
       const res = await axios.put(
-        `${backendUrl}/api/holidays/${form._id}`,
+        `${backendUrl}/api/hrm/holidays/${form._id}`,
         payload,
       );
       if (res.status === 200) {
@@ -857,7 +857,7 @@ const Holidays = () => {
                 <div className="grid grid-cols-7 gap-1 mb-2">
                   {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
                     <div
-                      key={day}
+                      key={`${day}-${index}`}   // ✅ FIX: unique key
                       className={`text-center text-xs font-medium ${
                         index === 0 ? "text-red-600" : "text-gray-600"
                       }`}

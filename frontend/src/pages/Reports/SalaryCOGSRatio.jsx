@@ -203,7 +203,7 @@ const SalaryCOGSRatio = () => {
         params.search = search.trim();
       }
 
-      const response = await axios.get(`${backendUrl}/api/salary-cogs-ratio`, {
+      const response = await axios.get(`${backendUrl}/api/reports/salary-cogs-ratio`, {
         params,
       });
 
@@ -417,7 +417,7 @@ const SalaryCOGSRatio = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/salary-cogs-ratio/export`,
+        `${backendUrl}/api/reports/salary-cogs-ratio/export`,
         {
           params,
           responseType: "blob",

@@ -549,4 +549,239 @@ router.get("/export", async (req, res) => {
   }
 });
 
+// ===== Annual Repeat Rate Export =====
+router.get("/annual/export", async (req, res) => {
+  try {
+    const { search = "", period = "last_year" } = req.query;
+
+    // Date filter for last year
+    let dateFilter = {};
+    if (period === "last_year") {
+      const now = new Date();
+      const firstDayOfLastYear = new Date(now.getFullYear() - 1, 0, 1);
+      const lastDayOfLastYear = new Date(now.getFullYear() - 1, 11, 31);
+      dateFilter = {
+        invoiceDate: {
+          $gte: firstDayOfLastYear,
+          $lte: lastDayOfLastYear,
+        },
+      };
+    }
+
+    // Search filter
+    let searchCondition = {};
+    if (search.trim() !== "") {
+      const regex = new RegExp(search.trim(), "i");
+      searchCondition = {
+        $or: [
+          { "customerDetails.name": regex },
+          { "customerDetails.customerCode": regex },
+          { mrName: regex },
+        ],
+      };
+    }
+
+    // Main aggregation pipeline (no pagination)
+    const pipeline = [
+      { $match: { ...dateFilter, ...searchCondition } },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerDetails",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customerDetails",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $group: {
+          _id: "$customerCode",
+          customerName: { $first: "$customerDetails.name" },
+          customerCode: { $first: "$customerCode" },
+          totalPurchases: { $sum: 1 },
+          firstPurchaseDate: { $min: "$invoiceDate" },
+          lastPurchaseDate: { $max: "$invoiceDate" },
+          totalAmount: { $sum: "$totalAmount" },
+        },
+      },
+      {
+        $addFields: {
+          isRepeatCustomer: {
+            $cond: { if: { $gte: ["$totalPurchases", 2] }, then: true, else: false },
+          },
+        },
+      },
+      { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
+    ];
+
+    const records = await SaleSummary.aggregate(pipeline);
+
+    // Summary statistics
+    const summaryPipeline = [
+      { $match: { ...dateFilter, ...searchCondition } },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerDetails",
+        },
+      },
+      {
+        $group: {
+          _id: "$customerCode",
+          totalPurchases: { $sum: 1 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalCustomers: { $sum: 1 },
+          repeatCustomers: {
+            $sum: { $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0] },
+          },
+          newCustomers: {
+            $sum: { $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0] },
+          },
+        },
+      },
+      {
+        $project: {
+          totalCustomers: 1,
+          repeatCustomers: 1,
+          newCustomers: 1,
+          repeatRate: {
+            $cond: [
+              { $eq: ["$totalCustomers", 0] },
+              0,
+              {
+                $multiply: [
+                  { $divide: ["$repeatCustomers", "$totalCustomers"] },
+                  100,
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const summaryResult = await SaleSummary.aggregate(summaryPipeline);
+    const summary = summaryResult[0] || {
+      totalCustomers: 0,
+      repeatCustomers: 0,
+      newCustomers: 0,
+      repeatRate: 0,
+    };
+
+    // Helper to pad customer code
+    const padCode = (code) => {
+      if (!code) return "N/A";
+      return String(code).padStart(5, '0');
+    };
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+
+    // Summary Sheet
+    const summarySheet = workbook.addWorksheet("Summary");
+    summarySheet.mergeCells("A1:E1");
+    const titleCell = summarySheet.getCell("A1");
+    titleCell.value = "Annual Customer Repeat Rate - Summary";
+    titleCell.font = { size: 16, bold: true };
+    titleCell.alignment = { horizontal: "center" };
+
+    summarySheet.addRow([]);
+    const summaryHeaders = ["Metric", "Value"];
+    const summaryHeaderRow = summarySheet.addRow(summaryHeaders);
+    summaryHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
+      };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    summarySheet.addRow(["Total Customers", summary.totalCustomers]);
+    summarySheet.addRow(["Repeat Customers", summary.repeatCustomers]);
+    summarySheet.addRow(["New Customers", summary.newCustomers]);
+    summarySheet.addRow(["Repeat Rate", `${summary.repeatRate?.toFixed(2) || 0}%`]);
+    summarySheet.addRow(["Generated On", new Date().toLocaleString()]);
+
+    summarySheet.columns.forEach((col) => (col.width = 25));
+
+    // Details Sheet
+    const detailsSheet = workbook.addWorksheet("Details");
+    detailsSheet.mergeCells("A1:G1");
+    const detailsTitle = detailsSheet.getCell("A1");
+    detailsTitle.value = "Annual Customer Repeat Rate - Details";
+    detailsTitle.font = { size: 16, bold: true };
+    detailsTitle.alignment = { horizontal: "center" };
+
+    detailsSheet.addRow([]);
+    const detailsHeaders = [
+      "Sr.No",
+      "Customer Code",
+      "Customer Name",
+      "Total Purchases",
+      "First Purchase",
+      "Last Purchase",
+      "Status",
+    ];
+    const detailsHeaderRow = detailsSheet.addRow(detailsHeaders);
+    detailsHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
+      };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    records.forEach((record, idx) => {
+      detailsSheet.addRow([
+        idx + 1,
+        padCode(record.customerCode),                // padded code
+        record.customerName || "N/A",
+        record.totalPurchases || 0,
+        record.firstPurchaseDate
+          ? new Date(record.firstPurchaseDate).toLocaleDateString()
+          : "N/A",
+        record.lastPurchaseDate
+          ? new Date(record.lastPurchaseDate).toLocaleDateString()
+          : "N/A",
+        record.isRepeatCustomer ? "Repeat" : "One-Time",
+      ]);
+    });
+
+    detailsSheet.columns.forEach((col) => (col.width = 20));
+
+    // Send response
+    const fileName = `Annual_Repeat_Rate_${Date.now()}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("❌ Error exporting annual repeat rate:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export annual repeat rate",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
 export default router;

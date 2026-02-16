@@ -24,11 +24,13 @@ const CustomerRetentionRate = () => {
       retainedCustomers: 0,
       retentionRate: 0,
       repeatCustomers: 0,
+      newCustomers: 0,
     },
     records: [],
   });
 
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [pagination, setPagination] = useState({
     currentPage: 1,
@@ -46,11 +48,10 @@ const CustomerRetentionRate = () => {
     pagination.totalPages
   );
 
-  // Get serial number
   const getSerialNumber = (index) =>
     (pagination.currentPage - 1) * itemsPerPage + index + 1;
 
-  // Fetch Data - Updated to use monthly customer repeat rate API
+  // Fetch Data
   const fetchRetentionData = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
@@ -65,10 +66,10 @@ const CustomerRetentionRate = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/monthly-customer-repeat-rate`,
+        `${backendUrl}/api/reports/customer-retention/monthly`,
         { params }
       );
-            
+
       setData(
         response.data.data || {
           summary: {
@@ -76,6 +77,7 @@ const CustomerRetentionRate = () => {
             retainedCustomers: 0,
             retentionRate: 0,
             repeatCustomers: 0,
+            newCustomers: 0,
           },
           records: [],
         }
@@ -100,6 +102,7 @@ const CustomerRetentionRate = () => {
           retainedCustomers: 0,
           retentionRate: 0,
           repeatCustomers: 0,
+          newCustomers: 0,
         },
         records: [],
       });
@@ -112,14 +115,12 @@ const CustomerRetentionRate = () => {
     fetchRetentionData(1);
   }, []);
 
-  // Handle pagination
   const handlePageChange = (page) => {
     if (page >= 1 && page <= pagination.totalPages) {
       fetchRetentionData(page);
     }
   };
 
-  // Search handlers
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
   };
@@ -142,13 +143,50 @@ const CustomerRetentionRate = () => {
     }
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export to Excel feature coming soon");
+  // ✅ Export to Excel (implemented)
+  const exportToExcel = async () => {
+    // Prevent export if no records
+    if (data.records.length === 0) {
+      showToast("warning", "No records to export");
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const params = { period: "last_month" };
+      if (searchTerm && searchTerm.trim() !== "") {
+        params.search = searchTerm.trim();
+      }
+
+      const queryString = new URLSearchParams(params).toString();
+      const exportUrl = `${backendUrl}/api/reports/customer-retention/monthly/export?${queryString}`;
+
+      const response = await axios.get(exportUrl, {
+        responseType: "blob",
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      const fileName = `Monthly_Repeat_Rate_${new Date().toISOString().split("T")[0]}.xlsx`;
+
+      link.href = url;
+      link.setAttribute("download", fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      showToast("success", "Excel report downloaded successfully!");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      showToast("error", "Failed to download Excel report");
+    } finally {
+      setExporting(false);
+    }
   };
 
-  // Render pagination
   const renderPagination = () => {
-    if (pagination.totalPages <= 1) return null;
+    if (pagination.totalPages <= 1 || data.records.length === 0) return null;
     return (
       <div className="flex items-center justify-start gap-2 mt-6">
         <button
@@ -201,7 +239,6 @@ const CustomerRetentionRate = () => {
     );
   };
 
-  // Summary Cards - Updated with loading states and proper structure
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500">
@@ -320,10 +357,15 @@ const CustomerRetentionRate = () => {
 
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            disabled={exporting || data.records.length === 0}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+              exporting || data.records.length === 0
+                ? "bg-gray-400 text-white cursor-not-allowed"
+                : "bg-green-600 hover:bg-green-700 text-white"
+            }`}
           >
             <Download size={18} />
-            Export Excel
+            {exporting ? "Exporting..." : "Export Excel"}
           </button>
         </div>
       </div>

@@ -184,7 +184,7 @@ const OperationCostSalesRatio = () => {
         params.search = search.trim();
       }
 
-      const response = await axios.get(`${backendUrl}/api/operation-cost-sales-ratio`, {
+      const response = await axios.get(`${backendUrl}/api/reports/operation-cost-sales-ratio`, {
         params,
       });
 
@@ -388,7 +388,7 @@ const OperationCostSalesRatio = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/operation-cost-sales-ratio/export`,
+        `${backendUrl}/api/reports/operation-cost-sales-ratio/export`,
         {
           params,
           responseType: "blob",

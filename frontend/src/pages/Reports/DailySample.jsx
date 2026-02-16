@@ -37,29 +37,22 @@ const DailySample = () => {
     requestNumber: "",
     date: "",
     mrName: "",
-    description: "",
     productName: "",
-    qtyBigBox: 0,
-    qtySmallBox: 0,
     totalQty: 0,
-    qtyPerBox: 0,
     remark: "",
   });
 
-  const filteredDailySamples = dailySampleData.filter(
+  // Filtered data – now using remark instead of description
+  const filteredDailySamples = (dailySampleData || []).filter(
     (item) =>
-      item.productName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.qtyBigBox?.toString().includes(searchTerm.toLowerCase()) ||
-      item.qtySmallBox?.toString().includes(searchTerm.toLowerCase()) ||
-      item.qtyPerBox?.toString().includes(searchTerm.toLowerCase()) ||
-      item.requestNumber?.toString().includes(searchTerm.toLowerCase()) ||
-      item.mrName?.toLowerCase().includes(searchTerm.toLowerCase())
+      item?.productName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item?.remark?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item?.totalQty?.toString().includes(searchTerm.toLowerCase()) ||
+      item?.requestNumber?.toString().includes(searchTerm.toLowerCase()) ||
+      item?.mrName?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalPages = Math.ceil(
-    filteredDailySamples.length / dailySamplePerPage
-  );
+  const totalPages = Math.ceil(filteredDailySamples.length / dailySamplePerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentDailySamples = filteredDailySamples.slice(
     (currentPage - 1) * dailySamplePerPage,
@@ -68,17 +61,16 @@ const DailySample = () => {
 
   const fetchDailySampleReports = async () => {
     try {
-      const res = await fetch(`${backendUrl}/api/dailysample`);
+      setLoading(true);
+      const res = await fetch(`${backendUrl}/api/reports/daily-sample`);
       if (!res.ok) throw new Error("Failed to fetch daily sample reports");
 
       const data = await res.json();
-      setDailySampleData(data.reports);
+      setDailySampleData(data.reports || []);
     } catch (error) {
       console.error("❌ Fetch Daily Sample Reports Error:", error);
-      showToast(
-        "error",
-        error.message || "Error fetching daily sample reports"
-      );
+      showToast("error", error.message || "Error fetching daily sample reports");
+      setDailySampleData([]);
     } finally {
       setLoading(false);
     }
@@ -110,26 +102,22 @@ const DailySample = () => {
         return;
       }
 
-      // ✅ Required headers
+      // ✅ Required headers – replaced "description" with "remark"
       const requiredHeaders = [
         "request #",
         "date",
         "mr name",
-        "description",
+        "remark",
         "product name",
+        "total quantity",
       ];
 
       let headerRowIndex = -1;
       let matchedHeaders = [];
 
-      // 🔍 Find header row (first 10 rows max)
       for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const row = rows[i].map((cell) =>
-          cell?.toString().trim().toLowerCase()
-        );
-        const matched = requiredHeaders.filter((header) =>
-          row.includes(header)
-        );
+        const row = rows[i].map((cell) => cell?.toString().trim().toLowerCase());
+        const matched = requiredHeaders.filter((header) => row.includes(header));
         if (matched.length >= 4) {
           headerRowIndex = i;
           matchedHeaders = matched;
@@ -137,18 +125,12 @@ const DailySample = () => {
         }
       }
 
-      if (
-        headerRowIndex === -1 ||
-        matchedHeaders.length < requiredHeaders.length
-      ) {
-        const missing = requiredHeaders.filter(
-          (h) => !matchedHeaders.includes(h)
-        );
+      if (headerRowIndex === -1 || matchedHeaders.length < requiredHeaders.length) {
+        const missing = requiredHeaders.filter((h) => !matchedHeaders.includes(h));
         showToast("error", `❌ Missing headers: ${missing.join(", ")}`);
         return;
       }
 
-      // ✅ Map header keys to column indexes
       const rawHeaders = rows[headerRowIndex];
       const headersMap = {};
       rawHeaders.forEach((header, index) => {
@@ -157,7 +139,6 @@ const DailySample = () => {
         headersMap[index] = cleaned;
       });
 
-      // ✅ Extract data rows
       const dataRows = rows.slice(headerRowIndex + 1);
       if (dataRows.length === 0) {
         showToast("warning", "No data rows found in Excel file.");
@@ -175,8 +156,9 @@ const DailySample = () => {
             requestNumber: item["request #"],
             date: parseExcelDate(item["date"]),
             mrName: item["mr name"],
-            description: item["description"],
+            remark: item["remark"],            // ✅ now using remark
             productName: item["product name"],
+            totalQty: item["total quantity"] || 0,
           };
         })
         .filter((entry) => !!entry.requestNumber);
@@ -206,28 +188,22 @@ const DailySample = () => {
 
     try {
       const res = await axios.post(
-        `${backendUrl}/api/dailysample/import`,
+        `${backendUrl}/api/reports/daily-sample/import`,
         parsedData
       );
 
-      // If import is successful
       if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Daily Sample Report imported successfully!"
-        );
+        showToast("success", res.data.message || "Daily Sample Report imported successfully!");
         setShowImportModal(false);
+        fetchDailySampleReports();
+        setParsedData([]);
       }
     } catch (err) {
       console.error("Import error:", err);
       if (err.response) {
         const { message } = err.response.data;
         const cleanMessage = message.replace(/<[^>]+>/g, "");
-
-        showToast(
-          "error",
-          cleanMessage || "Failed to import daily sample reports."
-        );
+        showToast("error", cleanMessage || "Failed to import daily sample reports.");
         fetchDailySampleReports();
       } else {
         showToast("error", "Network error. Please try again.");
@@ -243,7 +219,6 @@ const DailySample = () => {
     setIsEditModalOpen(true);
   };
 
-  // Open view modal with selected customer data
   const handleView = (DailySample) => {
     setForm({ ...DailySample });
     setIsOpen(true);
@@ -253,7 +228,7 @@ const DailySample = () => {
   const onUpdate = async (formData) => {
     try {
       const res = await axios.put(
-        `${backendUrl}/api/dailysample/${formData._id}`,
+        `${backendUrl}/api/reports/daily-sample/${formData._id}`,
         formData
       );
 
@@ -281,7 +256,7 @@ const DailySample = () => {
     if (confirmDelete.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/dailysample/${dailySampleData._id}`
+          `${backendUrl}/api/reports/daily-sample/${dailySampleData._id}`
         );
 
         if (res.status === 200) {
@@ -308,7 +283,7 @@ const DailySample = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/dailysample`, {
+        const res = await axios.delete(`${backendUrl}/api/reports/daily-sample`, {
           data: { ids: selected },
         });
 
@@ -331,7 +306,6 @@ const DailySample = () => {
   const toggleSelect = (sale) => {
     setSelected((prev) => {
       const exists = prev.some((c) => c.id === sale._id);
-
       if (exists) {
         return prev.filter((c) => c.id !== sale._id);
       } else {
@@ -351,7 +325,7 @@ const DailySample = () => {
 
   function capitalizeFirstLetter(str) {
     if (!str) return "";
-    str = str.toString(); // ensure it's a string
+    str = str.toString();
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
 
@@ -364,6 +338,14 @@ const DailySample = () => {
       }, 1000);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 flex justify-center items-center h-64">
+        <div className="text-lg text-gray-600">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -396,7 +378,6 @@ const DailySample = () => {
 
         {/* Right: Total Count & Search Input */}
         <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6 w-full md:w-auto justify-end">
-          {/* Total Count */}
           <p className="text-sm font-medium text-gray-700 whitespace-nowrap">
             Total Count:{" "}
             <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold shadow-sm">
@@ -404,7 +385,6 @@ const DailySample = () => {
             </span>
           </p>
 
-          {/* Search Input */}
           <div className="relative w-full md:w-72">
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -414,7 +394,7 @@ const DailySample = () => {
             <input
               ref={inputRef}
               type="text"
-              placeholder="Search by Product, Item Code or Brand"
+              placeholder="Search by Product, MR Name, Remark or Request #"
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -425,6 +405,7 @@ const DailySample = () => {
           </div>
         </div>
       </div>
+
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
@@ -445,68 +426,56 @@ const DailySample = () => {
                   <span>Product Name</span>
                 </div>
               </th>
-              <th className="p-3">Reference Number</th>
               <th className="p-3">MR Name</th>
-              <th className="p-3">Description</th>
-              <th className="p-3">Big Box(Q)</th>
-              <th className="p-3">Small Box(Q)</th>
-              <th className="p-3">Strip</th>
+              <th className="p-3">Remark</th>               {/* ✅ Changed header */}
+              <th className="p-3">Total Quantity</th>
               <th className="p-3">Action</th>
             </tr>
           </thead>
           <tbody>
             {currentDailySamples.length > 0 ? (
-              currentDailySamples.map((item, index) => {
-                return (
-                  <tr
-                    key={item._id}
-                    className={`hover:bg-gray-50 ${
-                      (index + 1) % dailySamplePerPage === 0 ||
-                      index + 1 === currentDailySamples.length
-                        ? ""
-                        : "border-b"
-                    }`}
-                  >
-                    <td className="p-3">
-                      <div className="flex items-center gap-4">
-                        <input
-                          type="checkbox"
-                          checked={selected.some((s) => s.id === item._id)}
-                          onChange={() => toggleSelect(item)}
-                        />
-                        <span>{capitalizeFirstLetter(item.productName)}</span>
-                      </div>
-                    </td>
-                    <td className="p-3">{item.requestNumber}</td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(item.mrName)}
-                    </td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(item.description)}
-                    </td>
-                    <td className="p-3">{item.qtyBigBox}</td>
-                    <td className="p-3">{item.qtySmallBox}</td>
-                    <td className="p-3">{item.qtySmallBox}</td>
-                    <td className="p-3 flex items-center justify-center gap-3">
-                      <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
-                        <Eye onClick={() => handleView(item)} size={18} />
-                      </button>
-                      <button className="text-green-600 hover:text-green-800 cursor-pointer">
-                        <Edit onClick={() => editDailySample(item)} size={18} />
-                      </button>
-                      <button
-                        onClick={() => deleteDailySample(item)}
-                        className="text-red-600 hover:text-red-800 cursor-pointer"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
+              currentDailySamples.map((item, index) => (
+                <tr
+                  key={item._id}
+                  className={`hover:bg-gray-50 ${
+                    (index + 1) % dailySamplePerPage === 0 ||
+                    index + 1 === currentDailySamples.length
+                      ? ""
+                      : "border-b"
+                  }`}
+                >
+                  <td className="p-3">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="checkbox"
+                        checked={selected.some((s) => s.id === item._id)}
+                        onChange={() => toggleSelect(item)}
+                      />
+                      <span>{capitalizeFirstLetter(item.productName)}</span>
+                    </div>
+                  </td>
+                  <td className="p-3">{capitalizeFirstLetter(item.mrName)}</td>
+                  <td className="p-3">{capitalizeFirstLetter(item.remark)}</td>  {/* ✅ Show remark */}
+                  <td className="p-3">{item.totalQty}</td>
+                  <td className="p-3 flex items-center justify-center gap-3">
+                    <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
+                      <Eye onClick={() => handleView(item)} size={18} />
+                    </button>
+                    <button className="text-green-600 hover:text-green-800 cursor-pointer">
+                      <Edit onClick={() => editDailySample(item)} size={18} />
+                    </button>
+                    <button
+                      onClick={() => deleteDailySample(item)}
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </td>
+                </tr>
+              ))
             ) : (
               <tr>
-                <td colSpan="8" className="text-center py-4 text-gray-500">
+                <td colSpan="6" className="text-center py-4 text-gray-500">
                   No products match your search.
                 </td>
               </tr>
@@ -514,6 +483,8 @@ const DailySample = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
       {filteredDailySamples.length > 0 && (
         <div className="mt-4 p-5 flex justify-start gap-2">
           <button
@@ -557,27 +528,29 @@ const DailySample = () => {
           </button>
         </div>
       )}
+
+      {/* Import Modal */}
       {showImportModal &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Background Overlay */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => {
+                if (!isUploading) setShowImportModal(false);
+              }}
             />
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-              {/* Close */}
               <button
-                onClick={() => setShowImportModal(false)}
+                onClick={() => {
+                  if (!isUploading) setShowImportModal(false);
+                }}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 disabled={isUploading}
               >
                 <X size={20} />
               </button>
 
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Import Customer
-              </h2>
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">Import Daily Sample</h2>
               {isSampleFile && <SampleExcelDownloadDailySample />}
               <div className="mb-6">
                 <label className="block text-gray-700 mb-2">File</label>
@@ -586,6 +559,7 @@ const DailySample = () => {
                   accept=".csv, .xlsx"
                   onChange={handleFileUpload}
                   className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                  disabled={isUploading}
                 />
               </div>
 
@@ -617,13 +591,14 @@ const DailySample = () => {
           </div>,
           document.body
         )}
+
+      {/* Edit Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Background Overlay */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsEditModalOpen(false)}
             />
 
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
@@ -634,9 +609,7 @@ const DailySample = () => {
                 ✕
               </button>
 
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                Edit Daily Sample Report
-              </h2>
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">Edit Daily Sample Report</h2>
 
               <form
                 onSubmit={(e) => {
@@ -646,16 +619,12 @@ const DailySample = () => {
                 className="grid grid-cols-1 md:grid-cols-2 gap-4"
               >
                 <div>
-                  <label className="block text-sm font-medium">
-                    Request Number
-                  </label>
+                  <label className="block text-sm font-medium">Request Number</label>
                   <input
                     type="text"
                     name="requestNumber"
                     value={form.requestNumber}
-                    onChange={(e) =>
-                      setForm({ ...form, requestNumber: e.target.value })
-                    }
+                    onChange={(e) => setForm({ ...form, requestNumber: e.target.value })}
                     className="w-full border px-3 py-2 rounded-lg"
                     required
                   />
@@ -664,9 +633,7 @@ const DailySample = () => {
                   <label className="block text-sm font-medium">Date</label>
                   <DatePicker
                     selected={form.date ? new Date(form.date) : null}
-                    onChange={(date) =>
-                      setForm({ ...form, date: date ? date.toISOString() : "" })
-                    }
+                    onChange={(date) => setForm({ ...form, date: date ? date.toISOString() : "" })}
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select a date"
                     className="w-full border px-3 py-2 rounded-lg"
@@ -679,126 +646,48 @@ const DailySample = () => {
                     type="text"
                     name="mrName"
                     value={form.mrName}
-                    onChange={(e) =>
-                      setForm({ ...form, mrName: e.target.value })
-                    }
+                    onChange={(e) => setForm({ ...form, mrName: e.target.value })}
                     className="w-full border px-3 py-2 rounded-lg"
                     required
                   />
                 </div>
+                {/* ❌ Description field removed */}
+
                 <div>
-                  <label className="block text-sm font-medium">
-                    Description
-                  </label>
-                  <input
-                    type="text"
-                    name="description"
-                    value={form.description}
-                    onChange={(e) =>
-                      setForm({ ...form, description: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium">
-                    Product Name
-                  </label>
+                  <label className="block text-sm font-medium">Product Name</label>
                   <input
                     type="text"
                     name="productName"
                     value={form.productName}
-                    onChange={(e) =>
-                      setForm({ ...form, productName: e.target.value })
-                    }
+                    onChange={(e) => setForm({ ...form, productName: e.target.value })}
                     className="w-full border px-3 py-2 rounded-lg"
                     required
                   />
                 </div>
 
-                {/* Quantity (Big Box) */}
                 <div>
-                  <label className="block text-sm font-medium">
-                    Quantity (Big Box)
-                  </label>
-                  <input
-                    type="number"
-                    name="qtyBigBox"
-                    value={form.qtyBigBox}
-                    onChange={(e) =>
-                      setForm({ ...form, qtyBigBox: Number(e.target.value) })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
-                  />
-                </div>
-
-                {/* Quantity (Small Box) */}
-                <div>
-                  <label className="block text-sm font-medium">
-                    Quantity (Small Box)
-                  </label>
-                  <input
-                    type="number"
-                    name="qtySmallBox"
-                    value={form.qtySmallBox}
-                    onChange={(e) =>
-                      setForm({ ...form, qtySmallBox: Number(e.target.value) })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
-                  />
-                </div>
-
-                {/* Total Qty */}
-                <div>
-                  <label className="block text-sm font-medium">
-                    Total Quantity
-                  </label>
+                  <label className="block text-sm font-medium">Total Quantity</label>
                   <input
                     type="number"
                     name="totalQty"
                     value={form.totalQty}
-                    onChange={(e) =>
-                      setForm({ ...form, totalQty: Number(e.target.value) })
-                    }
+                    onChange={(e) => setForm({ ...form, totalQty: Number(e.target.value) })}
                     className="w-full border px-3 py-2 rounded-lg"
                     min={0}
                   />
                 </div>
 
-                {/* Qty per Box (Strip) */}
-                <div>
-                  <label className="block text-sm font-medium">
-                    Qty per Box (Strip)
-                  </label>
-                  <input
-                    type="number"
-                    name="qtyPerBox"
-                    value={form.qtyPerBox}
-                    onChange={(e) =>
-                      setForm({ ...form, qtyPerBox: Number(e.target.value) })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
-                  />
-                </div>
-
-                {/* Remark */}
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium">Remark</label>
                   <input
                     type="text"
                     name="remark"
                     value={form.remark}
-                    onChange={(e) =>
-                      setForm({ ...form, remark: e.target.value })
-                    }
+                    onChange={(e) => setForm({ ...form, remark: e.target.value })}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
 
-                {/* Buttons */}
                 <div className="md:col-span-2 flex justify-end gap-3 mt-4">
                   <button
                     type="button"
@@ -819,10 +708,11 @@ const DailySample = () => {
           </div>,
           document.body
         )}
+
+      {/* View Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Background Overlay */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsViewModalOpen(false)}
@@ -836,106 +726,40 @@ const DailySample = () => {
                 <X size={20} />
               </button>
 
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                View Daily Sample Report
-              </h2>
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">View Daily Sample Report</h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Request Number */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Request Number
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.requestNumber}
-                  </p>
+                  <label className="block text-sm font-medium text-gray-600">Request Number</label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">{form.requestNumber}</p>
                 </div>
 
-                {/* Date */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Date
-                  </label>
+                  <label className="block text-sm font-medium text-gray-600">Date</label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
                     {form.date ? formatDateToReadable(form.date) : "—"}
                   </p>
                 </div>
 
-                {/* MR Name */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    MR Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.mrName}
-                  </p>
+                  <label className="block text-sm font-medium text-gray-600">MR Name</label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.mrName}</p>
                 </div>
 
-                {/* Description */}
+                {/* ❌ Description block removed */}
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Description
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.description || "—"}
-                  </p>
+                  <label className="block text-sm font-medium text-gray-600">Product Name</label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.productName}</p>
                 </div>
 
-                {/* Product Name */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Product Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.productName}
-                  </p>
+                  <label className="block text-sm font-medium text-gray-600">Total Quantity</label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">{form.totalQty}</p>
                 </div>
 
-                {/* Quantity (Big Box) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Quantity (Big Box)
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyBigBox}
-                  </p>
-                </div>
-
-                {/* Quantity (Small Box) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Quantity (Small Box)
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtySmallBox}
-                  </p>
-                </div>
-
-                {/* Total Quantity */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Total Quantity
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.totalQty}
-                  </p>
-                </div>
-
-                {/* Qty per Box */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Qty per Box (Strip)
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyPerBox}
-                  </p>
-                </div>
-
-                {/* Remark */}
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-600">
-                    Remark
-                  </label>
+                  <label className="block text-sm font-medium text-gray-600">Remark</label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
                     {form.remark?.trim() ? form.remark : "No Remark"}
                   </p>
@@ -954,6 +778,7 @@ const DailySample = () => {
           </div>,
           document.body
         )}
+
       <Outlet />
     </div>
   );

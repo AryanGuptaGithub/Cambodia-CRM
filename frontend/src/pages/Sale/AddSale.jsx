@@ -1709,166 +1709,191 @@ const AddSale = () => {
   );
 
   // --- SUBMIT (unchanged) ---
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+// --- SUBMIT (FIXED) ---
+const handleSubmit = async (e) => {
+  e.preventDefault();
 
-    if (!checkRequiredData()) return;
+  if (!checkRequiredData()) return;
 
-    if (!validate(products, saleType, mrProductStock)) {
-      showToast("error", "Please fix the validation errors before submitting");
+  if (!validate(products, saleType, mrProductStock)) {
+    showToast("error", "Please fix the validation errors before submitting");
+    return;
+  }
+
+  try {
+    const validProducts = form.products.filter(
+      (product) =>
+        product.productName &&
+        product.productName.trim() !== "" &&
+        (Number(product.salesQty) > 0 || Number(product.bonusQty) > 0)
+    );
+
+    if (validProducts.length === 0) {
+      showToast("error", "Please add at least one product with quantity");
       return;
     }
 
-    try {
-      const validProducts = form.products.filter(
-        (product) =>
-          product.productName &&
-          product.productName.trim() !== "" &&
-          (Number(product.salesQty) > 0 || Number(product.bonusQty) > 0)
-      );
-
-      if (validProducts.length === 0) {
-        showToast("error", "Please add at least one product with quantity");
-        return;
-      }
-
-      const stockErrors = [];
-      for (const product of validProducts) {
-        if (saleType === 'mr') {
-          const index = form.products.findIndex(p => p === product);
-          const stockData = mrProductStock[index];
-          if (!stockData) {
-            stockErrors.push(`"${product.productName}": Stock information not loaded`);
-            continue;
-          }
-          const availableStock = calculateMRStock(stockData);
+    const stockErrors = [];
+    for (const product of validProducts) {
+      if (saleType === 'mr') {
+        const index = form.products.findIndex(p => p === product);
+        const stockData = mrProductStock[index];
+        if (!stockData) {
+          stockErrors.push(`"${product.productName}": Stock information not loaded`);
+          continue;
+        }
+        const availableStock = calculateMRStock(stockData);
+        const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
+        if (totalQty > availableStock) {
+          stockErrors.push(
+            `"${product.productName}" for MR ${product.selectedMrName || 'unknown'}: Required ${totalQty}, Available ${availableStock}`
+          );
+        }
+      } else {
+        const productData = products.find(
+          (p) => p.productName === product.productName
+        );
+        if (productData) {
+          const availableStock = calculateAvailableStock(productData);
           const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
           if (totalQty > availableStock) {
             stockErrors.push(
-              `"${product.productName}" for MR ${product.selectedMrName || 'unknown'}: Required ${totalQty}, Available ${availableStock}`
+              `"${product.productName}": Required ${totalQty}, Available ${availableStock}`
             );
           }
-        } else {
-          const productData = products.find(
-            (p) => p.productName === product.productName
-          );
-          if (productData) {
-            const availableStock = calculateAvailableStock(productData);
-            const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
-            if (totalQty > availableStock) {
-              stockErrors.push(
-                `"${product.productName}": Required ${totalQty}, Available ${availableStock}`
-              );
-            }
-          }
         }
       }
-
-      if (stockErrors.length > 0) {
-        showToast("error", "Stock insufficient: " + stockErrors.join("; "));
-        return;
-      }
-
-      const safeFormatDate = (dateString) => {
-        if (!dateString) return "";
-        const date = new Date(dateString);
-        return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
-      };
-
-      const saleData = {
-        recordingDate: safeFormatDate(form.recordingDate),
-        invoiceNumber: form.invoiceNumber?.trim() || "",
-        invoiceDate: safeFormatDate(form.invoiceDate),
-        customerCode: form.customerCode || "",
-        customerId: form.customerId || null,
-        customerName: form.customerName || "",
-        products: validProducts.map((product) => ({
-          productName: product.productName.trim(),
-          salesQty: Number(product.salesQty) || 0,
-          bonusQty: Number(product.bonusQty) || 0,
-          totalQty: Number(product.totalQty) || 0,
-          sellingPrice: Number(product.sellingPrice) || 0,
-          amount: Number(product.amount) || 0,
-          discount: Number(product.discount) || 0,
-          netSellingAmount: Number(product.netSellingAmount) || 0,
-          averageUnitPrice: Number(product.averageUnitPrice) || 0,
-          lc: Number(product.lc) || 0,
-          fob: Number(product.fob) || 0,
-          cif: Number(product.cif) || 0,
-          profitLoss: Number(product.profitLoss) || 0,
-          isProductAccept: true,
-          remark: product.remark || "",
-          ...(saleType === 'mr' && {
-            mrId: product.selectedMrId,
-            mrName: product.selectedMrName,
-          }),
-        })),
-        creditDays: form.creditDays ? Number(form.creditDays) : null,
-        dueDate: safeFormatDate(form.dueDate),
-        deliveryDate: safeFormatDate(form.deliveryDate),
-        paidAmount: Number(form.paidAmount) || 0,
-        dueAmount: Number(form.dueAmount) || 0,
-        totalAmount: Number(form.totalAmount) || 0,
-        paymentStatus: form.paymentStatus || "Credit",
-        remark: form.remark || "",
-      };
-
-      if (saleType !== 'mr') {
-        saleData.mrName = form.mrName || "";
-        saleData.mrId = form.mrId || null;
-      } else {
-        if (validProducts.length > 0 && validProducts[0].selectedMrName) {
-          saleData.mrName = validProducts[0].selectedMrName;
-          saleData.mrId = validProducts[0].selectedMrId;
-        }
-        saleData._mrDistribution = new Map();
-        validProducts.forEach((product) => {
-          const mrName = product.selectedMrName || 'Unknown';
-          if (!saleData._mrDistribution.has(mrName)) {
-            saleData._mrDistribution.set(mrName, {
-              mrName,
-              mrId: product.selectedMrId,
-              products: []
-            });
-          }
-          saleData._mrDistribution.get(mrName).products.push({
-            productName: product.productName,
-            salesQty: Number(product.salesQty),
-            bonusQty: Number(product.bonusQty),
-            sellingPrice: Number(product.sellingPrice),
-            discount: Number(product.discount),
-          });
-        });
-        saleData._mrDistribution = Object.fromEntries(saleData._mrDistribution);
-      }
-
-      const response = await fetch(`${backendUrl}/api/sales/create`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(saleData),
-      });
-
-      const contentType = response.headers.get("content-type");
-      if (!response.ok) {
-        let errorMessage;
-        if (contentType && contentType.includes("application/json")) {
-          const respData = await response.json();
-          errorMessage = respData.error || respData.message || `HTTP error! status: ${response.status}`;
-        } else {
-          const text = await response.text();
-          errorMessage = `Server returned ${response.status}: ${text.substring(0, 100)}...`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const respData = await response.json();
-      showToast("success", respData.message || "Sale created successfully!");
-      navigate("/salelayout/sale");
-    } catch (err) {
-      console.error("Error submitting sale:", err);
-      showToast("error", err.message || "Failed to submit sale");
     }
-  };
+
+    if (stockErrors.length > 0) {
+      showToast("error", "Stock insufficient: " + stockErrors.join("; "));
+      return;
+    }
+
+    const safeFormatDate = (dateString) => {
+      if (!dateString) return "";
+      const date = new Date(dateString);
+      return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
+    };
+
+    // ✅ FIX: Create saleData with isMRSale flag
+    const saleData = {
+      // Add the isMRSale flag - this is the critical fix
+      isMRSale: saleType === 'mr',
+      
+      recordingDate: safeFormatDate(form.recordingDate),
+      invoiceNumber: form.invoiceNumber?.trim() || "",
+      invoiceDate: safeFormatDate(form.invoiceDate),
+      customerCode: form.customerCode || "",
+      customerId: form.customerId || null,
+      customerName: form.customerName || "",
+      products: validProducts.map((product) => ({
+        productName: product.productName.trim(),
+        salesQty: Number(product.salesQty) || 0,
+        bonusQty: Number(product.bonusQty) || 0,
+        totalQty: Number(product.totalQty) || 0,
+        sellingPrice: Number(product.sellingPrice) || 0,
+        amount: Number(product.amount) || 0,
+        discount: Number(product.discount) || 0,
+        netSellingAmount: Number(product.netSellingAmount) || 0,
+        averageUnitPrice: Number(product.averageUnitPrice) || 0,
+        lc: Number(product.lc) || 0,
+        fob: Number(product.fob) || 0,
+        cif: Number(product.cif) || 0,
+        profitLoss: Number(product.profitLoss) || 0,
+        isProductAccept: true,
+        remark: product.remark || "",
+        ...(saleType === 'mr' && {
+          mrId: product.selectedMrId,
+          mrName: product.selectedMrName,
+        }),
+      })),
+      creditDays: form.creditDays ? Number(form.creditDays) : null,
+      dueDate: safeFormatDate(form.dueDate),
+      deliveryDate: safeFormatDate(form.deliveryDate),
+      paidAmount: Number(form.paidAmount) || 0,
+      dueAmount: Number(form.dueAmount) || 0,
+      totalAmount: Number(form.totalAmount) || 0,
+      paymentStatus: form.paymentStatus || "Credit",
+      remark: form.remark || "",
+    };
+
+    // Add header MR fields for normal sale
+    if (saleType !== 'mr') {
+      saleData.mrName = form.mrName || "";
+      saleData.mrId = form.mrId || null;
+    } else {
+      // For MR sale, set primary MR from first product (for backward compatibility)
+      if (validProducts.length > 0 && validProducts[0].selectedMrName) {
+        saleData.mrName = validProducts[0].selectedMrName;
+        saleData.mrId = validProducts[0].selectedMrId;
+      }
+      
+      // ✅ FIX: Create MR distribution map for multi-MR invoices
+      // This helps track which products belong to which MR
+      const mrDistribution = {};
+      validProducts.forEach((product) => {
+        const mrName = product.selectedMrName || 'Unknown';
+        const mrId = product.selectedMrId;
+        
+        if (!mrDistribution[mrName]) {
+          mrDistribution[mrName] = {
+            mrName,
+            mrId,
+            products: []
+          };
+        }
+        
+        mrDistribution[mrName].products.push({
+          productName: product.productName,
+          salesQty: Number(product.salesQty),
+          bonusQty: Number(product.bonusQty),
+          sellingPrice: Number(product.sellingPrice),
+          discount: Number(product.discount),
+        });
+      });
+      
+      // Add the distribution to saleData
+      saleData._mrDistribution = mrDistribution;
+    }
+
+    console.log("📤 Sending sale data:", {
+      ...saleData,
+      isMRSale: saleData.isMRSale, // This should now be true for MR sales
+      products: saleData.products.map(p => ({
+        productName: p.productName,
+        mrId: p.mrId,
+        mrName: p.mrName
+      }))
+    });
+
+    const response = await fetch(`${backendUrl}/api/sales/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(saleData),
+    });
+
+    const contentType = response.headers.get("content-type");
+    if (!response.ok) {
+      let errorMessage;
+      if (contentType && contentType.includes("application/json")) {
+        const respData = await response.json();
+        errorMessage = respData.error || respData.message || `HTTP error! status: ${response.status}`;
+      } else {
+        const text = await response.text();
+        errorMessage = `Server returned ${response.status}: ${text.substring(0, 100)}...`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const respData = await response.json();
+    showToast("success", respData.message || "Sale created successfully!");
+    navigate("/salelayout/sale");
+  } catch (err) {
+    console.error("❌ Error submitting sale:", err);
+    showToast("error", err.message || "Failed to submit sale");
+  }
+};
 
   const paidInFull = isPaidInFull();
 

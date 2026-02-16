@@ -185,7 +185,7 @@ const TourExpenseSalesRatio = () => {
         params.search = search.trim();
       }
 
-      const response = await axios.get(`${backendUrl}/api/tour-expense-sales-ratio`, {
+      const response = await axios.get(`${backendUrl}/api/reports/tour-expense-sales`, {
         params,
       });
 
@@ -386,7 +386,7 @@ const TourExpenseSalesRatio = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/tour-expense-sales-ratio/export`,
+        `${backendUrl}/api/reports/tour-expense-sales/export`,
         {
           params,
           responseType: "blob",

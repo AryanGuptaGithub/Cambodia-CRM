@@ -5,10 +5,12 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 const router = express.Router();
 
 // Helper function to generate MR ID
-const generateMRId = (index) => {
-  return `MR${String(index + 1).padStart(3, "0")}`;
+// Helper function to generate a fallback MR ID (if not found in staff)
+const generateFallbackMRId = (index) => {
+  return `MR${String(index + 1).padStart(3, '0')}`;
 };
 
+// GET / – paginated data with working contact info
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 7, search, startDate, endDate } = req.query;
@@ -53,18 +55,13 @@ router.get("/", async (req, res) => {
 
       {
         $lookup: {
-          from: "staffs",
+          from: "staffs", // adjust collection name if needed (e.g., "staff")
           let: { mrName: "$_id" },
           pipeline: [
             {
               $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$medicalRepName", "$$mrName"] },
-                    { $eq: ["$enabled", true] },
-                  ],
-                },
-              },
+                $expr: { $eq: ["$medicalRepName", "$$mrName"] } // removed enabled filter
+              }
             },
             {
               $project: {
@@ -72,6 +69,7 @@ router.get("/", async (req, res) => {
                 teamName: 1,
                 contactNo: 1,
                 email: 1,
+                MRId: 1, // include MRId for ID column
               },
             },
           ],
@@ -93,6 +91,7 @@ router.get("/", async (req, res) => {
                 contactNo: "Not Available",
                 email: "Not Available",
                 teamName: "Not Available",
+                MRId: null,
               },
             },
           },
@@ -104,13 +103,13 @@ router.get("/", async (req, res) => {
 
     const [countResult, mrData, summaryResult] = await Promise.all([
       SaleSummary.aggregate([...basePipeline, { $count: "totalCount" }]),
-      
+
       SaleSummary.aggregate([
         ...basePipeline,
         { $skip: skip },
         { $limit: limitNum },
       ]),
-      
+
       SaleSummary.aggregate([
         { $match: matchConditions },
         {
@@ -137,7 +136,7 @@ router.get("/", async (req, res) => {
     const totalPages = Math.ceil(totalRecords / limitNum);
 
     const records = mrData.map((mr, index) => ({
-      mrId: generateMRId(skip + index),
+      mrId: mr.staff?.MRId ? String(mr.staff.MRId).padStart(3, '0') : generateFallbackMRId(skip + index),
       mrName: mr.mrName,
       totalOutstandingAmount: mr.totalOutstandingAmount,
       totalCustomers: mr.totalCustomers,
@@ -172,12 +171,12 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET /export/excel – Excel export with working contact info
 router.get("/export/excel", async (req, res) => {
   try {
     const { search, startDate, endDate } = req.query;
     const matchConditions = { dueAmount: { $gt: 0 } };
 
-    // Handle date parameters
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
@@ -198,7 +197,6 @@ router.get("/export/excel", async (req, res) => {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // Get all MR data without pagination for export
     const mrData = await SaleSummary.aggregate([
       { $match: matchConditions },
 
@@ -217,13 +215,8 @@ router.get("/export/excel", async (req, res) => {
           pipeline: [
             {
               $match: {
-                $expr: {
-                  $and: [
-                    { $eq: ["$medicalRepName", "$$mrName"] },
-                    { $eq: ["$enabled", true] },
-                  ],
-                },
-              },
+                $expr: { $eq: ["$medicalRepName", "$$mrName"] } // removed enabled filter
+              }
             },
             {
               $project: {
@@ -231,6 +224,7 @@ router.get("/export/excel", async (req, res) => {
                 teamName: 1,
                 contactNo: 1,
                 email: 1,
+                MRId: 1,
               },
             },
           ],
@@ -252,6 +246,7 @@ router.get("/export/excel", async (req, res) => {
                 contactNo: "Not Available",
                 email: "Not Available",
                 teamName: "Not Available",
+                MRId: null,
               },
             },
           },
@@ -267,8 +262,7 @@ router.get("/export/excel", async (req, res) => {
     workbook.created = new Date();
 
     const worksheet = workbook.addWorksheet('MR Wise Outstanding');
-    
-    // Define columns
+
     worksheet.columns = [
       { header: 'Sr.No', key: 'serialNo', width: 10 },
       { header: 'MR ID', key: 'mrId', width: 15 },
@@ -278,65 +272,47 @@ router.get("/export/excel", async (req, res) => {
       { header: 'Total Outstanding ($)', key: 'totalOutstanding', width: 20 }
     ];
 
-    // Style the header row
     const headerRow = worksheet.getRow(1);
     headerRow.font = { bold: true, size: 12 };
-    headerRow.alignment = { 
-      horizontal: 'center', 
-      vertical: 'middle'
-    };
+    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
     headerRow.height = 25;
 
-    // Add data rows with serial numbers
     mrData.forEach((mr, index) => {
-      const rowNumber = index + 2;
+      const mrId = mr.staff?.MRId 
+        ? String(mr.staff.MRId).padStart(3, '0') 
+        : generateFallbackMRId(index);
+
       const row = worksheet.addRow({
         serialNo: index + 1,
-        mrId: generateMRId(index),
+        mrId: mrId,
         mrName: mr.mrName || 'N/A',
         contact: mr.staff?.contactNo || 'Not Available',
         totalCustomers: mr.totalCustomers || 0,
         totalOutstanding: mr.totalOutstandingAmount || 0
       });
 
-      // Style the row
       row.font = { size: 11 };
-      row.alignment = { 
-        vertical: 'middle'
-      };
-      
-      // Format outstanding amount as currency
-      const outstandingCell = row.getCell('totalOutstanding');
-      outstandingCell.numFmt = '$#,##0.00';
+      row.alignment = { vertical: 'middle' };
+      row.getCell('totalOutstanding').numFmt = '$#,##0.00';
     });
 
     // Calculate totals
     const totalOutstanding = mrData.reduce((sum, mr) => sum + (mr.totalOutstandingAmount || 0), 0);
     const totalCustomers = mrData.reduce((sum, mr) => sum + (mr.totalCustomers || 0), 0);
 
-    // Add summary section only if there's data
     if (mrData.length > 0) {
       worksheet.addRow({});
-      
-      // Add summary row
       const summaryRow = worksheet.addRow({});
-      
-      // Fill specific cells for summary
       summaryRow.getCell('mrName').value = 'TOTAL SUMMARY';
       summaryRow.getCell('totalCustomers').value = totalCustomers;
       summaryRow.getCell('totalOutstanding').value = totalOutstanding;
-
-      // Style the summary row
       summaryRow.font = { bold: true, size: 12 };
-      
-      // Format summary outstanding amount as currency
-      const summaryOutstandingCell = summaryRow.getCell('totalOutstanding');
-      summaryOutstandingCell.numFmt = '$#,##0.00';
+      summaryRow.getCell('totalOutstanding').numFmt = '$#,##0.00';
     }
 
-    // Apply borders to all cells
-    worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    // Apply borders
+    worksheet.eachRow({ includeEmpty: true }, (row) => {
+      row.eachCell({ includeEmpty: true }, (cell) => {
         cell.border = {
           top: { style: 'thin' },
           left: { style: 'thin' },
@@ -346,10 +322,8 @@ router.get("/export/excel", async (req, res) => {
       });
     });
 
-    // Generate filename
     const currentDate = new Date();
     const formattedDate = currentDate.toISOString().split('T')[0];
-    
     let fileName = 'mr-wise-outstanding';
     if (startDate && endDate) {
       fileName = `mr-wise-outstanding-${startDate.replace(/-/g, '')}-to-${endDate.replace(/-/g, '')}`;
@@ -358,7 +332,6 @@ router.get("/export/excel", async (req, res) => {
     }
     fileName += '.xlsx';
 
-    // Set response headers
     res.setHeader(
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
@@ -368,7 +341,6 @@ router.get("/export/excel", async (req, res) => {
       `attachment; filename="${fileName}"`
     );
 
-    // Write workbook to buffer and send
     const buffer = await workbook.xlsx.writeBuffer();
     res.send(buffer);
 
@@ -381,5 +353,10 @@ router.get("/export/excel", async (req, res) => {
     });
   }
 });
+
+// Fallback ID generator (place this at the top of your file)
+// function generateFallbackMRId(index) {
+//   return `MR${String(index + 1).padStart(3, '0')}`;
+// }
 
 export default router;

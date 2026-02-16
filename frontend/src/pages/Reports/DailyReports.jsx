@@ -203,7 +203,7 @@ const DailyReports = () => {
         params.saleType = selectedSaleType;
       }
 
-      const response = await axios.get(`${backendUrl}/api/dailyReports`, {
+      const response = await axios.get(`${backendUrl}/api/reports/daily-reports`, {
         params,
       });
 
@@ -269,7 +269,7 @@ const DailyReports = () => {
 
   const fetchSaleTypes = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/dailyReports/types`);
+      const response = await axios.get(`${backendUrl}/api/reports/daily-reports/types`);
       const types = response.data || [];
       const allTypes = [...types];
       setSaleTypes(allTypes);
@@ -433,7 +433,7 @@ const DailyReports = () => {
       }
 
       // Make request to export endpoint
-      const response = await axios.get(`${backendUrl}/api/dailyReports/export`, {
+      const response = await axios.get(`${backendUrl}/api/reports/daily-reports/export`, {
         params: exportParams,
         responseType: 'blob' // Important for file download
       });

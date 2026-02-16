@@ -364,9 +364,6 @@ router.post("/bulk-update", async (req, res) => {
 // ✅ CHANGED: removed "/reports/outstanding-collections" prefix
 router.get("/", async (req, res) => {
   try {
-    console.log("\n========== OUTSTANDING COLLECTIONS REPORT ==========");
-    console.log("Received query params:", req.query);
-
     const {
       startDate,
       endDate,
@@ -384,8 +381,7 @@ router.get("/", async (req, res) => {
       isExchange: false,
       dueAmount: { $gt: 0 },
     };
-    console.log("Initial matchStage:", matchStage);
-
+  
     // Date filtering
     if (startDate || endDate) {
       matchStage.deliveryDate = {};
@@ -398,7 +394,6 @@ router.get("/", async (req, res) => {
           });
         }
         matchStage.deliveryDate.$gte = start;
-        console.log("Start date filter:", start);
       }
       if (endDate) {
         const end = new Date(endDate);
@@ -410,33 +405,22 @@ router.get("/", async (req, res) => {
         }
         end.setHours(23, 59, 59, 999);
         matchStage.deliveryDate.$lte = end;
-        console.log("End date filter:", end);
       }
     }
 
     // Customer code filter (5‑digit format)
     if (customerCode) {
       matchStage.customerCode = formatCustomerCode(customerCode);
-      console.log("CustomerCode filter:", matchStage.customerCode);
     }
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
     const now = new Date();
-    console.log(`Pagination: page=${pageNum}, limit=${limitNum}, skip=${skip}`);
-
-    // ---------- 2. FETCH CREDIT SALES ----------
-    console.log("Fetching sales with matchStage:", JSON.stringify(matchStage, null, 2));
     const sales = await Sale.find(matchStage).lean();
-    console.log(`Found ${sales.length} credit sales.`);
-
     // Log total dueAmount from raw sales (should be close to expected total if filters are correct)
     const rawTotalDue = sales.reduce((sum, s) => sum + (s.dueAmount || 0), 0);
-    console.log(`Raw total dueAmount from sales: ${rawTotalDue.toFixed(2)}`);
-
     if (sales.length === 0) {
-      console.log("No sales found – returning empty report.");
       return res.json({
         success: true,
         data: { summary: { /* ... zeros */ }, records: [] },
@@ -453,11 +437,6 @@ router.get("/", async (req, res) => {
     const uniqueFormattedCodes = [
       ...new Set(formattedSales.map((s) => s.formattedCustomerCode)),
     ];
-    console.log(`Unique formatted customer codes: ${uniqueFormattedCodes.length}`);
-    console.log("Sample codes:", uniqueFormattedCodes.slice(0, 5));
-
-    // ---------- 4. LOOKUP CUSTOMERS ----------
-    console.log("Looking up customers for each code...");
     const customerPromises = uniqueFormattedCodes.map(async (code) => {
       // exact match
       let customer = await Customer.findOne({ customerCode: code }).lean();
@@ -470,12 +449,7 @@ router.get("/", async (req, res) => {
             { customerCode: { $regex: new RegExp(`${normalizedCode}$`) } },
           ],
         }).lean();
-        if (customer) {
-          console.log(`  Matched code ${code} → customer ${customer.customerCode} (normalised)`);
-        }
-      } else {
-        console.log(`  Exact match for ${code}`);
-      }
+      } 
       return { saleCode: code, customer };
     });
 
@@ -484,10 +458,7 @@ router.get("/", async (req, res) => {
     customerResults.forEach(({ saleCode, customer }) => {
       customerMap[saleCode] = customer;
     });
-    console.log(`Customers mapped: ${Object.keys(customerMap).length}`);
 
-    // ---------- 5. GROUP SALES BY CUSTOMER CODE ----------
-    console.log("Grouping sales by formatted customer code...");
     const customerGroups = {};
 
     formattedSales.forEach((sale) => {
@@ -538,9 +509,6 @@ router.get("/", async (req, res) => {
       group.invoices.push(sale);
     });
 
-    console.log(`Created groups for ${Object.keys(customerGroups).length} customers.`);
-
-    // ---------- 6. CALCULATE DERIVED FIELDS ----------
     let customerList = Object.values(customerGroups).map((group) => ({
       ...group,
       outstandingAmount: group.totalDueAmount,
@@ -568,7 +536,6 @@ router.get("/", async (req, res) => {
           addr.includes(searchTerm)
         );
       });
-      console.log(`Search filter "${searchTerm}": ${beforeCount} → ${customerList.length} customers`);
     }
 
     // ---------- 8. SORT BY OVERDUE AMOUNT ----------
@@ -595,21 +562,11 @@ router.get("/", async (req, res) => {
       }
     );
     totals.totalRecords = customerList.length;
-
-    console.log("\n========== FINAL SUMMARY ==========");
-    console.log(`Total customers: ${totals.totalCustomers}`);
-    console.log(`Total invoices: ${totals.totalInvoices}`);
-    console.log(`Total outstanding amount: ${totals.totalOutstandingAmount.toFixed(2)}`);
-    console.log(`Total overdue amount: ${totals.totalOverdueAmount.toFixed(2)}`);
-    console.log(`Total overdue invoices: ${totals.totalOverdueInvoices}`);
-    console.log("=====================================\n");
-
     // ---------- 10. PAGINATION ----------
     const totalCount = customerList.length;
     const totalPages = Math.ceil(totalCount / limitNum);
     const paginatedCustomers = customerList.slice(skip, skip + limitNum);
-    console.log(`Pagination: showing ${paginatedCustomers.length} of ${totalCount} customers`);
-
+  
     // ---------- 11. FORMAT RESPONSE RECORDS ----------
     const records = paginatedCustomers.map((cust) => ({
       customerCode: cust.customerCode,

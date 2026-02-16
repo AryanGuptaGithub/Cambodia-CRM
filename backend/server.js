@@ -102,7 +102,6 @@ app.use(express.json());
 
 // Debugging middleware (optional - remove in production)
 app.use((req, res, next) => {
-  console.log(`📍 ${req.method} ${req.path}`);
   next();
 });
 

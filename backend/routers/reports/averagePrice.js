@@ -10,8 +10,6 @@ const router = express.Router();
 router.get("/", async (req, res) => {
   try {
     const search = req.query.search || "";
-    console.log("🔍 Search:", search || "NONE");
-
     const pipeline = [
       // 1️⃣ Break invoice → product rows
       { $unwind: "$products" },
@@ -93,18 +91,6 @@ router.get("/", async (req, res) => {
     ];
 
     const reports = await Sale.aggregate(pipeline);
-
-    console.log("\n====================================");
-    console.log("📦 PRODUCT NORMALIZATION CHECK");
-    console.log("====================================");
-
-    reports.forEach((r, i) => {
-      console.log(`\n#${i + 1} ${r.productName}`);
-      console.log(" Qty :", r.totalQuantity);
-      console.log(" Amt :", r.totalAmount);
-      console.log(" Avg :", r.averagePrice);
-    });
-
     res.json({ success: true, reports });
   } catch (error) {
     console.error("❌ ERROR:", error);

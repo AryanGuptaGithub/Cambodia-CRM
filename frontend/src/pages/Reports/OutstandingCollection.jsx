@@ -304,7 +304,6 @@ const OutstandingCollection = () => {
         { params }
       );
 
-      console.log('valueso f response', response.data.data);
       setData(response.data.data || { summary: {}, records: [] });
       setPagination(
         response.data.pagination || {
@@ -613,7 +612,6 @@ const OutstandingCollection = () => {
         { updates: parsedData }
       );
 
-      console.log('values of response', response.data);
       if (response.data.success) {
         showToast(
           "success",

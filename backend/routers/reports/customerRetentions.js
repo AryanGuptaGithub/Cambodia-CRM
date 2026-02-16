@@ -5,6 +5,25 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
+
+function formatDateForExcel(date) {
+  if (!date) return "N/A";
+  const d = new Date(date);
+  const day = d.getDate().toString().padStart(2, '0');
+  const month = d.toLocaleString('default', { month: 'short' });
+  const year = d.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
+// Helper to capitalize first letter (optional – to match frontend)
+function capitalizeFirstLetter(str) {
+  if (!str) return "N/A";
+  str = str.toString();
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+
+// ==================== Original Zone‑Based Endpoints (unchanged) ====================
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 7, search = "", period = "all" } = req.query;
@@ -12,7 +31,6 @@ router.get("/", async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Date filter
     let dateFilter = {};
     if (period === "last_month") {
       const now = new Date();
@@ -21,7 +39,6 @@ router.get("/", async (req, res) => {
       dateFilter = { invoiceDate: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth } };
     }
 
-    // Search filter
     let searchCondition = {};
     if (search.trim() !== "") {
       const regex = new RegExp(search.trim(), "i");
@@ -36,9 +53,6 @@ router.get("/", async (req, res) => {
       };
     }
 
-    console.time("⏱️ customer-retention-query");
-
-    // Single pipeline using $facet for both pagination + summary
     const pipeline = [
       ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
       {
@@ -86,12 +100,8 @@ router.get("/", async (req, res) => {
                 _id: "$zone",
                 zoneName: { $first: "$zone" },
                 totalCustomers: { $sum: 1 },
-                retainedCustomers: {
-                  $sum: { $cond: ["$isActiveCustomer", 1, 0] },
-                },
-                repeatCustomers: {
-                  $sum: { $cond: ["$isRepeatCustomer", 1, 0] },
-                },
+                retainedCustomers: { $sum: { $cond: ["$isActiveCustomer", 1, 0] } },
+                repeatCustomers: { $sum: { $cond: ["$isRepeatCustomer", 1, 0] } },
                 customers: {
                   $push: {
                     customerId: "$_id",
@@ -177,8 +187,6 @@ router.get("/", async (req, res) => {
     ];
 
     const result = await Customer.aggregate(pipeline);
-    console.timeEnd("⏱️ customer-retention-query");
-
     const summary = result[0].summary[0] || {};
     const records = result[0].paginated || [];
     const totalCount = result[0].totalCount[0]?.count || 0;
@@ -205,7 +213,6 @@ router.get("/export", async (req, res) => {
   try {
     const { search = "", period = "all" } = req.query;
 
-    // Date filter
     let dateFilter = {};
     if (period === "last_month") {
       const now = new Date();
@@ -214,7 +221,6 @@ router.get("/export", async (req, res) => {
       dateFilter = { invoiceDate: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth } };
     }
 
-    // Search filter
     let searchCondition = {};
     if (search.trim() !== "") {
       const regex = new RegExp(search.trim(), "i");
@@ -229,7 +235,6 @@ router.get("/export", async (req, res) => {
       };
     }
 
-    // Pipeline for export (no pagination)
     const pipeline = [
       ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
       {
@@ -271,9 +276,7 @@ router.get("/export", async (req, res) => {
           _id: "$zone",
           zoneName: { $first: "$zone" },
           totalCustomers: { $sum: 1 },
-          retainedCustomers: {
-            $sum: { $cond: ["$isActiveCustomer", 1, 0] },
-          },
+          retainedCustomers: { $sum: { $cond: ["$isActiveCustomer", 1, 0] } },
         },
       },
       {
@@ -302,7 +305,6 @@ router.get("/export", async (req, res) => {
 
     const records = await Customer.aggregate(pipeline);
 
-    // Get summary statistics
     const summaryPipeline = [
       ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
       {
@@ -378,18 +380,15 @@ router.get("/export", async (req, res) => {
       retentionRate: 0,
     };
 
-    // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Customer Retention Report');
 
-    // Add report title
     worksheet.mergeCells('A1:E1');
     const titleRow = worksheet.getCell('A1');
     titleRow.value = 'Customer Retention/Repeat Rate Report';
     titleRow.font = { size: 16, bold: true };
     titleRow.alignment = { horizontal: 'center' };
 
-    // Add summary section
     worksheet.addRow([]);
     worksheet.mergeCells('A3:E3');
     const summaryTitle = worksheet.getCell('A3');
@@ -414,7 +413,6 @@ router.get("/export", async (req, res) => {
 
     worksheet.addRow([]);
 
-    // Add data headers
     const headers = ['Sr.No', 'Zone Name', 'Total Customers', 'Retained Customers', 'Retention Rate'];
     const headerRow = worksheet.addRow(headers);
     headerRow.eachCell((cell) => {
@@ -427,36 +425,29 @@ router.get("/export", async (req, res) => {
       cell.alignment = { horizontal: 'center' };
     });
 
-    // Add data rows
     records.forEach((record, index) => {
-      const rowData = [
+      worksheet.addRow([
         index + 1,
         record.zoneName || "N/A",
         record.totalCustomers || 0,
         record.retainedCustomers || 0,
         `${record.retentionRate?.toFixed(1) || 0}%`
-      ];
-      worksheet.addRow(rowData);
+      ]);
     });
 
-    // Format columns
-    worksheet.columns.forEach((column, index) => {
+    worksheet.columns.forEach((column) => {
       let maxLength = 0;
       column.eachCell({ includeEmpty: true }, (cell) => {
-        const columnLength = cell.value ? cell.value.toString().length : 10;
-        if (columnLength > maxLength) {
-          maxLength = columnLength;
-        }
+        const len = cell.value ? cell.value.toString().length : 10;
+        if (len > maxLength) maxLength = len;
       });
       column.width = Math.min(maxLength + 2, 30);
     });
 
-    // Set response headers
     const fileName = `Customer_Retention_Report_${Date.now()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
 
-    // Write to response
     await workbook.xlsx.write(res);
     res.end();
 
@@ -470,59 +461,40 @@ router.get("/export", async (req, res) => {
   }
 });
 
-router.get("/annual-customer-repeat-rate", async (req, res) => {
+// ==================== FIXED ANNUAL ENDPOINT ====================
+router.get("/annual", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 7;
     const search = req.query.search?.trim() || "";
     const period = req.query.period || "last_year";
 
-    // Calculate date range based on period
     let dateFilter = {};
     if (period === "last_year") {
       const now = new Date();
       const firstDayOfLastYear = new Date(now.getFullYear() - 1, 0, 1);
       const lastDayOfLastYear = new Date(now.getFullYear() - 1, 11, 31);
-
       dateFilter = {
-        invoiceDate: {
-          $gte: firstDayOfLastYear,
-          $lte: lastDayOfLastYear,
-        },
+        invoiceDate: { $gte: firstDayOfLastYear, $lte: lastDayOfLastYear },
       };
     }
 
-    // Match filter for search and date
     const matchQuery = { ...dateFilter };
     if (search) {
       matchQuery.$or = [
-        { "customerDetails.name": { $regex: search, $options: "i" } },
-        { "customerDetails.customerCode": { $regex: search, $options: "i" } },
+        { customerName: { $regex: search, $options: "i" } },
+        { customerCode: { $regex: search, $options: "i" } },
         { mrName: { $regex: search, $options: "i" } },
       ];
     }
-
-    // Aggregation pipeline for annual repeat rate
+  
+    // SIMPLIFIED: No lookup needed, customerName is already in SaleSummary
     const pipeline = [
       { $match: matchQuery },
       {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerDetails",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
         $group: {
           _id: "$customerCode",
-          customerName: { $first: "$customerDetails.name" },
+          customerName: { $first: "$customerName" },
           customerCode: { $first: "$customerCode" },
           totalPurchases: { $sum: 1 },
           firstPurchaseDate: { $min: "$invoiceDate" },
@@ -533,41 +505,29 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
       {
         $addFields: {
           isRepeatCustomer: {
-            $cond: {
-              if: { $gte: ["$totalPurchases", 2] },
-              then: true,
-              else: false,
-            },
+            $cond: { if: { $gte: ["$totalPurchases", 2] }, then: true, else: false },
           },
         },
       },
       { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
     ];
 
-    // Get total count for pagination
-    const countPipeline = [...pipeline];
-    countPipeline.push({ $count: "total" });
-
+    const countPipeline = [...pipeline, { $count: "total" }];
     const countResult = await SaleSummary.aggregate(countPipeline);
-    const totalRecords = countResult.length > 0 ? countResult[0].total : 0;
+    const totalRecords = countResult[0]?.total || 0;
     const totalPages = Math.ceil(totalRecords / limit);
 
-    // Apply pagination to main pipeline
-    pipeline.push({ $skip: (page - 1) * limit }, { $limit: limit });
+    // Apply pagination
+    const paginatedPipeline = [
+      ...pipeline,
+      { $skip: (page - 1) * limit },
+      { $limit: limit }
+    ];
+    const records = await SaleSummary.aggregate(paginatedPipeline);
 
-    const records = await SaleSummary.aggregate(pipeline);
-
-    // Calculate summary statistics
+    // Summary statistics
     const summaryPipeline = [
-      { $match: matchQuery },
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
+      { $match: dateFilter },
       {
         $group: {
           _id: "$customerCode",
@@ -579,14 +539,10 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
           _id: null,
           totalCustomers: { $sum: 1 },
           repeatCustomers: {
-            $sum: {
-              $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0],
-            },
+            $sum: { $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0] },
           },
           newCustomers: {
-            $sum: {
-              $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0],
-            },
+            $sum: { $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0] },
           },
         },
       },
@@ -612,17 +568,13 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
     ];
 
     const summaryResult = await SaleSummary.aggregate(summaryPipeline);
-    const summary =
-      summaryResult.length > 0
-        ? summaryResult[0]
-        : {
-            totalCustomers: 0,
-            repeatCustomers: 0,
-            newCustomers: 0,
-            repeatRate: 0,
-          };
-    
-    // Format the response records
+    const summary = summaryResult[0] || {
+      totalCustomers: 0,
+      repeatCustomers: 0,
+      newCustomers: 0,
+      repeatRate: 0,
+    };
+
     const formattedRecords = records.map((record) => ({
       customerCode: record.customerCode,
       customerName: record.customerName || "N/A",
@@ -633,8 +585,7 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
       totalAmount: record.totalAmount || 0,
     }));
 
-    // Send response
-    res.status(200).json({
+    res.json({
       success: true,
       data: {
         summary: {
@@ -654,68 +605,45 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Error fetching annual customer repeat rate data:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching annual customer repeat rate data",
-      error: error.message,
-    });
+    console.error("❌ Error fetching annual customer repeat rate:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-router.get("/monthly-customer-repeat-rate", async (req, res) => {
+// ==================== FIXED MONTHLY ENDPOINT ====================
+router.get("/monthly", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 7;
     const search = req.query.search?.trim() || "";
     const period = req.query.period || "last_month";
 
-    // Calculate date range based on period
     let dateFilter = {};
     if (period === "last_month") {
       const now = new Date();
       const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-
       dateFilter = {
-        invoiceDate: {
-          $gte: firstDayOfLastMonth,
-          $lte: lastDayOfLastMonth,
-        },
+        invoiceDate: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth },
       };
     }
 
-    // Match filter for search and date
     const matchQuery = { ...dateFilter };
     if (search) {
       matchQuery.$or = [
-        { "customerDetails.name": { $regex: search, $options: "i" } },
-        { "customerDetails.customerCode": { $regex: search, $options: "i" } },
+        { customerName: { $regex: search, $options: "i" } },
+        { customerCode: { $regex: search, $options: "i" } },
         { mrName: { $regex: search, $options: "i" } },
       ];
     }
 
-    // Aggregation pipeline for monthly repeat rate
+    // SIMPLIFIED: No lookup needed, customerName is already in SaleSummary
     const pipeline = [
       { $match: matchQuery },
       {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerDetails",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
         $group: {
           _id: "$customerCode",
-          customerName: { $first: "$customerDetails.name" },
+          customerName: { $first: "$customerName" },
           customerCode: { $first: "$customerCode" },
           totalPurchases: { $sum: 1 },
           firstPurchaseDate: { $min: "$invoiceDate" },
@@ -726,41 +654,23 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
       {
         $addFields: {
           isRepeatCustomer: {
-            $cond: {
-              if: { $gte: ["$totalPurchases", 2] },
-              then: true,
-              else: false,
-            },
+            $cond: { if: { $gte: ["$totalPurchases", 2] }, then: true, else: false },
           },
         },
       },
       { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
     ];
 
-    // Get total count for pagination
-    const countPipeline = [...pipeline];
-    countPipeline.push({ $count: "total" });
-
+    const countPipeline = [...pipeline, { $count: "total" }];
     const countResult = await SaleSummary.aggregate(countPipeline);
-    const totalRecords = countResult.length > 0 ? countResult[0].total : 0;
+    const totalRecords = countResult[0]?.total || 0;
     const totalPages = Math.ceil(totalRecords / limit);
 
-    // Apply pagination to main pipeline
     pipeline.push({ $skip: (page - 1) * limit }, { $limit: limit });
-
     const records = await SaleSummary.aggregate(pipeline);
 
-    // Calculate summary statistics
     const summaryPipeline = [
-      { $match: matchQuery },
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
+      { $match: dateFilter },
       {
         $group: {
           _id: "$customerCode",
@@ -772,14 +682,10 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
           _id: null,
           totalCustomers: { $sum: 1 },
           repeatCustomers: {
-            $sum: {
-              $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0],
-            },
+            $sum: { $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0] },
           },
           newCustomers: {
-            $sum: {
-              $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0],
-            },
+            $sum: { $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0] },
           },
         },
       },
@@ -805,17 +711,13 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
     ];
 
     const summaryResult = await SaleSummary.aggregate(summaryPipeline);
-    const summary =
-      summaryResult.length > 0
-        ? summaryResult[0]
-        : {
-            totalCustomers: 0,
-            repeatCustomers: 0,
-            newCustomers: 0,
-            repeatRate: 0,
-          };
+    const summary = summaryResult[0] || {
+      totalCustomers: 0,
+      repeatCustomers: 0,
+      newCustomers: 0,
+      repeatRate: 0,
+    };
 
-    // Format the response records
     const formattedRecords = records.map((record) => ({
       customerCode: record.customerCode,
       customerName: record.customerName || "N/A",
@@ -826,8 +728,7 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
       totalAmount: record.totalAmount || 0,
     }));
 
-    // Send response
-    res.status(200).json({
+    res.json({
       success: true,
       data: {
         summary: {
@@ -847,11 +748,410 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Error fetching monthly customer repeat rate data:", error);
+    console.error("❌ Error fetching monthly customer repeat rate:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Helper to format date as "dd Mmm yyyy"
+
+
+// ==================== ANNUAL EXPORT (FIXED) ====================
+router.get("/annual/export", async (req, res) => {
+  try {
+    const { search = "", period = "last_year" } = req.query;
+
+    let dateFilter = {};
+    if (period === "last_year") {
+      const now = new Date();
+      const firstDayOfLastYear = new Date(now.getFullYear() - 1, 0, 1);
+      const lastDayOfLastYear = new Date(now.getFullYear() - 1, 11, 31);
+      dateFilter = {
+        invoiceDate: { $gte: firstDayOfLastYear, $lte: lastDayOfLastYear },
+      };
+    }
+
+    let searchCondition = {};
+    if (search.trim() !== "") {
+      const regex = new RegExp(search.trim(), "i");
+      searchCondition = {
+        $or: [
+          { customerName: regex },
+          { customerCode: regex },
+          { mrName: regex },
+        ],
+      };
+    }
+
+    const pipeline = [
+      { $match: { ...dateFilter, ...searchCondition } },
+      {
+        $group: {
+          _id: "$customerCode",
+          customerName: { $first: "$customerName" },
+          customerCode: { $first: "$customerCode" },
+          totalPurchases: { $sum: 1 },
+          firstPurchaseDate: { $min: "$invoiceDate" },
+          lastPurchaseDate: { $max: "$invoiceDate" },
+          totalAmount: { $sum: "$totalAmount" },
+        },
+      },
+      {
+        $addFields: {
+          isRepeatCustomer: {
+            $cond: { if: { $gte: ["$totalPurchases", 2] }, then: true, else: false },
+          },
+        },
+      },
+      { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
+    ];
+
+    const records = await SaleSummary.aggregate(pipeline);
+
+    const summaryPipeline = [
+      { $match: { ...dateFilter, ...searchCondition } },
+      {
+        $group: {
+          _id: "$customerCode",
+          totalPurchases: { $sum: 1 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalCustomers: { $sum: 1 },
+          repeatCustomers: {
+            $sum: { $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0] },
+          },
+          newCustomers: {
+            $sum: { $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0] },
+          },
+        },
+      },
+      {
+        $project: {
+          totalCustomers: 1,
+          repeatCustomers: 1,
+          newCustomers: 1,
+          repeatRate: {
+            $cond: [
+              { $eq: ["$totalCustomers", 0] },
+              0,
+              {
+                $multiply: [
+                  { $divide: ["$repeatCustomers", "$totalCustomers"] },
+                  100,
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const summaryResult = await SaleSummary.aggregate(summaryPipeline);
+    const summary = summaryResult[0] || {
+      totalCustomers: 0,
+      repeatCustomers: 0,
+      newCustomers: 0,
+      repeatRate: 0,
+    };
+
+    const workbook = new ExcelJS.Workbook();
+
+    // Summary Sheet (optional – keep as is)
+    const summarySheet = workbook.addWorksheet("Summary");
+    summarySheet.mergeCells("A1:E1");
+    const titleCell = summarySheet.getCell("A1");
+    titleCell.value = "Annual Customer Repeat Rate - Summary";
+    titleCell.font = { size: 16, bold: true };
+    titleCell.alignment = { horizontal: "center" };
+
+    summarySheet.addRow([]);
+    const summaryHeaders = ["Metric", "Value"];
+    const summaryHeaderRow = summarySheet.addRow(summaryHeaders);
+    summaryHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
+      };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    summarySheet.addRow(["Total Customers", summary.totalCustomers]);
+    summarySheet.addRow(["Repeat Customers", summary.repeatCustomers]);
+    summarySheet.addRow(["New Customers", summary.newCustomers]);
+    summarySheet.addRow(["Repeat Rate", `${summary.repeatRate?.toFixed(2) || 0}%`]);
+    summarySheet.addRow(["Generated On", new Date().toLocaleString()]);
+
+    summarySheet.columns.forEach((col) => (col.width = 25));
+
+    // Details Sheet – matches the image layout
+    const detailsSheet = workbook.addWorksheet("Details");
+    detailsSheet.mergeCells("A1:F1");
+    const detailsTitle = detailsSheet.getCell("A1");
+    detailsTitle.value = "Annual Customer Repeat Rate - Details";
+    detailsTitle.font = { size: 16, bold: true };
+    detailsTitle.alignment = { horizontal: "center" };
+
+    detailsSheet.addRow([]);
+    const detailsHeaders = [
+      "Sr.No",
+      "Customer Name",
+      "Total Purchases",
+      "First Purchase",
+      "Last Purchase",
+      "Status",
+    ];
+    const detailsHeaderRow = detailsSheet.addRow(detailsHeaders);
+    detailsHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
+      };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    records.forEach((record, idx) => {
+      detailsSheet.addRow([
+        idx + 1,
+        capitalizeFirstLetter(record.customerName) || "N/A",
+        record.totalPurchases || 0,
+        formatDateForExcel(record.firstPurchaseDate),
+        formatDateForExcel(record.lastPurchaseDate),
+        record.isRepeatCustomer ? "Repeat" : "One-Time",
+      ]);
+    });
+
+    // Auto-size columns
+    detailsSheet.columns.forEach((col) => {
+      let maxLength = 0;
+      col.eachCell({ includeEmpty: true }, (cell) => {
+        const len = cell.value ? cell.value.toString().length : 10;
+        if (len > maxLength) maxLength = len;
+      });
+      col.width = Math.min(maxLength + 2, 30);
+    });
+
+    const fileName = `Annual_Repeat_Rate_${Date.now()}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("❌ Error exporting annual repeat rate:", error);
     res.status(500).json({
       success: false,
-      message: "Server error while fetching monthly customer repeat rate data",
-      error: error.message,
+      message: "Failed to export annual repeat rate",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
+// ==================== MONTHLY EXPORT (FIXED) ====================
+router.get("/monthly/export", async (req, res) => {
+  try {
+    const { search = "", period = "last_month" } = req.query;
+
+    let dateFilter = {};
+    if (period === "last_month") {
+      const now = new Date();
+      const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+      dateFilter = {
+        invoiceDate: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth },
+      };
+    }
+
+    let searchCondition = {};
+    if (search.trim() !== "") {
+      const regex = new RegExp(search.trim(), "i");
+      searchCondition = {
+        $or: [
+          { customerName: regex },
+          { customerCode: regex },
+          { mrName: regex },
+        ],
+      };
+    }
+
+    const pipeline = [
+      { $match: { ...dateFilter, ...searchCondition } },
+      {
+        $group: {
+          _id: "$customerCode",
+          customerName: { $first: "$customerName" },
+          customerCode: { $first: "$customerCode" },
+          totalPurchases: { $sum: 1 },
+          firstPurchaseDate: { $min: "$invoiceDate" },
+          lastPurchaseDate: { $max: "$invoiceDate" },
+          totalAmount: { $sum: "$totalAmount" },
+        },
+      },
+      {
+        $addFields: {
+          isRepeatCustomer: {
+            $cond: { if: { $gte: ["$totalPurchases", 2] }, then: true, else: false },
+          },
+        },
+      },
+      { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
+    ];
+
+    const records = await SaleSummary.aggregate(pipeline);
+
+    const summaryPipeline = [
+      { $match: { ...dateFilter, ...searchCondition } },
+      {
+        $group: {
+          _id: "$customerCode",
+          totalPurchases: { $sum: 1 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalCustomers: { $sum: 1 },
+          repeatCustomers: {
+            $sum: { $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0] },
+          },
+          newCustomers: {
+            $sum: { $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0] },
+          },
+        },
+      },
+      {
+        $project: {
+          totalCustomers: 1,
+          repeatCustomers: 1,
+          newCustomers: 1,
+          repeatRate: {
+            $cond: [
+              { $eq: ["$totalCustomers", 0] },
+              0,
+              {
+                $multiply: [
+                  { $divide: ["$repeatCustomers", "$totalCustomers"] },
+                  100,
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const summaryResult = await SaleSummary.aggregate(summaryPipeline);
+    const summary = summaryResult[0] || {
+      totalCustomers: 0,
+      repeatCustomers: 0,
+      newCustomers: 0,
+      repeatRate: 0,
+    };
+
+    const workbook = new ExcelJS.Workbook();
+
+    // Summary Sheet (keep as is)
+    const summarySheet = workbook.addWorksheet("Summary");
+    summarySheet.mergeCells("A1:E1");
+    const titleCell = summarySheet.getCell("A1");
+    titleCell.value = "Monthly Customer Repeat Rate - Summary";
+    titleCell.font = { size: 16, bold: true };
+    titleCell.alignment = { horizontal: "center" };
+
+    summarySheet.addRow([]);
+    const summaryHeaders = ["Metric", "Value"];
+    const summaryHeaderRow = summarySheet.addRow(summaryHeaders);
+    summaryHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
+      };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    summarySheet.addRow(["Total Customers", summary.totalCustomers]);
+    summarySheet.addRow(["Repeat Customers", summary.repeatCustomers]);
+    summarySheet.addRow(["New Customers", summary.newCustomers]);
+    summarySheet.addRow(["Repeat Rate", `${summary.repeatRate?.toFixed(2) || 0}%`]);
+    summarySheet.addRow(["Generated On", new Date().toLocaleString()]);
+
+    summarySheet.columns.forEach((col) => (col.width = 25));
+
+    // Details Sheet – matches the image layout (no Customer Code)
+    const detailsSheet = workbook.addWorksheet("Details");
+    detailsSheet.mergeCells("A1:F1");
+    const detailsTitle = detailsSheet.getCell("A1");
+    detailsTitle.value = "Monthly Customer Repeat Rate - Details";
+    detailsTitle.font = { size: 16, bold: true };
+    detailsTitle.alignment = { horizontal: "center" };
+
+    detailsSheet.addRow([]);
+    const detailsHeaders = [
+      "Sr.No",
+      "Customer Name",
+      "Total Purchases",
+      "First Purchase",
+      "Last Purchase",
+      "Status",
+    ];
+    const detailsHeaderRow = detailsSheet.addRow(detailsHeaders);
+    detailsHeaderRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
+      };
+      cell.alignment = { horizontal: "center" };
+    });
+
+    records.forEach((record, idx) => {
+      detailsSheet.addRow([
+        idx + 1,
+        capitalizeFirstLetter(record.customerName) || "N/A",
+        record.totalPurchases || 0,
+        formatDateForExcel(record.firstPurchaseDate),
+        formatDateForExcel(record.lastPurchaseDate),
+        record.isRepeatCustomer ? "Repeat" : "One-Time",
+      ]);
+    });
+
+    // Auto-size columns
+    detailsSheet.columns.forEach((col) => {
+      let maxLength = 0;
+      col.eachCell({ includeEmpty: true }, (cell) => {
+        const len = cell.value ? cell.value.toString().length : 10;
+        if (len > maxLength) maxLength = len;
+      });
+      col.width = Math.min(maxLength + 2, 30);
+    });
+
+    const fileName = `Monthly_Repeat_Rate_${Date.now()}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("❌ Error exporting monthly repeat rate:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export monthly repeat rate",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });

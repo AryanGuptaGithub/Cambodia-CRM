@@ -196,9 +196,6 @@ const CashSales = () => {
         setExportLoading(false);
         return;
       }
-
-      showToast("info", "Preparing Excel file...");
-
       const params = new URLSearchParams();
 
       if (dateRange.startDate) params.append("startDate", dateRange.startDate);

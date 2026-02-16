@@ -65,7 +65,7 @@ const CustomerProductAcceptanceRate = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/customer-product-acceptance-rate`,
+        `${backendUrl}/api/reports/customer-expectation-ratio`,
         { params }
       );
 
@@ -147,7 +147,7 @@ const CustomerProductAcceptanceRate = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/customer-product-acceptance-rate/export`,
+        `${backendUrl}/api/reports/customer-expectation-ratio/export`,
         {
           params,
           responseType: 'blob', // Important for file download

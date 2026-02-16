@@ -40,7 +40,7 @@ const ProvinceWiseCustomer = () => {
     try {
       setLoading(true);
       const response = await axios.get(
-        `${backendUrl}/api/province-wise-customer`,
+        `${backendUrl}/api/reports/province-wise-customers`,
         {
           params: {
             page: currentPage,
@@ -79,7 +79,7 @@ const ProvinceWiseCustomer = () => {
       
       // Make API call for export
       const response = await axios.get(
-        `${backendUrl}/api/province-wise-customer/export`,
+        `${backendUrl}/api/reports/province-wise-customers/export`,
         {
           params: params,
           responseType: 'blob',

@@ -60,9 +60,6 @@ const formatDateToReadable = (dateString) => {
 
 // ================== POST / ==================
 router.post("/", async (req, res) => {
-  console.log("📥 POST /sales-return - received request");
-  console.log("Request body:", JSON.stringify(req.body, null, 2));
-
   try {
     const data = req.body;
     const records = Array.isArray(data) ? data : [data];
@@ -78,9 +75,6 @@ router.post("/", async (req, res) => {
 
     const processedData = await Promise.all(
       records.map(async (record, index) => {
-        console.log(`\n--- Processing record ${index + 1} ---`);
-        console.log("Record raw:", record);
-
         // Validate required fields
         for (const field of requiredFields) {
           if (record[field] === undefined || record[field] === null) {
@@ -105,40 +99,26 @@ router.post("/", async (req, res) => {
         const customerIdValue = customerIdRaw ? String(customerIdRaw).trim() : "";
         const customerCodeValue = customerCodeRaw ? String(customerCodeRaw).trim() : "";
 
-        console.log("   customerIdValue (string):", customerIdValue);
-        console.log("   customerCodeValue:", customerCodeValue);
-
         if (customerIdValue && mongoose.Types.ObjectId.isValid(customerIdValue)) {
-          // Case 1: Direct ObjectId string
           customerId = new mongoose.Types.ObjectId(customerIdValue);
-          console.log("   Using customerId as direct ObjectId →", customerId);
         } else if (customerIdValue) {
-          // Case 2: Treat as customer code
-          console.log("   Looking up customer by code (customerId field):", customerIdValue);
           const customer = await Customer.findOne({ code: customerIdValue });
           if (!customer) {
             throw new Error(`Customer not found with code "${customerIdValue}" in record ${index + 1}`);
           }
           customerId = customer._id;
-          console.log("   Found customer, _id:", customerId);
         } else if (customerCodeValue) {
-          // Case 3: Fallback to customerCode field
-          console.log("   Looking up customer by code (customerCode field):", customerCodeValue);
           const customer = await Customer.findOne({ code: customerCodeValue });
           if (!customer) {
             throw new Error(`Customer not found with code "${customerCodeValue}" in record ${index + 1}`);
           }
           customerId = customer._id;
-          console.log("   Found customer, _id:", customerId);
         } else {
-          // Case 4: No identifier provided – try to find by customerName (last resort)
-          console.log("   No code or ID provided, attempting lookup by customerName:", record.customerName);
           const customer = await Customer.findOne({ name: record.customerName });
           if (!customer) {
             throw new Error(`Customer not found with name "${record.customerName}" in record ${index + 1}`);
           }
           customerId = customer._id;
-          console.log("   Found customer by name, _id:", customerId);
         }
 
         // Replace record.customerId with the resolved ObjectId
@@ -188,16 +168,12 @@ router.post("/", async (req, res) => {
           paymentStatus: record.paymentStatus || "Pending",
           remark: record.remark || "",
         };
-
-        console.log("   ✅ Processed record ready → invoiceNumber:", processedRecord.invoiceNumber);
         return processedRecord;
       })
     );
 
     // Save to database
     const savedReturns = await SalesReturn.insertMany(processedData);
-    console.log(`✅ Saved ${savedReturns.length} records`);
-
     // Update inventory with return quantities
     const inventoryUpdatePromises = processedData.flatMap((record) =>
       record.products.map(async (product) => {

@@ -21,7 +21,7 @@ const expensesAPI = {
     return resp.data;
   },
   fetchExpenseCategories: async () => {
-    const resp = await axios.get(`${backendUrl}/api/expense-categary`);
+    const resp = await axios.get(`${backendUrl}/api/expense-categories`);
     return resp.data;
   },
   fetchSourceAccounts: async () => {
