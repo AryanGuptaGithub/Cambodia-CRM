@@ -4,23 +4,30 @@ import StockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";
 import mongoose from "mongoose";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 
-const deductFromReportInHand = async (productName, qty) => {
-  // Case-insensitive search
+// ------------------------------------------------------------------
+// TRANSACTION‑SAFE HELPER FUNCTIONS
+// ------------------------------------------------------------------
+
+/**
+ * Deduct boxes from ReportInHand inside a transaction.
+ * Returns the LC value of the batch used.
+ */
+const deductFromReportInHand = async (productName, qty, session) => {
   const productStock = await ReportInHand.findOne({
     productName: { $regex: new RegExp(`^${productName}$`, 'i') }
-  });
+  }).session(session);
 
   if (!productStock)
     throw new Error(`Product not in ReportInHand: ${productName}`);
 
   let remaining = qty;
-
   for (let batch of productStock.batches) {
     if (remaining <= 0) break;
-
     if (batch.boxes >= remaining) {
       batch.boxes -= remaining;
       remaining = 0;
@@ -35,473 +42,171 @@ const deductFromReportInHand = async (productName, qty) => {
   }
 
   productStock.totalBoxes = productStock.batches.reduce(
-    (sum, b) => sum + b.boxes,
-    0
+    (sum, b) => sum + b.boxes, 0
   );
 
   const lastBatch = productStock.batches[productStock.batches.length - 1];
   const lcValue = lastBatch?.lc || 0;
   productStock.totalAmount = productStock.totalBoxes * lcValue;
 
-  await productStock.save();
+  await productStock.save({ session });
   return lcValue;
 };
 
-const addBackToReportInHand = async (productName, qty) => {
-  // Case-insensitive search
+/**
+ * Add boxes back to ReportInHand inside a transaction.
+ * Returns the LC value of the batch used.
+ */
+const addBackToReportInHand = async (productName, qty, session) => {
   const productStock = await ReportInHand.findOne({
     productName: { $regex: new RegExp(`^${productName}$`, 'i') }
-  });
+  }).session(session);
 
   if (!productStock)
     throw new Error(`Product not in ReportInHand: ${productName}`);
 
   const lastBatch = productStock.batches[productStock.batches.length - 1];
-
   if (!lastBatch) throw new Error(`No batch found for ${productName}`);
 
   lastBatch.boxes += qty;
-
   productStock.totalBoxes += qty;
   productStock.totalAmount = productStock.totalBoxes * lastBatch.lc;
 
-  await productStock.save();
+  await productStock.save({ session });
   return lastBatch.lc;
 };
 
-async function updateStockInMRHand(mrId, mrName, productId, productName, quantity, operation) {
-  try {
-    // Clean MR name - remove extra spaces
-    const cleanedMrName = mrName.replace(/\s+/g, ' ').trim();
-    
-    // First, try to find the MR stock document by mrId if provided
-    let mrStock;
-    
-    if (mrId) {
-      mrStock = await StockInMRHand.findOne({ mrId: mrId });
-    }
-    
-    // If not found by mrId, try by name
-    if (!mrStock) {
-      mrStock = await StockInMRHand.findOne({
-        mrName: { $regex: new RegExp(`^${cleanedMrName}$`, 'i') }
-      });
-    }
+/**
+ * Update StockInMRHand (add/subtract) inside a transaction.
+ */
+const updateStockInMRHand = async (
+  mrId,
+  mrName,
+  productId,
+  productName,
+  quantity,
+  operation,   // "add" or "subtract"
+  session
+) => {
+  const cleanedMrName = mrName.replace(/\s+/g, ' ').trim();
 
-    // If MR stock doesn't exist and we're adding, create it
-    if (!mrStock) {
-      if (operation === "add") {
-        mrStock = new StockInMRHand({
-          mrId: mrId,
-          mrName: cleanedMrName,
-          productsInHand: []
-        });
-        await mrStock.save();
-      } else {
-        throw new Error(`MR ${cleanedMrName} not found in stock`);
-      }
-    }
-
-    // Ensure productsInHand array exists
-    if (!mrStock.productsInHand) {
-      mrStock.productsInHand = [];
-    }
-
-    // Find the product within the productsInHand array
-    let productFound = false;
-    let productIndex = -1;
-    
-    for (let i = 0; i < mrStock.productsInHand.length; i++) {
-      const product = mrStock.productsInHand[i];
-      
-      if (product && product.productName && product.productName.toLowerCase() === productName.toLowerCase()) {
-        productFound = true;
-        productIndex = i;
-        break;
-      }
-      
-      if (productId && product && product.productId && product.productId.toString() === productId.toString()) {
-        productFound = true;
-        productIndex = i;
-        break;
-      }
-    }
-
-    if (productFound) {
-      if (operation === "add") {
-        mrStock.productsInHand[productIndex].quantity += quantity;
-      } else if (operation === "subtract") {
-        mrStock.productsInHand[productIndex].quantity = Math.max(0, mrStock.productsInHand[productIndex].quantity - quantity);
-      }
-      
-      mrStock.productsInHand[productIndex].lastUpdated = new Date();
-    } else {
-      if (operation === "add") {
-        const productDetails = await Product.findById(productId);
-        const lcValue = productDetails?.lc || 0;
-        
-        mrStock.productsInHand.push({
-          productId: productId,
-          productName: productName,
-          quantity: quantity,
-          lc: lcValue,
-          lastUpdated: new Date()
-        });
-      } else if (operation === "subtract") {
-        throw new Error(`Product ${productName} not found in MR ${cleanedMrName} stock`);
-      }
-    }
-
-    mrStock.productsInHand = mrStock.productsInHand.filter(product => product && product.quantity > 0);
-    
-    await mrStock.save();
-    return mrStock;
-  } catch (error) {
-    console.error("Error updating MR stock:", error);
-    throw error;
+  // Find the MR stock document
+  let mrStock;
+  if (mrId) {
+    mrStock = await StockInMRHand.findOne({ mrId }).session(session);
   }
-}
+  if (!mrStock) {
+    mrStock = await StockInMRHand.findOne({
+      mrName: { $regex: new RegExp(`^${cleanedMrName}$`, 'i') }
+    }).session(session);
+  }
 
-// Generate next stock transfer number function
+  // If adding and MR doesn't exist, create it
+  if (!mrStock) {
+    if (operation === "add") {
+      mrStock = new StockInMRHand({
+        mrId,
+        mrName: cleanedMrName,
+        productsInHand: []
+      });
+      // Save after adding product below
+    } else {
+      throw new Error(`MR ${cleanedMrName} not found in stock`);
+    }
+  }
+
+  if (!mrStock.productsInHand) mrStock.productsInHand = [];
+
+  // Find the product entry
+  let productEntry = mrStock.productsInHand.find(p =>
+    (p.productId && p.productId.toString() === productId.toString()) ||
+    (p.productName && p.productName.toLowerCase() === productName.toLowerCase())
+  );
+
+  if (productEntry) {
+    if (operation === "add") {
+      productEntry.quantity += quantity;
+    } else { // subtract
+      productEntry.quantity = Math.max(0, productEntry.quantity - quantity);
+      if (productEntry.quantity === 0) {
+        // Remove zero‑quantity entries later
+      }
+    }
+    productEntry.lastUpdated = new Date();
+  } else {
+    if (operation === "add") {
+      const product = await Product.findById(productId).session(session);
+      const lcValue = product?.lc || 0;
+      mrStock.productsInHand.push({
+        productId,
+        productName,
+        quantity,
+        lc: lcValue,
+        lastUpdated: new Date()
+      });
+    } else {
+      throw new Error(`Product ${productName} not found in MR ${cleanedMrName} stock`);
+    }
+  }
+
+  // Remove zero‑quantity entries
+  mrStock.productsInHand = mrStock.productsInHand.filter(p => p.quantity > 0);
+
+  if (mrStock.isNew) {
+    await mrStock.save({ session });
+  } else {
+    await mrStock.save({ session });
+  }
+  return mrStock;
+};
+
+// ------------------------------------------------------------------
+// UTILITY: Generate next invoice number
+// ------------------------------------------------------------------
 const generateNextStockTransferNumber = async () => {
   try {
     const lastTransfer = await StockTransferToMR.findOne()
       .sort({ invoiceNo: -1 })
       .select("invoiceNo");
-
-    const extractNumber = (invoiceNo) => {
-      if (!invoiceNo) return 0;
-      const match = invoiceNo.match(/ST-(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-
-    const lastNumber = extractNumber(lastTransfer?.invoiceNo);
-    const nextNumber = lastNumber + 1;
-
-    return `ST-${nextNumber.toString().padStart(4, "0")}`;
+    const match = lastTransfer?.invoiceNo?.match(/ST-(\d+)/);
+    const lastNum = match ? parseInt(match[1], 10) : 0;
+    return `ST-${(lastNum + 1).toString().padStart(4, "0")}`;
   } catch (error) {
-    console.error("Error generating stock transfer number:", error);
+    console.error("Error generating number:", error);
     return "ST-0001";
   }
 };
 
-// Route to get next stock transfer number
+// ------------------------------------------------------------------
+// ROUTES
+// ------------------------------------------------------------------
+
+// Get next transfer number (public, or can be protected)
 router.get("/next-number", async (req, res) => {
   try {
     const nextNumber = await generateNextStockTransferNumber();
     res.json({ success: true, nextNumber });
   } catch (error) {
-    console.error("Error generating next stock transfer number:", error);
     res.json({ success: true, nextNumber: "ST-0001" });
   }
 });
 
-// Route to get last stock transfer number
+// Get last transfer number
 router.get("/last-number", async (req, res) => {
   try {
     const lastTransfer = await StockTransferToMR.findOne()
       .sort({ invoiceNo: -1 })
       .select("invoiceNo");
-
-    const extractNumber = (invoiceNo) => {
-      if (!invoiceNo) return 0;
-      const match = invoiceNo.match(/ST-(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-
-    const lastNumber = extractNumber(lastTransfer?.invoiceNo) || 0;
-
+    const match = lastTransfer?.invoiceNo?.match(/ST-(\d+)/);
+    const lastNumber = match ? parseInt(match[1], 10) : 0;
     res.json({ success: true, lastNumber });
   } catch (error) {
-    console.error("Error fetching last stock transfer number:", error);
     res.json({ success: true, lastNumber: 0 });
   }
 });
 
-// POST create stock transfer
-router.post("/", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
-  try {
-    const data = req.body;
-    let invoiceNo = data.invoiceNo;
-    if (!invoiceNo || invoiceNo === "ST-0001") {
-      invoiceNo = await generateNextStockTransferNumber();
-    }
-
-    const itemsWithLC = await Promise.all(
-      data.items.map(async (item) => {
-        try {
-          const product = await Product.findById(item.productId);
-          let lcValue = product?.lc || product?.costPrice || 0;
-
-          if (!lcValue || lcValue === 0) {
-            const productStock = await ReportInHand.findOne({
-              productName: item.productName,
-            });
-            if (productStock && productStock.batches.length > 0) {
-              const lastBatch = productStock.batches[productStock.batches.length - 1];
-              lcValue = lastBatch?.lc || 0;
-            }
-          }
-
-          return {
-            ...item,
-            lc: lcValue,
-            productName: item.productName || product?.productName || "Unknown",
-          };
-        } catch (error) {
-          console.error(`Error fetching lc for product ${item.productName}:`, error);
-          return {
-            ...item,
-            lc: 0,
-            productName: item.productName || "Unknown",
-          };
-        }
-      })
-    );
-
-    const transferData = {
-      ...data,
-      invoiceNo: invoiceNo,
-      items: itemsWithLC,
-    };
-
-    const newTransfer = await StockTransferToMR.create([transferData], { session });
-
-    if (data.transferType === "send") {
-      const mrId = data.mrId;
-      const mrName = data.stockTransferToMr;
-
-      for (const item of data.items) {
-        const lcValue = await deductFromReportInHand(
-          item.productName,
-          item.boxQuantity
-        );
-
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "add"
-        );
-      }
-    }
-
-    if (data.transferType === "receive") {
-      const mrId = data.mrId;
-      const mrName = data.stockTransferFromMrToMain;
-
-      for (const item of data.items) {
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "subtract"
-        );
-
-        const product = await Product.findById(item.productId);
-        let lcValue = product?.lc || product?.costPrice || 0;
-
-        const productStock = await ReportInHand.findOne({
-          productName: item.productName,
-        });
-
-        if (!productStock) {
-          await ReportInHand.create({
-            productName: item.productName,
-            batches: [
-              {
-                batchNo: `BATCH-${Date.now()}`,
-                boxes: item.boxQuantity,
-                lc: lcValue,
-                date: new Date().toISOString().split("T")[0],
-              },
-            ],
-            totalBoxes: item.boxQuantity,
-            totalAmount: item.boxQuantity * lcValue,
-          });
-        } else {
-          const lastBatch = productStock.batches[productStock.batches.length - 1];
-
-          if (!lastBatch || Math.abs(lastBatch?.lc - lcValue) > 0.01) {
-            productStock.batches.push({
-              batchNo: `BATCH-${Date.now()}`,
-              boxes: item.boxQuantity,
-              lc: lcValue,
-              date: new Date().toISOString().split("T")[0],
-            });
-          } else {
-            lastBatch.boxes += item.boxQuantity;
-          }
-
-          productStock.totalBoxes += item.boxQuantity;
-          productStock.totalAmount = productStock.batches.reduce(
-            (sum, batch) => sum + batch.boxes * batch.lc,
-            0
-          );
-
-          await productStock.save();
-        }
-      }
-    }
-
-    await session.commitTransaction();
-    
-    res.status(201).json({
-      success: true,
-      message: "Stock transfer created successfully!",
-      data: newTransfer[0],
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("TRANSFER ERROR →", error);
-    res.status(500).json({ success: false, error: error.message });
-  } finally {
-    session.endSession();
-  }
-});
-
-// DELETE transfer by ID
-router.delete("/:id", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
-  try {
-    const transfer = await StockTransferToMR.findById(req.params.id).session(session);
-    if (!transfer)
-      return res.status(404).json({ message: "Transfer not found" });
-
-    const data = transfer;
-
-    if (data.transferType === "send") {
-      const mrId = data.mrId;
-      const mrName = data.stockTransferToMr;
-
-      for (const item of data.items) {
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "subtract"
-        );
-        await addBackToReportInHand(item.productName, item.boxQuantity);
-      }
-    }
-
-    if (data.transferType === "receive") {
-      const mrId = data.mrId;
-      const mrName = data.stockTransferFromMrToMain;
-
-      for (const item of data.items) {
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "add"
-        );
-        await deductFromReportInHand(item.productName, item.boxQuantity);
-      }
-    }
-
-    await transfer.deleteOne({ session });
-
-    await session.commitTransaction();
-
-    res.json({
-      success: true,
-      message: "Transfer deleted and stock reverted successfully!",
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("DELETE ERROR →", error);
-    res.status(500).json({ success: false, error: error.message });
-  } finally {
-    session.endSession();
-  }
-});
-
-// DELETE transfer by invoice number
-router.delete("/by-invoice/:invoiceNo", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
-  try {
-    const invoiceNo = req.params.invoiceNo;
-    
-    const transfer = await StockTransferToMR.findOne({ invoiceNo: invoiceNo }).session(session);
-    if (!transfer) {
-      await session.abortTransaction();
-      return res.status(404).json({ 
-        success: false, 
-        message: `Transfer with invoice number ${invoiceNo} not found` 
-      });
-    }
-
-    const data = transfer;
-
-    if (data.transferType === "send") {
-      const mrId = data.mrId;
-      const mrName = data.stockTransferToMr;
-
-      for (const item of data.items) {
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "subtract"
-        );
-        await addBackToReportInHand(item.productName, item.boxQuantity);
-      }
-    }
-
-    if (data.transferType === "receive") {
-      const mrId = data.mrId;
-      const mrName = data.stockTransferFromMrToMain;
-
-      for (const item of data.items) {
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "add"
-        );
-        await deductFromReportInHand(item.productName, item.boxQuantity);
-      }
-    }
-
-    await transfer.deleteOne({ session });
-
-    await session.commitTransaction();
-
-    res.json({
-      success: true,
-      message: `Transfer with invoice number ${invoiceNo} deleted and stock reverted successfully!`,
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("DELETE BY INVOICE ERROR →", error);
-    res.status(500).json({ success: false, error: error.message });
-  } finally {
-    session.endSession();
-  }
-});
-
-// GET all transfers
-router.get("/", async (req, res) => {
+// GET all transfers (protected)
+router.get("/", protect, async (req, res) => {
   try {
     const transfers = await StockTransferToMR.find()
       .populate({
@@ -517,38 +222,29 @@ router.get("/", async (req, res) => {
       if (transfer.items && Array.isArray(transfer.items)) {
         const itemsWithCosts = transfer.items.map((item) => {
           const itemObj = item.toObject ? item.toObject() : item;
-
-          let lc = 0;
-          if (item.lc && item.lc > 0) {
-            lc = item.lc;
-          } else if (item.productId?.lc) {
-            lc = item.productId.lc;
-          } else if (item.productId?.costPrice) {
-            lc = item.productId.costPrice;
-          }
-
+          let lc = item.lc ||
+                   item.productId?.lc ||
+                   item.productId?.costPrice ||
+                   0;
           const boxQuantity = item.boxQuantity || 0;
           const itemCost = lc * boxQuantity;
-
           totalTransferCost += itemCost;
 
           return {
             ...itemObj,
-            lc: lc,
-            itemCost: itemCost,
-            productName:
-              item.productName ||
-              item.productId?.productName ||
-              "Unknown Product",
+            lc,
+            itemCost,
+            productName: item.productName ||
+                         item.productId?.productName ||
+                         "Unknown Product",
           };
         });
-
         transferObj.items = itemsWithCosts;
       }
-
       transferObj.totalTransferCost = totalTransferCost;
       return transferObj;
     });
+
     res.json(transfersWithCosts);
   } catch (err) {
     console.error("Failed to fetch transfers:", err);
@@ -556,11 +252,10 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET MR stock for admin (detailed)
-router.get("/mr-hand-admin", async (req, res) => {
+// GET MR stock detailed (for admin)
+router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
   try {
     const { mrName, search } = req.query;
-
     let matchStage = { $match: {} };
     if (mrName && mrName !== "all") {
       matchStage.$match.mrName = { $regex: new RegExp(`^${mrName}$`, 'i') };
@@ -577,9 +272,7 @@ router.get("/mr-hand-admin", async (req, res) => {
           as: "productDetails",
         },
       },
-      {
-        $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true },
-      },
+      { $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true } },
       {
         $project: {
           mrId: 1,
@@ -624,7 +317,6 @@ router.get("/mr-hand-admin", async (req, res) => {
     const transfers = await StockTransferToMR.find(transferMatch);
 
     const assignedMap = {};
-    
     transfers.forEach(transfer => {
       transfer.items.forEach(item => {
         const key = `${transfer.stockTransferToMr}_${item.productId}`;
@@ -636,7 +328,6 @@ router.get("/mr-hand-admin", async (req, res) => {
           };
         }
         assignedMap[key].totalAssigned += item.boxQuantity || 0;
-        
         if (transfer.createdAt > assignedMap[key].latestTransferDate) {
           assignedMap[key].latestTransferDate = transfer.createdAt;
         }
@@ -650,7 +341,6 @@ router.get("/mr-hand-admin", async (req, res) => {
         latestTransferDate: item.createdAt,
         invoiceNo: null
       };
-
       const remainingQty = item.quantity || 0;
       const assignedQty = assignedData.totalAssigned;
       const usedQty = Math.max(0, assignedQty - remainingQty);
@@ -661,25 +351,21 @@ router.get("/mr-hand-admin", async (req, res) => {
           : item.createdAt
           ? new Date(item.createdAt).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
-        assignedQty: assignedQty,
+        assignedQty,
         batch: "N/A",
         createdAt: item.createdAt
           ? new Date(item.createdAt).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
         expiry: "N/A",
-        id: item.stockId
-          ? item.stockId.toString()
-          : `${item.mrName}-${item.productId}-${index}`,
+        id: item.stockId?.toString() || `${item.mrName}-${item.productId}-${index}`,
         invoiceNumbers: assignedData.invoiceNo ? [assignedData.invoiceNo] : [],
         mrCode: item.mrName,
         mrName: item.mrName,
-        productCode:
-          item.productCode ||
-          `PROD-${item.productId?.toString().slice(-4) || "0000"}`,
+        productCode: item.productCode || `PROD-${item.productId?.toString().slice(-4) || "0000"}`,
         productId: item.productId,
         productName: item.productName || "Unknown Product",
-        remainingQty: remainingQty,
-        usedQty: usedQty,
+        remainingQty,
+        usedQty,
         status: remainingQty > 0 ? "Active" : "Depleted",
         boxQuantity: item.quantity || 0,
         quantity: item.quantity || 0,
@@ -702,22 +388,15 @@ router.get("/mr-hand-admin", async (req, res) => {
       );
     }
 
-    res.json({
-      success: true,
-      data: filteredResult,
-      count: filteredResult.length,
-    });
+    res.json({ success: true, data: filteredResult, count: filteredResult.length });
   } catch (err) {
     console.error("Failed to fetch MR stock:", err);
-    res.status(500).json({
-      success: false,
-      error: err.message,
-    });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET flattened MR stock
-router.get("/mr-hand", async (req, res) => {
+// GET flattened MR stock (simpler list)
+router.get("/mr-hand", protect, async (req, res) => {
   try {
     const stock = await StockInMRHand.find()
       .populate({
@@ -738,7 +417,6 @@ router.get("/mr-hand", async (req, res) => {
           lc: product.lc || product.productId?.lc || product.productId?.costPrice || 0,
           lastUpdated: product.lastUpdated || mrStock.updatedAt,
         }));
-
         return products;
       })
       .flat();
@@ -750,8 +428,8 @@ router.get("/mr-hand", async (req, res) => {
   }
 });
 
-// ===== NEW ENDPOINT: GET list of MRs (id + name) =====
-router.get("/mrs", async (req, res) => {
+// GET list of MRs (id + name)
+router.get("/mrs", protect, async (req, res) => {
   try {
     const mrs = await StockInMRHand.aggregate([
       { $group: { _id: "$mrId", mrName: { $first: "$mrName" } } },
@@ -762,6 +440,428 @@ router.get("/mrs", async (req, res) => {
   } catch (error) {
     console.error("Error fetching MR list:", error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// CREATE transfer (protected)
+// ------------------------------------------------------------------
+router.post("/", protect, allowAdminOnly, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const data = req.body;
+    let invoiceNo = data.invoiceNo;
+    if (!invoiceNo || invoiceNo === "ST-0001") {
+      invoiceNo = await generateNextStockTransferNumber();
+    }
+
+    // Enrich items with LC values
+    const itemsWithLC = await Promise.all(
+      data.items.map(async (item) => {
+        try {
+          const product = await Product.findById(item.productId).session(session);
+          let lcValue = product?.lc || product?.costPrice || 0;
+
+          if (!lcValue) {
+            const productStock = await ReportInHand.findOne({
+              productName: item.productName,
+            }).session(session);
+            if (productStock?.batches?.length) {
+              const lastBatch = productStock.batches[productStock.batches.length - 1];
+              lcValue = lastBatch?.lc || 0;
+            }
+          }
+
+          return {
+            ...item,
+            lc: lcValue,
+            productName: item.productName || product?.productName || "Unknown",
+          };
+        } catch (error) {
+          console.error(`Error fetching lc for product ${item.productName}:`, error);
+          return { ...item, lc: 0, productName: item.productName || "Unknown" };
+        }
+      })
+    );
+
+    const transferData = { ...data, invoiceNo, items: itemsWithLC };
+    const [newTransfer] = await StockTransferToMR.create([transferData], { session });
+
+    // Handle stock movements based on transfer type
+    if (data.transferType === "send") {
+      const { mrId, stockTransferToMr: mrName } = data;
+      for (const item of itemsWithLC) {
+        await deductFromReportInHand(item.productName, item.boxQuantity, session);
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "add",
+          session
+        );
+      }
+    } else if (data.transferType === "receive") {
+      const { mrId, stockTransferFromMrToMain: mrName } = data;
+      for (const item of itemsWithLC) {
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "subtract",
+          session
+        );
+
+        const product = await Product.findById(item.productId).session(session);
+        let lcValue = product?.lc || product?.costPrice || 0;
+
+        const productStock = await ReportInHand.findOne({
+          productName: item.productName,
+        }).session(session);
+
+        if (!productStock) {
+          await ReportInHand.create([{
+            productName: item.productName,
+            batches: [{
+              batchNo: `BATCH-${Date.now()}`,
+              boxes: item.boxQuantity,
+              lc: lcValue,
+              date: new Date().toISOString().split("T")[0],
+            }],
+            totalBoxes: item.boxQuantity,
+            totalAmount: item.boxQuantity * lcValue,
+          }], { session });
+        } else {
+          const lastBatch = productStock.batches[productStock.batches.length - 1];
+          if (!lastBatch || Math.abs(lastBatch.lc - lcValue) > 0.01) {
+            productStock.batches.push({
+              batchNo: `BATCH-${Date.now()}`,
+              boxes: item.boxQuantity,
+              lc: lcValue,
+              date: new Date().toISOString().split("T")[0],
+            });
+          } else {
+            lastBatch.boxes += item.boxQuantity;
+          }
+
+          productStock.totalBoxes += item.boxQuantity;
+          productStock.totalAmount = productStock.batches.reduce(
+            (sum, b) => sum + b.boxes * b.lc, 0
+          );
+          await productStock.save({ session });
+        }
+      }
+    }
+
+    await session.commitTransaction();
+    res.status(201).json({
+      success: true,
+      message: "Stock transfer created successfully!",
+      data: newTransfer,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("TRANSFER CREATE ERROR →", error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    session.endSession();
+  }
+});
+
+// ------------------------------------------------------------------
+// UPDATE transfer (protected)
+// ------------------------------------------------------------------
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const existing = await StockTransferToMR.findById(id).session(session);
+    if (!existing) {
+      await session.abortTransaction();
+      return res.status(404).json({ success: false, message: "Transfer not found" });
+    }
+
+    // First revert the original stock movements (opposite of what was done)
+    if (existing.transferType === "send") {
+      const { mrId, stockTransferToMr: mrName } = existing;
+      for (const item of existing.items) {
+        // Reverse: remove from MR, add back to ReportInHand
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "subtract",
+          session
+        );
+        await addBackToReportInHand(item.productName, item.boxQuantity, session);
+      }
+    } else if (existing.transferType === "receive") {
+      const { mrId, stockTransferFromMrToMain: mrName } = existing;
+      for (const item of existing.items) {
+        // Reverse: add back to MR, remove from ReportInHand
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "add",
+          session
+        );
+        await deductFromReportInHand(item.productName, item.boxQuantity, session);
+      }
+    }
+
+    // Now apply the new data (similar to POST)
+    const data = req.body;
+    // Re‑fetch LC values for new items
+    const itemsWithLC = await Promise.all(
+      data.items.map(async (item) => {
+        try {
+          const product = await Product.findById(item.productId).session(session);
+          let lcValue = product?.lc || product?.costPrice || 0;
+          if (!lcValue) {
+            const productStock = await ReportInHand.findOne({
+              productName: item.productName,
+            }).session(session);
+            if (productStock?.batches?.length) {
+              const lastBatch = productStock.batches[productStock.batches.length - 1];
+              lcValue = lastBatch?.lc || 0;
+            }
+          }
+          return {
+            ...item,
+            lc: lcValue,
+            productName: item.productName || product?.productName || "Unknown",
+          };
+        } catch (error) {
+          return { ...item, lc: 0, productName: item.productName || "Unknown" };
+        }
+      })
+    );
+
+    // Update the transfer document
+    const updated = await StockTransferToMR.findByIdAndUpdate(
+      id,
+      { ...data, items: itemsWithLC },
+      { new: true, runValidators: true, session }
+    );
+
+    // Apply new stock movements
+    if (data.transferType === "send") {
+      const { mrId, stockTransferToMr: mrName } = data;
+      for (const item of itemsWithLC) {
+        await deductFromReportInHand(item.productName, item.boxQuantity, session);
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "add",
+          session
+        );
+      }
+    } else if (data.transferType === "receive") {
+      const { mrId, stockTransferFromMrToMain: mrName } = data;
+      for (const item of itemsWithLC) {
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "subtract",
+          session
+        );
+
+        const product = await Product.findById(item.productId).session(session);
+        let lcValue = product?.lc || product?.costPrice || 0;
+
+        const productStock = await ReportInHand.findOne({
+          productName: item.productName,
+        }).session(session);
+
+        if (!productStock) {
+          await ReportInHand.create([{
+            productName: item.productName,
+            batches: [{
+              batchNo: `BATCH-${Date.now()}`,
+              boxes: item.boxQuantity,
+              lc: lcValue,
+              date: new Date().toISOString().split("T")[0],
+            }],
+            totalBoxes: item.boxQuantity,
+            totalAmount: item.boxQuantity * lcValue,
+          }], { session });
+        } else {
+          const lastBatch = productStock.batches[productStock.batches.length - 1];
+          if (!lastBatch || Math.abs(lastBatch.lc - lcValue) > 0.01) {
+            productStock.batches.push({
+              batchNo: `BATCH-${Date.now()}`,
+              boxes: item.boxQuantity,
+              lc: lcValue,
+              date: new Date().toISOString().split("T")[0],
+            });
+          } else {
+            lastBatch.boxes += item.boxQuantity;
+          }
+          productStock.totalBoxes += item.boxQuantity;
+          productStock.totalAmount = productStock.batches.reduce(
+            (sum, b) => sum + b.boxes * b.lc, 0
+          );
+          await productStock.save({ session });
+        }
+      }
+    }
+
+    await session.commitTransaction();
+    res.json({
+      success: true,
+      message: "Transfer updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("TRANSFER UPDATE ERROR →", error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    session.endSession();
+  }
+});
+
+// ------------------------------------------------------------------
+// DELETE transfer (by ID, protected)
+// ------------------------------------------------------------------
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const transfer = await StockTransferToMR.findById(req.params.id).session(session);
+    if (!transfer) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: "Transfer not found" });
+    }
+
+    // Reverse stock movements
+    if (transfer.transferType === "send") {
+      const { mrId, stockTransferToMr: mrName } = transfer;
+      for (const item of transfer.items) {
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "subtract",
+          session
+        );
+        await addBackToReportInHand(item.productName, item.boxQuantity, session);
+      }
+    } else if (transfer.transferType === "receive") {
+      const { mrId, stockTransferFromMrToMain: mrName } = transfer;
+      for (const item of transfer.items) {
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "add",
+          session
+        );
+        await deductFromReportInHand(item.productName, item.boxQuantity, session);
+      }
+    }
+
+    await transfer.deleteOne({ session });
+    await session.commitTransaction();
+
+    res.json({
+      success: true,
+      message: "Transfer deleted and stock reverted successfully!",
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("DELETE ERROR →", error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    session.endSession();
+  }
+});
+
+// ------------------------------------------------------------------
+// DELETE by invoice number (protected)
+// ------------------------------------------------------------------
+router.delete("/by-invoice/:invoiceNo", protect, allowAdminOnly, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { invoiceNo } = req.params;
+    const transfer = await StockTransferToMR.findOne({ invoiceNo }).session(session);
+    if (!transfer) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: `Transfer with invoice number ${invoiceNo} not found`
+      });
+    }
+
+    // Reverse stock movements
+    if (transfer.transferType === "send") {
+      const { mrId, stockTransferToMr: mrName } = transfer;
+      for (const item of transfer.items) {
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "subtract",
+          session
+        );
+        await addBackToReportInHand(item.productName, item.boxQuantity, session);
+      }
+    } else if (transfer.transferType === "receive") {
+      const { mrId, stockTransferFromMrToMain: mrName } = transfer;
+      for (const item of transfer.items) {
+        await updateStockInMRHand(
+          mrId,
+          mrName,
+          item.productId,
+          item.productName,
+          item.boxQuantity,
+          "add",
+          session
+        );
+        await deductFromReportInHand(item.productName, item.boxQuantity, session);
+      }
+    }
+
+    await transfer.deleteOne({ session });
+    await session.commitTransaction();
+
+    res.json({
+      success: true,
+      message: `Transfer ${invoiceNo} deleted and stock reverted successfully!`,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    console.error("DELETE BY INVOICE ERROR →", error);
+    res.status(500).json({ success: false, error: error.message });
+  } finally {
+    session.endSession();
   }
 });
 

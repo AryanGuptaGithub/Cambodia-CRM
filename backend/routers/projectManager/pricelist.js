@@ -2,6 +2,8 @@ import express from "express";
 import mongoose from "mongoose";
 const router = express.Router();
 import Product from "../../models/projectManger/product.js";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 // GET PRICE LIST
 router.get("/", async (req, res) => {
@@ -41,7 +43,7 @@ router.get("/", async (req, res) => {
 });
 
 // UPDATE PRICE LIST ITEM
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     const {

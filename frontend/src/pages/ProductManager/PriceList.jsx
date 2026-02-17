@@ -45,7 +45,7 @@ function PriceList() {
       if (!response.ok) throw new Error("Failed to fetch products");
       const data = await response.json();
       const uniqueTypes = Array.from(
-        new Set(data.map((item) => item.type?.toLowerCase()).filter(Boolean))
+        new Set(data.map((item) => item.type?.toLowerCase()).filter(Boolean)),
       );
       setTypes(["All", ...uniqueTypes]);
       setPriceList(data);
@@ -72,7 +72,7 @@ function PriceList() {
       const licenseDateFormatted = product.licenseValidityDate
         ? formatDateToReadable(
             new Date(product.licenseValidityDate),
-            "dd/MM/yyyy"
+            "dd/MM/yyyy",
           ).toLowerCase()
         : "";
 
@@ -89,7 +89,7 @@ function PriceList() {
       const matchesSearch = fieldsToSearch.some((field) =>
         String(field || "")
           .toLowerCase()
-          .includes(lowerSearch)
+          .includes(lowerSearch),
       );
 
       return matchesType && matchesSearch;
@@ -100,7 +100,7 @@ function PriceList() {
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentPriceList = filteredPriceList.slice(
     (currentPage - 1) * priceListPerPage,
-    currentPage * priceListPerPage
+    currentPage * priceListPerPage,
   );
 
   function capitalizeFirstLetter(str) {
@@ -123,9 +123,15 @@ function PriceList() {
     e.preventDefault();
 
     try {
+      const token = localStorage.getItem("token");
       const res = await axios.put(
         `${backendUrl}/api/price-lists/${form._id}`,
-        form
+        form,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
 
       if (res.status === 200) {
@@ -135,7 +141,11 @@ function PriceList() {
       }
     } catch (err) {
       console.error("Update error:", err);
-      showToast("error", "Failed to update product.");
+
+      const errorMessage =
+        err.response?.data?.message || "Failed to update price list.";
+
+      showToast("error", errorMessage);
     }
   };
 
@@ -171,48 +181,52 @@ function PriceList() {
 
     try {
       setDownloading(true);
-      
+
       // Prepare data for CSV
       const dataToDownload = filteredPriceList.map((item, index) => ({
         "S.No": index + 1,
         "Product Name": item.productName || "",
-        "Type": item.type || "",
+        Type: item.type || "",
         "Selling Price (USD)": item.sellingPrice || "",
-        "LC": item.lc || "",
+        LC: item.lc || "",
         "Tax Selling Price (USD)": item.taxSellingPrice || "",
         "Drug License": item.drugLicense || "",
-        "License Validity Date": item.licenseValidityDate 
+        "License Validity Date": item.licenseValidityDate
           ? formatDateToReadable(item.licenseValidityDate, "dd/MM/yyyy")
           : "",
-
       }));
 
       // Create CSV content
       const headers = Object.keys(dataToDownload[0]).join(",");
-      const rows = dataToDownload.map(item => 
-        Object.values(item).map(value => 
-          typeof value === 'string' && value.includes(',') 
-            ? `"${value}"` 
-            : value
-        ).join(",")
+      const rows = dataToDownload.map((item) =>
+        Object.values(item)
+          .map((value) =>
+            typeof value === "string" && value.includes(",")
+              ? `"${value}"`
+              : value,
+          )
+          .join(","),
       );
-      
+
       const csvContent = [headers, ...rows].join("\n");
-      
+
       // Create and download file
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       const timestamp = new Date().toISOString().split("T")[0];
-      
+
       link.href = url;
       link.download = `PriceList_${timestamp}_${filteredPriceList.length}_items.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
-      showToast("success", `Downloaded ${filteredPriceList.length} items as CSV`);
+
+      showToast(
+        "success",
+        `Downloaded ${filteredPriceList.length} items as CSV`,
+      );
     } catch (error) {
       console.error("Download error:", error);
       showToast("error", "Failed to download file");
@@ -230,17 +244,17 @@ function PriceList() {
 
     try {
       setDownloading(true);
-      
+
       // Prepare data for Excel
       const dataToDownload = filteredPriceList.map((item, index) => ({
         "S.No": index + 1,
         "Product Name": item.productName || "",
-        "Type": item.type || "",
+        Type: item.type || "",
         "Selling Price (USD)": item.sellingPrice || "",
-        "LC": item.lc || "",
+        LC: item.lc || "",
         "Tax Selling Price (USD)": item.taxSellingPrice || "",
         "Drug License": item.drugLicense || "",
-        "License Validity Date": item.licenseValidityDate 
+        "License Validity Date": item.licenseValidityDate
           ? formatDateToReadable(item.licenseValidityDate, "dd/MM/yyyy")
           : "",
       }));
@@ -248,31 +262,33 @@ function PriceList() {
       // Create workbook and worksheet
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(dataToDownload);
-      
+
       // Set column widths
       const wscols = [
-        { wch: 6 },   // S.No
-        { wch: 30 },  // Product Name
-        { wch: 15 },  // Type
-        { wch: 18 },  // Selling Price
-        { wch: 10 },  // LC
-        { wch: 22 },  // Tax Selling Price
-        { wch: 15 },  // Drug License
-        { wch: 20 },  // License Validity
-   
+        { wch: 6 }, // S.No
+        { wch: 30 }, // Product Name
+        { wch: 15 }, // Type
+        { wch: 18 }, // Selling Price
+        { wch: 10 }, // LC
+        { wch: 22 }, // Tax Selling Price
+        { wch: 15 }, // Drug License
+        { wch: 20 }, // License Validity
       ];
-      ws['!cols'] = wscols;
-      
+      ws["!cols"] = wscols;
+
       // Add worksheet to workbook
       XLSX.utils.book_append_sheet(wb, ws, "Price List");
-      
+
       // Generate and download file
       const timestamp = new Date().toISOString().split("T")[0];
       const fileName = `PriceList_${timestamp}_${filteredPriceList.length}_items.xlsx`;
-      
+
       XLSX.writeFile(wb, fileName);
-      
-      showToast("success", `Downloaded ${filteredPriceList.length} items as Excel`);
+
+      showToast(
+        "success",
+        `Downloaded ${filteredPriceList.length} items as Excel`,
+      );
     } catch (error) {
       console.error("Excel download error:", error);
       showToast("error", "Failed to download Excel file");
@@ -285,14 +301,14 @@ function PriceList() {
   const DownloadDropdown = () => (
     <div className="relative inline-block">
       <button
-        className={`flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors ${downloading ? 'opacity-70 cursor-not-allowed' : ''}`}
+        className={`flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors ${downloading ? "opacity-70 cursor-not-allowed" : ""}`}
         onClick={() => setIsOpen(!isOpen)}
         disabled={downloading}
       >
         <Download size={18} />
         {downloading ? "Downloading..." : "Download"}
       </button>
-      
+
       {isOpen && (
         <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
           <button
@@ -320,23 +336,29 @@ function PriceList() {
                 const dataToDownload = currentPriceList.map((item, index) => ({
                   "S.No": (currentPage - 1) * priceListPerPage + index + 1,
                   "Product Name": item.productName || "",
-                  "Type": item.type || "",
+                  Type: item.type || "",
                   "Selling Price (USD)": item.sellingPrice || "",
-                  "LC": item.lc || "",
+                  LC: item.lc || "",
                   "Tax Selling Price (USD)": item.taxSellingPrice || "",
                   "Drug License": item.drugLicense || "",
-                  "License Validity Date": item.licenseValidityDate 
-                    ? formatDateToReadable(item.licenseValidityDate, "dd/MM/yyyy")
+                  "License Validity Date": item.licenseValidityDate
+                    ? formatDateToReadable(
+                        item.licenseValidityDate,
+                        "dd/MM/yyyy",
+                      )
                     : "",
                 }));
-                
+
                 const wb = XLSX.utils.book_new();
                 const ws = XLSX.utils.json_to_sheet(dataToDownload);
                 XLSX.utils.book_append_sheet(wb, ws, `Page ${currentPage}`);
-                
+
                 const timestamp = new Date().toISOString().split("T")[0];
-                XLSX.writeFile(wb, `PriceList_Page_${currentPage}_${timestamp}.xlsx`);
-                
+                XLSX.writeFile(
+                  wb,
+                  `PriceList_Page_${currentPage}_${timestamp}.xlsx`,
+                );
+
                 showToast("success", `Downloaded page ${currentPage} as Excel`);
               }
               setIsOpen(false);
@@ -353,13 +375,13 @@ function PriceList() {
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (isOpen && !event.target.closest('.relative.inline-block')) {
+      if (isOpen && !event.target.closest(".relative.inline-block")) {
         setIsOpen(false);
       }
     };
-    
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
+
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, [isOpen]);
 
   return (
@@ -429,7 +451,7 @@ function PriceList() {
       {error && !loading && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
           <p className="font-medium">Error: {error}</p>
-          <button 
+          <button
             onClick={fetchPriceList}
             className="mt-2 text-sm underline hover:text-red-800 cursor-pointer"
           >
@@ -522,7 +544,6 @@ function PriceList() {
 
         {!loading && currentPriceList.length > 0 && (
           <div className="mt-4 p-5 flex">
-       
             <div className="flex gap-2">
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
@@ -713,7 +734,7 @@ function PriceList() {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* View Modal */}
@@ -818,7 +839,7 @@ function PriceList() {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

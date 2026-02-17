@@ -8,6 +8,8 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 import PaymentStatus from "../../models/paymentStatus.js";
 import Product from "../../models/projectManger/product.js";
 import StockAdjustment from "../../models/stock/stockAdjustment.js";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 const importProgressMap = new Map();
@@ -1150,36 +1152,44 @@ const checkMRStock = async (
 // NEW: Deduct stock from MR's hand (enhanced to return LC)
 // ✅ FIXED: MR Stock deduction with detailed logging
 // ✅ FIXED: MR Stock deduction with detailed logging (removed invalid productIndex reference)
-const deductStockFromMRHand = async (mrId, productName, salesQty, bonusQty, session) => {
+const deductStockFromMRHand = async (
+  mrId,
+  productName,
+  salesQty,
+  bonusQty,
+  session,
+) => {
   console.log(`\n🔧 Starting MR stock deduction process...`);
   console.log(`📦 Input parameters:`, {
     mrId,
     productName,
     salesQty,
     bonusQty,
-    session: !!session
+    session: !!session,
   });
 
   try {
-    const totalQty = fixPrecision((parseFloat(salesQty) || 0) + (parseFloat(bonusQty) || 0));
+    const totalQty = fixPrecision(
+      (parseFloat(salesQty) || 0) + (parseFloat(bonusQty) || 0),
+    );
     console.log(`📊 Calculated total quantity: ${totalQty}`);
-    
+
     if (totalQty <= 0) {
       console.log(`⏭️ Total quantity is zero or negative, skipping deduction`);
       return { success: true, deductedQty: 0, skipped: true };
     }
-    
+
     console.log(`🔌 Accessing MongoDB collection 'stockinmrhands'...`);
     // Check if mongoose connection exists
     if (!mongoose.connection || !mongoose.connection.db) {
       console.error(`❌ MongoDB connection not established`);
       return {
         success: false,
-        message: `Database connection not available`
+        message: `Database connection not available`,
       };
     }
 
-    const stockinmrhands = mongoose.connection.db.collection('stockinmrhands');
+    const stockinmrhands = mongoose.connection.db.collection("stockinmrhands");
     console.log(`✅ Collection 'stockinmrhands' accessed successfully`);
 
     console.log(`🔍 Searching for MR stock with mrId: ${mrId}`);
@@ -1187,42 +1197,48 @@ const deductStockFromMRHand = async (mrId, productName, salesQty, bonusQty, sess
     try {
       mrStock = await stockinmrhands.findOne(
         { mrId: new mongoose.Types.ObjectId(mrId) },
-        { session }
+        { session },
       );
       console.log(`📊 MR Stock query executed`);
     } catch (err) {
       console.error(`❌ Error querying MR stock:`, err.message);
       return {
         success: false,
-        message: `Failed to query MR stock: ${err.message}`
+        message: `Failed to query MR stock: ${err.message}`,
       };
     }
-    
+
     if (!mrStock) {
       console.error(`❌ MR stock not found for MR ID: ${mrId}`);
       return {
         success: false,
-        message: `MR stock not found for MR ID: ${mrId}. Please ensure MR has stock.`
+        message: `MR stock not found for MR ID: ${mrId}. Please ensure MR has stock.`,
       };
     }
-    console.log(`✅ MR stock found for MR: ${mrStock.mrName || 'Unknown MR'}`);
+    console.log(`✅ MR stock found for MR: ${mrStock.mrName || "Unknown MR"}`);
     console.log(`📋 MR Stock details:`, {
       mrName: mrStock.mrName,
       mrId: mrStock.mrId,
-      productsCount: mrStock.productsInHand?.length || 0
+      productsCount: mrStock.productsInHand?.length || 0,
     });
 
     // ✅ FIX: Use lowercase comparison with proper null checks
-    const normalizedSearchName = productName?.toLowerCase().trim() || '';
-    console.log(`🔤 Searching for product with normalized name: "${normalizedSearchName}"`);
-    
+    const normalizedSearchName = productName?.toLowerCase().trim() || "";
+    console.log(
+      `🔤 Searching for product with normalized name: "${normalizedSearchName}"`,
+    );
+
     const productsInHand = mrStock.productsInHand || [];
-    console.log(`📋 Available products in MR stock (${productsInHand.length} total):`);
+    console.log(
+      `📋 Available products in MR stock (${productsInHand.length} total):`,
+    );
     productsInHand.forEach((p, idx) => {
-      console.log(`   ${idx + 1}. "${p.productName}" (Qty: ${p.quantity || 0}, LC: ${p.lc || 0})`);
+      console.log(
+        `   ${idx + 1}. "${p.productName}" (Qty: ${p.quantity || 0}, LC: ${p.lc || 0})`,
+      );
     });
 
-    const productIndex = productsInHand.findIndex(p => {
+    const productIndex = productsInHand.findIndex((p) => {
       if (!p || !p.productName) {
         console.log(`⚠️ Found product entry with missing name`);
         return false;
@@ -1230,91 +1246,98 @@ const deductStockFromMRHand = async (mrId, productName, salesQty, bonusQty, sess
       const prodName = p.productName.toLowerCase().trim();
       return prodName === normalizedSearchName;
     });
-    
+
     if (productIndex === -1) {
       console.error(`❌ Product "${productName}" not found in MR's stock`);
-      console.log(`📋 Available product names:`, productsInHand.map(p => p.productName).join(', '));
+      console.log(
+        `📋 Available product names:`,
+        productsInHand.map((p) => p.productName).join(", "),
+      );
       return {
         success: false,
-        message: `Product "${productName}" not found in ${mrStock.mrName || 'MR'}'s stock. Available products: ${productsInHand.map(p => p.productName).join(', ')}`
+        message: `Product "${productName}" not found in ${mrStock.mrName || "MR"}'s stock. Available products: ${productsInHand.map((p) => p.productName).join(", ")}`,
       };
     }
-    
+
     const product = mrStock.productsInHand[productIndex];
     const currentQty = fixPrecision(Number(product.quantity) || 0);
     console.log(`📊 Current stock for "${product.productName}": ${currentQty}`);
     console.log(`📦 Required quantity: ${totalQty}`);
-    
+
     if (currentQty < totalQty) {
       const shortage = fixPrecision(totalQty - currentQty);
       console.error(`❌ Insufficient MR stock for ${productName}`);
-      console.error(`   Available: ${currentQty}, Required: ${totalQty}, Short by: ${shortage}`);
+      console.error(
+        `   Available: ${currentQty}, Required: ${totalQty}, Short by: ${shortage}`,
+      );
       return {
         success: false,
-        message: `Insufficient MR stock for ${productName}. MR: ${mrStock.mrName || 'Unknown'}, Available: ${currentQty}, Required: ${totalQty}, Short by: ${shortage}`,
-        shortage: shortage
+        message: `Insufficient MR stock for ${productName}. MR: ${mrStock.mrName || "Unknown"}, Available: ${currentQty}, Required: ${totalQty}, Short by: ${shortage}`,
+        shortage: shortage,
       };
     }
-    
+
     const newQuantity = fixPrecision(currentQty - totalQty);
     console.log(`✅ Stock sufficient, new quantity will be: ${newQuantity}`);
-    
+
     console.log(`🔄 Updating MR stock in database...`);
     const updateResult = await stockinmrhands.updateOne(
-      { 
+      {
         mrId: new mongoose.Types.ObjectId(mrId),
-        "productsInHand.productName": product.productName
+        "productsInHand.productName": product.productName,
       },
       {
         $set: {
           "productsInHand.$.quantity": newQuantity,
           "productsInHand.$.lastUpdated": new Date(),
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       },
-      { session }
+      { session },
     );
-    
+
     console.log(`📊 Update result:`, {
       matchedCount: updateResult.matchedCount,
       modifiedCount: updateResult.modifiedCount,
-      acknowledged: updateResult.acknowledged
+      acknowledged: updateResult.acknowledged,
     });
-    
+
     if (newQuantity === 0) {
-      console.log(`🔄 Product quantity reached zero, removing from productsInHand array...`);
+      console.log(
+        `🔄 Product quantity reached zero, removing from productsInHand array...`,
+      );
       const removeResult = await stockinmrhands.updateOne(
         { mrId: new mongoose.Types.ObjectId(mrId) },
         {
           $pull: {
-            productsInHand: { productName: product.productName }
+            productsInHand: { productName: product.productName },
           },
-          $set: { updatedAt: new Date() }
+          $set: { updatedAt: new Date() },
         },
-        { session }
+        { session },
       );
       console.log(`📊 Remove result:`, {
         matchedCount: removeResult.matchedCount,
-        modifiedCount: removeResult.modifiedCount
+        modifiedCount: removeResult.modifiedCount,
       });
     }
-    
+
     console.log(`✅ MR stock deduction completed successfully`);
     return {
       success: true,
       deductedQty: totalQty,
-      mrName: mrStock.mrName || 'Unknown MR',
+      mrName: mrStock.mrName || "Unknown MR",
       productName: product.productName,
       previousStock: currentQty,
       newStock: newQuantity,
-      lc: product.lc || 0,  // return LC for profit calculation
+      lc: product.lc || 0, // return LC for profit calculation
     };
   } catch (error) {
     console.error(`❌ Error in deductStockFromMRHand:`, error);
     console.error(`   Error stack:`, error.stack);
     return {
       success: false,
-      message: error.message
+      message: error.message,
     };
   }
 };
@@ -2912,7 +2935,34 @@ router.get("/payment-status", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.post("/batch-delete",protect, allowAdminOnly, async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "No valid IDs provided" });
+    }
+
+    const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    if (validIds.length === 0) {
+      return res.status(400).json({ error: "No valid ObjectIds provided" });
+    }
+
+    const result = await SaleSummary.deleteMany({ _id: { $in: validIds } });
+
+    res.status(200).json({
+      success: true,
+      message: `${result.deletedCount} sale(s) deleted successfully`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("Batch delete error:", error);
+    res.status(500).json({ error: error.message || "Batch delete failed" });
+  }
+});
+
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const { id } = req.params;
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -2982,7 +3032,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const { id } = req.params;
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -3208,7 +3258,6 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-
 // ==========================================
 // CREATE SALE (UPDATED - MR SALE FIX)
 // ==========================================
@@ -3218,7 +3267,7 @@ router.post("/create", async (req, res) => {
 
   try {
     const data = req.body;
-    console.log('values of data', data);
+    console.log("values of data", data);
     const isMRSale = data.isMRSale || false;
 
     console.log("\n🔍 Processing sale creation...");
@@ -3270,7 +3319,7 @@ router.post("/create", async (req, res) => {
 
     // ✅ FIX: Separate validation for MR sales vs warehouse sales
     console.log("\n🔍 Validating stock for each product...");
-    
+
     for (const p of data.products || []) {
       const salesQty = fixPrecision(Number(p.salesQty) || 0);
       const bonusQty = fixPrecision(Number(p.bonusQty) || 0);
@@ -3279,25 +3328,28 @@ router.post("/create", async (req, res) => {
       if (totalQty <= 0) continue;
 
       console.log(`\n📦 Checking product: ${p.productName}`);
-      console.log(`   Quantity: ${totalQty} (Sales: ${salesQty}, Bonus: ${bonusQty})`);
+      console.log(
+        `   Quantity: ${totalQty} (Sales: ${salesQty}, Bonus: ${bonusQty})`,
+      );
 
       if (isMRSale) {
         // ✅ MR SALE: Validate MR stock, NOT warehouse stock
         console.log(`   Type: MR Sale - Checking MR stock`);
-        
+
         if (!p.mrId) {
           console.error(`❌ MR ID missing for product: ${p.productName}`);
           throw new Error(`MR not selected for product: ${p.productName}`);
         }
 
         // Get MR stock from stockinmrhands collection
-        const stockinmrhands = mongoose.connection.db.collection("stockinmrhands");
-        
+        const stockinmrhands =
+          mongoose.connection.db.collection("stockinmrhands");
+
         let mrStock;
         try {
           mrStock = await stockinmrhands.findOne(
             { mrId: new mongoose.Types.ObjectId(p.mrId) },
-            { session }
+            { session },
           );
         } catch (err) {
           console.error(`❌ Error querying MR stock:`, err.message);
@@ -3312,15 +3364,23 @@ router.post("/create", async (req, res) => {
         const normalizedProductName = p.productName?.toLowerCase().trim() || "";
         const mrProduct = mrStock.productsInHand?.find((prod) => {
           if (!prod || !prod.productName) return false;
-          return prod.productName.toLowerCase().trim() === normalizedProductName;
+          return (
+            prod.productName.toLowerCase().trim() === normalizedProductName
+          );
         });
 
         if (!mrProduct) {
-          console.error(`❌ Product "${p.productName}" not found in ${mrStock.mrName}'s stock`);
-          console.log(`   Available products:`, mrStock.productsInHand?.map(p => p.productName).join(', ') || 'None');
+          console.error(
+            `❌ Product "${p.productName}" not found in ${mrStock.mrName}'s stock`,
+          );
+          console.log(
+            `   Available products:`,
+            mrStock.productsInHand?.map((p) => p.productName).join(", ") ||
+              "None",
+          );
           throw new Error(
             `Product "${p.productName}" not found in ${mrStock.mrName}'s stock. ` +
-            `Available products: ${mrStock.productsInHand?.map(p => p.productName).join(', ') || 'None'}`
+              `Available products: ${mrStock.productsInHand?.map((p) => p.productName).join(", ") || "None"}`,
           );
         }
 
@@ -3333,20 +3393,21 @@ router.post("/create", async (req, res) => {
           console.error(`❌ Insufficient MR stock for ${p.productName}`);
           throw new Error(
             `Insufficient MR stock for ${p.productName} in ${mrStock.mrName}'s hand. ` +
-            `Available: ${availableQty}, Required: ${totalQty}, Short by: ${shortage}`
+              `Available: ${availableQty}, Required: ${totalQty}, Short by: ${shortage}`,
           );
         }
 
         console.log(`✅ Sufficient MR stock available`);
-        
       } else {
         // ✅ WAREHOUSE SALE: Validate warehouse stock
         console.log(`   Type: Warehouse Sale - Checking warehouse stock`);
-        
+
         const stockItem = await findStockItemFlexible(p.productName, session);
 
         if (!stockItem) {
-          console.error(`❌ Product "${p.productName}" not found in warehouse inventory`);
+          console.error(
+            `❌ Product "${p.productName}" not found in warehouse inventory`,
+          );
           throw new Error(`Product "${p.productName}" not found in inventory`);
         }
 
@@ -3358,7 +3419,7 @@ router.post("/create", async (req, res) => {
           console.error(`❌ Insufficient warehouse stock for ${p.productName}`);
           throw new Error(
             `Insufficient warehouse stock for ${p.productName}. ` +
-            `Required: ${totalQty}, Available: ${availableStock}, Short by: ${shortage}`
+              `Required: ${totalQty}, Available: ${availableStock}, Short by: ${shortage}`,
           );
         }
 
@@ -3385,14 +3446,14 @@ router.post("/create", async (req, res) => {
 
       if (isMRSale) {
         console.log(`\n💰 Processing MR sale product: ${p.productName}`);
-        
+
         // Deduct from MR's stock
         const deductionResult = await deductStockFromMRHand(
           p.mrId,
           p.productName.trim(),
           salesQty,
           bonusQty,
-          session
+          session,
         );
 
         stockDeductionResults.push({
@@ -3404,33 +3465,33 @@ router.post("/create", async (req, res) => {
 
         if (!deductionResult.success) {
           throw new Error(
-            `MR stock deduction failed for ${p.productName}: ${deductionResult.message}`
+            `MR stock deduction failed for ${p.productName}: ${deductionResult.message}`,
           );
         }
 
         // Get LC from MR's stock
-        const stockinmrhands = mongoose.connection.db.collection("stockinmrhands");
+        const stockinmrhands =
+          mongoose.connection.db.collection("stockinmrhands");
         const mrStock = await stockinmrhands.findOne(
           { mrId: new mongoose.Types.ObjectId(p.mrId) },
-          { session }
+          { session },
         );
-        
+
         const mrProduct = mrStock.productsInHand.find(
           (prod) =>
             prod.productName.toLowerCase().trim() ===
-            p.productName.toLowerCase().trim()
+            p.productName.toLowerCase().trim(),
         );
-        
+
         lc = mrProduct?.lc || Number(p.lc) || 0;
         console.log(`   LC value: ${lc}`);
-        
       } else {
         console.log(`\n💰 Processing warehouse sale product: ${p.productName}`);
-        
+
         // Get LC from product catalog
         const productRecord = await findProductRecordFlexible(
           p.productName,
-          session
+          session,
         );
         lc = productRecord?.lc || Number(p.lc) || 0;
 
@@ -3440,7 +3501,7 @@ router.post("/create", async (req, res) => {
           salesQty,
           bonusQty,
           data.invoiceNumber,
-          session
+          session,
         );
 
         stockDeductionResults.push({
@@ -3450,7 +3511,7 @@ router.post("/create", async (req, res) => {
 
         if (!deductionResult.success) {
           throw new Error(
-            `Warehouse stock deduction failed for ${p.productName}: ${deductionResult.message}`
+            `Warehouse stock deduction failed for ${p.productName}: ${deductionResult.message}`,
           );
         }
       }
@@ -3537,7 +3598,7 @@ router.post("/create", async (req, res) => {
         data.invoiceNumber,
         data.invoiceDate || new Date(),
         session,
-        false // isRefund = false
+        false, // isRefund = false
       );
       if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
         console.warn(`⚠️ Failed to update MR Cash: ${mrCashUpdate.error}`);
@@ -3557,16 +3618,15 @@ router.post("/create", async (req, res) => {
       sale: sale[0],
       stockDeductionResults,
     });
-    
   } catch (err) {
     console.error("❌ Error creating sale:", err.message);
-    
+
     try {
       await session.abortTransaction();
     } catch (abortError) {
       console.error("Error aborting transaction:", abortError);
     }
-    
+
     try {
       await session.endSession();
     } catch (endError) {
@@ -3589,21 +3649,26 @@ router.get("/mr-stock/mrs-with-stock", async (req, res) => {
       })
       .toArray();
 
-    console.log('values of mrStocks', mrStocks);
+    console.log("values of mrStocks", mrStocks);
 
     // Include every MR that has productsInHand (even if all quantities are zero)
     const mrsWithStock = mrStocks.map((mrStock) => {
       const products = mrStock.productsInHand || [];
-      const totalQuantity = products.reduce((sum, p) => sum + (p.quantity || 0), 0);
-      const totalProductsWithStock = products.filter(p => p.quantity > 0).length;
+      const totalQuantity = products.reduce(
+        (sum, p) => sum + (p.quantity || 0),
+        0,
+      );
+      const totalProductsWithStock = products.filter(
+        (p) => p.quantity > 0,
+      ).length;
 
       return {
-        _id: mrStock.mrId,                // MR’s ID (as stored in the collection)
+        _id: mrStock.mrId, // MR’s ID (as stored in the collection)
         mrName: mrStock.mrName,
-        totalProducts: products.length,    // all products assigned, even zero‑stock
+        totalProducts: products.length, // all products assigned, even zero‑stock
         productsWithStock: totalProductsWithStock, // how many actually have positive stock
-        totalQuantity,                      // sum of quantities (may be zero)
-        hasStock: totalQuantity > 0,         // convenience flag
+        totalQuantity, // sum of quantities (may be zero)
+        hasStock: totalQuantity > 0, // convenience flag
       };
     });
 
@@ -3712,91 +3777,118 @@ router.get("/mr-stock/:mrId/:productName", async (req, res) => {
   }
 });
 
-router.delete("/delete-batch", async (req, res) => {
-  const { ids } = req.body;
+// router.delete("/delete-batch", protect, allowAdminOnly, async (req, res) => {
+//   const { ids } = req.body;
+//   console.log("Delete batch request received. IDs:", ids);
 
-  if (!ids || !Array.isArray(ids) || ids.length === 0) {
-    return res.status(400).json({
-      success: false,
-      message: "No sale IDs provided for deletion",
-    });
-  }
+//   if (!ids || !Array.isArray(ids) || ids.length === 0) {
+//     console.log("Invalid IDs provided:", ids);
+//     return res.status(400).json({
+//       success: false,
+//       message: "No sale IDs provided for deletion",
+//     });
+//   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+//   console.log("Starting transaction...");
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
 
-  try {
-    const salesToDelete = await SaleSummary.find({ _id: { $in: ids } }).session(
-      session,
-    );
+//   try {
+//     console.log("Finding sales to delete with IDs:", ids);
+//     const salesToDelete = await SaleSummary.find({ _id: { $in: ids } }).session(
+//       session,
+//     );
+//     console.log(`Found ${salesToDelete.length} sales to delete.`);
 
-    const mrPayments = {};
-    for (const sale of salesToDelete) {
-      if (sale.paidAmount > 0 && sale.mrName) {
-        const mrKey = sale.mrName;
-        if (!mrPayments[mrKey]) {
-          mrPayments[mrKey] = {
-            mrName: sale.mrName,
-            totalAmount: 0,
-            invoiceNumbers: [],
-          };
-        }
-        mrPayments[mrKey].totalAmount = fixPrecision(
-          mrPayments[mrKey].totalAmount + sale.paidAmount,
-        );
-        mrPayments[mrKey].invoiceNumbers.push(sale.invoiceNumber);
-      }
-    }
+//     const mrPayments = {};
+//     for (const sale of salesToDelete) {
+//       console.log(
+//         `Processing sale ${sale.invoiceNumber}, paidAmount: ${sale.paidAmount}, mrName: ${sale.mrName}`,
+//       );
+//       if (sale.paidAmount > 0 && sale.mrName) {
+//         const mrKey = sale.mrName;
+//         if (!mrPayments[mrKey]) {
+//           mrPayments[mrKey] = {
+//             mrName: sale.mrName,
+//             totalAmount: 0,
+//             invoiceNumbers: [],
+//           };
+//         }
+//         mrPayments[mrKey].totalAmount = fixPrecision(
+//           mrPayments[mrKey].totalAmount + sale.paidAmount,
+//         );
+//         mrPayments[mrKey].invoiceNumbers.push(sale.invoiceNumber);
+//       }
+//     }
+//     console.log("MR payments aggregated:", mrPayments);
 
-    for (const mrKey in mrPayments) {
-      const mrPayment = mrPayments[mrKey];
-      const mrCashUpdate = await updateMRCashes(
-        mrPayment.mrName,
-        mrPayment.totalAmount,
-        mrPayment.invoiceNumbers.join(", "),
-        new Date(),
-        session,
-        true,
-      );
-      if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
-        console.warn(
-          `Failed to update MR Cash for MR ${mrPayment.mrName}: ${mrCashUpdate.error}`,
-        );
-      }
-    }
+//     for (const mrKey in mrPayments) {
+//       const mrPayment = mrPayments[mrKey];
+//       console.log(
+//         `Updating MR cash for ${mrPayment.mrName}, amount: ${mrPayment.totalAmount}, invoices: ${mrPayment.invoiceNumbers.join(", ")}`,
+//       );
+//       const mrCashUpdate = await updateMRCashes(
+//         mrPayment.mrName,
+//         mrPayment.totalAmount,
+//         mrPayment.invoiceNumbers.join(", "),
+//         new Date(),
+//         session,
+//         true,
+//       );
+//       if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
+//         console.warn(
+//           `Failed to update MR Cash for MR ${mrPayment.mrName}: ${mrCashUpdate.error}`,
+//         );
+//       } else {
+//         console.log(
+//           `MR Cash update for ${mrPayment.mrName} successful/skipped.`,
+//         );
+//       }
+//     }
 
-    for (const sale of salesToDelete) {
-      for (const product of sale.products || []) {
-        const salesQty = Number(product.salesQty) || 0;
-        const bonusQty = Number(product.bonusQty) || 0;
-        const totalQty = salesQty + bonusQty;
+//     for (const sale of salesToDelete) {
+//       console.log(`Restoring stock for sale ${sale.invoiceNumber}`);
+//       for (const product of sale.products || []) {
+//         const salesQty = Number(product.salesQty) || 0;
+//         const bonusQty = Number(product.bonusQty) || 0;
+//         const totalQty = salesQty + bonusQty;
 
-        if (totalQty > 0) {
-          await restoreStockToReportInHand(product.productName, totalQty);
-        }
-      }
-    }
+//         if (totalQty > 0) {
+//           console.log(`Restoring ${totalQty} of ${product.productName}`);
+//           await restoreStockToReportInHand(product.productName, totalQty);
+//         }
+//       }
+//     }
 
-    await SaleSummary.deleteMany({ _id: { $in: ids } }).session(session);
+//     console.log("Deleting sales documents...");
+//     await SaleSummary.deleteMany({ _id: { $in: ids } }).session(session);
+//     console.log("Sales deleted.");
 
-    await session.commitTransaction();
-    session.endSession();
+//     await session.commitTransaction();
+//     session.endSession();
+//     console.log("Transaction committed successfully.");
 
-    res.status(200).json({
-      success: true,
-      message: `${salesToDelete.length} sales deleted successfully and stock restored.`,
-      deletedCount: salesToDelete.length,
-    });
-  } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+//     res.status(200).json({
+//       success: true,
+//       message: `${salesToDelete.length} sales deleted successfully and stock restored.`,
+//       deletedCount: salesToDelete.length,
+//     });
+//   } catch (err) {
+//     console.error("Error in delete-batch transaction:", err);
+//     await session.abortTransaction();
+//     session.endSession();
+//     console.log("Transaction aborted.");
 
-    res.status(500).json({
-      success: false,
-      error: err.message || "Failed to delete sales",
-    });
-  }
-});
+//     res.status(500).json({
+//       success: false,
+//       error: err.message || "Failed to delete sales",
+//     });
+//   }
+// });
+
+// ==========================================
+// DELETE BATCH ROUTE (UNCOMMENT THIS)
+// ==========================================
 
 router.get("/profit-loss-summary", async (req, res) => {
   try {

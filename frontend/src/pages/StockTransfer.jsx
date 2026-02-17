@@ -27,7 +27,7 @@ import CustomDropdown from "./Utility/customDropdown.jsx";
 import axios from "axios";
 import { showToast } from "../utils/toast.jsx";
 import { confirmDialog } from "../utils/confirmationDialog.js";
-import SearchableDropdown from "../components/common/SearchableDropdown"; // Added import
+import SearchableDropdown from "../components/common/SearchableDropdown";
 
 const ITEMS_PER_PAGE = 9,
   backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -131,7 +131,10 @@ const StockTransfer = () => {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/staff`);
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${backendUrl}/api/staff`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = response.data || [];
       if (data && data.length > 0) {
         setMrList(data);
@@ -158,7 +161,7 @@ const StockTransfer = () => {
     return mrList.map((mr) => ({
       value: mr._id,
       label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
-      mrData: mr // Include the entire mr object for reference
+      mrData: mr, // Include the entire mr object for reference
     }));
   }, [mrList, isMrListEmpty]);
 
@@ -217,8 +220,10 @@ const StockTransfer = () => {
 
   const getNextStockTransferNumber = useCallback(async () => {
     try {
+      const token = localStorage.getItem("token");
       const response = await axios.get(
-        `${backendUrl}/api/stock-transfer/next-number`
+        `${backendUrl}/api/stock-transfer/next-number`,
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.data.success) {
         return response.data.nextNumber;
@@ -243,8 +248,10 @@ const StockTransfer = () => {
   // Fetch products with LC information
   const fetchProducts = useCallback(async () => {
     try {
-      // Fetch products with LC and stock information
-      const response = await axios.get(`${backendUrl}/api/products/dropdown`);
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${backendUrl}/api/products/dropdown`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const productsData = response.data?.data || [];
 
       if (!Array.isArray(productsData)) {
@@ -334,12 +341,11 @@ const StockTransfer = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${backendUrl}/api/stock-transfer`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch general transfers");
-      }
-      const data = await response.json();
-      setGeneralTransfers(data.data || data || []);
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${backendUrl}/api/stock-transfer`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setGeneralTransfers(response.data.data || response.data || []);
     } catch (err) {
       setError(err.message || "Error fetching general transfers");
       showToast("error", err.message || "Failed to fetch general transfers");
@@ -352,11 +358,11 @@ const StockTransfer = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${backendUrl}/api/stock-transfer-to-mr`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch MR transfers");
-      }
-      const data = await response.json();
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${backendUrl}/api/stock-transfer-to-mr`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = response.data || [];
       const updatedData = data.map((transfer) => {
         if (!transfer.totalTransferCost || transfer.totalTransferCost === 0) {
           return {
@@ -443,9 +449,7 @@ const StockTransfer = () => {
 
     const productsWithCost = transfer.items.map((item) => {
       const boxQuantity = parseFloat(item.boxQuantity) || 0;
-
       const lc = parseFloat(item.lc) || 0;
-
       const productCost = parseFloat(item.productCost) || lc * boxQuantity;
 
       return {
@@ -609,9 +613,11 @@ const StockTransfer = () => {
     });
   };
 
+  // --- FIXED: handleUpdateTransfer with axios and token ---
   const handleUpdateTransfer = async (e, formData) => {
     e.preventDefault();
     try {
+      const token = localStorage.getItem("token");
       let url;
       let requestData = { ...formData };
 
@@ -660,36 +666,32 @@ const StockTransfer = () => {
       requestData.totalTransferCost = calculateTotalTransferCost(
         requestData.items
       );
-
       requestData.grandTotal = calculateGrandTotal(
         requestData.items,
         requestData.shipping,
         requestData.totalExpenses
       );
 
-      const response = await fetch(url, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestData),
+      const response = await axios.put(url, requestData, {
+        headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to update transfer");
+      if (response.status === 200) {
+        if (activeTab === "general") {
+          await fetchGeneralTransfers();
+        } else {
+          await fetchMRTransfers();
+        }
+        setIsEditModalOpen(false);
+        showToast("success", "Transfer updated successfully");
       }
-
-      if (activeTab === "general") {
-        await fetchGeneralTransfers();
-      } else {
-        await fetchMRTransfers();
-      }
-
-      setIsEditModalOpen(false);
-      showToast("success", "Transfer updated successfully");
     } catch (err) {
-      showToast("error", `Error updating transfer: ${err.message}`);
+      console.error("Error updating transfer:", err);
+      const errorMessage =
+        err.response?.data?.err ||
+        err.response?.data?.message ||
+        "Failed to update transfer";
+      showToast("error", errorMessage);
     }
   };
 
@@ -846,11 +848,14 @@ const StockTransfer = () => {
     }
   };
 
+  // --- FIXED: handleDelete with axios and token ---
   const handleDelete = async () => {
+    if (selectedRows.length === 0) return;
+
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selectedRows.length}</b> ${
         activeTab === "general" ? "General Transfers" : "MR Transfers"
-      }`,
+      }?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -858,14 +863,15 @@ const StockTransfer = () => {
 
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token");
         await Promise.all(
           selectedRows.map((id) => {
             const url =
               activeTab === "general"
                 ? `${backendUrl}/api/stock-transfer/${id}`
                 : `${backendUrl}/api/stock-transfer-to-mr/${id}`;
-            return fetch(url, {
-              method: "DELETE",
+            return axios.delete(url, {
+              headers: { Authorization: `Bearer ${token}` },
             });
           })
         );
@@ -879,13 +885,21 @@ const StockTransfer = () => {
         setSelectedRows([]);
         showToast("success", "Selected items deleted");
       } catch (err) {
-        showToast("error", err.message || "Error deleting items");
+        console.error("Error deleting selected items:", err);
+        const errorMessage =
+          err.response?.data?.err ||
+          err.response?.data?.message ||
+          err.message ||
+          "Error deleting items";
+        showToast("error", errorMessage);
       }
     }
   };
 
+  // --- FIXED: handleDeleteSingle with axios and token ---
   const handleDeleteSingle = async (transferData) => {
     if (!transferData._id) return;
+
     const confirmDelete = await confirmDialog({
       title: "Delete",
       text: `Are you sure you want to delete ${
@@ -898,13 +912,17 @@ const StockTransfer = () => {
 
     if (confirmDelete.isConfirmed) {
       try {
+        const token = localStorage.getItem("token");
         const url =
           activeTab === "general"
             ? `${backendUrl}/api/stock-transfer/${transferData._id}`
             : `${backendUrl}/api/stock-transfer-to-mr/${transferData._id}`;
 
-        const res = await axios.delete(url);
-        if (res.status === 200) {
+        const response = await axios.delete(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (response.status === 200) {
           showToast(
             "success",
             `${activeTab === "general" ? "Stock Transfer" : "MR Transfer"} <b>${
@@ -918,13 +936,13 @@ const StockTransfer = () => {
             await fetchMRTransfers();
           }
         }
-      } catch (error) {
-        showToast(
-          "error",
-          `Failed to delete ${
-            activeTab === "general" ? "stock transfer" : "MR transfer"
-          }.`
-        );
+      } catch (err) {
+        console.error("Error deleting transfer:", err);
+        const errorMessage =
+          err.response?.data?.err ||
+          err.response?.data?.message ||
+          `Failed to delete ${activeTab === "general" ? "stock transfer" : "MR transfer"}.`;
+        showToast("error", errorMessage);
       }
     }
   };
@@ -938,7 +956,7 @@ const StockTransfer = () => {
       totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
       grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
       // Ensure mrId is properly set from the transfer data
-      mrId: transfer.mrId || "", 
+      mrId: transfer.mrId || "",
     });
     setIsViewModalOpen(true);
   };

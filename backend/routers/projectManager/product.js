@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 const router = express.Router();
 import Product from "../../models/projectManger/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const parseDate = (dateStr) => {
   if (!dateStr) return null;
@@ -16,7 +18,7 @@ const parseDate = (dateStr) => {
   if (typeof dateStr === "number") {
     const baseDate = new Date(1900, 0, 1);
     const resultDate = new Date(
-      baseDate.setDate(baseDate.getDate() + dateStr - 2)
+      baseDate.setDate(baseDate.getDate() + dateStr - 2),
     );
     return isNaN(resultDate.getTime()) ? null : resultDate;
   }
@@ -47,7 +49,7 @@ const parseDate = (dateStr) => {
       // DD/MM/YYYY format (e.g., 31/07/2025)
       () => {
         const match = cleanDateStr.match(
-          /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/
+          /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/,
         );
         if (match) {
           const day = parseInt(match[1], 10);
@@ -72,7 +74,7 @@ const parseDate = (dateStr) => {
       // MM/DD/YYYY format
       () => {
         const match = cleanDateStr.match(
-          /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/
+          /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/,
         );
         if (match) {
           const month = parseInt(match[1], 10) - 1;
@@ -96,7 +98,7 @@ const parseDate = (dateStr) => {
       // DD MMM YYYY format (e.g., 07 Sept 2198)
       () => {
         const match = cleanDateStr.match(
-          /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/
+          /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/,
         );
         if (match) {
           const day = parseInt(match[1], 10);
@@ -254,7 +256,7 @@ router.post("/import", async (req, res) => {
             errors.push(
               `Row ${
                 index + 1
-              }: Quantity must contain a number. Received: "${qtyString}"`
+              }: Quantity must contain a number. Received: "${qtyString}"`,
             );
             continue;
           }
@@ -265,7 +267,7 @@ router.post("/import", async (req, res) => {
           errors.push(
             `Row ${
               index + 1
-            }: Quantity must be a positive number. Received: "${qtyString}"`
+            }: Quantity must be a positive number. Received: "${qtyString}"`,
           );
           continue;
         }
@@ -289,7 +291,7 @@ router.post("/import", async (req, res) => {
             console.warn(
               `Row ${
                 index + 1
-              }: ${fieldName} is not a valid number. Using default: ${defaultValue}`
+              }: ${fieldName} is not a valid number. Using default: ${defaultValue}`,
             );
             return defaultValue;
           }
@@ -300,7 +302,7 @@ router.post("/import", async (req, res) => {
         const parsedSellingPrice = parseNumericField(
           sellingPriceUSD,
           "Selling Price",
-          0
+          0,
         );
 
         const parsedLc = parseNumericField(lcUSD, "LC Price", 0);
@@ -310,7 +312,7 @@ router.post("/import", async (req, res) => {
         const parsedTaxSellingPrice = parseNumericField(
           taxSellingPriceUSD,
           "Tax Selling Price",
-          0
+          0,
         );
 
         // Parse date - handle "N/A", empty, and various formats
@@ -325,7 +327,7 @@ router.post("/import", async (req, res) => {
             console.warn(
               `Row ${
                 index + 1
-              }: Could not parse date "${licenseValidityDate}", using null`
+              }: Could not parse date "${licenseValidityDate}", using null`,
             );
           }
         }
@@ -336,7 +338,7 @@ router.post("/import", async (req, res) => {
         const cleanPacking = normalizeString(packing);
         const cleanSupplierName = normalizeString(supplierName);
         let cleanDrugLicense = normalizeString(drugLicense);
-        
+
         if (cleanDrugLicense === "n/a") {
           cleanDrugLicense = "";
         }
@@ -399,7 +401,7 @@ router.post("/import", async (req, res) => {
       } catch (productError) {
         console.error(
           `Error processing product at row ${index + 1}:`,
-          productError.message || productError
+          productError.message || productError,
         );
 
         let errorMessage = `Row ${index + 1}: Failed to process product "${
@@ -408,7 +410,7 @@ router.post("/import", async (req, res) => {
 
         if (productError.name === "ValidationError") {
           const validationErrors = Object.values(productError.errors).map(
-            (err) => `${err.path}: ${err.message}`
+            (err) => `${err.path}: ${err.message}`,
           );
           errorMessage = `Row ${index + 1}: ${validationErrors.join(", ")}`;
         } else if (productError.code === 11000) {
@@ -502,24 +504,24 @@ router.get("/dropdown", async (req, res) => {
 
       return {
         ...product.toObject(),
-        
+
         // Format display names
         productName: product.productName
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' '),
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
         type: product.type
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' '),
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
         supplierName: product.supplierName
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' '),
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
         drugLicense: product.drugLicense
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' '),
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
 
         // Include batches from stock if available
         batches: stock?.batches || [],
@@ -554,28 +556,28 @@ router.get("/dropdown", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const products = await Product.find().sort({ productName: 1 });
-    
+
     // Format for display
-    const formattedProducts = products.map(product => ({
+    const formattedProducts = products.map((product) => ({
       ...product.toObject(),
       productName: product.productName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       type: product.type
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       supplierName: product.supplierName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       drugLicense: product.drugLicense
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
     }));
-    
+
     res.status(200).json(formattedProducts);
   } catch (err) {
     console.error("Error fetching products:", err);
@@ -600,23 +602,23 @@ router.get("/in-stock", async (req, res) => {
     // Combine the data with formatted display names
     const productsWithStock = products.map((product) => {
       const stock = stockByProduct.find(
-        (s) => s._id.toLowerCase() === product.productName.toLowerCase()
+        (s) => s._id.toLowerCase() === product.productName.toLowerCase(),
       );
 
       return {
         ...product.toObject(),
         productName: product.productName
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' '),
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
         type: product.type
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' '),
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
         supplierName: product.supplierName
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' '),
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
         inStock: {
           boxes: stock?.totalBoxes || 0,
           status: stock?.totalBoxes > 0 ? "In Stock" : "Out of Stock",
@@ -640,55 +642,55 @@ router.get("/paginated", async (req, res) => {
     const limit = parseInt(req.query.limit) || 9;
     const search = req.query.search || "";
     const type = req.query.type || "";
-    
+
     const skip = (page - 1) * limit;
-    
+
     // Build query
     const query = {};
-    
+
     if (search) {
       query.$or = [
         { productName: { $regex: search, $options: "i" } },
         { supplierName: { $regex: search, $options: "i" } },
         { drugLicense: { $regex: search, $options: "i" } },
-        { type: { $regex: search, $options: "i" } }
+        { type: { $regex: search, $options: "i" } },
       ];
     }
-    
+
     if (type && type.toLowerCase() !== "all") {
       query.type = { $regex: new RegExp(`^${type}$`, "i") };
     }
-    
+
     // Get total count
     const total = await Product.countDocuments(query);
-    
+
     // Get paginated products
     const products = await Product.find(query)
       .sort({ productName: 1 })
       .skip(skip)
       .limit(limit);
-    
+
     // Format products for display (capitalize first letter of each word)
-    const formattedProducts = products.map(product => ({
+    const formattedProducts = products.map((product) => ({
       ...product.toObject(),
       productName: product.productName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       type: product.type
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       supplierName: product.supplierName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       drugLicense: product.drugLicense
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
     }));
-    
+
     res.status(200).json({
       success: true,
       data: formattedProducts,
@@ -696,14 +698,14 @@ router.get("/paginated", async (req, res) => {
         currentPage: page,
         totalPages: Math.ceil(total / limit),
         totalItems: total,
-        itemsPerPage: limit
-      }
+        itemsPerPage: limit,
+      },
     });
   } catch (err) {
     console.error("Error fetching paginated products:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to fetch products." 
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch products.",
     });
   }
 });
@@ -712,37 +714,37 @@ router.get("/paginated", async (req, res) => {
 router.get("/types", async (req, res) => {
   try {
     const types = await Product.distinct("type");
-    
+
     // Format types for display
     const formattedTypes = types
-      .filter(type => type && type.trim() !== "")
-      .map(type => 
+      .filter((type) => type && type.trim() !== "")
+      .map((type) =>
         type
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' ')
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
       )
       .sort();
-    
-    res.status(200).json({ 
-      success: true, 
-      data: formattedTypes 
+
+    res.status(200).json({
+      success: true,
+      data: formattedTypes,
     });
   } catch (err) {
     console.error("Error fetching product types:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to fetch product types." 
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch product types.",
     });
   }
 });
 
 // UPDATE PRODUCT
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     let updatedData = req.body;
-    
+
     // Convert string fields to lowercase before saving
     if (updatedData.productName) {
       updatedData.productName = normalizeString(updatedData.productName);
@@ -776,21 +778,21 @@ router.put("/:id", async (req, res) => {
     const formattedProduct = {
       ...updatedProduct.toObject(),
       productName: updatedProduct.productName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       type: updatedProduct.type
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       supplierName: updatedProduct.supplierName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       drugLicense: updatedProduct.drugLicense
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
     };
 
     return res.status(200).json(formattedProduct);
@@ -801,7 +803,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE SINGLE PRODUCT
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -821,7 +823,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // DELETE MULTIPLE PRODUCTS
-router.delete("/", async (req, res) => {
+router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     let { ids } = req.body;
 
@@ -901,22 +903,22 @@ router.post("/add", async (req, res) => {
     });
 
     const savedProduct = await newProduct.save();
-    
+
     // Format for display in response
     const formattedProduct = {
       ...savedProduct.toObject(),
       productName: savedProduct.productName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       type: savedProduct.type
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
       supplierName: savedProduct.supplierName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
+        .split(" ")
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(" "),
     };
 
     return res.status(201).json({

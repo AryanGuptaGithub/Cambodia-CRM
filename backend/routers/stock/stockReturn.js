@@ -4,12 +4,11 @@ import StockReturn from "../../models/stock/StockReturn.js";
 import StockInMrHand from "../../models/stock/StockInMRHand.js";
 import MRCash from "../../models/accounts/MRCash.js";
 import MR from "../../models/staffMember/staff.js";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 
-/**
- * Generate unique return ID with format: SR + YY + MM + 0001
- */
 const generateReturnId = async () => {
   const prefix = "SR";
   const year = new Date().getFullYear().toString().slice(-2);
@@ -28,9 +27,6 @@ const generateReturnId = async () => {
   return `${prefix}${year}${month}${sequence.toString().padStart(4, "0")}`;
 };
 
-/**
- * Clean string helper - removes extra spaces and special characters
- */
 const cleanString = (str) => {
   if (!str) return "";
   return str
@@ -40,9 +36,6 @@ const cleanString = (str) => {
     .toLowerCase();
 };
 
-/**
- * Find MR data with fallback logic
- */
 const findMR = async (returnItem) => {
   const mrName = returnItem.mrName?.trim();
 
@@ -66,7 +59,6 @@ const findMR = async (returnItem) => {
   return mrCashData;
 };
 
-// ==================== GET / ====================
 router.get("/", async (req, res) => {
   try {
     const {
@@ -160,7 +152,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ==================== GET /statistics ====================
 router.get("/statistics", async (req, res) => {
   try {
     const { mrCode, startDate, endDate } = req.query;
@@ -254,7 +245,6 @@ router.get("/statistics", async (req, res) => {
   }
 });
 
-// ==================== GET /:id ====================
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -303,7 +293,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ==================== POST / ====================
 router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -542,7 +531,6 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ==================== PUT /:id/status ====================
 router.put("/:id/status", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -702,7 +690,7 @@ router.put("/:id/status", async (req, res) => {
 });
 
 // ==================== DELETE /:id ====================
-router.delete("/:id", async (req, res) => {
+router.delete("/:id",  async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 

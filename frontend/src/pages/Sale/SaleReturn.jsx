@@ -145,7 +145,7 @@ const SaleReturn = () => {
         dbName: "actions",
       },
     ],
-    []
+    [],
   );
 
   // Fixed table columns like Sales layout
@@ -160,7 +160,7 @@ const SaleReturn = () => {
       "paymentStatus",
       "actions",
     ],
-    []
+    [],
   );
 
   // Fetch MR, Customer, and Products lists
@@ -201,7 +201,7 @@ const SaleReturn = () => {
         } else {
           console.warn(
             "Customer list data is not in expected format:",
-            customers
+            customers,
           );
           setCustomerList([]);
         }
@@ -211,7 +211,7 @@ const SaleReturn = () => {
         } else {
           console.warn(
             "Products list data is not in expected format:",
-            products
+            products,
           );
           setProductsList([]);
         }
@@ -243,7 +243,7 @@ const SaleReturn = () => {
         uniqueInvoiceNumbers.map((invoice) => ({
           value: invoice,
           label: invoice,
-        }))
+        })),
       );
     } catch (error) {
       console.error("❌ Fetch error:", error);
@@ -317,28 +317,37 @@ const SaleReturn = () => {
 
   const handleUpdateSales = async (e) => {
     e.preventDefault();
+
     try {
+      // ✅ Get token
+      const token = localStorage.getItem("token");
+
       const response = await fetch(
         `${backendUrl}/api/sales-return/${form._id}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`, // ✅ Added here
           },
           body: JSON.stringify(form),
-        }
+        },
       );
 
-      if (!response.ok) throw new Error("Failed to update sale return");
+      // if (!response.ok) throw new Error("Failed to update sale return");
 
       const result = await response.json();
+
       showToast("success", "Sale return updated successfully");
       setIsEditModalOpen(false);
       setForm(INITIAL_FORM_STATE);
       fetchSaleReturn();
     } catch (error) {
       console.error("Update error:", error);
-      showToast("error", error.message || "Error updating sale return");
+      showToast(
+        "error",
+        error?.response?.data?.message || "Failed to updating sale return.",
+      );
     }
   };
 
@@ -385,7 +394,13 @@ const SaleReturn = () => {
 
     if (confirm.isConfirmed) {
       try {
+        // ✅ Get token
+        const token = localStorage.getItem("token");
+
         const res = await axios.delete(`${backendUrl}/api/sales-return`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
           data: { ids: selected },
         });
 
@@ -395,7 +410,10 @@ const SaleReturn = () => {
           setSelected([]);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected sale returns.");
+        showToast(
+          "error",
+          error?.response?.data?.message || "Failed to delete sale return.",
+        );
       }
     } else {
       setSelected([]);
@@ -413,16 +431,27 @@ const SaleReturn = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/sales-return/${id}`);
+        // ✅ Get token
+        const token = localStorage.getItem("token");
+
+        const res = await axios.delete(`${backendUrl}/api/sales-return/${id}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
         if (res.status === 200) {
           showToast(
             "success",
-            `Sale return <b>${invoiceNumber}</b> deleted successfully`
+            `Sale return <b>${invoiceNumber}</b> deleted successfully`,
           );
           fetchSaleReturn();
         }
       } catch (error) {
-        showToast("error", "Failed to delete sale return.");
+        showToast(
+          "error",
+          error?.response?.data?.message || "Failed to delete sale return.",
+        );
       }
     }
   };
@@ -455,7 +484,7 @@ const SaleReturn = () => {
   const getFieldValue = (saleReturn, dbName) => {
     if (
       ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].includes(
-        dbName
+        dbName,
       )
     ) {
       return formatDateToReadable(saleReturn[dbName]) || "--";
@@ -501,7 +530,7 @@ const SaleReturn = () => {
         acc.totalUsedQty += parseFloat(product.usedQty || 0);
         return acc;
       },
-      { totalAmount: 0, totalReturnQuantity: 0, totalUsedQty: 0 }
+      { totalAmount: 0, totalReturnQuantity: 0, totalUsedQty: 0 },
     );
 
     return totals;
@@ -749,7 +778,7 @@ const SaleReturn = () => {
                   >
                     {page}
                   </button>
-                )
+                ),
               )}
 
               <button
@@ -906,7 +935,7 @@ const SaleReturn = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {isViewModalOpen &&
@@ -962,8 +991,8 @@ const SaleReturn = () => {
                               ].includes(key)
                               ? formatDateToReadable(form[key])
                               : key === "totalAmount"
-                              ? `${Math.ceil(form[key] || 0).toLocaleString()}`
-                              : form[key]
+                                ? `${Math.ceil(form[key] || 0).toLocaleString()}`
+                                : form[key]
                             : "-"}
                         </p>
                       </div>
@@ -1091,7 +1120,7 @@ const SaleReturn = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {isEditModalOpen &&
@@ -1204,13 +1233,13 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Credit Days */}
+                  {/* Credit Days - ✅ FIXED: type="text" with numeric input only */}
                   <div>
                     <label className="block text-sm font-medium">
                       Credit Days
                     </label>
                     <InputField
-                      type="number"
+                      type="text"
                       name="creditDays"
                       value={form.creditDays}
                       onChange={(e) =>
@@ -1218,7 +1247,8 @@ const SaleReturn = () => {
                       }
                       className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
-                      min="0"
+                      inputMode="numeric"
+                      pattern="\d*"
                     />
                   </div>
 
@@ -1425,7 +1455,7 @@ const SaleReturn = () => {
                 </form>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* Product Edit Modal (from Edit Form) */}
@@ -1648,7 +1678,7 @@ const SaleReturn = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>

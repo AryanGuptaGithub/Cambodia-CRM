@@ -104,7 +104,7 @@ function Purchase() {
       "productCount",
       "actions",
     ],
-    []
+    [],
   );
 
   const allFields = useMemo(
@@ -145,7 +145,7 @@ function Purchase() {
         dbName: "actions",
       },
     ],
-    []
+    [],
   );
 
   // Validation function
@@ -153,19 +153,19 @@ function Purchase() {
     if (!supplierOptions.length && !productOptions.length) {
       showToast(
         "error",
-        "No suppliers and products found. Please add at least one supplier and one product first."
+        "No suppliers and products found. Please add at least one supplier and one product first.",
       );
       return false;
     } else if (!supplierOptions.length) {
       showToast(
         "error",
-        "No suppliers found. Please add at least one supplier first."
+        "No suppliers found. Please add at least one supplier first.",
       );
       return false;
     } else if (!productOptions.length) {
       showToast(
         "error",
-        "No products found. Please add at least one product first."
+        "No products found. Please add at least one product first.",
       );
       return false;
     }
@@ -395,7 +395,7 @@ function Purchase() {
           let supplierName = getValue("supplierName")?.toString().trim();
           const expiryDate = parseDate(getValue("expiryDate"));
           const quantityPerBoxStrip = parseNumber(
-            getValue("quantityPerBoxStrip")
+            getValue("quantityPerBoxStrip"),
           );
           let fob = parseNumber(getValue("fob"));
           let cif = parseNumber(getValue("cif"));
@@ -431,12 +431,12 @@ function Purchase() {
             if (!invoiceGroups[`NO_INVOICE_${supplierKey}`]) {
               // Generate invoice number for this supplier
               const lastInvoiceNumber = Object.keys(invoiceGroups).filter(
-                (key) => key.startsWith(`INC_${supplierKey}`)
+                (key) => key.startsWith(`INC_${supplierKey}`),
               ).length;
 
               invoiceNumber = `INC${String(lastInvoiceNumber + 1).padStart(
                 5,
-                "0"
+                "0",
               )}`;
             } else {
               // Use existing generated invoice number for this supplier
@@ -499,12 +499,12 @@ function Purchase() {
         if (groupedData.length === 0) {
           showToast(
             "warning",
-            "No valid data found in the file. Please check the format."
+            "No valid data found in the file. Please check the format.",
           );
         } else {
           const totalProducts = groupedData.reduce(
             (sum, invoice) => sum + invoice.products.length,
-            0
+            0,
           );
         }
       } catch (error) {
@@ -549,13 +549,13 @@ function Purchase() {
     try {
       const res = await axios.post(
         `${backendUrl}/api/purchase/import`,
-        parsedData
+        parsedData,
       );
 
       if (res.status === 200) {
         showToast(
           "success",
-          res.data.message || "Purchase Inventory imported successfully!"
+          res.data.message || "Purchase Inventory imported successfully!",
         );
         setShowImportModal(false);
         setParsedData([]);
@@ -740,7 +740,7 @@ function Purchase() {
         (purchase.products &&
           Array.isArray(purchase.products) &&
           purchase.products.some((product) =>
-            product.productName?.toLowerCase().includes(lowerSearch)
+            product.productName?.toLowerCase().includes(lowerSearch),
           ))
       );
     });
@@ -795,10 +795,10 @@ function Purchase() {
           ? currentPurchases.map((purchase) => ({
               id: purchase._id,
             }))
-          : []
+          : [],
       );
     },
-    [currentPurchases]
+    [currentPurchases],
   );
 
   const handleView = (purchase) => {
@@ -824,6 +824,7 @@ function Purchase() {
 
   const deletePurchase = async (purchase) => {
     if (!purchase._id) return;
+
     const confirmDelete = await confirmDialog({
       title: "Delete",
       text: `Are you sure you want to delete <b>${purchase?.invoiceNumber}</b>?`,
@@ -834,21 +835,35 @@ function Purchase() {
 
     if (confirmDelete.isConfirmed) {
       try {
+        const token = localStorage.getItem("token"); // ✅ Get token
+
         const res = await axios.delete(
-          `${backendUrl}/api/purchase/${purchase._id}`
+          `${backendUrl}/api/purchase/${purchase._id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`, // ✅ Added token header
+            },
+          },
         );
+
         if (res.status === 200) {
           showToast(
             "success",
-            `Purchase <b>${purchase?.invoiceNumber}</b> deleted successfully`
+            `Purchase <b>${purchase?.invoiceNumber}</b> deleted successfully`,
           );
           fetchPurchaseDetails();
         }
       } catch (error) {
-        showToast("error", "Failed to delete purchase.");
+        console.error("Delete error:", error);
+
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to delete purchase.",
+        );
       }
     }
   };
+
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> purchase(s)?`,
@@ -859,31 +874,43 @@ function Purchase() {
 
     if (confirm.isConfirmed) {
       try {
-        // Extract just the ID strings from the selected array
+        const token = localStorage.getItem("token"); // ✅ Get token
+
         const selectedIds = selected.map((item) => item.id);
 
         const res = await axios.delete(`${backendUrl}/api/purchase`, {
-          data: { ids: selectedIds }, // Send array of ID strings
+          headers: {
+            Authorization: `Bearer ${token}`, // ✅ Added header
+          },
+          data: { ids: selectedIds }, // Body for DELETE
         });
+
         if (res.status === 200) {
           showToast(
             "success",
-            `Selected <b>${selected.length}</b> purchase(s) deleted successfully`
+            `Selected <b>${selected.length}</b> purchase(s) deleted successfully`,
           );
           fetchPurchaseDetails();
           setSelected([]);
         }
       } catch (error) {
         console.error("Delete error:", error);
-        showToast("error", "Failed to delete selected purchases.");
+
+        showToast(
+          "error",
+          error.response?.data?.message ||
+            "Failed to delete selected purchases.",
+        );
       }
     } else {
       setSelected([]);
     }
   };
+
   const deleteSelectedPurchases = async () => {
     try {
-      // Ensure selected is an array of IDs
+      const token = localStorage.getItem("token"); // ✅ Get token
+
       const selectedIds = selected.map((item) => item.id);
 
       if (!selectedIds || selectedIds.length === 0) {
@@ -895,26 +922,27 @@ function Purchase() {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`, // ✅ Added header
         },
-        body: JSON.stringify({ ids: selectedIds }), // Ensure this is { ids: [...] }
+        body: JSON.stringify({ ids: selectedIds }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to delete purchases");
+        throw new Error(data.message || "Failed to delete purchases");
       }
 
       alert(data.message);
 
-      // Refresh purchases list
       fetchPurchaseDetails();
-      setSelected([]); // Clear selection
+      setSelected([]);
     } catch (error) {
       console.error("Delete error:", error);
       alert(`Failed to delete purchases: ${error.message}`);
     }
   };
+
   // Form handlers
   const enhancedHandleChange = useCallback((e) => {
     const { name, value } = e.target;
@@ -991,7 +1019,10 @@ function Purchase() {
 
   const handlePurchaseUpdate = async (e) => {
     e.preventDefault();
+
     try {
+      const token = localStorage.getItem("token"); // ✅ get token
+
       const updateData = {
         invoiceNumber: form.invoiceNumber,
         invoiceDate: form.invoiceDate,
@@ -1003,9 +1034,15 @@ function Purchase() {
         amount: productTotals.totalAmount,
         products: form.products || [],
       };
+
       const res = await axios.put(
         `${backendUrl}/api/purchase/${form._id}`,
-        updateData
+        updateData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`, // ✅ added token header
+          },
+        },
       );
 
       if (res.status === 200) {
@@ -1016,10 +1053,10 @@ function Purchase() {
       }
     } catch (err) {
       console.error("Update error:", err);
+
       showToast(
         "error",
-        "Failed to update purchase: " +
-          (err.response?.data?.message || err.message)
+        err.response?.data?.message || "Failed to update purchase.",
       );
     }
   };
@@ -1155,7 +1192,7 @@ function Purchase() {
         acc.totalAmount += parseFloat(product.amount || 0);
         return acc;
       },
-      { totalAmount: 0 }
+      { totalAmount: 0 },
     );
 
     return totals;
@@ -1174,7 +1211,7 @@ function Purchase() {
     let filtered = invoiceProducts;
     if (selectedTab !== "All") {
       filtered = invoiceProducts.filter(
-        (p) => p.productType === selectedTab || p.type === selectedTab
+        (p) => p.productType === selectedTab || p.type === selectedTab,
       );
     }
 
@@ -1187,7 +1224,7 @@ function Purchase() {
             ?.toLowerCase()
             .includes(lowerSearch) ||
           p.productType?.toLowerCase().includes(lowerSearch) ||
-          p.type?.toLowerCase().includes(lowerSearch)
+          p.type?.toLowerCase().includes(lowerSearch),
       );
     }
 
@@ -1334,7 +1371,7 @@ function Purchase() {
                               <input
                                 type="checkbox"
                                 checked={selected.some(
-                                  (s) => s.id === purchase._id
+                                  (s) => s.id === purchase._id,
                                 )}
                                 onChange={() => toggleSelect(purchase)}
                               />
@@ -1428,7 +1465,7 @@ function Purchase() {
                     >
                       {page}
                     </button>
-                  )
+                  ),
                 )}
 
                 <button
@@ -1590,15 +1627,15 @@ function Purchase() {
                                   <p className="border px-3 py-2 rounded-lg bg-white">
                                     {key === "productType"
                                       ? capitalizeFirstLetter(
-                                          product[key] || "unknown"
+                                          product[key] || "unknown",
                                         )
                                       : ["fob", "cif", "amount"].includes(key)
-                                      ? formatNumber(product[key])
-                                      : key === "expiryDate"
-                                      ? product[key]
-                                        ? formatDateToReadable(product[key])
-                                        : "--"
-                                      : product[key] ?? "--"}
+                                        ? formatNumber(product[key])
+                                        : key === "expiryDate"
+                                          ? product[key]
+                                            ? formatDateToReadable(product[key])
+                                            : "--"
+                                          : (product[key] ?? "--")}
                                   </p>
                                 </div>
                               ))}
@@ -1637,7 +1674,7 @@ function Purchase() {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {isEditModalOpen &&
@@ -1838,7 +1875,7 @@ function Purchase() {
                 </form>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* PRODUCT MODAL */}
@@ -1888,7 +1925,7 @@ function Purchase() {
                               ...new Set(
                                 invoiceProducts
                                   .map((p) => p?.productType || p?.type)
-                                  .filter(Boolean)
+                                  .filter(Boolean),
                               ),
                             ];
 
@@ -1905,7 +1942,7 @@ function Purchase() {
                                 >
                                   {capitalizeFirstLetter(type)}
                                 </button>
-                              )
+                              ),
                             );
                           })()}
                         </div>
@@ -1966,15 +2003,15 @@ function Purchase() {
                                     product.type === "physical"
                                       ? "bg-blue-100 text-blue-800"
                                       : product.productType === "digital" ||
-                                        product.type === "digital"
-                                      ? "bg-purple-100 text-purple-800"
-                                      : "bg-green-100 text-green-800"
+                                          product.type === "digital"
+                                        ? "bg-purple-100 text-purple-800"
+                                        : "bg-green-100 text-green-800"
                                   }`}
                                 >
                                   {capitalizeFirstLetter(
                                     product.productType ||
                                       product.type ||
-                                      "unknown"
+                                      "unknown",
                                   )}
                                 </span>
                               </td>
@@ -2031,7 +2068,7 @@ function Purchase() {
                             {filteredProductsInModal
                               .reduce(
                                 (sum, p) => sum + (Number(p.amount) || 0),
-                                0
+                                0,
                               )
                               .toLocaleString(undefined, {
                                 minimumFractionDigits: 2,
@@ -2045,7 +2082,7 @@ function Purchase() {
                           </p>
                           <p className="text-lg font-bold text-blue-600">
                             {formatDateToReadable(
-                              selectedPurchaseProduct.invoiceDate
+                              selectedPurchaseProduct.invoiceDate,
                             )}
                           </p>
                         </div>
@@ -2068,7 +2105,7 @@ function Purchase() {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* PRODUCT EDIT MODAL */}
@@ -2110,7 +2147,7 @@ function Purchase() {
                       }
                       onChange={(selectedValue) => {
                         const selectedProduct = productOptions.find(
-                          (product) => product.id === selectedValue
+                          (product) => product.id === selectedValue,
                         );
 
                         if (selectedProduct) {
@@ -2384,7 +2421,7 @@ function Purchase() {
                               <span className="font-medium">Batch Date:</span>
                               <p>
                                 {formatDateToReadable(
-                                  currentProduct.batches[0].date
+                                  currentProduct.batches[0].date,
                                 )}
                               </p>
                             </div>
@@ -2392,7 +2429,7 @@ function Purchase() {
                               <span className="font-medium">Expiry:</span>
                               <p>
                                 {formatDateToReadable(
-                                  currentProduct.batches[0].expiryDate
+                                  currentProduct.batches[0].expiryDate,
                                 )}
                               </p>
                             </div>
@@ -2432,7 +2469,7 @@ function Purchase() {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {showImportModal &&
@@ -2523,7 +2560,7 @@ function Purchase() {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>

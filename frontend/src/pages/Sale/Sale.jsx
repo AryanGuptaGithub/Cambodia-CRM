@@ -54,7 +54,6 @@ import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-
 const StockValidationModal = ({
   isOpen,
   onClose,
@@ -66,11 +65,18 @@ const StockValidationModal = ({
 
   if (!isOpen || !stockValidationResult) return null;
 
-  const { stockIssues = [], summary = {}, importBlocked = false, message = "" } = stockValidationResult;
+  const {
+    stockIssues = [],
+    summary = {},
+    importBlocked = false,
+    message = "",
+  } = stockValidationResult;
 
   // Check if import is blocked due to insufficient stock
-  const isBlocked = importBlocked || (summary.hasInsufficientStock && summary.totalInsufficient > 0);
-  
+  const isBlocked =
+    importBlocked ||
+    (summary.hasInsufficientStock && summary.totalInsufficient > 0);
+
   const downloadStockIssuesExcel = useCallback(() => {
     try {
       const excelData = stockIssues.map((issue, index) => ({
@@ -78,9 +84,11 @@ const StockValidationModal = ({
         "Product Name": issue.productName,
         "Required Quantity": issue.totalRequired,
         "Available Stock": issue.availableStock,
-        "Shortage": issue.insufficientQty || 0,
-        "Status": issue.productExists 
-          ? (issue.insufficient ? "Insufficient Stock" : "Available")
+        Shortage: issue.insufficientQty || 0,
+        Status: issue.productExists
+          ? issue.insufficient
+            ? "Insufficient Stock"
+            : "Available"
           : "Product Not Found",
         "Issue Type": issue.message,
         "Affected Invoices": issue.requiredByInvoices?.length || 0,
@@ -89,7 +97,7 @@ const StockValidationModal = ({
       const ws = XLSX.utils.json_to_sheet(excelData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
-      
+
       const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(wb, fileName);
 
@@ -103,23 +111,36 @@ const StockValidationModal = ({
   const downloadStockIssuesCSV = useCallback(() => {
     try {
       const csvRows = [
-        ["S.No", "Product Name", "Required Quantity", "Available Stock", "Shortage", "Status", "Issue Type", "Affected Invoices"],
+        [
+          "S.No",
+          "Product Name",
+          "Required Quantity",
+          "Available Stock",
+          "Shortage",
+          "Status",
+          "Issue Type",
+          "Affected Invoices",
+        ],
         ...stockIssues.map((issue, index) => [
           index + 1,
           issue.productName,
           issue.totalRequired,
           issue.availableStock,
           issue.insufficientQty || 0,
-          issue.productExists 
-            ? (issue.insufficient ? "Insufficient Stock" : "Available")
+          issue.productExists
+            ? issue.insufficient
+              ? "Insufficient Stock"
+              : "Available"
             : "Product Not Found",
           issue.message,
           issue.requiredByInvoices?.length || 0,
-        ])
+        ]),
       ];
 
       const csvContent = csvRows
-        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+        .map((row) =>
+          row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
+        )
         .join("\n");
 
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -142,23 +163,31 @@ const StockValidationModal = ({
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
       <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-        <div className={`mb-6 ${isBlocked ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'} border-2 rounded-xl p-5`}>
+        <div
+          className={`mb-6 ${isBlocked ? "bg-red-50 border-red-200" : "bg-yellow-50 border-yellow-200"} border-2 rounded-xl p-5`}
+        >
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-xl font-bold flex items-center gap-2">
               {isBlocked ? (
                 <>
                   <AlertCircle size={24} className="text-red-800" />
-                  <span className="text-red-800">❌ Insufficient Stock - Import Blocked</span>
+                  <span className="text-red-800">
+                    ❌ Insufficient Stock - Import Blocked
+                  </span>
                 </>
               ) : (
                 <>
                   <AlertCircle size={24} className="text-yellow-800" />
-                  <span className="text-yellow-800">⚠️ Missing Products - Review Required</span>
+                  <span className="text-yellow-800">
+                    ⚠️ Missing Products - Review Required
+                  </span>
                 </>
               )}
             </h2>
             <div className="flex items-center gap-2">
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${isBlocked ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>
+              <span
+                className={`px-3 py-1 rounded-full text-sm font-medium ${isBlocked ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"}`}
+              >
                 {stockIssues.length} Stock Issues
               </span>
               <div className="flex gap-2">
@@ -209,12 +238,19 @@ const StockValidationModal = ({
             </div>
           </div>
 
-          <div className={`p-3 ${isBlocked ? 'bg-red-100 border-red-300' : 'bg-yellow-100 border-yellow-300'} border rounded-lg`}>
-            <p className={`text-sm font-medium ${isBlocked ? 'text-red-900' : 'text-yellow-900'}`}>
+          <div
+            className={`p-3 ${isBlocked ? "bg-red-100 border-red-300" : "bg-yellow-100 border-yellow-300"} border rounded-lg`}
+          >
+            <p
+              className={`text-sm font-medium ${isBlocked ? "text-red-900" : "text-yellow-900"}`}
+            >
               {isBlocked ? (
                 <>
-                  ⛔ <strong>IMPORT BLOCKED:</strong> {summary.totalInsufficient || 0} products have insufficient stock.
-                  <br /><br />
+                  ⛔ <strong>IMPORT BLOCKED:</strong>{" "}
+                  {summary.totalInsufficient || 0} products have insufficient
+                  stock.
+                  <br />
+                  <br />
                   <strong>You must:</strong>
                   <br />
                   1. Update your inventory to have sufficient stock
@@ -222,22 +258,29 @@ const StockValidationModal = ({
                   2. Or reduce quantities in your import file
                   <br />
                   3. Then try the import again
-                  <br /><br />
+                  <br />
+                  <br />
                   <strong>Cannot proceed until stock is available.</strong>
                 </>
               ) : (
                 <>
-                  ⚠️ <strong>Missing Products Found:</strong> {summary.missingProducts || 0} products are not in inventory.
-                  <br /><br />
+                  ⚠️ <strong>Missing Products Found:</strong>{" "}
+                  {summary.missingProducts || 0} products are not in inventory.
+                  <br />
+                  <br />
                   <strong>These products will:</strong>
                   <br />
                   1. Be created automatically during import
                   <br />
-                  2. Have zero initial stock (you'll need to add inventory later)
+                  2. Have zero initial stock (you'll need to add inventory
+                  later)
                   <br />
                   3. Appear in your product catalog
-                  <br /><br />
-                  <strong>You can proceed if you want to create these products.</strong>
+                  <br />
+                  <br />
+                  <strong>
+                    You can proceed if you want to create these products.
+                  </strong>
                 </>
               )}
             </p>
@@ -268,21 +311,26 @@ const StockValidationModal = ({
               </thead>
               <tbody>
                 {stockIssues.map((issue, idx) => {
-                  const isInsufficient = issue.productExists && issue.insufficient;
+                  const isInsufficient =
+                    issue.productExists && issue.insufficient;
                   const isMissing = !issue.productExists;
-                  
+
                   return (
                     <tr
                       key={idx}
-                      className={`hover:${isInsufficient ? 'bg-red-50' : 'bg-yellow-50'} border-b ${
-                        isInsufficient ? 'bg-red-50' : 
-                        isMissing ? 'bg-yellow-50' : ''
+                      className={`hover:${isInsufficient ? "bg-red-50" : "bg-yellow-50"} border-b ${
+                        isInsufficient
+                          ? "bg-red-50"
+                          : isMissing
+                            ? "bg-yellow-50"
+                            : ""
                       }`}
                     >
                       <td className="p-3 font-medium">
                         <div className="text-gray-700">{issue.productName}</div>
                         <div className="text-xs text-gray-500">
-                          Required by {issue.requiredByInvoices?.length || 0} invoices
+                          Required by {issue.requiredByInvoices?.length || 0}{" "}
+                          invoices
                         </div>
                       </td>
                       <td className="p-3 font-bold text-red-700">
@@ -342,7 +390,9 @@ const StockValidationModal = ({
                 <div className="text-lg font-bold text-yellow-700">
                   {summary.missingProducts || 0}
                 </div>
-                <div className="text-xs text-yellow-600">(Missing Products)</div>
+                <div className="text-xs text-yellow-600">
+                  (Missing Products)
+                </div>
               </div>
               <div className="text-center">
                 <div className="text-sm text-gray-600">Total Shortage</div>
@@ -414,18 +464,18 @@ const MRValidationModal = ({
         "MR Name": issue.mrName,
         "Error Message": issue.message,
         "Affected Invoices": issue.affectedCount,
-        "Invoice Numbers": issue.affectedInvoices
-          ?.map((inv) => inv.invoiceNumber)
-          .join(", ") || "N/A",
-        "Customers": issue.affectedInvoices
-          ?.map((inv) => inv.customerName)
-          .join(", ") || "N/A",
+        "Invoice Numbers":
+          issue.affectedInvoices?.map((inv) => inv.invoiceNumber).join(", ") ||
+          "N/A",
+        Customers:
+          issue.affectedInvoices?.map((inv) => inv.customerName).join(", ") ||
+          "N/A",
       }));
 
       const ws = XLSX.utils.json_to_sheet(excelData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Invalid MRs");
-      
+
       const fileName = `invalid_mrs_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(wb, fileName);
 
@@ -439,7 +489,6 @@ const MRValidationModal = ({
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
       <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-        
         {/* ✅ CHANGED: Header shows WARNING (yellow) instead of ERROR (red) */}
         <div className="mb-6 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-5">
           <div className="flex justify-between items-center mb-3">
@@ -465,27 +514,37 @@ const MRValidationModal = ({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div className="text-center p-3 bg-white rounded-lg shadow border">
               <div className="text-xs text-gray-600">Total Invoices</div>
-              <div className="text-xl font-bold text-gray-800">{totalInvoices}</div>
+              <div className="text-xl font-bold text-gray-800">
+                {totalInvoices}
+              </div>
             </div>
             <div className="text-center p-3 bg-white rounded-lg shadow border">
               <div className="text-xs text-gray-600">Total MRs</div>
-              <div className="text-xl font-bold text-blue-800">{summary.totalMRs || 0}</div>
+              <div className="text-xl font-bold text-blue-800">
+                {summary.totalMRs || 0}
+              </div>
             </div>
             <div className="text-center p-3 bg-white rounded-lg shadow border">
               <div className="text-xs text-gray-600">Valid MRs</div>
-              <div className="text-xl font-bold text-green-800">{summary.validMRs || 0}</div>
+              <div className="text-xl font-bold text-green-800">
+                {summary.validMRs || 0}
+              </div>
             </div>
             <div className="text-center p-3 bg-white rounded-lg shadow border">
               <div className="text-xs text-gray-600">Invalid MRs</div>
-              <div className="text-xl font-bold text-yellow-800">{summary.invalidMRs || 0}</div>
+              <div className="text-xl font-bold text-yellow-800">
+                {summary.invalidMRs || 0}
+              </div>
             </div>
           </div>
 
           {/* ✅ CHANGED: Warning message instead of error - allows proceeding */}
           <div className="p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
             <p className="text-sm text-yellow-900 font-medium">
-              ⚠️ <strong>Warning:</strong> The following MRs are not registered in the Staff system.
-              <br /><br />
+              ⚠️ <strong>Warning:</strong> The following MRs are not registered
+              in the Staff system.
+              <br />
+              <br />
               <strong>These invoices will still be imported, but:</strong>
               <ol className="list-decimal ml-6 mt-2">
                 <li>MR names will be saved as provided</li>
@@ -493,7 +552,9 @@ const MRValidationModal = ({
                 <li>Reports may show "Unknown" for unregistered MRs</li>
               </ol>
               <br />
-              <strong className="text-yellow-700">You can proceed with import if this is acceptable.</strong>
+              <strong className="text-yellow-700">
+                You can proceed with import if this is acceptable.
+              </strong>
             </p>
           </div>
         </div>
@@ -517,10 +578,15 @@ const MRValidationModal = ({
               </thead>
               <tbody>
                 {mrIssues.map((issue, idx) => (
-                  <tr key={idx} className="hover:bg-yellow-50 border-b border-yellow-100">
+                  <tr
+                    key={idx}
+                    className="hover:bg-yellow-50 border-b border-yellow-100"
+                  >
                     <td className="p-3 font-medium text-gray-700">{idx + 1}</td>
                     <td className="p-3">
-                      <div className="font-bold text-yellow-700">{issue.mrName}</div>
+                      <div className="font-bold text-yellow-700">
+                        {issue.mrName}
+                      </div>
                     </td>
                     <td className="p-3 text-yellow-600 text-xs font-medium">
                       {issue.message}
@@ -531,22 +597,26 @@ const MRValidationModal = ({
                       </span>
                     </td>
                     <td className="p-3">
-                      {issue.affectedInvoices && issue.affectedInvoices.length > 0 && (
-                        <div className="text-xs text-gray-600">
-                          <div className="font-medium">
-                            {issue.affectedInvoices.slice(0, 3).map((inv, i) => (
-                              <div key={i} className="mb-1">
-                                • {inv.invoiceNumber} ({inv.customerName})
-                              </div>
-                            ))}
-                            {issue.affectedInvoices.length > 3 && (
-                              <div className="text-gray-500 italic">
-                                ... and {issue.affectedInvoices.length - 3} more
-                              </div>
-                            )}
+                      {issue.affectedInvoices &&
+                        issue.affectedInvoices.length > 0 && (
+                          <div className="text-xs text-gray-600">
+                            <div className="font-medium">
+                              {issue.affectedInvoices
+                                .slice(0, 3)
+                                .map((inv, i) => (
+                                  <div key={i} className="mb-1">
+                                    • {inv.invoiceNumber} ({inv.customerName})
+                                  </div>
+                                ))}
+                              {issue.affectedInvoices.length > 3 && (
+                                <div className="text-gray-500 italic">
+                                  ... and {issue.affectedInvoices.length - 3}{" "}
+                                  more
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                     </td>
                   </tr>
                 ))}
@@ -558,7 +628,8 @@ const MRValidationModal = ({
         {/* ✅ CHANGED: Footer now shows "Proceed Anyway" button instead of blocking */}
         <div className="flex justify-between items-center pt-4 border-t-2 border-gray-300">
           <div className="text-sm text-gray-600">
-            <strong className="text-yellow-600">Warning:</strong> MRs not found in Staff module
+            <strong className="text-yellow-600">Warning:</strong> MRs not found
+            in Staff module
           </div>
           <div className="flex gap-3">
             <button
@@ -578,7 +649,7 @@ const MRValidationModal = ({
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 };
 
@@ -850,13 +921,13 @@ const ImportSalesModal = ({
 
       const mrNames = new Set();
       const mrToInvoices = new Map(); // Track which invoices use which MR
-      
+
       // Collect all unique MR names and track their invoices
       for (const invoice of invoices) {
         if (invoice.mrName && invoice.mrName.trim()) {
           const mrName = invoice.mrName.trim();
           mrNames.add(mrName);
-          
+
           if (!mrToInvoices.has(mrName)) {
             mrToInvoices.set(mrName, []);
           }
@@ -905,7 +976,7 @@ const ImportSalesModal = ({
 
       response.data.invalidMRs.forEach((invalidMR) => {
         const affectedInvoices = mrToInvoices.get(invalidMR.mrName) || [];
-        
+
         invalidMRMap.set(invalidMR.mrName, {
           mrName: invalidMR.mrName,
           message: invalidMR.message,
@@ -929,7 +1000,7 @@ const ImportSalesModal = ({
     } catch (error) {
       console.error("MR validation error:", error);
       setIsValidatingMR(false);
-      
+
       return {
         mrIssues: [],
         totalInvoices: invoices.length,
@@ -983,7 +1054,13 @@ const ImportSalesModal = ({
 
   // Handle modal close properly
   const handleClose = useCallback(() => {
-    if (isImporting || isUploading || isProcessingFile || isValidatingStock || isValidatingMR) {
+    if (
+      isImporting ||
+      isUploading ||
+      isProcessingFile ||
+      isValidatingStock ||
+      isValidatingMR
+    ) {
       const shouldCancel = window.confirm(
         "Import/Validation is in progress. Are you sure you want to cancel and close?",
       );
@@ -1715,7 +1792,7 @@ const ImportSalesModal = ({
 
               if (existsResponse.data.exists) {
                 productData.productExists = true;
-                
+
                 // Check stock
                 const stockCheck = await findProductStockInHandOptimized(
                   productName,
@@ -1738,7 +1815,9 @@ const ImportSalesModal = ({
                     isCritical: !stockCheck.success,
                     productExists: true,
                     insufficient: stockCheck.insufficient,
-                    type: stockCheck.insufficient ? "insufficient_stock" : "product_not_found"
+                    type: stockCheck.insufficient
+                      ? "insufficient_stock"
+                      : "product_not_found",
                   });
                 }
               } else {
@@ -1754,7 +1833,7 @@ const ImportSalesModal = ({
                   isCritical: false,
                   productExists: false,
                   insufficient: false,
-                  type: "missing_product"
+                  type: "missing_product",
                 });
               }
 
@@ -1770,19 +1849,19 @@ const ImportSalesModal = ({
                 isCritical: false,
                 productExists: false,
                 insufficient: false,
-                type: "verification_error"
+                type: "verification_error",
               });
             }
           }
         }
 
         // Calculate summary with better categorization
-        const insufficientCount = stockIssues.filter(issue => 
-          issue.productExists && issue.insufficient
+        const insufficientCount = stockIssues.filter(
+          (issue) => issue.productExists && issue.insufficient,
         ).length;
-        
-        const missingCount = stockIssues.filter(issue => 
-          !issue.productExists
+
+        const missingCount = stockIssues.filter(
+          (issue) => !issue.productExists,
         ).length;
 
         const stockValidationResult = {
@@ -1801,17 +1880,25 @@ const ImportSalesModal = ({
             totalInsufficient: insufficientCount,
             missingProducts: missingCount,
             lowStockProducts: insufficientCount,
-            hasCriticalIssues: stockIssues.some(issue => issue.isCritical),
+            hasCriticalIssues: stockIssues.some((issue) => issue.isCritical),
             hasInsufficientStock: insufficientCount > 0,
           },
           // Add categorization
-          insufficientStockIssues: stockIssues.filter(issue => issue.productExists && issue.insufficient),
-          missingProductIssues: stockIssues.filter(issue => !issue.productExists),
+          insufficientStockIssues: stockIssues.filter(
+            (issue) => issue.productExists && issue.insufficient,
+          ),
+          missingProductIssues: stockIssues.filter(
+            (issue) => !issue.productExists,
+          ),
           importBlocked: insufficientCount > 0, // Block only if insufficient stock
-          blockReason: insufficientCount > 0 ? "INSUFFICIENT_STOCK" : "MISSING_PRODUCTS_ONLY",
-          message: insufficientCount > 0 
-            ? `${insufficientCount} products have insufficient stock. Please update inventory.`
-            : `${missingCount} products not found. They will be created during import.`
+          blockReason:
+            insufficientCount > 0
+              ? "INSUFFICIENT_STOCK"
+              : "MISSING_PRODUCTS_ONLY",
+          message:
+            insufficientCount > 0
+              ? `${insufficientCount} products have insufficient stock. Please update inventory.`
+              : `${missingCount} products not found. They will be created during import.`,
         };
 
         return stockValidationResult;
@@ -1834,7 +1921,7 @@ const ImportSalesModal = ({
           missingProductIssues: [],
           importBlocked: false,
           blockReason: "NO_ISSUES",
-          message: "Stock validation failed"
+          message: "Stock validation failed",
         };
       } finally {
         setIsValidatingStock(false);
@@ -2041,7 +2128,10 @@ const ImportSalesModal = ({
 
     // Check if there are any blocking issues
     if (stockValidationResult.summary?.hasInsufficientStock) {
-      showToast("error", "Cannot proceed - there are insufficient stock issues");
+      showToast(
+        "error",
+        "Cannot proceed - there are insufficient stock issues",
+      );
       return;
     }
 
@@ -2056,16 +2146,24 @@ const ImportSalesModal = ({
     if (confirmProceed.isConfirmed) {
       setShowStockValidation(false);
       const mrValidationResult = await validateMRsBeforeImport(parsedData);
-      
-      if (mrValidationResult.mrIssues && mrValidationResult.mrIssues.length > 0) {
+
+      if (
+        mrValidationResult.mrIssues &&
+        mrValidationResult.mrIssues.length > 0
+      ) {
         setMrValidationResult(mrValidationResult);
         setShowMRValidation(true);
         return; // Wait for user decision on MR warning
       }
-      
+
       await handleProductImport(parsedData, true);
     }
-  }, [stockValidationResult, parsedData, validateMRsBeforeImport, handleProductImport]);
+  }, [
+    stockValidationResult,
+    parsedData,
+    validateMRsBeforeImport,
+    handleProductImport,
+  ]);
 
   // Handle cancel stock validation
   const handleCancelStockValidation = useCallback(() => {
@@ -2093,16 +2191,16 @@ const ImportSalesModal = ({
 
     // Check if there are ANY stock issues
     const hasStockIssues = stockValidationResult?.stockIssues?.length > 0;
-    
+
     if (hasStockIssues) {
       const insufficientStockIssues = stockValidationResult.stockIssues.filter(
-        issue => issue.productExists && issue.insufficient
+        (issue) => issue.productExists && issue.insufficient,
       );
-      
+
       const missingProductIssues = stockValidationResult.stockIssues.filter(
-        issue => !issue.productExists
+        (issue) => !issue.productExists,
       );
-           
+
       if (insufficientStockIssues.length > 0) {
         const blockingStockValidationResult = {
           ...stockValidationResult,
@@ -2114,16 +2212,19 @@ const ImportSalesModal = ({
           },
           importBlocked: true,
           blockReason: "INSUFFICIENT_STOCK",
-          message: `${insufficientStockIssues.length} products have insufficient stock. Please update inventory before importing.`
+          message: `${insufficientStockIssues.length} products have insufficient stock. Please update inventory before importing.`,
         };
-        
+
         setStockValidationResult(blockingStockValidationResult);
         setShowStockValidation(true);
         return; // STOP - Do not proceed with import
       }
-      
+
       // 🔥 If only missing products (product not found), allow import with warning
-      if (missingProductIssues.length > 0 && insufficientStockIssues.length === 0) {
+      if (
+        missingProductIssues.length > 0 &&
+        insufficientStockIssues.length === 0
+      ) {
         const warningStockValidationResult = {
           ...stockValidationResult,
           stockIssues: missingProductIssues,
@@ -2134,26 +2235,34 @@ const ImportSalesModal = ({
           },
           importBlocked: false,
           blockReason: "MISSING_PRODUCTS_ONLY",
-          message: `${missingProductIssues.length} products not found in inventory. They will be created during import.`
+          message: `${missingProductIssues.length} products not found in inventory. They will be created during import.`,
         };
-        
+
         setStockValidationResult(warningStockValidationResult);
         setShowStockValidation(true);
         // Wait for user decision in the modal
         return;
       }
-    } else {    
+    } else {
       const mrValidationResult = await validateMRsBeforeImport(parsedData);
-      
-      if (mrValidationResult.mrIssues && mrValidationResult.mrIssues.length > 0) {
+
+      if (
+        mrValidationResult.mrIssues &&
+        mrValidationResult.mrIssues.length > 0
+      ) {
         setMrValidationResult(mrValidationResult);
         setShowMRValidation(true);
         return; // Wait for user decision on MR warning
       }
-      
+
       await handleProductImport(parsedData, false);
     }
-  }, [parsedData, validateStockBeforeImport, validateMRsBeforeImport, handleProductImport]);
+  }, [
+    parsedData,
+    validateStockBeforeImport,
+    validateMRsBeforeImport,
+    handleProductImport,
+  ]);
 
   // Download error report
   const downloadErrorReport = useCallback(() => {
@@ -2330,7 +2439,9 @@ const ImportSalesModal = ({
                   <button
                     onClick={resetParsedData}
                     className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 border border-gray-300 rounded-lg cursor-pointer"
-                    disabled={isImporting || isValidatingStock || isValidatingMR}
+                    disabled={
+                      isImporting || isValidatingStock || isValidatingMR
+                    }
                   >
                     Clear
                   </button>
@@ -2498,7 +2609,9 @@ const ImportSalesModal = ({
                   <button
                     onClick={handleImportData}
                     className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer"
-                    disabled={isImporting || isValidatingStock || isValidatingMR}
+                    disabled={
+                      isImporting || isValidatingStock || isValidatingMR
+                    }
                   >
                     Start Import ({parsedData.length} invoices)
                   </button>
@@ -3034,17 +3147,38 @@ const Sales = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/sales/delete-batch`, {
-          data: { ids: selected.map((s) => s.id) },
-        });
+        const token = localStorage.getItem("token");
+
+        const ids = selected
+          .map((s) => s.id)
+          .filter((id) => id && typeof id === "string");
+
+        if (ids.length === 0) {
+          showToast("error", "No valid sale IDs to delete");
+          return;
+        }
+
+        // ✅ Use POST to a dedicated batch-delete endpoint to avoid route conflicts
+        const res = await axios.post(
+          `${backendUrl}/api/sales/batch-delete`,
+          { ids },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          },
+        );
 
         if (res.status === 200) {
-          showToast("success", "Selected Sales deleted successfully");
+          showToast("success", `${ids.length} sale(s) deleted successfully`);
           fetchSaleSummaries();
           setSelected([]);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected sales");
+        console.error("Error deleting selected sales:", error);
+        const errorMessage =
+          error.response?.data?.error ||
+          error.response?.data?.message ||
+          "Failed to delete selected sales";
+        showToast("error", errorMessage);
       }
     }
   }, [selected, fetchSaleSummaries]);
@@ -3232,6 +3366,7 @@ const Sales = () => {
   const deleteSale = useCallback(
     async (sale) => {
       if (!sale._id) return;
+
       const confirmDelete = await confirmDialog({
         title: "Delete",
         text: `Are you sure you want to delete ${sale.invoiceNumber}?`,
@@ -3242,7 +3377,18 @@ const Sales = () => {
 
       if (confirmDelete.isConfirmed) {
         try {
-          const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
+          // ✅ Get token from localStorage
+          const token = localStorage.getItem("token");
+
+          const res = await axios.delete(
+            `${backendUrl}/api/sales/${sale._id}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            },
+          );
+
           if (res.status === 200) {
             showToast(
               "success",
@@ -3251,7 +3397,12 @@ const Sales = () => {
             fetchSaleSummaries();
           }
         } catch (error) {
-          showToast("error", "Failed to delete sale.");
+          console.error("Error deleting selected sales:", error);
+          const errorMessage =
+            error.response?.data?.error ||
+            error.response?.data?.message ||
+            "Failed to delete selected sales";
+          showToast("error", errorMessage);
         }
       }
     },
@@ -3284,8 +3435,10 @@ const Sales = () => {
   const handleUpdateSale = useCallback(
     async (e) => {
       e.preventDefault();
+
       try {
         const totals = calculateProductTotals(form.products);
+
         const updatedForm = {
           ...form,
           totalAmount: totals.totalAmount,
@@ -3294,10 +3447,19 @@ const Sales = () => {
           ).toFixed(2),
         };
 
+        // ✅ Get token
+        const token = localStorage.getItem("token");
+
         const res = await axios.put(
           `${backendUrl}/api/sales/${form._id}`,
           updatedForm,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
+
         if (res.status === 200) {
           showToast("success", "Sales record updated successfully");
           setIsEditModalOpen(false);
@@ -3305,11 +3467,12 @@ const Sales = () => {
           fetchSaleSummaries();
         }
       } catch (err) {
-        if (err.response?.data?.error) {
-          showToast("error", err.response.data.error);
-        } else {
-          showToast("error", "Failed to update sales record.");
-        }
+        console.error("Error deleting selected sales:", err);
+        const errorMessage =
+          err.response?.data?.err ||
+          err.response?.data?.message ||
+          "Failed to delete selected sales";
+        showToast("error", errorMessage);
       }
     },
     [form, calculateProductTotals, fetchSaleSummaries],

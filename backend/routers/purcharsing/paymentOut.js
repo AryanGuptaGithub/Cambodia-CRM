@@ -1,6 +1,8 @@
 import express from "express";
 import PaymentsOut from "../../models/purcharsing/purchaseOut.js";
-import CompanyAccount from "../../models/accounts/Destination.js"; // Import CompanyAccount model
+import CompanyAccount from "../../models/accounts/Destination.js";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 
@@ -35,7 +37,7 @@ router.get("/", async (req, res) => {
           bankName: "No Bank",
           sourceBank: "No Bank", // Add sourceBank field
         };
-      })
+      }),
     );
 
     res.json(paymentsWithBankNames);
@@ -154,7 +156,7 @@ router.post("/", async (req, res) => {
 });
 
 // UPDATE payment
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const {
       paymentDate,
@@ -207,7 +209,7 @@ router.put("/:id", async (req, res) => {
         bank: bank || existingPayment.bank,
         remarks: remarks || "",
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     companyAccount.totalAmount -= amountDifference;
@@ -231,7 +233,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE payment
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const deletedPayment = await PaymentsOut.findById(req.params.id);
 

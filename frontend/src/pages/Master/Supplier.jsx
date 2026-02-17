@@ -23,7 +23,7 @@ const toTitleCase = (str) => {
   return str
     .toLowerCase()
     .split(" ")
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
 };
 
@@ -170,7 +170,9 @@ const SupplierTable = ({
                   checked={selected.some((s) => s.id === supplier._id)}
                   onChange={() => toggleSelect(supplier)}
                 />
-                <span className="capitalize">{displayValue(supplier.name)}</span>
+                <span className="capitalize">
+                  {displayValue(supplier.name)}
+                </span>
               </div>
             </td>
             <td className="p-3">{displayValue(supplier.address)}</td>
@@ -231,7 +233,7 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
   const getVisiblePages = () => {
     const pages = [];
     const maxVisible = 5;
-    
+
     if (totalPages <= maxVisible) {
       for (let i = 1; i <= totalPages; i++) {
         pages.push(i);
@@ -239,42 +241,42 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
     } else {
       // Always show first page
       pages.push(1);
-      
+
       // Calculate start and end
       let start = Math.max(2, currentPage - 1);
       let end = Math.min(totalPages - 1, currentPage + 1);
-      
+
       // Adjust if near the beginning
       if (currentPage <= 3) {
         start = 2;
         end = 4;
       }
-      
+
       // Adjust if near the end
       if (currentPage >= totalPages - 2) {
         start = totalPages - 3;
         end = totalPages - 1;
       }
-      
+
       // Add ellipsis if needed
       if (start > 2) {
         pages.push("...");
       }
-      
+
       // Add middle pages
       for (let i = start; i <= end; i++) {
         pages.push(i);
       }
-      
+
       // Add ellipsis if needed
       if (end < totalPages - 1) {
         pages.push("...");
       }
-      
+
       // Always show last page
       pages.push(totalPages);
     }
-    
+
     return pages;
   };
 
@@ -289,7 +291,7 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
       >
         ← Prev
       </button>
-      
+
       {visiblePages.map((page, index) => (
         <button
           key={index}
@@ -299,14 +301,14 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
             page === "..."
               ? "bg-gray-200 cursor-not-allowed"
               : currentPage === page
-              ? "bg-indigo-600 text-white cursor-pointer"
-              : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+                ? "bg-indigo-600 text-white cursor-pointer"
+                : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
           }`}
         >
           {page}
         </button>
       ))}
-      
+
       <button
         onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
         disabled={currentPage === totalPages}
@@ -383,7 +385,7 @@ const ImportModal = ({
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 
 const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
@@ -452,7 +454,7 @@ const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 
 const EditModal = ({
@@ -578,7 +580,7 @@ const EditModal = ({
         </form>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 
 const Supplier = () => {
@@ -613,34 +615,37 @@ const Supplier = () => {
     const fetchSuppliers = async () => {
       try {
         setLoading(true);
-        
+
         // Build query parameters
         const params = {
           page: currentPage,
           limit: SUPPLIERS_PER_PAGE,
         };
-        
+
         // Add search parameter if provided
         if (search && search.trim() !== "") {
           params.search = search.trim();
         }
-                
+
         const response = await axios.get(`${backendUrl}/api/suppliers`, {
           params: params,
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           timeout: 10000, // 10 second timeout
         });
-        
+
         // Handle different response structures
         if (response.data) {
           // Check for success flag or direct data
           if (response.data.success || response.data.ok) {
             const data = response.data.data || response.data.suppliers || [];
             const total = response.data.total || response.data.count || 0;
-            const totalPages = response.data.totalPages || Math.ceil(total / SUPPLIERS_PER_PAGE) || 1;
-            
+            const totalPages =
+              response.data.totalPages ||
+              Math.ceil(total / SUPPLIERS_PER_PAGE) ||
+              1;
+
             setSuppliers(data);
             setTotalSuppliers(total);
             setTotalPages(totalPages);
@@ -662,26 +667,35 @@ const Supplier = () => {
           setError("No data received from server");
         }
       } catch (err) {
-        console.error('Error fetching suppliers:', err);
-        
+        console.error("Error fetching suppliers:", err);
+
         // Detailed error handling
         if (err.response) {
           // Server responded with error status
-          console.error('Response error:', err.response.status, err.response.data);
-          setError(`Server error: ${err.response.status} - ${err.response.data?.message || 'Unknown error'}`);
-          showToast("error", `Failed to fetch suppliers: ${err.response.status}`);
+          console.error(
+            "Response error:",
+            err.response.status,
+            err.response.data,
+          );
+          setError(
+            `Server error: ${err.response.status} - ${err.response.data?.message || "Unknown error"}`,
+          );
+          showToast(
+            "error",
+            `Failed to fetch suppliers: ${err.response.status}`,
+          );
         } else if (err.request) {
           // Request was made but no response
-          console.error('No response received:', err.request);
+          console.error("No response received:", err.request);
           setError("No response from server. Check backend connection.");
           showToast("error", "Cannot connect to server. Please try again.");
         } else {
           // Something else happened
-          console.error('Request setup error:', err.message);
+          console.error("Request setup error:", err.message);
           setError(`Request error: ${err.message}`);
           showToast("error", `Failed to fetch suppliers: ${err.message}`);
         }
-        
+
         // Set empty data on error
         setSuppliers([]);
         setTotalSuppliers(0);
@@ -690,7 +704,7 @@ const Supplier = () => {
         setLoading(false);
       }
     };
-    
+
     fetchSuppliers();
   }, [currentPage, search, activeTab]); // Added activeTab to dependencies
 
@@ -700,7 +714,7 @@ const Supplier = () => {
     if (searchTimeout) {
       clearTimeout(searchTimeout);
     }
-    
+
     // Set new timeout for search
     const timeout = setTimeout(() => {
       if (search !== "") {
@@ -744,7 +758,7 @@ const Supplier = () => {
     setSelected((prev) =>
       prev.some((s) => s.id === supplier._id)
         ? prev.filter((s) => s.id !== supplier._id)
-        : [...prev, { id: supplier._id }]
+        : [...prev, { id: supplier._id }],
     );
   }, []);
 
@@ -752,7 +766,7 @@ const Supplier = () => {
     (checked) => {
       setSelected(checked ? filteredSuppliers.map((s) => ({ id: s._id })) : []);
     },
-    [filteredSuppliers]
+    [filteredSuppliers],
   );
 
   const handleView = (supplier) => {
@@ -767,7 +781,7 @@ const Supplier = () => {
 
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
-    
+
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> suppliers?`,
       icon: "warning",
@@ -777,21 +791,35 @@ const Supplier = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const idsToDelete = selected.map((s) => s.id);
+        const token = localStorage.getItem("token");
+        const idsToDelete = selected.map((s) => s.id); // make sure this matches _id if needed
+
         const res = await axios.delete(`${backendUrl}/api/suppliers`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
           data: { ids: idsToDelete },
         });
 
         if (res.status === 200 || res.status === 204) {
           showToast("success", "Suppliers deleted successfully");
-          // Refresh data
-          setSuppliers(prev => prev.filter(s => !idsToDelete.includes(s._id)));
-          setTotalSuppliers(prev => prev - selected.length);
+
+          // Update local state
+          setSuppliers((prev) =>
+            prev.filter((s) => !idsToDelete.includes(s._id)),
+          );
+
+          setTotalSuppliers((prev) => prev - selected.length);
           setSelected([]);
         }
       } catch (err) {
         console.error("Delete error:", err.response?.data || err.message);
-        showToast("error", "Failed to delete suppliers.");
+
+        if (err.response) {
+          showToast("error", err.response.data.message);
+        } else {
+          showToast("error", "Failed to delete suppliers.");
+        }
       }
     }
   };
@@ -806,17 +834,34 @@ const Supplier = () => {
 
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token");
+
         const res = await axios.delete(
-          `${backendUrl}/api/suppliers/${supplier._id}`
+          `${backendUrl}/api/suppliers/${supplier._id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
+
         if (res.status === 200 || res.status === 204) {
-          showToast("success", res.data?.message || "Supplier deleted successfully");
+          showToast(
+            "success",
+            res.data?.message || "Supplier deleted successfully",
+          );
+
           // Update local state
-          setSuppliers(prev => prev.filter(s => s._id !== supplier._id));
-          setTotalSuppliers(prev => prev - 1);
+          setSuppliers((prev) => prev.filter((s) => s._id !== supplier._id));
+
+          setTotalSuppliers((prev) => prev - 1);
         }
       } catch (err) {
-        showToast("error", err.message || "Failed to delete supplier");
+        if (err.response) {
+          showToast("error", err.response.data.message);
+        } else {
+          showToast("error", "Failed to delete supplier");
+        }
       }
     }
   };
@@ -915,15 +960,23 @@ const Supplier = () => {
                 return null;
               };
 
-              if (siteRegistrationDateStr && siteRegistrationDateStr.trim() !== "") {
+              if (
+                siteRegistrationDateStr &&
+                siteRegistrationDateStr.trim() !== ""
+              ) {
                 const parsedDate = parseDateValue(siteRegistrationDateStr);
                 if (parsedDate) {
                   dataObj.siteRegistrationDate = parsedDate;
                 }
               }
 
-              if (siteRegistrationExpiryDateStr && siteRegistrationExpiryDateStr.trim() !== "") {
-                const parsedDate = parseDateValue(siteRegistrationExpiryDateStr);
+              if (
+                siteRegistrationExpiryDateStr &&
+                siteRegistrationExpiryDateStr.trim() !== ""
+              ) {
+                const parsedDate = parseDateValue(
+                  siteRegistrationExpiryDateStr,
+                );
                 if (parsedDate) {
                   dataObj.siteRegistrationExpiryDate = parsedDate;
                 }
@@ -938,13 +991,13 @@ const Supplier = () => {
           .filter((item) => item !== null);
 
         const validData = parsedData.filter(
-          (item) => item.supplierName && item.supplierName.trim() !== ""
+          (item) => item.supplierName && item.supplierName.trim() !== "",
         );
 
         if (validData.length === 0) {
           showToast(
             "warning",
-            "No valid data found in the Excel file. Please check the format."
+            "No valid data found in the Excel file. Please check the format.",
           );
         }
 
@@ -968,18 +1021,18 @@ const Supplier = () => {
     try {
       const res = await axios.post(
         `${backendUrl}/api/suppliers/import`,
-        parsedData
+        parsedData,
       );
       if (res.status === 200 || res.status === 201) {
         showToast(
           "success",
-          res.data.message || "Suppliers imported successfully!"
+          res.data.message || "Suppliers imported successfully!",
         );
 
         // Refresh suppliers
         setCurrentPage(1); // Go to first page to see new data
         setSearch(""); // Clear search
-        
+
         setParsedData([]);
         setIsOpen(null);
       }
@@ -997,20 +1050,39 @@ const Supplier = () => {
     if (!selectedSupplier) return;
 
     try {
-      const res = await axios.put(`${backendUrl}/api/suppliers/${id}`, {
-        enabled: !selectedSupplier.enabled,
-      });
+      const token = localStorage.getItem("token");
+
+      const res = await axios.put(
+        `${backendUrl}/api/suppliers/${id}`,
+        {
+          enabled: !selectedSupplier.enabled,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
       if (res.status === 200) {
         // Update local state
         setSuppliers((prev) =>
           prev.map((s) =>
-            s._id === id ? { ...s, enabled: res.data.enabled } : s
-          )
+            s._id === id ? { ...s, enabled: res.data.enabled } : s,
+          ),
         );
-        showToast("success", `Supplier ${res.data.enabled ? "enabled" : "disabled"} successfully`);
+
+        showToast(
+          "success",
+          `Supplier ${res.data.enabled ? "enabled" : "disabled"} successfully`,
+        );
       }
     } catch (err) {
-      showToast("error", "Failed to update supplier status.");
+      if (err.response) {
+        showToast("error", err.response.data.message);
+      } else {
+        showToast("error", "Failed to update supplier status.");
+      }
     }
   };
 
@@ -1024,50 +1096,65 @@ const Supplier = () => {
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+
     try {
+      const token = localStorage.getItem("token");
+
       const updateData = {
         ...form,
         name: toLowerCase(form.name),
-        address: toLowerCase(form.address)
+        address: toLowerCase(form.address),
       };
-      
+
       const res = await axios.put(
         `${backendUrl}/api/suppliers/${form._id}`,
-        updateData
+        updateData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
+
       if (res.status === 200) {
         showToast("success", "Supplier updated successfully");
         setIsOpen(null);
-        
+
         // Update local state
-        setSuppliers(prev => 
-          prev.map(s => s._id === form._id ? { ...s, ...updateData } : s)
+        setSuppliers((prev) =>
+          prev.map((s) => (s._id === form._id ? { ...s, ...updateData } : s)),
         );
       }
     } catch (err) {
-      showToast("error", "Failed to update supplier.");
+      if (err.response) {
+        showToast("error", err.response.data.message);
+      } else {
+        showToast("error", "Failed to update supplier.");
+      }
     }
   };
 
-  if (loading && suppliers.length === 0) return <LoadingOverlay text="Please wait..." />;
-  if (error && suppliers.length === 0) return (
-    <div className="p-6">
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-        <p className="text-red-700 font-medium">Error: {error}</p>
-        <button 
-          onClick={() => {
-            setError(null);
-            setLoading(true);
-            // Trigger refetch
-            setCurrentPage(1);
-          }}
-          className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-        >
-          Retry
-        </button>
+  if (loading && suppliers.length === 0)
+    return <LoadingOverlay text="Please wait..." />;
+  if (error && suppliers.length === 0)
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+          <p className="text-red-700 font-medium">Error: {error}</p>
+          <button
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              // Trigger refetch
+              setCurrentPage(1);
+            }}
+            className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            Retry
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
 
   return (
     <div className="p-6">
@@ -1077,14 +1164,14 @@ const Supplier = () => {
         onDeleteSelected={handleDeleteSelected}
         selectedCount={selected.length}
       />
-      
+
       <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
         <Tabs
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           totalSuppliers={totalSuppliers}
         />
-        
+
         {totalSuppliers > 0 && (
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
@@ -1104,22 +1191,26 @@ const Supplier = () => {
           </div>
         )}
       </div>
-      
+
       {search && totalSuppliers > 0 && (
         <div className="mb-4 p-3 bg-blue-50 rounded-lg">
           <p className="text-sm text-blue-700">
-            Searching for: <span className="font-semibold">"{search}"</span> 
-            <span className="ml-4">Found: <span className="font-bold">{totalSuppliers}</span> supplier(s)</span>
+            Searching for: <span className="font-semibold">"{search}"</span>
+            <span className="ml-4">
+              Found: <span className="font-bold">{totalSuppliers}</span>{" "}
+              supplier(s)
+            </span>
           </p>
         </div>
       )}
-      
+
       {search && totalSuppliers === 0 && suppliers.length === 0 && (
         <div className="mb-4 p-3 bg-yellow-50 rounded-lg">
           <p className="text-sm text-yellow-700">
-            No suppliers found for: <span className="font-semibold">"{search}"</span>
+            No suppliers found for:{" "}
+            <span className="font-semibold">"{search}"</span>
             <span className="ml-4">
-              <button 
+              <button
                 onClick={() => setSearch("")}
                 className="text-blue-600 hover:text-blue-800 underline"
               >
@@ -1129,7 +1220,7 @@ const Supplier = () => {
           </p>
         </div>
       )}
-      
+
       <SupplierTable
         currentSuppliers={filteredSuppliers}
         selected={selected}
@@ -1141,7 +1232,7 @@ const Supplier = () => {
         handlerEnabledSupplier={handlerEnabledSupplier}
         formatDateToReadable={formatDateToReadable}
       />
-      
+
       {filteredSuppliers.length > 0 && totalPages > 1 && (
         <Pagination
           currentPage={currentPage}
@@ -1149,7 +1240,7 @@ const Supplier = () => {
           setCurrentPage={setCurrentPage}
         />
       )}
-      
+
       <ImportModal
         show={isOpen === "import"}
         onClose={() => {

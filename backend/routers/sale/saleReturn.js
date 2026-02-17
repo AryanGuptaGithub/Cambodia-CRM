@@ -5,6 +5,8 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 import ProductInventory from "../../models/purcharsing/purchaseInventory.js";
 import Customer from "../../models/master/customer.js";
 import ExcelJS from "exceljs";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 
@@ -44,7 +46,7 @@ const calculateProductTotals = (products) => {
 
       return totals;
     },
-    { totalAmount: 0 }
+    { totalAmount: 0 },
   );
 };
 
@@ -65,12 +67,20 @@ router.post("/", async (req, res) => {
     const records = Array.isArray(data) ? data : [data];
 
     if (records.length === 0) {
-      return res.status(400).json({ message: "Expected a non‑empty array of sales return records" });
+      return res
+        .status(400)
+        .json({
+          message: "Expected a non‑empty array of sales return records",
+        });
     }
 
     const requiredFields = [
-      "recordingDate", "invoiceNumber", "invoiceDate", "mrName",
-      "customerName", "products"
+      "recordingDate",
+      "invoiceNumber",
+      "invoiceDate",
+      "mrName",
+      "customerName",
+      "products",
     ];
 
     const processedData = await Promise.all(
@@ -78,7 +88,9 @@ router.post("/", async (req, res) => {
         // Validate required fields
         for (const field of requiredFields) {
           if (record[field] === undefined || record[field] === null) {
-            throw new Error(`Missing required field "${field}" in record ${index + 1}`);
+            throw new Error(
+              `Missing required field "${field}" in record ${index + 1}`,
+            );
           }
         }
 
@@ -88,35 +100,52 @@ router.post("/", async (req, res) => {
         let customerCodeRaw = record.customerCode;
 
         // If customerId is an object (populated document), extract the _id string
-        if (customerIdRaw && typeof customerIdRaw === 'object') {
+        if (customerIdRaw && typeof customerIdRaw === "object") {
           if (customerIdRaw._id) {
             customerIdRaw = customerIdRaw._id;
           } else {
-            throw new Error(`Invalid customerId object format in record ${index + 1}: missing _id`);
+            throw new Error(
+              `Invalid customerId object format in record ${index + 1}: missing _id`,
+            );
           }
         }
 
-        const customerIdValue = customerIdRaw ? String(customerIdRaw).trim() : "";
-        const customerCodeValue = customerCodeRaw ? String(customerCodeRaw).trim() : "";
+        const customerIdValue = customerIdRaw
+          ? String(customerIdRaw).trim()
+          : "";
+        const customerCodeValue = customerCodeRaw
+          ? String(customerCodeRaw).trim()
+          : "";
 
-        if (customerIdValue && mongoose.Types.ObjectId.isValid(customerIdValue)) {
+        if (
+          customerIdValue &&
+          mongoose.Types.ObjectId.isValid(customerIdValue)
+        ) {
           customerId = new mongoose.Types.ObjectId(customerIdValue);
         } else if (customerIdValue) {
           const customer = await Customer.findOne({ code: customerIdValue });
           if (!customer) {
-            throw new Error(`Customer not found with code "${customerIdValue}" in record ${index + 1}`);
+            throw new Error(
+              `Customer not found with code "${customerIdValue}" in record ${index + 1}`,
+            );
           }
           customerId = customer._id;
         } else if (customerCodeValue) {
           const customer = await Customer.findOne({ code: customerCodeValue });
           if (!customer) {
-            throw new Error(`Customer not found with code "${customerCodeValue}" in record ${index + 1}`);
+            throw new Error(
+              `Customer not found with code "${customerCodeValue}" in record ${index + 1}`,
+            );
           }
           customerId = customer._id;
         } else {
-          const customer = await Customer.findOne({ name: record.customerName });
+          const customer = await Customer.findOne({
+            name: record.customerName,
+          });
           if (!customer) {
-            throw new Error(`Customer not found with name "${record.customerName}" in record ${index + 1}`);
+            throw new Error(
+              `Customer not found with name "${record.customerName}" in record ${index + 1}`,
+            );
           }
           customerId = customer._id;
         }
@@ -127,7 +156,9 @@ router.post("/", async (req, res) => {
 
         // Validate products array
         if (!Array.isArray(record.products) || record.products.length === 0) {
-          throw new Error(`Products array is required and cannot be empty in record ${index + 1}`);
+          throw new Error(
+            `Products array is required and cannot be empty in record ${index + 1}`,
+          );
         }
 
         // Calculate product totals
@@ -137,12 +168,17 @@ router.post("/", async (req, res) => {
         const dueAmount = Math.max(0, totalAmount - amount);
 
         const creditDays = parseInt(record.creditDays) || 0;
-        const dueDate = creditDays > 0
-          ? new Date(new Date(record.invoiceDate).setDate(new Date(record.invoiceDate).getDate() + creditDays))
-          : new Date(record.invoiceDate);
+        const dueDate =
+          creditDays > 0
+            ? new Date(
+                new Date(record.invoiceDate).setDate(
+                  new Date(record.invoiceDate).getDate() + creditDays,
+                ),
+              )
+            : new Date(record.invoiceDate);
 
         // Map products with proper numeric conversions
-        const mappedProducts = record.products.map(p => ({
+        const mappedProducts = record.products.map((p) => ({
           ...p,
           salesQty: Number(p.salesQty) || 0,
           bonusQty: Number(p.bonusQty) || 0,
@@ -169,7 +205,7 @@ router.post("/", async (req, res) => {
           remark: record.remark || "",
         };
         return processedRecord;
-      })
+      }),
     );
 
     // Save to database
@@ -203,7 +239,7 @@ router.post("/", async (req, res) => {
 
             inventoryItem.totalAmount = inventoryItem.batches.reduce(
               (sum, batch) => sum + batch.amount,
-              0
+              0,
             );
             inventoryItem.status =
               inventoryItem.totalBoxes > inventoryItem.minStockLevel
@@ -213,7 +249,7 @@ router.post("/", async (req, res) => {
             await inventoryItem.save();
           }
         }
-      })
+      }),
     );
 
     await Promise.all(inventoryUpdatePromises);
@@ -240,9 +276,9 @@ router.post("/", async (req, res) => {
               "products.$.totalQty": product.totalQty,
               "products.$.averageUnitPrice": product.averageUnitPrice,
             },
-          }
-        )
-      )
+          },
+        ),
+      ),
     );
 
     await Promise.all(updatePromises);
@@ -266,7 +302,10 @@ router.get("/", async (req, res) => {
     const filters = {};
 
     if (req.query.invoiceNumber) {
-      filters.invoiceNumber = { $regex: req.query.invoiceNumber, $options: "i" };
+      filters.invoiceNumber = {
+        $regex: req.query.invoiceNumber,
+        $options: "i",
+      };
     }
     if (req.query.customerName) {
       filters.customerName = { $regex: req.query.customerName, $options: "i" };
@@ -309,7 +348,7 @@ router.get("/:id", async (req, res) => {
 
     const saleReturn = await SalesReturn.findById(id).populate(
       "customerId",
-      "name code"
+      "name code",
     );
 
     if (!saleReturn) {
@@ -336,7 +375,8 @@ router.get("/:id", async (req, res) => {
 // ================== PUT /update-product ==================
 router.put("/update-product", async (req, res) => {
   try {
-    const { invoiceNumber, productName, salesQty, bonusQty, returnQuantity } = req.body;
+    const { invoiceNumber, productName, salesQty, bonusQty, returnQuantity } =
+      req.body;
 
     if (!invoiceNumber || !productName) {
       return res.status(400).json({
@@ -355,7 +395,7 @@ router.put("/update-product", async (req, res) => {
     }
 
     const productIndex = saleRecord.products.findIndex(
-      (product) => product.productName === productName
+      (product) => product.productName === productName,
     );
 
     if (productIndex === -1) {
@@ -367,9 +407,14 @@ router.put("/update-product", async (req, res) => {
 
     const product = saleRecord.products[productIndex];
 
-    const updatedSalesQty = salesQty !== undefined ? Number(salesQty) : product.salesQty;
-    const updatedBonusQty = bonusQty !== undefined ? Number(bonusQty) : product.bonusQty;
-    const updatedReturnQuantity = returnQuantity !== undefined ? Number(returnQuantity) : product.returnQuantity;
+    const updatedSalesQty =
+      salesQty !== undefined ? Number(salesQty) : product.salesQty;
+    const updatedBonusQty =
+      bonusQty !== undefined ? Number(bonusQty) : product.bonusQty;
+    const updatedReturnQuantity =
+      returnQuantity !== undefined
+        ? Number(returnQuantity)
+        : product.returnQuantity;
 
     const usedQty = Math.max(0, updatedSalesQty - updatedReturnQuantity);
     const totalQty = usedQty + updatedBonusQty;
@@ -391,14 +436,18 @@ router.put("/update-product", async (req, res) => {
       usedAmount: usedAmount,
       averageUnitPrice: averageUnitPrice,
       profitLoss: profitLoss,
-      isProductAccept: updatedReturnQuantity > 0 ? false : product.isProductAccept,
+      isProductAccept:
+        updatedReturnQuantity > 0 ? false : product.isProductAccept,
     };
 
     const totalNetSellingAmount = saleRecord.products.reduce(
       (sum, prod) => sum + prod.netSellingAmount,
-      0
+      0,
     );
-    const totalDueAmount = Math.max(0, totalNetSellingAmount - saleRecord.amount);
+    const totalDueAmount = Math.max(
+      0,
+      totalNetSellingAmount - saleRecord.amount,
+    );
 
     saleRecord.totalAmount = totalNetSellingAmount;
     saleRecord.dueAmount = totalDueAmount;
@@ -418,7 +467,7 @@ router.put("/update-product", async (req, res) => {
           }
           inventoryItem.totalAmount = inventoryItem.batches.reduce(
             (sum, batch) => sum + batch.amount,
-            0
+            0,
           );
           inventoryItem.status =
             inventoryItem.totalBoxes > inventoryItem.minStockLevel
@@ -445,23 +494,34 @@ router.put("/update-product", async (req, res) => {
 });
 
 // ================== PUT /:id ==================
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     const updatedData = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid sales return ID" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid sales return ID" });
     }
 
     const requiredFields = [
-      "recordingDate", "invoiceNumber", "invoiceDate", "mrName",
-      "customerName", "products"
+      "recordingDate",
+      "invoiceNumber",
+      "invoiceDate",
+      "mrName",
+      "customerName",
+      "products",
     ];
 
     for (const field of requiredFields) {
       if (updatedData[field] === undefined || updatedData[field] === null) {
-        return res.status(400).json({ success: false, message: `Missing required field: ${field}` });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: `Missing required field: ${field}`,
+          });
       }
     }
 
@@ -470,7 +530,7 @@ router.put("/:id", async (req, res) => {
     let customerIdRaw = updatedData.customerId;
     let customerCodeRaw = updatedData.customerCode;
 
-    if (customerIdRaw && typeof customerIdRaw === 'object') {
+    if (customerIdRaw && typeof customerIdRaw === "object") {
       if (customerIdRaw._id) {
         customerIdRaw = customerIdRaw._id;
       } else {
@@ -479,26 +539,45 @@ router.put("/:id", async (req, res) => {
     }
 
     const customerIdValue = customerIdRaw ? String(customerIdRaw).trim() : "";
-    const customerCodeValue = customerCodeRaw ? String(customerCodeRaw).trim() : "";
+    const customerCodeValue = customerCodeRaw
+      ? String(customerCodeRaw).trim()
+      : "";
 
     if (customerIdValue && mongoose.Types.ObjectId.isValid(customerIdValue)) {
       customerId = new mongoose.Types.ObjectId(customerIdValue);
     } else if (customerIdValue) {
       const customer = await Customer.findOne({ code: customerIdValue });
       if (!customer) {
-        return res.status(404).json({ success: false, message: `Customer not found with code "${customerIdValue}"` });
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message: `Customer not found with code "${customerIdValue}"`,
+          });
       }
       customerId = customer._id;
     } else if (customerCodeValue) {
       const customer = await Customer.findOne({ code: customerCodeValue });
       if (!customer) {
-        return res.status(404).json({ success: false, message: `Customer not found with code "${customerCodeValue}"` });
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message: `Customer not found with code "${customerCodeValue}"`,
+          });
       }
       customerId = customer._id;
     } else {
-      const customer = await Customer.findOne({ name: updatedData.customerName });
+      const customer = await Customer.findOne({
+        name: updatedData.customerName,
+      });
       if (!customer) {
-        return res.status(404).json({ success: false, message: `Customer not found with name "${updatedData.customerName}"` });
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message: `Customer not found with name "${updatedData.customerName}"`,
+          });
       }
       customerId = customer._id;
     }
@@ -511,12 +590,13 @@ router.put("/:id", async (req, res) => {
     const dueAmount = Math.max(0, totalAmount - amount);
     const creditDays = parseInt(updatedData.creditDays) || 0;
     const invoiceDate = new Date(updatedData.invoiceDate);
-    const dueDate = creditDays > 0
-      ? new Date(invoiceDate.setDate(invoiceDate.getDate() + creditDays))
-      : invoiceDate;
+    const dueDate =
+      creditDays > 0
+        ? new Date(invoiceDate.setDate(invoiceDate.getDate() + creditDays))
+        : invoiceDate;
 
     // Map products with proper numeric conversions
-    const mappedProducts = updatedData.products.map(p => ({
+    const mappedProducts = updatedData.products.map((p) => ({
       ...p,
       salesQty: Number(p.salesQty) || 0,
       bonusQty: Number(p.bonusQty) || 0,
@@ -547,7 +627,9 @@ router.put("/:id", async (req, res) => {
     });
 
     if (!updatedReturn) {
-      return res.status(404).json({ success: false, message: "Sales return record not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Sales return record not found" });
     }
 
     // Update inventory (adjust for quantity differences)
@@ -556,15 +638,23 @@ router.put("/:id", async (req, res) => {
     // first fetch the old record, then revert its inventory changes and apply new ones.
     // We'll skip that here for brevity, but you may want to implement similar to POST.
 
-    return res.status(200).json({ success: true, message: "Sales return updated successfully", data: updatedReturn });
+    return res
+      .status(200)
+      .json({
+        success: true,
+        message: "Sales return updated successfully",
+        data: updatedReturn,
+      });
   } catch (error) {
     console.error("Error updating sales return:", error);
-    return res.status(500).json({ success: false, message: "Server error", error: error.message });
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 
 // ================== DELETE / (multiple) ==================
-router.delete("/", async (req, res) => {
+router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
 
@@ -624,7 +714,7 @@ router.delete("/", async (req, res) => {
 
             inventoryItem.totalAmount = inventoryItem.batches.reduce(
               (sum, batch) => sum + batch.amount,
-              0
+              0,
             );
             inventoryItem.status =
               inventoryItem.totalBoxes > inventoryItem.minStockLevel
@@ -634,7 +724,7 @@ router.delete("/", async (req, res) => {
             await inventoryItem.save();
           }
         }
-      })
+      }),
     );
 
     await Promise.all(inventoryRevertPromises);
@@ -655,7 +745,7 @@ router.delete("/", async (req, res) => {
 });
 
 // ================== DELETE /:id ==================
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -696,7 +786,7 @@ router.delete("/:id", async (req, res) => {
 
             inventoryItem.totalAmount = inventoryItem.batches.reduce(
               (sum, batch) => sum + batch.amount,
-              0
+              0,
             );
             inventoryItem.status =
               inventoryItem.totalBoxes > inventoryItem.minStockLevel
@@ -706,7 +796,7 @@ router.delete("/:id", async (req, res) => {
             await inventoryItem.save();
           }
         }
-      }
+      },
     );
 
     await Promise.all(inventoryRevertPromises);
@@ -775,12 +865,19 @@ router.post("/download-excel", async (req, res) => {
     worksheet.mergeCells("A1:AC1");
     worksheet.getCell("A1").value = "HEALTHCARE SOUTH EAST ASIA";
     worksheet.getCell("A1").font = { bold: true, size: 16 };
-    worksheet.getCell("A1").alignment = { vertical: "middle", horizontal: "center" };
+    worksheet.getCell("A1").alignment = {
+      vertical: "middle",
+      horizontal: "center",
+    };
 
     worksheet.mergeCells("A2:AC2");
-    worksheet.getCell("A2").value = `Sales Return Summary (${formatDateToReadable(startDate)} - ${formatDateToReadable(endDate)})`;
+    worksheet.getCell("A2").value =
+      `Sales Return Summary (${formatDateToReadable(startDate)} - ${formatDateToReadable(endDate)})`;
     worksheet.getCell("A2").font = { bold: true, size: 14 };
-    worksheet.getCell("A2").alignment = { vertical: "middle", horizontal: "center" };
+    worksheet.getCell("A2").alignment = {
+      vertical: "middle",
+      horizontal: "center",
+    };
 
     // Column Definitions
     worksheet.columns = [
@@ -864,7 +961,8 @@ router.post("/download-excel", async (req, res) => {
           invoiceNumber: sale.invoiceNumber,
           invoiceDate: sale.invoiceDate,
           mrName: sale.mrName,
-          customerName: sale.customerId?.name || sale.customerName || "Unknown Customer",
+          customerName:
+            sale.customerId?.name || sale.customerName || "Unknown Customer",
           productName: prod.productName,
           salesQty: prod.salesQty,
           bonusQty: prod.bonusQty,
@@ -895,7 +993,10 @@ router.post("/download-excel", async (req, res) => {
 
     const fileName = `sales_return_summary_${formatDateToReadable(startDate)}_to_${formatDateToReadable(endDate)}.xlsx`;
 
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     await workbook.xlsx.write(res);

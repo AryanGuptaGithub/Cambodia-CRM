@@ -7,7 +7,6 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 export const useApi = () => {
   const fetchData = useCallback(async (endpoint, options = {}) => {
     try {
-      console.log('values of ${backendUrl}${endpoint}', `${backendUrl}${endpoint}`);
       const response = await fetch(`${backendUrl}${endpoint}`, {
         headers: { "Content-Type": "application/json" },
         ...options,

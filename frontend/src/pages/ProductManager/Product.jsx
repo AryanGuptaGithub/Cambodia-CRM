@@ -70,7 +70,7 @@ const Product = () => {
     currentPage: 1,
     totalPages: 1,
     totalItems: 0,
-    itemsPerPage: 9
+    itemsPerPage: 9,
   });
   const inputRef = useRef(null);
 
@@ -97,9 +97,9 @@ const Product = () => {
     if (!text) return "";
     return text
       .toString()
-      .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   };
 
   // Fetch dropdown data
@@ -107,26 +107,32 @@ const Product = () => {
     const fetchDropdownData = async () => {
       try {
         const [typesResult, suppliersResult, packingResult] = await Promise.all(
-          [fetchProductTypes(), fetchSuppliers(), fetchProductPackingType()]
+          [fetchProductTypes(), fetchSuppliers(), fetchProductPackingType()],
         );
 
         if (typesResult.success) {
           const transformedTypes = typesResult.data.map((item) => {
-            const value = typeof item === "string" ? item : item.name || item.value;
+            const value =
+              typeof item === "string" ? item : item.name || item.value;
             return {
               value: value.toLowerCase(),
-              label: formatDisplayText(value)
+              label: formatDisplayText(value),
             };
           });
           setProductTypes(transformedTypes);
         }
 
-        if (suppliersResult.success && suppliersResult.data && suppliersResult.data.length > 0) {
+        if (
+          suppliersResult.success &&
+          suppliersResult.data &&
+          suppliersResult.data.length > 0
+        ) {
           const transformedSuppliers = suppliersResult.data.map((item) => {
-            const value = typeof item === "string" ? item : item.name || item.value;
+            const value =
+              typeof item === "string" ? item : item.name || item.value;
             return {
               value: value.toLowerCase(),
-              label: formatDisplayText(value)
+              label: formatDisplayText(value),
             };
           });
           setSuppliers(transformedSuppliers);
@@ -140,10 +146,11 @@ const Product = () => {
 
         if (packingResult.success) {
           const transformedPacking = packingResult.data.map((item) => {
-            const value = typeof item === "string" ? item : item.name || item.value;
+            const value =
+              typeof item === "string" ? item : item.name || item.value;
             return {
               value: value.toLowerCase(),
-              label: formatDisplayText(value)
+              label: formatDisplayText(value),
             };
           });
           setPackingOptions(transformedPacking);
@@ -158,27 +165,31 @@ const Product = () => {
   }, []);
 
   // Fetch products with pagination
-  const fetchProducts = async (page = 1, search = searchTerm, type = selectedTab) => {
+  const fetchProducts = async (
+    page = 1,
+    search = searchTerm,
+    type = selectedTab,
+  ) => {
     try {
       setLoading(true);
       const response = await fetch(
         `${backendUrl}/api/products/paginated?` +
-        new URLSearchParams({
-          page: page.toString(),
-          limit: "9",
-          search: search,
-          type: type === "All" ? "" : type
-        })
+          new URLSearchParams({
+            page: page.toString(),
+            limit: "9",
+            search: search,
+            type: type === "All" ? "" : type,
+          }),
       );
-      
+
       if (!response.ok) throw new Error("Failed to fetch products");
       const data = await response.json();
-      
+
       if (data.success) {
         setProducts(data.data);
         setPaginationInfo(data.pagination);
         setSelected([]);
-        
+
         // Fetch unique types for tabs (only once or when needed)
         if (page === 1 && search === "" && type === "All") {
           const typesResponse = await fetch(`${backendUrl}/api/products/types`);
@@ -190,13 +201,17 @@ const Product = () => {
           } else {
             // Fallback: extract types from current products
             const uniqueTypes = Array.from(
-              new Set(data.data.map((item) => item.type?.toLowerCase()).filter(Boolean))
+              new Set(
+                data.data
+                  .map((item) => item.type?.toLowerCase())
+                  .filter(Boolean),
+              ),
             );
-            const formattedTypes = uniqueTypes.map(type => 
+            const formattedTypes = uniqueTypes.map((type) =>
               type
-                .split(' ')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                .join(' ')
+                .split(" ")
+                .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(" "),
             );
             setTypes(["All", ...formattedTypes.sort()]);
           }
@@ -235,7 +250,7 @@ const Product = () => {
     setSelected((prev) =>
       prev.some((c) => c.id === product._id)
         ? prev.filter((c) => c.id !== product._id)
-        : [...prev, { id: product._id }]
+        : [...prev, { id: product._id }],
     );
   }, []);
 
@@ -246,10 +261,10 @@ const Product = () => {
           ? currentProducts.map((product) => ({
               id: product._id,
             }))
-          : []
+          : [],
       );
     },
-    [currentProducts]
+    [currentProducts],
   );
 
   // Import click handler with supplier validation
@@ -257,7 +272,7 @@ const Product = () => {
     if (!suppliers || suppliers.length === 0) {
       showToast(
         "error",
-        "No suppliers found. Please add at least one supplier first."
+        "No suppliers found. Please add at least one supplier first.",
       );
       return;
     }
@@ -280,7 +295,7 @@ const Product = () => {
     try {
       const res = await axios.post(
         `${backendUrl}/api/product/import`,
-        parsedData
+        parsedData,
       );
 
       if (res.status === 200) {
@@ -314,7 +329,7 @@ const Product = () => {
             showToast(
               "error",
               `First 5 errors: ${res.data.errors.slice(0, 5).join("; ")}`,
-              5000
+              5000,
             );
           }
         }
@@ -385,11 +400,11 @@ const Product = () => {
 
       for (let i = 0; i < Math.min(rows.length, 15); i++) {
         const cleanedRow = rows[i].map((cell) =>
-          (cell || "").toString().trim().toLowerCase()
+          (cell || "").toString().trim().toLowerCase(),
         );
 
         const matchCount = requiredHeaders.filter((hdr) =>
-          cleanedRow.includes(hdr)
+          cleanedRow.includes(hdr),
         ).length;
 
         if (matchCount >= requiredHeaders.length * 0.8) {
@@ -483,7 +498,7 @@ const Product = () => {
       // Ensure values are in lowercase for dropdowns
       type: product.type?.toLowerCase() || "",
       supplierName: product.supplierName?.toLowerCase() || "",
-      packing: product.packing?.toLowerCase() || ""
+      packing: product.packing?.toLowerCase() || "",
     });
     setIsEditModalOpen(true);
   };
@@ -498,7 +513,6 @@ const Product = () => {
     setForm(initialFormState);
   };
 
-  // Delete selected
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> product(s)?`,
@@ -509,26 +523,34 @@ const Product = () => {
 
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token");
+
         const res = await axios.delete(`${backendUrl}/api/products`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
           data: { ids: selected.map((s) => s.id) },
         });
 
         if (res.status === 200) {
           showToast(
             "success",
-            res.data.message || "Products deleted successfully"
+            res.data.message || "Products deleted successfully",
           );
-          fetchProducts(currentPage); // Refresh current page
+          fetchProducts(currentPage);
         }
       } catch (err) {
-        showToast("error", "Failed to delete products.");
+        if (err.response) {
+          showToast("error", err.response.data.message);
+        } else {
+          showToast("error", "Failed to delete products.");
+        }
       }
     } else {
       setSelected([]);
     }
   };
 
-  // Delete one
   const deleteProduct = async (product) => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${product.productName}</b>?`,
@@ -539,19 +561,30 @@ const Product = () => {
 
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token");
+
         const res = await axios.delete(
-          `${backendUrl}/api/product/${product._id}`
+          `${backendUrl}/api/products/${product._id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
 
         if (res.status === 200) {
           showToast(
             "success",
-            res.data.message || "Product deleted successfully"
+            res.data.message || "Product deleted successfully",
           );
-          fetchProducts(currentPage); // Refresh current page
+          fetchProducts(currentPage);
         }
       } catch (error) {
-        showToast("error", error.message || "Failed to delete product");
+        if (error.response) {
+          showToast("error", error.response.data.message);
+        } else {
+          showToast("error", "Failed to delete product");
+        }
       }
     }
   };
@@ -560,7 +593,8 @@ const Product = () => {
     e.preventDefault();
 
     try {
-      // Send lowercase values to backend
+      const token = localStorage.getItem("token");
+
       const updateData = {
         ...form,
         productName: form.productName.toLowerCase(),
@@ -568,25 +602,35 @@ const Product = () => {
         packing: form.packing.toLowerCase(),
         supplierName: form.supplierName.toLowerCase(),
         drugLicense: form.drugLicense.toLowerCase(),
-        remarks: form.remarks.toLowerCase()
+        remarks: form.remarks.toLowerCase(),
       };
 
       const res = await axios.put(
         `${backendUrl}/api/products/${form._id}`,
-        updateData
+        updateData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
 
       if (res.status === 200) {
         showToast(
           "success",
-          `Product <b>${res.data.productName}</b> updated successfully`
+          `Product <b>${res.data.productName}</b> updated successfully`,
         );
         closeEditModal();
-        fetchProducts(currentPage); // Refresh current page
+        fetchProducts(currentPage);
       }
     } catch (err) {
       console.error("Update error:", err);
-      showToast("error", "Failed to update product.");
+
+      if (err.response) {
+        showToast("error", err.response.data.message);
+      } else {
+        showToast("error", "Failed to update product.");
+      }
     }
   };
 
@@ -659,7 +703,8 @@ const Product = () => {
     // Don't fetch here - let the debounced effect handle it
   };
 
-  if (loading && currentPage === 1 && !debouncedSearchTerm) return <LoadingOverlay text="Loading products..." />;
+  if (loading && currentPage === 1 && !debouncedSearchTerm)
+    return <LoadingOverlay text="Loading products..." />;
 
   return (
     <div className="p-6">
@@ -801,16 +846,15 @@ const Product = () => {
                           onChange={() => toggleSelect(product)}
                         />
                         <span>
-                          {product.productName} {/* Already formatted by backend */}
+                          {product.productName}{" "}
+                          {/* Already formatted by backend */}
                         </span>
                       </div>
                     </td>
                     <td className="p-3">{product.type}</td>
                     <td className="p-3">{product.packing}</td>
                     <td className="p-3">{product.qtyPerBoxStrip}</td>
-                    <td className="p-3">
-                      {product.supplierName || "--"}
-                    </td>
+                    <td className="p-3">{product.supplierName || "--"}</td>
                     <td className="p-3">{product.drugLicense || "--"}</td>
                     <td className="p-3">
                       {product.licenseValidityDate
@@ -951,7 +995,7 @@ const Product = () => {
                 )}
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* View Modal */}
@@ -1056,7 +1100,7 @@ const Product = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* Edit Modal */}
@@ -1232,7 +1276,7 @@ const Product = () => {
                 </form>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>

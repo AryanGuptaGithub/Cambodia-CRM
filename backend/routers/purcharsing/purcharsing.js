@@ -5,6 +5,8 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";
 import ExcelJS from "exceljs";
 import dayjs from "dayjs";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 
@@ -753,9 +755,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// Changed from: router.put("/purchase/:id", ...)
-// To: router.put("/:id", ...)
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const id = req.params.id;
 
@@ -879,9 +879,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// Changed from: router.delete("/purchase/:id", ...)
-// To: router.delete("/:id", ...)
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const invoice = await purchaseInventory.findById(req.params.id).lean();
     if (!invoice) return res.status(404).json({ error: "Not found" });
@@ -912,9 +910,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// Changed from: router.delete("/purchase", ...)
-// To: router.delete("/", ...)
-router.delete("/", async (req, res) => {
+router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
 
@@ -1698,7 +1694,7 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
 
 // Get reports in hand
 router.get("/reports-in-hand", async (req, res) => {
- try {
+  try {
     const { search } = req.query;
 
     // Build query based on search parameter
@@ -1712,11 +1708,19 @@ router.get("/reports-in-hand", async (req, res) => {
     const filteredReports = filterReportsWithBatches(allReports);
 
     // Calculate summary statistics
-    const inStockCount = filteredReports.filter(r => r.status === "In Stock").length;
-    const lowStockCount = filteredReports.filter(r => r.status === "Low Stock").length;
-    const criticalCount = filteredReports.filter(r => r.status === "Critical").length;
-    const outOfStockCount = filteredReports.filter(r => r.status === "Out of Stock").length;
-    
+    const inStockCount = filteredReports.filter(
+      (r) => r.status === "In Stock",
+    ).length;
+    const lowStockCount = filteredReports.filter(
+      (r) => r.status === "Low Stock",
+    ).length;
+    const criticalCount = filteredReports.filter(
+      (r) => r.status === "Critical",
+    ).length;
+    const outOfStockCount = filteredReports.filter(
+      (r) => r.status === "Out of Stock",
+    ).length;
+
     // ✅ Calculate total boxes across all products
     const totalBoxesSum = filteredReports.reduce((sum, report) => {
       return sum + (report.totalBoxes || 0);

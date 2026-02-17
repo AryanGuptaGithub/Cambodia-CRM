@@ -112,7 +112,7 @@ const PurchaseReturn = () => {
       "returnReason",
       "actions",
     ],
-    []
+    [],
   );
 
   // Define all available table columns
@@ -164,7 +164,7 @@ const PurchaseReturn = () => {
         dbName: "actions",
       },
     ],
-    []
+    [],
   );
 
   // Toggle product details in view modal
@@ -202,7 +202,7 @@ const PurchaseReturn = () => {
       const response = await axios.get(`${backendUrl}/api/purchase`);
       const purchases = response.data.reports || [];
       const originalPurchase = purchases.find(
-        (purchase) => purchase.invoiceNumber === invoiceNumber
+        (purchase) => purchase.invoiceNumber === invoiceNumber,
       );
 
       return originalPurchase;
@@ -222,7 +222,7 @@ const PurchaseReturn = () => {
       }
 
       const originalSupplier = supplierOptions.find(
-        (supplier) => supplier.label === originalPurchase.supplierName
+        (supplier) => supplier.label === originalPurchase.supplierName,
       );
 
       if (originalSupplier) {
@@ -247,12 +247,12 @@ const PurchaseReturn = () => {
       }
 
       const filteredProducts = productOptions.filter((product) =>
-        originalProductNames.includes(product.label)
+        originalProductNames.includes(product.label),
       );
 
       setFilteredProductOptions(filteredProducts);
     },
-    [productOptions, supplierOptions]
+    [productOptions, supplierOptions],
   );
 
   // Fetch products, suppliers, and purchases for dropdowns
@@ -276,43 +276,46 @@ const PurchaseReturn = () => {
     }
   };
 
-const fetchSuppliers = async () => {
-  setLoadingSuppliers(true);
-  try {
-    // Updated to use the correct endpoint that returns array or handle paginated response
-    const response = await axios.get(`${backendUrl}/api/suppliers/all`);     
-    let suppliersData = [];
-    
-    if (Array.isArray(response.data)) {
-      // If backend returns direct array
-      suppliersData = response.data;
-    } else if (response.data.suppliers && Array.isArray(response.data.suppliers)) {
-      // If backend returns paginated response with suppliers array
-      suppliersData = response.data.suppliers;
-    } else if (Array.isArray(response.data.data)) {
-      // If backend returns { data: [] } format
-      suppliersData = response.data.data;
-    } else {
-      console.warn('Unexpected response format:', response.data);
-      suppliersData = [];
+  const fetchSuppliers = async () => {
+    setLoadingSuppliers(true);
+    try {
+      // Updated to use the correct endpoint that returns array or handle paginated response
+      const response = await axios.get(`${backendUrl}/api/suppliers/all`);
+      let suppliersData = [];
+
+      if (Array.isArray(response.data)) {
+        // If backend returns direct array
+        suppliersData = response.data;
+      } else if (
+        response.data.suppliers &&
+        Array.isArray(response.data.suppliers)
+      ) {
+        // If backend returns paginated response with suppliers array
+        suppliersData = response.data.suppliers;
+      } else if (Array.isArray(response.data.data)) {
+        // If backend returns { data: [] } format
+        suppliersData = response.data.data;
+      } else {
+        console.warn("Unexpected response format:", response.data);
+        suppliersData = [];
+      }
+
+      const transformedSuppliers = suppliersData.map((supplier) => ({
+        value: supplier._id,
+        label: supplier.supplierName || supplier.name || "Unnamed Supplier",
+      }));
+
+      setSupplierOptions(transformedSuppliers);
+      setFilteredSupplierOptions(transformedSuppliers);
+    } catch (err) {
+      console.error("Error fetching suppliers:", err);
+      showToast("error", "Failed to fetch suppliers");
+      setSupplierOptions([]);
+      setFilteredSupplierOptions([]);
+    } finally {
+      setLoadingSuppliers(false);
     }
-    
-    const transformedSuppliers = suppliersData.map((supplier) => ({
-      value: supplier._id,
-      label: supplier.supplierName || supplier.name || 'Unnamed Supplier',
-    }));
-    
-    setSupplierOptions(transformedSuppliers);
-    setFilteredSupplierOptions(transformedSuppliers);
-  } catch (err) {
-    console.error("Error fetching suppliers:", err);
-    showToast("error", "Failed to fetch suppliers");
-    setSupplierOptions([]);
-    setFilteredSupplierOptions([]);
-  } finally {
-    setLoadingSuppliers(false);
-  }
-};
+  };
 
   const fetchPurchases = async () => {
     setLoadingPurchases(true);
@@ -367,7 +370,7 @@ const fetchSuppliers = async () => {
   const handleSupplierChange = useCallback(
     (supplierId) => {
       const selectedSupplier = filteredSupplierOptions.find(
-        (supplier) => supplier.value === supplierId
+        (supplier) => supplier.value === supplierId,
       );
       if (selectedSupplier) {
         setForm((prev) => ({
@@ -377,14 +380,14 @@ const fetchSuppliers = async () => {
         }));
       }
     },
-    [filteredSupplierOptions]
+    [filteredSupplierOptions],
   );
 
   // Handle product selection for a specific product in the array
   const handleProductChange = useCallback(
     (productIndex, productId) => {
       const selectedProduct = filteredProductOptions.find(
-        (product) => product.value === productId
+        (product) => product.value === productId,
       );
       if (selectedProduct) {
         setForm((prev) => {
@@ -401,7 +404,7 @@ const fetchSuppliers = async () => {
         });
       }
     },
-    [filteredProductOptions]
+    [filteredProductOptions],
   );
 
   // Remove product from the form
@@ -482,7 +485,7 @@ const fetchSuppliers = async () => {
         const returnQuantity = parseFloat(currentProduct.returnQuantity) || 0;
         currentProduct.usedQty = Math.max(
           0,
-          purchaseQty - returnQuantity
+          purchaseQty - returnQuantity,
         ).toFixed(2);
       }
 
@@ -524,21 +527,28 @@ const fetchSuppliers = async () => {
 
   const handleUpdatePurchaseReturn = async (e, formData) => {
     e.preventDefault();
+
     try {
+      const token = localStorage.getItem("token"); // ✅ Get token
+
       const response = await fetch(
         `${backendUrl}/api/purchase-return/${formData._id}`,
         {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`, // ✅ Added Authorization header
           },
           body: JSON.stringify(formData),
-        }
+        },
       );
 
-      if (!response.ok) throw new Error("Failed to update purchase return");
-
       const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to update purchase return");
+      }
+
       showToast("success", "Purchase return updated successfully");
       closeAllModals();
       fetchPurchaseReturn();
@@ -563,7 +573,7 @@ const fetchSuppliers = async () => {
       r.returnReason?.toLowerCase().includes(lower) ||
       r.supplierName?.toLowerCase().includes(lower) ||
       r.products?.some((product) =>
-        product.productName?.toLowerCase().includes(lower)
+        product.productName?.toLowerCase().includes(lower),
       )
     );
   });
@@ -575,7 +585,7 @@ const fetchSuppliers = async () => {
     return purchaseReturn.products
       .reduce(
         (total, product) => total + (parseFloat(product.returnAmount) || 0),
-        0
+        0,
       )
       .toFixed(2);
   };
@@ -613,20 +623,31 @@ const fetchSuppliers = async () => {
 
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token"); // ✅ Get token
+
         const res = await axios.delete(`${backendUrl}/api/purchase-return`, {
+          headers: {
+            Authorization: `Bearer ${token}`, // ✅ Added header
+          },
           data: { ids: selected },
         });
 
         if (res.status === 200) {
           showToast(
             "success",
-            "Selected purchase returns deleted successfully"
+            "Selected purchase returns deleted successfully",
           );
           fetchPurchaseReturn();
           setSelected([]);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected purchase returns.");
+        console.error("Delete error:", error);
+
+        showToast(
+          "error",
+          error.response?.data?.message ||
+            "Failed to delete selected purchase returns.",
+        );
       }
     } else {
       setSelected([]);
@@ -644,18 +665,31 @@ const fetchSuppliers = async () => {
 
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token"); // ✅ Get token
+
         const res = await axios.delete(
-          `${backendUrl}/api/purchase-return/${id}`
+          `${backendUrl}/api/purchase-return/${id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`, // ✅ Added header
+            },
+          },
         );
+
         if (res.status === 200) {
           showToast(
             "success",
-            `Purchase return <b>${invoiceNumber}</b> deleted successfully`
+            `Purchase return <b>${invoiceNumber}</b> deleted successfully`,
           );
           fetchPurchaseReturn();
         }
       } catch (error) {
-        showToast("error", "Failed to delete purchase return.");
+        console.error("Delete error:", error);
+
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to delete purchase return.",
+        );
       }
     }
   };
@@ -671,7 +705,7 @@ const fetchSuppliers = async () => {
 
     if (purchaseReturn.invoiceNumber) {
       const originalPurchase = await fetchOriginalPurchaseData(
-        purchaseReturn.invoiceNumber
+        purchaseReturn.invoiceNumber,
       );
       setOriginalPurchaseData(originalPurchase);
       filterOptionsByOriginalPurchase(originalPurchase);
@@ -692,7 +726,7 @@ const fetchSuppliers = async () => {
   // Handle return reason click
   const handleReturnReasonClick = (purchaseReturn) => {
     setSelectedReturnReason(
-      purchaseReturn.returnReason || "No reason provided"
+      purchaseReturn.returnReason || "No reason provided",
     );
     openModal("returnReason");
   };
@@ -735,7 +769,7 @@ const fetchSuppliers = async () => {
           const returnQuantity = parseFloat(updatedProduct.returnQuantity) || 0;
           updatedProduct.usedQty = Math.max(
             0,
-            purchaseQty - returnQuantity
+            purchaseQty - returnQuantity,
           ).toFixed(2);
         }
 
@@ -852,7 +886,7 @@ const fetchSuppliers = async () => {
         acc.totalReturnQuantity += parseFloat(product.returnQuantity || 0);
         return acc;
       },
-      { totalReturnAmount: 0, totalReturnQuantity: 0 }
+      { totalReturnAmount: 0, totalReturnQuantity: 0 },
     );
 
     return totals;
@@ -1010,7 +1044,7 @@ const fetchSuppliers = async () => {
                                   onClick={() =>
                                     handleDeleteSingle(
                                       ret._id,
-                                      ret.invoiceNumber
+                                      ret.invoiceNumber,
                                     )
                                   }
                                   title="Delete"
@@ -1040,7 +1074,7 @@ const fetchSuppliers = async () => {
                   disabled={currentPage === 1}
                   className="px-3 py-1.5 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
                 >
-                   ← Prev
+                  ← Prev
                 </button>
                 {visiblePages.map((page, idx) =>
                   page === "..." ? (
@@ -1062,7 +1096,7 @@ const fetchSuppliers = async () => {
                     >
                       {page}
                     </button>
-                  )
+                  ),
                 )}
                 <button
                   onClick={() => {
@@ -1235,10 +1269,10 @@ const fetchSuppliers = async () => {
                                     ].includes(key)
                                       ? formatNumber(product[key])
                                       : key === "expiredDate"
-                                      ? product[key]
-                                        ? formatDateToReadable(product[key])
-                                        : "--"
-                                      : product[key] ?? "--"}
+                                        ? product[key]
+                                          ? formatDateToReadable(product[key])
+                                          : "--"
+                                        : (product[key] ?? "--")}
                                   </p>
                                 </div>
                               ))}
@@ -1273,7 +1307,7 @@ const fetchSuppliers = async () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* Edit Modal */}
@@ -1518,7 +1552,7 @@ const fetchSuppliers = async () => {
                 </form>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* Product Edit Modal */}
@@ -1560,7 +1594,7 @@ const fetchSuppliers = async () => {
                       onChange={(selectedValue) => {
                         // Find the selected product from the current invoice's products
                         const selectedProduct = form.products?.find(
-                          (product) => product.productName === selectedValue
+                          (product) => product.productName === selectedValue,
                         );
                         if (selectedProduct) {
                           setCurrentProduct((prev) => ({
@@ -1721,7 +1755,7 @@ const fetchSuppliers = async () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* Return Reason Modal */}
@@ -1765,7 +1799,7 @@ const fetchSuppliers = async () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {activeModal === "products" &&
@@ -1845,7 +1879,7 @@ const fetchSuppliers = async () => {
                                     : "--"}
                                 </td>
                               </tr>
-                            )
+                            ),
                           )}
                         </tbody>
                       </table>
@@ -1901,7 +1935,7 @@ const fetchSuppliers = async () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>

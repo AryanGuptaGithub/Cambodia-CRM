@@ -5,7 +5,7 @@ import { showToast } from "../utils/toast";
 import { getVisiblePages } from "../utils/useVisiblePages";
 import CustomDropdown from "./Utility/customDropdown";
 import { fetchProducts } from "./ProductManager/common/fetchDropdown.jsx";
-import { confirmDialog } from "../utils/confirmationDialog.js"; // Add this import
+import { confirmDialog } from "../utils/confirmationDialog.js";
 
 // Configuration constants
 const CONFIG = {
@@ -29,11 +29,6 @@ const CONFIG = {
     NO_PRODUCTS: "No products available for stock adjustment",
   },
 };
-
-// Helper function to validate MongoDB ObjectId
-// const isValidObjectId = (id) => {
-//   return /^[0-9a-fA-F]{24}$/.test(id);
-// };
 
 const StockAdjustment = () => {
   const [adjustments, setAdjustments] = useState([]);
@@ -78,7 +73,10 @@ const StockAdjustment = () => {
   const fetchAdjustments = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${backendUrl}/api/stock-adjustment`);
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${backendUrl}/api/stock-adjustment`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (response.data && response.data.success) {
         setAdjustments(response.data.data);
       } else {
@@ -104,7 +102,10 @@ const StockAdjustment = () => {
 
   const fetchStockTransfers = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/stock-transfer`);
+      const token = localStorage.getItem("token");
+      const response = await axios.get(`${backendUrl}/api/stock-transfer`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (response.data && response.data.success) {
         setStockTransfers(response.data.data);
       }
@@ -154,7 +155,7 @@ const StockAdjustment = () => {
     const productAdjustments = adjustments.filter(
       (adj) =>
         (adj.productId?._id === productId || adj.productId === productId) &&
-        adj._id !== editingAdjustment?._id
+        adj._id !== editingAdjustment?._id,
     );
 
     const adjustmentSum = productAdjustments.reduce((sum, adj) => {
@@ -242,7 +243,7 @@ const StockAdjustment = () => {
   // Selection handlers
   const handleSelect = (id) => {
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
     );
   };
 
@@ -253,18 +254,6 @@ const StockAdjustment = () => {
       return;
     }
 
-    // Validate IDs before sending (optional but good)
-    // const invalidIds = selectedIds.filter((id) => !isValidObjectId(id));
-    // if (invalidIds.length > 0) {
-    //   console.error("❌ Invalid IDs found:", invalidIds);
-    //   showToast(
-    //     "error",
-    //     `Invalid adjustment IDs detected. Please refresh the page and try again.`
-    //   );
-    //   return;
-    // }
-
-    // Use confirmDialog instead of window.confirm
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selectedIds.length}</b> stock adjustment(s)?`,
       icon: "warning",
@@ -276,21 +265,23 @@ const StockAdjustment = () => {
       try {
         setLoading(true);
 
+        // ✅ Get token
+        const token = localStorage.getItem("token");
+
         const response = await axios.delete(
           `${backendUrl}/api/stock-adjustment/bulk`,
           {
-            data: { ids: selectedIds },
             headers: {
               "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
             },
-          }
+            data: { ids: selectedIds },
+          },
         );
 
         if (response.data.success) {
           showToast("success", response.data.message);
-          // Refresh the adjustments list
           fetchAdjustments();
-          // Clear selection
           setSelectedIds([]);
         } else {
           showToast("error", response.data.message);
@@ -298,7 +289,6 @@ const StockAdjustment = () => {
       } catch (error) {
         console.error("❌ Bulk delete error:", error);
 
-        // Check if error has response data
         if (error.response) {
           const errorMsg =
             error.response.data.message || "Failed to delete adjustments.";
@@ -314,7 +304,6 @@ const StockAdjustment = () => {
     }
   };
 
-  // Updated handleDelete with confirmation dialog
   const handleDelete = async (id, productName = "") => {
     const confirmDelete = await confirmDialog({
       title: "Delete Stock Adjustment",
@@ -328,14 +317,33 @@ const StockAdjustment = () => {
 
     if (confirmDelete.isConfirmed) {
       try {
-        await axios.delete(`${backendUrl}/api/stock-adjustment/${id}`);
+        // ✅ Get token
+        const token = localStorage.getItem("token");
+
+        await axios.delete(`${backendUrl}/api/stock-adjustment/${id}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
         // Update local state immediately
         setAdjustments((prev) => prev.filter((adj) => adj._id !== id));
-        setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
+        setSelectedIds((prev) =>
+          prev.filter((selectedId) => selectedId !== id),
+        );
+
         showToast("success", CONFIG.MESSAGES.DELETE_SUCCESS);
       } catch (error) {
-        showToast("error", CONFIG.MESSAGES.DELETE_ERROR);
+        console.error("Delete error:", error);
+        if (error.response) {
+          const errorMsg =
+            error.response.data.message || "Failed to delete adjustment.";
+          showToast("error", errorMsg);
+        } else if (error.request) {
+          showToast("error", "Network error. Please check your connection.");
+        } else {
+          showToast("error", "An error occurred while deleting adjustment.");
+        }
       }
     }
   };
@@ -429,7 +437,6 @@ const StockAdjustment = () => {
     }
   };
 
-  // Handle numeric input
   const handleNumericInput = (field, value) => {
     const numericValue = value.replace(/[^0-9]/g, "");
     if (numericValue === "") {
@@ -439,7 +446,6 @@ const StockAdjustment = () => {
     }
   };
 
-  // Handle blur event for numeric inputs
   const handleNumericBlur = (field, value) => {
     if (!value || value === "" || isNaN(value)) {
       handleFormChange(field, 0);
@@ -496,33 +502,44 @@ const StockAdjustment = () => {
         remarks: formData.remarks,
       };
 
+      // ✅ Get token
+      const token = localStorage.getItem("token");
+
       if (editingAdjustment) {
-        // Update existing adjustment
+        // ✅ Update existing adjustment
         const response = await axios.put(
           `${backendUrl}/api/stock-adjustment/${editingAdjustment._id}`,
-          adjustmentData
+          adjustmentData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
 
         if (response.data.success) {
-          // Update local state
           setAdjustments((prev) =>
             prev.map((adj) =>
               adj._id === editingAdjustment._id
                 ? { ...response.data.data }
-                : adj
-            )
+                : adj,
+            ),
           );
           showToast("success", CONFIG.MESSAGES.UPDATE_SUCCESS);
         }
       } else {
-        // Create new adjustment
+        // ✅ Create new adjustment
         const response = await axios.post(
           `${backendUrl}/api/stock-adjustment`,
-          adjustmentData
+          adjustmentData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
 
         if (response.data.success) {
-          // Add to local state
           setAdjustments((prev) => [response.data.data, ...prev]);
           showToast("success", CONFIG.MESSAGES.CREATE_SUCCESS);
         }
@@ -531,12 +548,15 @@ const StockAdjustment = () => {
       handleModalCancel();
     } catch (error) {
       console.error("Error saving adjustment:", error);
-      showToast(
-        "error",
-        editingAdjustment
-          ? CONFIG.MESSAGES.UPDATE_ERROR
-          : CONFIG.MESSAGES.CREATE_ERROR
-      );
+      if (error.response) {
+        const errorMsg =
+          error.response.data.message || "Failed to save adjustment.";
+        showToast("error", errorMsg);
+      } else if (error.request) {
+        showToast("error", "Network error. Please check your connection.");
+      } else {
+        showToast("error", "An error occurred while saving adjustment.");
+      }
     }
   };
 
@@ -644,7 +664,7 @@ const StockAdjustment = () => {
                         checked={
                           paginatedAdjustments.length > 0 &&
                           paginatedAdjustments.every((adj) =>
-                            selectedIds.includes(adj._id)
+                            selectedIds.includes(adj._id),
                           )
                         }
                         ref={(input) => {
@@ -679,7 +699,7 @@ const StockAdjustment = () => {
               ) : (
                 paginatedAdjustments.map((adj, index) => {
                   const product = products.find(
-                    (p) => p._id === (adj.productId?._id || adj.productId)
+                    (p) => p._id === (adj.productId?._id || adj.productId),
                   );
                   const qtyPerCarton = product?.qtyPerCarton || 1;
                   const totalPieces = (adj.boxQuantity || 0) * qtyPerCarton;
@@ -798,13 +818,13 @@ const StockAdjustment = () => {
                       currentPage === page
                         ? "bg-indigo-600 text-white"
                         : isProductsEmpty
-                        ? "bg-gray-200 opacity-50 cursor-not-allowed"
-                        : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+                          ? "bg-gray-200 opacity-50 cursor-not-allowed"
+                          : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
                     }`}
                   >
                     {page}
                   </button>
-                )
+                ),
               )}
               <button
                 onClick={() =>

@@ -26,8 +26,6 @@ export const fetchCustomerList = async () => {
     // Handle different response formats
     const customers = response.data.customers || response.data.data || [];
     
-    console.log('✅ Customers loaded:', customers.length);
-    
     return {
       success: true,
       data: customers,
