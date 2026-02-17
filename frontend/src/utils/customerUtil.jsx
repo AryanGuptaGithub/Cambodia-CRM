@@ -73,9 +73,6 @@ export const fetchZones = async () => {
 export const fetchBusinessTypes = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/business-types`);
-    
-    console.log('Business types response:', response.data);
-    
     // Handle different response formats
     if (response.data && response.data.success) {
       return { 

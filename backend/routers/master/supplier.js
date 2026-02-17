@@ -1,6 +1,8 @@
 import express from "express";
 import mongoose from "mongoose";
 import Supplier from "../../models/master/supplier.js";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 
@@ -253,7 +255,7 @@ router.post("/", async (req, res) => {
 });
 
 /* ----------------------------- UPDATE Supplier ----------------------------- */
-router.put("/:id", async (req, res) => {
+router.put("/:id",protect, allowAdminOnly, async (req, res) => {
   try {
     const { name, supplierName, address, contact, email, gstNumber, panNumber } = req.body;
 
@@ -292,7 +294,7 @@ router.put("/:id", async (req, res) => {
 });
 
 /* ----------------------------- DELETE Supplier ----------------------------- */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id",protect, allowAdminOnly, async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
     
@@ -315,7 +317,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 /* ----------------------------- DELETE Multiple Suppliers ----------------------------- */
-router.delete("/", async (req, res) => {
+router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
 

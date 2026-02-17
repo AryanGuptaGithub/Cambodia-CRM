@@ -14,7 +14,7 @@ const router = express.Router();
 // ------------------------------------------------------
 router.post("/login", async (req, res) => {
   try {
-    const { username, password } = req.body;
+    let { username, password } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({
@@ -23,10 +23,13 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    username = username.trim().toLowerCase();
+
+    // ✅ FIXED: search by email OR name
     const user = await User.findOne({
       $or: [
-        { email: username.toLowerCase() },
-        { username: username.toLowerCase() },
+        { email: username },
+        { name: username }
       ],
     });
 
@@ -37,11 +40,11 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // ✅ NEW: Check if user is admin
-    if (user.role !== "admin") {
+    // ✅ Admin only access
+    if (!["admin", "super admin"].includes(user.role.toLowerCase())) {
       return res.status(403).json({
         success: false,
-        message: "Access denied. Admin users only.",
+        message: "Access denied. Admin or SuperAdmin accounts only.",
       });
     }
 
@@ -61,7 +64,7 @@ router.post("/login", async (req, res) => {
       {
         id: user._id,
         role: user.role,
-        username: user.username,
+        email: user.email,
       },
       process.env.JWT_SECRET,
       { expiresIn: "24h" }
@@ -71,16 +74,17 @@ router.post("/login", async (req, res) => {
       success: true,
       token,
       role: user.role,
-      username: user.username, // Changed from 'name' to 'username' to match frontend
-      name: user.name,
+      email: user.email,  // ✅ RETURN EMAIL
+      name: user.email,   // ✅ so frontend shows full email
       lastLogin: user.lastLogin,
-      isAdmin: user.role === "admin",
+      isAdmin: true,
     });
+
   } catch (error) {
     console.error("❌ Login error:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Server error",
+      message: "Server error",
     });
   }
 });

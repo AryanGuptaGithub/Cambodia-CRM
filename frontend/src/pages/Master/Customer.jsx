@@ -66,16 +66,16 @@ const useCustomerForm = (initialCustomerCode = "") => {
     _id: null,
   });
   const [errors, setErrors] = useState({});
-  
+
   const toTitleCase = (str) => {
     if (!str) return "";
     return str
       .toLowerCase()
       .split(" ")
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
   };
-  
+
   const toLowerCase = (str) => {
     if (!str) return "";
     return str.toLowerCase();
@@ -90,9 +90,9 @@ const useCustomerForm = (initialCustomerCode = "") => {
       setForm((prev) => ({ ...prev, [name]: value }));
       if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
     },
-    [errors]
+    [errors],
   );
-  
+
   const handleNumericInput = useCallback(
     (e, field) => {
       const value = e.target.value;
@@ -100,9 +100,9 @@ const useCustomerForm = (initialCustomerCode = "") => {
         handleChange(field, value);
       }
     },
-    [handleChange]
+    [handleChange],
   );
-  
+
   const validateForm = useCallback(() => {
     const newErrors = {};
     if (!form.name?.trim()) newErrors.name = "Customer name is required";
@@ -116,7 +116,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }, [form]);
-  
+
   const resetForm = useCallback(() => {
     setForm({
       customerCode: initialCustomerCode || "",
@@ -134,7 +134,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     });
     setErrors({});
   }, [initialCustomerCode]);
-  
+
   return {
     form,
     errors,
@@ -174,7 +174,7 @@ const Customer = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [errors, setErrors] = useState({});
-  
+
   const {
     form,
     handleChange,
@@ -201,8 +201,18 @@ const Customer = () => {
         const day = parseInt(parts[2], 10);
 
         const monthNames = [
-          "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
         ];
         return `${day} ${monthNames[month]} ${year}`;
       }
@@ -237,7 +247,7 @@ const Customer = () => {
     if (searchTimeout) {
       clearTimeout(searchTimeout);
     }
-    
+
     const timeout = setTimeout(() => {
       if (searchTerm !== "") {
         setCurrentPage(1);
@@ -283,10 +293,10 @@ const Customer = () => {
         params: {
           page: currentPage,
           limit: customersPerPage,
-          search: searchTerm
-        }
+          search: searchTerm,
+        },
       });
-      
+
       if (response.data.ok) {
         setCustomers(response.data.customers || []);
         setTotalCustomers(response.data.total || 0);
@@ -312,19 +322,17 @@ const Customer = () => {
     setSelected((prev) =>
       prev.some((c) => c.id === customer._id)
         ? prev.filter((c) => c.id !== customer._id)
-        : [...prev, { id: customer._id, name: customer.name }]
+        : [...prev, { id: customer._id, name: customer.name }],
     );
   }, []);
 
   const toggleSelectAll = useCallback(
     (checked) => {
       setSelected(
-        checked
-          ? customers.map((c) => ({ id: c._id, name: c.name }))
-          : []
+        checked ? customers.map((c) => ({ id: c._id, name: c.name })) : [],
       );
     },
-    [customers]
+    [customers],
   );
 
   /* ──────── Delete ──────── */
@@ -335,18 +343,31 @@ const Customer = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
+
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token");
+
         const res = await axios.delete(`${backendUrl}/api/customers`, {
-          data: { ids: selected.map((s) => s.id) },
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          data: {
+            ids: selected.map((s) => s.id), // make sure this matches backend
+          },
         });
+
         if (res.status === 200) {
           showToast("success", "Selected customers deleted successfully");
           fetchCustomers();
           setSelected([]);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected customers.");
+        if (error.response) {
+          showToast("error", error.response.data.message);
+        } else {
+          showToast("error", "Failed to delete selected customers.");
+        }
       }
     }
   };
@@ -358,17 +379,30 @@ const Customer = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
+
     if (confirm.isConfirmed) {
       try {
+        const token = localStorage.getItem("token");
+
         const res = await axios.delete(
-          `${backendUrl}/api/customers/${customer._id}`
+          `${backendUrl}/api/customers/${customer._id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
         );
+
         if (res.status === 200) {
           showToast("success", `${customer.name} deleted successfully`);
           fetchCustomers();
         }
       } catch (error) {
-        showToast("error", "Failed to delete customer.");
+        if (error.response) {
+          showToast("error", error.response.data.message);
+        } else {
+          showToast("error", "Failed to delete customer.");
+        }
       }
     }
   };
@@ -379,7 +413,7 @@ const Customer = () => {
       setForm(customer);
       setIsViewModalOpen(true);
     },
-    [setForm]
+    [setForm],
   );
 
   const handleEdit = useCallback(
@@ -389,7 +423,7 @@ const Customer = () => {
         const found = mrList.find(
           (mr) =>
             (mr.medicalRepName || mr.staffName || "").toLowerCase() ===
-            customer.medicalRepName.toLowerCase()
+            customer.medicalRepName.toLowerCase(),
         );
         actualMrId = found?._id || found?.id || "";
       }
@@ -409,7 +443,7 @@ const Customer = () => {
       });
       setIsEditModalOpen(true);
     },
-    [mrList, setForm]
+    [mrList, setForm],
   );
 
   const handleStatusToggle = async (id) => {
@@ -424,9 +458,8 @@ const Customer = () => {
       const newStatus = !customerToToggle.enabled;
       const customerName = customerToToggle.name;
 
-      // Optimistic UI update
       setCustomers(
-        customers.map((c) => (c._id === id ? { ...c, enabled: newStatus } : c))
+        customers.map((c) => (c._id === id ? { ...c, enabled: newStatus } : c)),
       );
 
       // API call
@@ -438,7 +471,7 @@ const Customer = () => {
         "success",
         `Customer <b>${customerName}</b> ${
           newStatus ? "enabled" : "disabled"
-        } successfully`
+        } successfully`,
       );
     } catch (err) {
       fetchCustomers();
@@ -459,7 +492,7 @@ const Customer = () => {
       if (errors.medicalRepId)
         setErrors((prev) => ({ ...prev, medicalRepId: "" }));
     },
-    [mrList, errors]
+    [mrList, errors],
   );
 
   const handleBusinessTypeChange = useCallback(
@@ -469,7 +502,7 @@ const Customer = () => {
       if (errors.typeOfBusiness)
         setErrors((prev) => ({ ...prev, typeOfBusiness: "" }));
     },
-    [errors]
+    [errors],
   );
 
   const handleZoneChange = useCallback(
@@ -478,7 +511,7 @@ const Customer = () => {
       setForm((prev) => ({ ...prev, zone: value }));
       if (errors.zone) setErrors((prev) => ({ ...prev, zone: "" }));
     },
-    [errors]
+    [errors],
   );
 
   const handleProvinceChange = useCallback(
@@ -487,22 +520,24 @@ const Customer = () => {
       setForm((prev) => ({ ...prev, province: value }));
       if (errors.province) setErrors((prev) => ({ ...prev, province: "" }));
     },
-    [errors]
+    [errors],
   );
 
   /* ──────── Update ──────── */
   const handleCustomerUpdate = async (e) => {
     e.preventDefault();
+
     if (!validateForm()) {
       showToast("error", "Please fill all required fields");
       return;
     }
+
     try {
       const payload = {
         date: form.date,
         medicalRepName: toLowerCase(form.medicalRepName),
         medicalRepId: form.medicalRepId,
-        name: form.name, // Already capitalized by handleChange
+        name: form.name,
         typeOfBusiness: toLowerCase(form.typeOfBusiness),
         customerNumber: form.customerNumber,
         address: toLowerCase(form.address),
@@ -510,11 +545,19 @@ const Customer = () => {
         province: toLowerCase(form.province),
         remark: toLowerCase(form.remark),
       };
-      
+
+      const token = localStorage.getItem("token");
+
       const res = await axios.put(
         `${backendUrl}/api/customers/${form._id}`,
-        payload
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
       );
+
       if (res.status === 200) {
         showToast("success", `${form.name} updated successfully`);
         setIsEditModalOpen(false);
@@ -522,7 +565,11 @@ const Customer = () => {
         fetchCustomers();
       }
     } catch (err) {
-      showToast("error", "Failed to update customer.");
+      if (err.response) {
+        showToast("error", err.response.data.message);
+      } else {
+        showToast("error", "Failed to update customer.");
+      }
     }
   };
 
@@ -531,7 +578,7 @@ const Customer = () => {
     if (!mrList.length) {
       showToast(
         "error",
-        "No Medical Representatives found. Please add at least one MR first."
+        "No Medical Representatives found. Please add at least one MR first.",
       );
       return;
     }
@@ -569,7 +616,7 @@ const Customer = () => {
       const adjustedDays = days >= 60 ? days + 1 : days;
       const excelZero = new Date(1899, 11, 31);
       const reconstructedDate = new Date(
-        excelZero.getTime() + (adjustedDays - 1) * 86400000
+        excelZero.getTime() + (adjustedDays - 1) * 86400000,
       );
 
       const year = reconstructedDate.getFullYear();
@@ -602,7 +649,7 @@ const Customer = () => {
         if (year < 100) year += 2000;
 
         return `${year}-${String(month).padStart(2, "0")}-${String(
-          day
+          day,
         ).padStart(2, "0")}`;
       }
 
@@ -627,8 +674,18 @@ const Customer = () => {
               if (year < 100) year += 2000;
 
               const monthMap = {
-                jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
-                jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+                jan: 1,
+                feb: 2,
+                mar: 3,
+                apr: 4,
+                may: 5,
+                jun: 6,
+                jul: 7,
+                aug: 8,
+                sep: 9,
+                oct: 10,
+                nov: 11,
+                dec: 12,
               };
 
               month = monthMap[monthStr];
@@ -645,7 +702,7 @@ const Customer = () => {
             }
 
             return `${year}-${String(month).padStart(2, "0")}-${String(
-              day
+              day,
             ).padStart(2, "0")}`;
           } catch (e) {
             console.warn("Failed to parse date string:", trimmed, e);
@@ -733,7 +790,7 @@ const Customer = () => {
             return obj;
           })
           .filter((o) =>
-            Object.values(o).some((v) => v.toString().trim() !== "")
+            Object.values(o).some((v) => v.toString().trim() !== ""),
           );
 
         const final = json.map((item) => {
@@ -816,7 +873,8 @@ const Customer = () => {
         });
 
         const validData = final.filter(
-          (item) => item.name.trim() !== "" || item.customerNumber.trim() !== ""
+          (item) =>
+            item.name.trim() !== "" || item.customerNumber.trim() !== "",
         );
 
         if (validData.length === 0) {
@@ -825,9 +883,9 @@ const Customer = () => {
         }
 
         // Apply capitalizeFirstLetter to imported customer names
-        const formattedData = validData.map(item => ({
+        const formattedData = validData.map((item) => ({
           ...item,
-          name: capitalizeFirstLetter(item.name)
+          name: capitalizeFirstLetter(item.name),
         }));
 
         setParsedData(formattedData);
@@ -856,14 +914,14 @@ const Customer = () => {
             "Content-Type": "application/json",
           },
           timeout: 300000,
-        }
+        },
       );
 
       if (res.status === 200) {
         showToast(
           "success",
           res.data.message ||
-            `Imported ${parsedData.length} records successfully`
+            `Imported ${parsedData.length} records successfully`,
         );
         setShowImportModal(false);
         setParsedData([]);
@@ -909,9 +967,9 @@ const Customer = () => {
         value: p.name.toLowerCase(),
         label: toTitleCase(p.name),
       })),
-    [provinces]
+    [provinces],
   );
-  
+
   const mrOptions = useMemo(
     () =>
       mrList.map((mr) => {
@@ -919,30 +977,31 @@ const Customer = () => {
         const name = mr.medicalRepName;
         return { value: id, label: toTitleCase(name) };
       }),
-    [mrList]
+    [mrList],
   );
-  
+
   const zoneOptions = useMemo(
     () =>
       zones.map((z, i) => {
         const val = typeof z === "string" ? z : z.name || `Zone ${i + 1}`;
         return { value: val.toLowerCase(), label: toTitleCase(val) };
       }),
-    [zones]
+    [zones],
   );
-  
+
   const businessTypeOptions = useMemo(
     () =>
       businessTypes.map((t) => {
         const name = typeof t === "string" ? t : t.name || t.label || "Unknown";
         return { value: name.toLowerCase(), label: toTitleCase(name) };
       }),
-    [businessTypes]
+    [businessTypes],
   );
 
   const visiblePages = getVisiblePages(currentPage, totalPages);
 
-  if (loading && customers.length === 0) return <LoadingOverlay text="Please wait..." />;
+  if (loading && customers.length === 0)
+    return <LoadingOverlay text="Please wait..." />;
 
   return (
     <div className="p-6">
@@ -975,7 +1034,7 @@ const Customer = () => {
               </button>
             )}
           </div>
-          
+
           {/* SEARCH SECTION */}
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
@@ -1006,8 +1065,12 @@ const Customer = () => {
         {searchTerm && (
           <div className="mb-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-700">
-              Showing results for: <span className="font-semibold">"{searchTerm}"</span> 
-              <span className="ml-4">Found: <span className="font-bold">{totalCustomers}</span> customer(s)</span>
+              Showing results for:{" "}
+              <span className="font-semibold">"{searchTerm}"</span>
+              <span className="ml-4">
+                Found: <span className="font-bold">{totalCustomers}</span>{" "}
+                customer(s)
+              </span>
             </p>
             {totalCustomers === 0 && (
               <p className="text-sm text-gray-600 mt-1">
@@ -1052,9 +1115,11 @@ const Customer = () => {
               {customers.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="p-4 text-center text-gray-500">
-                    {loading ? "Loading..." : searchTerm ? (
+                    {loading ? (
+                      "Loading..."
+                    ) : searchTerm ? (
                       <>
-                        No customers found matching your search. 
+                        No customers found matching your search.
                         <br />
                         <button
                           onClick={() => setSearchTerm("")}
@@ -1089,7 +1154,8 @@ const Customer = () => {
                       </div>
                     </td>
                     <td className="p-3">
-                      {capitalizeFirstLetter(customer.name)} {/* Use capitalizeFirstLetter here */}
+                      {capitalizeFirstLetter(customer.name)}{" "}
+                      {/* Use capitalizeFirstLetter here */}
                     </td>
                     <td className="p-3 capitalize">
                       {displayValue(customer.typeOfBusiness)}
@@ -1172,8 +1238,8 @@ const Customer = () => {
                     p === "..."
                       ? "bg-gray-200 cursor-not-allowed"
                       : currentPage === p
-                      ? "bg-indigo-600 text-white cursor-pointer"
-                      : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+                        ? "bg-indigo-600 text-white cursor-pointer"
+                        : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
                   }`}
                 >
                   {p}
@@ -1258,7 +1324,7 @@ const Customer = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* VIEW MODAL */}
@@ -1283,7 +1349,8 @@ const Customer = () => {
                   <div>
                     <p className="text-gray-700 font-medium">Name</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {capitalizeFirstLetter(form.name)} {/* Use capitalizeFirstLetter here */}
+                      {capitalizeFirstLetter(form.name)}{" "}
+                      {/* Use capitalizeFirstLetter here */}
                     </p>
                   </div>
                   <div>
@@ -1355,7 +1422,7 @@ const Customer = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* EDIT MODAL */}
@@ -1434,7 +1501,11 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.typeOfBusiness ? form.typeOfBusiness.toLowerCase() : ""}
+                        value={
+                          form.typeOfBusiness
+                            ? form.typeOfBusiness.toLowerCase()
+                            : ""
+                        }
                         onChange={handleBusinessTypeChange}
                         options={businessTypeOptions}
                         placeholder="Select Business Type"
@@ -1505,7 +1576,7 @@ const Customer = () => {
                         onChange={(date) =>
                           handleChange(
                             "date",
-                            date ? formatDateToYYYYMMDD(date) : ""
+                            date ? formatDateToYYYYMMDD(date) : "",
                           )
                         }
                         dateFormat="yyyy-MM-dd"
@@ -1572,7 +1643,7 @@ const Customer = () => {
                 </form>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>

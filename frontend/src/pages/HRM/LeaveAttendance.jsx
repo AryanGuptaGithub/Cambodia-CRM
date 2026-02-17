@@ -246,7 +246,7 @@ const LeaveAttendance = () => {
 
   const fetchAttendanceRecords = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/attendance`);
+      const response = await axios.get(`${backendUrl}/api/hrm/leaves/attendance`);
       const records = response.data || [];
       setAttendanceRecords(records);
 
@@ -262,7 +262,7 @@ const LeaveAttendance = () => {
 
   const fetchLeaves = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/leaves`);
+      const response = await axios.get(`${backendUrl}/api/hrm/leaves`);
       const leavesData = response.data || [];
 
       // Group leaves by user ID
@@ -292,7 +292,7 @@ const LeaveAttendance = () => {
 
   const fetchHolidays = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/holidays`);
+      const response = await axios.get(`${backendUrl}/api/hrm/holidays`);
       let holidaysData = response.data.holidays || response.data || [];
 
       // Transform holiday data to have a consistent format
@@ -953,7 +953,7 @@ const LeaveAttendance = () => {
       };
 
       const response = await axios.post(
-        `${backendUrl}/api/attendance/record`,
+        `${backendUrl}/api/hrm/leaves/attendance/record`,
         attendanceData,
       );
 
@@ -1037,7 +1037,7 @@ const LeaveAttendance = () => {
         status: "approved",
       };
 
-      const response = await axios.post(`${backendUrl}/api/leaves`, leaveData);
+      const response = await axios.post(`${backendUrl}/api/hrm/leaves`, leaveData);
 
       if (response.data.success) {
         showToast("success", `${leaveType === 'paid' ? 'Paid' : 'Unpaid'} leave applied successfully!`);
@@ -1138,7 +1138,7 @@ const LeaveAttendance = () => {
       };
 
       const response = await axios.post(
-        `${backendUrl}/api/attendance/convert-to-leave`,
+        `${backendUrl}/api/hrm/leaves/attendance/convert-to-leave`,
         convertData,
       );
 

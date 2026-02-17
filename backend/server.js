@@ -105,12 +105,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ============================================
-// ROUTES REGISTRATION
-// ============================================
-// NOTE: Order matters! More specific routes should come BEFORE generic ones
-
-// Auth Routes (no prefix needed, already has /auth in router)
 app.use("/api", authRoutes);
 
 // Master Data Routes

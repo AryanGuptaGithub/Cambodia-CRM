@@ -2,6 +2,8 @@ import express from "express";
 import Customer from "../../models/master/customer.js";
 import Province from "../../models/master/Province.js";
 import MedicalRep from "../../models/staffMember/staff.js";
+import { protect } from "../../middleware/auth.js";
+import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
 const router = express.Router();
 
@@ -36,7 +38,7 @@ const toTitleCase = (str) => {
   return str
     .toLowerCase()
     .split(" ")
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
 };
 
@@ -47,7 +49,7 @@ const parseCustomerDate = (dateInput) => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
   }
-  
+
   if (dateInput instanceof Date) {
     // If already a Date, ensure it's at noon
     const year = dateInput.getFullYear();
@@ -55,19 +57,19 @@ const parseCustomerDate = (dateInput) => {
     const day = dateInput.getDate();
     return new Date(year, month, day, 12, 0, 0);
   }
-  
-  if (typeof dateInput === 'string') {
+
+  if (typeof dateInput === "string") {
     // If it's already in YYYY-MM-DD format
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
-      const parts = dateInput.split('-');
+      const parts = dateInput.split("-");
       const year = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const day = parseInt(parts[2], 10);
-      
+
       // Create date at noon to avoid timezone issues
       return new Date(year, month, day, 12, 0, 0);
     }
-    
+
     // Try to parse other date formats
     const parsedDate = new Date(dateInput);
     if (!isNaN(parsedDate.getTime())) {
@@ -78,7 +80,7 @@ const parseCustomerDate = (dateInput) => {
       return new Date(year, month, day, 12, 0, 0);
     }
   }
-  
+
   // Return current date at noon
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
@@ -87,22 +89,22 @@ const parseCustomerDate = (dateInput) => {
 // Helper function to format date for response
 const formatDateForResponse = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
-    return '';
+    return "";
   }
-  
+
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
   return `${year}-${month}-${day}`;
 };
 
 // Helper to format customer response with title case for display
 const formatCustomerResponse = (customer) => {
   if (!customer) return customer;
-  
+
   const customerObj = customer.toObject ? customer.toObject() : customer;
-  
+
   return {
     ...customerObj,
     name: toTitleCase(customerObj.name),
@@ -112,7 +114,7 @@ const formatCustomerResponse = (customer) => {
     zone: toTitleCase(customerObj.zone),
     province: toTitleCase(customerObj.province),
     remark: toTitleCase(customerObj.remark),
-    date: formatDateForResponse(customerObj.date)
+    date: formatDateForResponse(customerObj.date),
   };
 };
 
@@ -125,7 +127,7 @@ const generateNextCustomerCode = async () => {
       .select("customerCode");
 
     let nextCode = 1;
-    
+
     if (lastCustomer?.customerCode) {
       // Extract numeric part from customer code (handles "00001", "CUST00001", etc.)
       const codeMatch = lastCustomer.customerCode.match(/\d+/);
@@ -137,21 +139,13 @@ const generateNextCustomerCode = async () => {
       }
     }
 
-    // Format with 5 digits
     return nextCode.toString().padStart(5, "0");
   } catch (error) {
     console.error("Error generating customer code:", error);
-    // Return default if error
     return "00001";
   }
 };
 
-// ============================================
-// SPECIFIC ROUTES FIRST (BEFORE PARAMETERIZED ROUTES)
-// ============================================
-
-// 1. GET: Customers dropdown endpoint
-// Route: GET /api/customers/dropdown
 router.get("/dropdown", async (req, res) => {
   try {
     const { search = "" } = req.query;
@@ -171,23 +165,21 @@ router.get("/dropdown", async (req, res) => {
       .lean();
 
     // Format names to title case for display
-    const formattedCustomers = customers.map(customer => ({
+    const formattedCustomers = customers.map((customer) => ({
       ...customer,
-      name: toTitleCase(customer.name)
+      name: toTitleCase(customer.name),
     }));
 
-    res.json({ 
-      customers: formattedCustomers, 
-      total: formattedCustomers.length, 
-      ok: true 
+    res.json({
+      customers: formattedCustomers,
+      total: formattedCustomers.length,
+      ok: true,
     });
   } catch (err) {
     handleServerError(res, err, "Failed to fetch customers dropdown");
   }
 });
 
-// 2. GET: Provinces
-// Route: GET /api/customers/provinces
 router.get("/provinces", async (req, res) => {
   try {
     const provinces = await Province.find({ isActive: true }).sort({ name: 1 });
@@ -197,8 +189,6 @@ router.get("/provinces", async (req, res) => {
   }
 });
 
-// 3. POST: Import customers
-// Route: POST /api/customers/import
 router.post("/import", async (req, res) => {
   try {
     const customers = req.body;
@@ -212,7 +202,7 @@ router.post("/import", async (req, res) => {
 
     // Fetch all MRs including USER ID
     const mrList = await MedicalRep.find().select(
-      "medicalRepName staffName userId"
+      "medicalRepName staffName userId",
     );
 
     // Map MR Name → USER ID
@@ -259,7 +249,7 @@ router.post("/import", async (req, res) => {
 
         // Parse date using helper function
         const parsedDate = parseCustomerDate(item.date);
-        
+
         // MR Name → USER ID
         let medicalRepId = null;
         let mrName = safeStr(item.medicalRepName).toLowerCase();
@@ -287,20 +277,19 @@ router.post("/import", async (req, res) => {
         const existingCustomer = await Customer.findOne({
           $or: [
             { customerNumber: customerNumber },
-            { name: name, customerNumber: customerNumber }
-          ]
+            { name: name, customerNumber: customerNumber },
+          ],
         });
 
         if (existingCustomer) {
           duplicates.push({
             row: i + 1,
             name: name,
-            reason: "Customer with same name or number already exists"
+            reason: "Customer with same name or number already exists",
           });
           continue;
         }
 
-        // Generate 5-digit customer code
         const customerCode = (nextCode + newCustomers.length)
           .toString()
           .padStart(5, "0");
@@ -311,9 +300,11 @@ router.post("/import", async (req, res) => {
           medicalRepName: mrName,
           medicalRepId,
           name: name,
-          typeOfBusiness: safeStr(item.typeOfBusiness).toLowerCase() || "not provided",
+          typeOfBusiness:
+            safeStr(item.typeOfBusiness).toLowerCase() || "not provided",
           customerNumber: customerNumber || "",
-          address: safeStr(item.customerAddress).toLowerCase() || "not provided",
+          address:
+            safeStr(item.customerAddress).toLowerCase() || "not provided",
           zone: safeStr(item.zone).toLowerCase() || "not provided",
           province: safeStr(item.province).toLowerCase() || "not provided",
           remark: safeStr(item.remark).toLowerCase() || "not provided",
@@ -383,8 +374,6 @@ router.post("/import", async (req, res) => {
   }
 });
 
-// 4. GET: By province
-// Route: GET /api/customers/province/:province
 router.get("/province/:province", async (req, res) => {
   try {
     const { province } = req.params;
@@ -393,7 +382,9 @@ router.get("/province/:province", async (req, res) => {
     });
 
     // Format customers with title case
-    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
+    const formattedCustomers = customers.map((customer) =>
+      formatCustomerResponse(customer),
+    );
 
     res.json({
       success: true,
@@ -405,12 +396,6 @@ router.get("/province/:province", async (req, res) => {
   }
 });
 
-// ============================================
-// GENERAL ROUTES (CAN INCLUDE PARAMETERS)
-// ============================================
-
-// 5. GET: All customers with pagination + next code
-// Route: GET /api/customers
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "" } = req.query;
@@ -431,23 +416,20 @@ router.get("/", async (req, res) => {
         { province: { $regex: searchLower, $options: "i" } },
         { customerCode: { $regex: search.trim(), $options: "i" } },
         { customerNumber: { $regex: search.trim(), $options: "i" } },
-        { remark: { $regex: searchLower, $options: "i" } }
+        { remark: { $regex: searchLower, $options: "i" } },
       ];
     }
 
-    // Get total count for pagination
     const total = await Customer.countDocuments(searchQuery);
-
-    // Get paginated customers
     const customers = await Customer.find(searchQuery)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum);
 
-    // Format customers with title case for display
-    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
+    const formattedCustomers = customers.map((customer) =>
+      formatCustomerResponse(customer),
+    );
 
-    // Generate next customer code
     const nextCustomerCode = await generateNextCustomerCode();
 
     res.json({
@@ -463,22 +445,20 @@ router.get("/", async (req, res) => {
   }
 });
 
-// 6. POST: Create new customer
-// Route: POST /api/customers
 router.post("/", async (req, res) => {
   try {
     const { customerNumber, date, ...data } = req.body;
-
-    // Generate next 5-digit customer code
     const customerCode = await generateNextCustomerCode();
-
-    // Convert string fields to lowercase before saving
     const cleanData = {
       ...data,
       customerCode: customerCode, // Add the generated code
       name: data.name ? data.name.toLowerCase() : "",
-      typeOfBusiness: data.typeOfBusiness ? data.typeOfBusiness.toLowerCase() : "",
-      medicalRepName: data.medicalRepName ? data.medicalRepName.toLowerCase() : "",
+      typeOfBusiness: data.typeOfBusiness
+        ? data.typeOfBusiness.toLowerCase()
+        : "",
+      medicalRepName: data.medicalRepName
+        ? data.medicalRepName.toLowerCase()
+        : "",
       address: data.address ? data.address.toLowerCase() : "",
       zone: data.zone ? data.zone.toLowerCase() : "",
       province: data.province ? data.province.toLowerCase() : "",
@@ -486,7 +466,7 @@ router.post("/", async (req, res) => {
     };
 
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
-    
+
     // Parse date if provided
     const parsedDate = date ? parseCustomerDate(date) : parseCustomerDate(null);
 
@@ -502,10 +482,10 @@ router.post("/", async (req, res) => {
       }
     }
 
-    const customer = new Customer({ 
-      ...cleanData, 
+    const customer = new Customer({
+      ...cleanData,
       customerNumber: cleanNumber,
-      date: parsedDate 
+      date: parsedDate,
     });
     const saved = await customer.save();
 
@@ -542,22 +522,16 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ============================================
-// PARAMETERIZED ROUTES (MUST BE LAST)
-// ============================================
-
-// 7. GET: By ID
-// Route: GET /api/customers/:id
 router.get("/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
     if (!customer) {
       return res.status(404).json({ message: "Customer not found", ok: false });
     }
-    
+
     // Format response with title case
     const responseCustomer = formatCustomerResponse(customer);
-    
+
     res.json({ customer: responseCustomer, ok: true });
   } catch (err) {
     if (err.name === "CastError") {
@@ -569,31 +543,29 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// 8. PUT: Update customer
-// Route: PUT /api/customers/:id
-router.put("/:id", async (req, res) => {
+router.put("/:id",protect, allowAdminOnly, async (req, res) => {
   try {
     const { customerNumber, date, customerCode, ...updateData } = req.body;
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
-    
+
     // Prevent customer code updates
     if (customerCode) {
       return res.status(400).json({
         message: "Customer code cannot be updated.",
-        ok: false
+        ok: false,
       });
     }
-    
+
     // Convert string fields to lowercase for update
     const cleanUpdateData = {};
-    Object.keys(updateData).forEach(key => {
-      if (typeof updateData[key] === 'string' && key !== 'customerNumber') {
+    Object.keys(updateData).forEach((key) => {
+      if (typeof updateData[key] === "string" && key !== "customerNumber") {
         cleanUpdateData[key] = updateData[key].toLowerCase();
       } else {
         cleanUpdateData[key] = updateData[key];
       }
     });
-    
+
     // Parse date if provided
     if (date) {
       cleanUpdateData.date = parseCustomerDate(date);
@@ -618,7 +590,7 @@ router.put("/:id", async (req, res) => {
     const updated = await Customer.findByIdAndUpdate(
       req.params.id,
       cleanUpdateData,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!updated) {
@@ -646,9 +618,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// 9. DELETE: Single
-// Route: DELETE /api/customers/:id
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const deleted = await Customer.findByIdAndDelete(req.params.id);
     if (!deleted) {
@@ -660,9 +630,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// 10. DELETE: Multiple (uses request body, not URL params)
-// Route: DELETE /api/customers
-router.delete("/", async (req, res) => {
+router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {

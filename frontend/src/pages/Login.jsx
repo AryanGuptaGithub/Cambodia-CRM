@@ -5,7 +5,8 @@ const Login = () => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false); // Add loading state
+  const [loading, setLoading] = useState(false);
+
   const navigate = useNavigate();
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -28,11 +29,13 @@ const Login = () => {
       });
 
       const data = await res.json();
-
+       
       if (!res.ok) {
-        // More specific error handling
         if (res.status === 403) {
-          setError("Access denied. Admin users only.");
+          setError(
+            data.message ||
+              "Access denied. Admin or SuperAdmin accounts only."
+          );
         } else if (res.status === 401) {
           setError("Invalid username or password");
         } else {
@@ -42,20 +45,22 @@ const Login = () => {
         return;
       }
 
-      // ✅ Save auth data in localStorage
+      // ✅ Save authentication data
       localStorage.setItem("token", data.token);
       localStorage.setItem("role", data.role);
-      localStorage.setItem("username", data.username || data.name);
-      localStorage.setItem("isAdmin", data.isAdmin || data.role === "admin");
+      localStorage.setItem("email", data.email);
 
-      // Optional: Save timestamp for token expiry check
+      // ✅ IMPORTANT: Save FULL email as username
+      const displayName = data.email || data.name || "User";
+      localStorage.setItem("username", displayName);
+
+      localStorage.setItem("isAdmin", "true");
       localStorage.setItem("loginTime", new Date().toISOString());
 
-      // Navigate to graph page
-      navigate("/graph");
+      navigate("/");
     } catch (err) {
-      setError("Network error. Please check your connection.");
       console.error("Login error:", err);
+      setError("Network error. Please check your connection.");
     } finally {
       setLoading(false);
     }
@@ -63,7 +68,7 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#c9d6ff] via-[#e2e2e2] to-[#fdfbfb]">
-      {/* Decorative Blobs */}
+      {/* Decorative Background Blobs */}
       <div className="absolute top-10 left-10 w-80 h-80 bg-cyan-300 opacity-30 rounded-full blur-3xl" />
       <div className="absolute bottom-20 right-10 w-52 h-52 bg-blue-400 opacity-30 rounded-full blur-2xl" />
       <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-72 h-72 bg-purple-300 opacity-20 rounded-full blur-3xl" />
@@ -81,16 +86,13 @@ const Login = () => {
           />
         </div>
 
-        {/* Title Section */}
+        {/* Title */}
         <div className="text-center mb-6">
           <h2 className="text-2xl font-bold text-gray-800 mb-2">
             Admin Login
           </h2>
           <p className="text-xs text-gray-600 mb-1">
-            Only administrator accounts can access this portal
-          </p>
-          <p className="text-xs text-gray-500 italic">
-            Demo: admin@example.com / 123456
+            Administrator and SuperAdmin accounts can access this portal
           </p>
         </div>
 
@@ -102,7 +104,7 @@ const Login = () => {
           </div>
         )}
 
-        {/* Username Field */}
+        {/* Username / Email */}
         <div className="mb-4">
           <input
             type="text"
@@ -113,14 +115,13 @@ const Login = () => {
               setError("");
             }}
             className="w-full px-4 py-3 rounded-lg bg-white/70 placeholder-gray-500 text-gray-900
-              focus:outline-none focus:ring-2 focus:ring-cyan-400 border border-gray-300
-              transition-all duration-200"
+              focus:outline-none focus:ring-2 focus:ring-cyan-400 border border-gray-300 transition-all duration-200"
             autoComplete="username"
             disabled={loading}
           />
         </div>
 
-        {/* Password Field */}
+        {/* Password */}
         <div className="mb-6">
           <input
             type="password"
@@ -131,8 +132,7 @@ const Login = () => {
               setError("");
             }}
             className="w-full px-4 py-3 rounded-lg bg-white/70 placeholder-gray-500 text-gray-900
-              focus:outline-none focus:ring-2 focus:ring-cyan-400 border border-gray-300
-              transition-all duration-200"
+              focus:outline-none focus:ring-2 focus:ring-cyan-400 border border-gray-300 transition-all duration-200"
             autoComplete="current-password"
             disabled={loading}
           />
@@ -142,34 +142,25 @@ const Login = () => {
         <button
           type="submit"
           disabled={loading}
-          className={`w-full py-3 mt-2 rounded-md text-white font-semibold
-            border border-cyan-500 transition-all duration-200
-            focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2
-            active:scale-[0.98] ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+          className={`w-full py-3 mt-2 rounded-md text-white font-semibold border border-cyan-500
+            transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-300
+            focus:ring-offset-2 active:scale-[0.98] ${
+              loading ? "opacity-70 cursor-not-allowed" : ""
+            }`}
           style={{
-            background: loading 
-              ? 'linear-gradient(to right, #9ca3af, #6b7280)'
-              : 'linear-gradient(to right, #0891b2, #3b82f6)'
+            background: loading
+              ? "linear-gradient(to right, #9ca3af, #6b7280)"
+              : "linear-gradient(to right, #0891b2, #3b82f6)",
           }}
         >
-          {loading ? (
-            <div className="flex items-center justify-center">
-              <svg className="animate-spin h-5 w-5 mr-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Authenticating...
-            </div>
-          ) : (
-            'Login as Admin'
-          )}
+          {loading ? "Authenticating..." : "Login"}
         </button>
 
-        {/* Admin Only Notice */}
+        {/* Notice */}
         <div className="mt-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <p className="text-xs text-blue-700 text-center">
-            <span className="font-semibold">Note:</span> This portal is restricted to administrator accounts only. 
-            Contact system administrator for access.
+            <span className="font-semibold">Note:</span> This portal is
+            restricted to Admin and SuperAdmin accounts only.
           </p>
         </div>
       </form>
