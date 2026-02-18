@@ -294,7 +294,7 @@ const Product = () => {
 
     try {
       const res = await axios.post(
-        `${backendUrl}/api/product/import`,
+        `${backendUrl}/api/products/import`,
         parsedData,
       );
 

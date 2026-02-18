@@ -59,7 +59,8 @@ const findMR = async (returnItem) => {
   return mrCashData;
 };
 
-router.get("/", async (req, res) => {
+// ==================== GET ALL STOCK RETURNS (Protected) ====================
+router.get("/", protect, async (req, res) => {
   try {
     const {
       page = 1,
@@ -152,7 +153,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.get("/statistics", async (req, res) => {
+// ==================== GET STATISTICS (Protected) ====================
+router.get("/statistics", protect, async (req, res) => {
   try {
     const { mrCode, startDate, endDate } = req.query;
 
@@ -245,7 +247,8 @@ router.get("/statistics", async (req, res) => {
   }
 });
 
-router.get("/:id", async (req, res) => {
+// ==================== GET SINGLE STOCK RETURN (Protected) ====================
+router.get("/:id", protect, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -293,6 +296,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// ==================== CREATE STOCK RETURN (Protected) ====================
 router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -531,7 +535,8 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id/status", async (req, res) => {
+// ==================== UPDATE STATUS (Protected & Admin Only) ====================
+router.put("/:id/status", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -689,8 +694,8 @@ router.put("/:id/status", async (req, res) => {
   }
 });
 
-// ==================== DELETE /:id ====================
-router.delete("/:id",  async (req, res) => {
+// ==================== DELETE SINGLE STOCK RETURN (Protected & Admin Only) ====================
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -777,8 +782,8 @@ router.delete("/:id",  async (req, res) => {
   }
 });
 
-// ==================== DELETE /bulk ====================
-router.delete("/bulk", async (req, res) => {
+// ==================== BULK DELETE STOCK RETURNS (Protected & Admin Only) ====================
+router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 

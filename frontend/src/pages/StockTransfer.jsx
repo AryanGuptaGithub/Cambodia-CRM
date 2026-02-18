@@ -36,7 +36,6 @@ const StockTransfer = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Get active tab from localStorage or location state, default to "general"
   const [activeTab, setActiveTab] = useState(() => {
     if (location.state && location.state.activeTab) {
       return location.state.activeTab;
@@ -55,13 +54,11 @@ const StockTransfer = () => {
   const [error, setError] = useState(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
-  // Modal states
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
   const inputRef = useRef(null);
 
-  // NEW: Add Product Modal states
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
   const [newProductForm, setNewProductForm] = useState({
     productId: "",
@@ -71,17 +68,14 @@ const StockTransfer = () => {
     productCost: 0,
   });
 
-  // Product edit modal states
   const [currentProduct, setCurrentProduct] = useState(null);
   const [currentProductIndex, setCurrentProductIndex] = useState(null);
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
 
-  // MR List state
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(true);
   const [isMrListEmpty, setIsMrListEmpty] = useState(false);
 
-  // Form state
   const [form, setForm] = useState({
     invoiceNo: "",
     date: "",
@@ -96,45 +90,33 @@ const StockTransfer = () => {
     source: "",
     destination: "",
     mrName: "",
-    mrId: "", // Added mrId field
+    mrId: "",
     stockTransferToMr: "",
     stockTransferFromMrToMain: "",
   });
 
-  // Helper function to get LC from product batches
   const getProductLc = useCallback((product) => {
     if (!product) return 0;
-
-    // First check if there are batches with LC
     if (
       product.batches &&
       Array.isArray(product.batches) &&
       product.batches.length > 0
     ) {
-      // Get the first batch with valid LC
       const batchWithLc = product.batches.find(
-        (batch) => batch.lc && batch.lc > 0
+        (batch) => batch.lc && batch.lc > 0,
       );
       if (batchWithLc) return batchWithLc.lc;
-
-      // If no batch with LC, check first batch
       if (product.batches[0].lc !== undefined) {
         return product.batches[0].lc || 0;
       }
     }
-
-    // Fallback to product-level LC
     return product.lc || 0;
   }, []);
 
-  // Fetch MR List
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const token = localStorage.getItem("token");
-      const response = await axios.get(`${backendUrl}/api/staff`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(`${backendUrl}/api/staff`);
       const data = response.data || [];
       if (data && data.length > 0) {
         setMrList(data);
@@ -152,25 +134,19 @@ const StockTransfer = () => {
     }
   }, []);
 
-  // MR Options for dropdown
   const mrOptions = useMemo(() => {
-    if (isMrListEmpty) {
-      return [];
-    }
-
+    if (isMrListEmpty) return [];
     return mrList.map((mr) => ({
       value: mr._id,
       label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
-      mrData: mr, // Include the entire mr object for reference
+      mrData: mr,
     }));
   }, [mrList, isMrListEmpty]);
 
-  // Save active tab to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem("stockTransferActiveTab", activeTab);
   }, [activeTab]);
 
-  // Clear location state after using it
   useEffect(() => {
     if (location.state?.activeTab) {
       window.history.replaceState({}, document.title);
@@ -220,10 +196,8 @@ const StockTransfer = () => {
 
   const getNextStockTransferNumber = useCallback(async () => {
     try {
-      const token = localStorage.getItem("token");
       const response = await axios.get(
         `${backendUrl}/api/stock-transfer/next-number`,
-        { headers: { Authorization: `Bearer ${token}` } }
       );
       if (response.data.success) {
         return response.data.nextNumber;
@@ -245,13 +219,9 @@ const StockTransfer = () => {
     }
   }, [generalTransfers, mrTransfers]);
 
-  // Fetch products with LC information
   const fetchProducts = useCallback(async () => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await axios.get(`${backendUrl}/api/products/dropdown`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(`${backendUrl}/api/products/dropdown`);
       const productsData = response.data?.data || [];
 
       if (!Array.isArray(productsData)) {
@@ -283,7 +253,7 @@ const StockTransfer = () => {
         totalAmount: product.totalAmount || 0,
         status: product.status || "Out of Stock",
         minStockLevel: product.minStockLevel || 0,
-        lc: getProductLc(product), // Get LC from batches
+        lc: getProductLc(product),
         fob: product.fob || 0,
         cif: product.cif || 0,
         sellingPrice: product.sellingPrice,
@@ -300,11 +270,9 @@ const StockTransfer = () => {
   }, [getProductLc]);
 
   const productOptions = useMemo(() => {
-    // Filter products with box quantity > 0 (greater than zero)
     const availableProducts = products.filter(
-      (product) => product.totalBoxes > 0
+      (product) => product.totalBoxes > 0,
     );
-
     return [
       { value: "", label: "Select Product" },
       ...availableProducts.map((product) => ({
@@ -320,7 +288,6 @@ const StockTransfer = () => {
     ];
   }, [products]);
 
-  // Product options for edit modal - includes all products (even if stock is 0) to allow editing
   const productOptionsForEdit = useMemo(() => {
     return [
       { value: "", label: "Select Product" },
@@ -341,10 +308,7 @@ const StockTransfer = () => {
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem("token");
-      const response = await axios.get(`${backendUrl}/api/stock-transfer`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(`${backendUrl}/api/stock-transfer`);
       setGeneralTransfers(response.data.data || response.data || []);
     } catch (err) {
       setError(err.message || "Error fetching general transfers");
@@ -358,10 +322,9 @@ const StockTransfer = () => {
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem("token");
-      const response = await axios.get(`${backendUrl}/api/stock-transfer-to-mr`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfer-to-mr`,
+      );
       const data = response.data || [];
       const updatedData = data.map((transfer) => {
         if (!transfer.totalTransferCost || transfer.totalTransferCost === 0) {
@@ -381,7 +344,6 @@ const StockTransfer = () => {
     }
   }, []);
 
-  // Fetch data based on active tab
   useEffect(() => {
     if (activeTab === "general") {
       fetchGeneralTransfers();
@@ -464,9 +426,7 @@ const StockTransfer = () => {
     setIsProductModalOpen(true);
   };
 
-  // NEW: Handle Add New Product Button - Opens Modal
   const handleAddNewItem = () => {
-    // Reset the new product form
     setNewProductForm({
       productId: "",
       productName: "",
@@ -477,10 +437,9 @@ const StockTransfer = () => {
     setIsAddProductModalOpen(true);
   };
 
-  // NEW: Handle Product Selection in Add Product Modal
   const handleNewProductSelect = (selectedValue) => {
     const selectedProduct = productOptions.find(
-      (opt) => opt.value === selectedValue
+      (opt) => opt.value === selectedValue,
     );
 
     if (selectedProduct && selectedProduct.value) {
@@ -489,18 +448,14 @@ const StockTransfer = () => {
         productId: selectedValue,
         productName: selectedProduct.productName,
         lc: selectedProduct.lc || 0,
-        // Reset box quantity when product changes
         boxQuantity: "",
         productCost: 0,
       }));
     }
   };
 
-  // NEW: Handle Box Quantity Change in Add Product Modal
   const handleNewProductBoxQuantityChange = (e) => {
     const value = e.target.value;
-
-    // Only allow numbers
     if (value === "" || /^\d+$/.test(value)) {
       const boxQty = value === "" ? "" : parseInt(value);
       setNewProductForm((prev) => {
@@ -508,20 +463,16 @@ const StockTransfer = () => {
           ...prev,
           boxQuantity: boxQty,
         };
-
-        // Calculate product cost
         if (boxQty !== "" && prev.lc) {
           updated.productCost = parseFloat((prev.lc * boxQty).toFixed(2));
         } else {
           updated.productCost = 0;
         }
-
         return updated;
       });
     }
   };
 
-  // NEW: Add the new product to the form
   const handleAddProductToForm = () => {
     if (
       !newProductForm.productId ||
@@ -530,26 +481,23 @@ const StockTransfer = () => {
     ) {
       showToast(
         "error",
-        "Please select a product and enter a valid box quantity"
+        "Please select a product and enter a valid box quantity",
       );
       return;
     }
 
     const selectedProduct = productOptions.find(
-      (opt) => opt.value === newProductForm.productId
+      (opt) => opt.value === newProductForm.productId,
     );
 
-    // Check if product already exists in the form
     const existingIndex = form.items.findIndex(
-      (item) => item.productId === newProductForm.productId
+      (item) => item.productId === newProductForm.productId,
     );
 
     if (existingIndex >= 0) {
-      // Update existing product
       setForm((prev) => {
         const updatedItems = [...prev.items];
         const existingItem = updatedItems[existingIndex];
-
         const newBoxQuantity = parseInt(newProductForm.boxQuantity) || 0;
         const totalBoxQuantity =
           (parseInt(existingItem.boxQuantity) || 0) + newBoxQuantity;
@@ -561,7 +509,7 @@ const StockTransfer = () => {
           productCost: parseFloat(
             (
               (newProductForm.lc || existingItem.lc || 0) * totalBoxQuantity
-            ).toFixed(2)
+            ).toFixed(2),
           ),
         };
 
@@ -573,7 +521,6 @@ const StockTransfer = () => {
 
       showToast("success", "Product quantity updated successfully");
     } else {
-      // Add new product
       const newItem = {
         productId: newProductForm.productId,
         productName: newProductForm.productName,
@@ -602,7 +549,6 @@ const StockTransfer = () => {
       showToast("success", "Product added successfully");
     }
 
-    // Close modal and reset form
     setIsAddProductModalOpen(false);
     setNewProductForm({
       productId: "",
@@ -613,11 +559,14 @@ const StockTransfer = () => {
     });
   };
 
-  // --- FIXED: handleUpdateTransfer with axios and token ---
+  // FIXED: handleUpdateTransfer - removed Authorization header
   const handleUpdateTransfer = async (e, formData) => {
     e.preventDefault();
+
+    // Get token from localStorage
+    const token = localStorage.getItem("token");
+
     try {
-      const token = localStorage.getItem("token");
       let url;
       let requestData = { ...formData };
 
@@ -635,7 +584,6 @@ const StockTransfer = () => {
         if (requestData.stockTransferToMr) {
           requestData.mrName = requestData.stockTransferToMr;
         }
-        // Ensure mrId is included for MR transfers
         if (requestData.mrId) {
           requestData.mrId = requestData.mrId;
         }
@@ -652,11 +600,11 @@ const StockTransfer = () => {
         if (item.lc) {
           itemData.lc = parseFloat(parseFloat(item.lc).toFixed(2));
           itemData.productCost = parseFloat(
-            (itemData.lc * (itemData.boxQuantity || 0)).toFixed(2)
+            (itemData.lc * (itemData.boxQuantity || 0)).toFixed(2),
           );
         } else if (item.productCost) {
           itemData.productCost = parseFloat(
-            parseFloat(item.productCost).toFixed(2)
+            parseFloat(item.productCost).toFixed(2),
           );
         }
 
@@ -664,16 +612,19 @@ const StockTransfer = () => {
       });
 
       requestData.totalTransferCost = calculateTotalTransferCost(
-        requestData.items
+        requestData.items,
       );
       requestData.grandTotal = calculateGrandTotal(
         requestData.items,
         requestData.shipping,
-        requestData.totalExpenses
+        requestData.totalExpenses,
       );
 
+      // Add Authorization header here
       const response = await axios.put(url, requestData, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       if (response.status === 200) {
@@ -749,7 +700,7 @@ const StockTransfer = () => {
 
   const handleSelectRow = (id) => {
     setSelectedRows((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   };
 
@@ -757,7 +708,7 @@ const StockTransfer = () => {
     setForm((prev) => {
       const updatedItems = [...prev.items];
       const selectedProduct = productOptionsForEdit.find(
-        (opt) => opt.value === productValue
+        (opt) => opt.value === productValue,
       );
 
       updatedItems[index] = {
@@ -769,7 +720,7 @@ const StockTransfer = () => {
         },
         productName: selectedProduct?.label || productValue,
         qtyPerCarton: selectedProduct?.qtyPerCarton || 0,
-        lc: selectedProduct?.lc || 0, // Set LC from product
+        lc: selectedProduct?.lc || 0,
       };
 
       const boxQuantity = updatedItems[index].boxQuantity || 0;
@@ -781,7 +732,7 @@ const StockTransfer = () => {
 
       const lc = selectedProduct?.lc || 0;
       updatedItems[index].productCost = parseFloat(
-        (lc * (boxQuantity || 0)).toFixed(2)
+        (lc * (boxQuantity || 0)).toFixed(2),
       );
 
       return {
@@ -821,7 +772,6 @@ const StockTransfer = () => {
         const boxQuantity = updatedItems[index].boxQuantity || 0;
         const openPieces = updatedItems[index].openPieces || 0;
         const qtyPerCarton = updatedItems[index].qtyPerCarton || 0;
-
         updatedItems[index].totalPieces =
           boxQuantity * qtyPerCarton + openPieces;
       }
@@ -848,7 +798,6 @@ const StockTransfer = () => {
     }
   };
 
-  // --- FIXED: handleDelete with axios and token ---
   const handleDelete = async () => {
     if (selectedRows.length === 0) return;
 
@@ -862,18 +811,22 @@ const StockTransfer = () => {
     });
 
     if (confirm.isConfirmed) {
+      const token = localStorage.getItem("token");
       try {
-        const token = localStorage.getItem("token");
         await Promise.all(
           selectedRows.map((id) => {
             const url =
               activeTab === "general"
                 ? `${backendUrl}/api/stock-transfer/${id}`
                 : `${backendUrl}/api/stock-transfer-to-mr/${id}`;
+
+            // Add Authorization header here
             return axios.delete(url, {
-              headers: { Authorization: `Bearer ${token}` },
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
             });
-          })
+          }),
         );
 
         if (activeTab === "general") {
@@ -896,7 +849,6 @@ const StockTransfer = () => {
     }
   };
 
-  // --- FIXED: handleDeleteSingle with axios and token ---
   const handleDeleteSingle = async (transferData) => {
     if (!transferData._id) return;
 
@@ -911,15 +863,18 @@ const StockTransfer = () => {
     });
 
     if (confirmDelete.isConfirmed) {
+      const token = localStorage.getItem("token");
       try {
-        const token = localStorage.getItem("token");
         const url =
           activeTab === "general"
             ? `${backendUrl}/api/stock-transfer/${transferData._id}`
             : `${backendUrl}/api/stock-transfer-to-mr/${transferData._id}`;
 
+        // Add Authorization header here
         const response = await axios.delete(url, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         });
 
         if (response.status === 200) {
@@ -927,7 +882,7 @@ const StockTransfer = () => {
             "success",
             `${activeTab === "general" ? "Stock Transfer" : "MR Transfer"} <b>${
               transferData.invoiceNo
-            }</b> deleted successfully`
+            }</b> deleted successfully`,
           );
 
           if (activeTab === "general") {
@@ -955,7 +910,6 @@ const StockTransfer = () => {
       shipping: parseFloat(transfer.shipping || 0).toFixed(2),
       totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
       grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
-      // Ensure mrId is properly set from the transfer data
       mrId: transfer.mrId || "",
     });
     setIsViewModalOpen(true);
@@ -969,12 +923,11 @@ const StockTransfer = () => {
       shipping: parseFloat(transfer.shipping || 0).toFixed(2),
       totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
       grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
-      mrId: transfer.mrId || "", // Set mrId from transfer data
+      mrId: transfer.mrId || "",
     });
     setIsEditModalOpen(true);
   };
 
-  // Product edit modal functions
   const openProductEditModal = (product, index) => {
     setCurrentProduct({
       ...product,
@@ -1001,7 +954,6 @@ const StockTransfer = () => {
     const { name, value } = e.target;
 
     if (isInteger) {
-      // For integer fields (boxQuantity)
       if (value === "" || /^\d*$/.test(value)) {
         const processedValue = value === "" ? "" : parseInt(value) || 0;
         setCurrentProduct((prev) => {
@@ -1009,21 +961,17 @@ const StockTransfer = () => {
             ...prev,
             [name]: processedValue,
           };
-
-          // Recalculate product cost when box quantity changes
           if (name === "boxQuantity") {
             const lcValue = parseFloat(updatedProduct.lc) || 0;
             const boxQty = parseInt(processedValue) || 0;
             updatedProduct.productCost = parseFloat(
-              (lcValue * boxQty).toFixed(2)
+              (lcValue * boxQty).toFixed(2),
             );
           }
-
           return updatedProduct;
         });
       }
     } else {
-      // For decimal fields (lc)
       if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
         const processedValue = value === "" ? "" : parseFloat(value) || 0;
         setCurrentProduct((prev) => {
@@ -1031,16 +979,13 @@ const StockTransfer = () => {
             ...prev,
             [name]: processedValue,
           };
-
-          // Recalculate product cost when lc changes
           if (name === "lc") {
             const lcValue = parseFloat(processedValue) || 0;
             const boxQty = parseInt(updatedProduct.boxQuantity) || 0;
             updatedProduct.productCost = parseFloat(
-              (lcValue * boxQty).toFixed(2)
+              (lcValue * boxQty).toFixed(2),
             );
           }
-
           return updatedProduct;
         });
       }
@@ -1049,7 +994,7 @@ const StockTransfer = () => {
 
   const handleProductSelectChange = (selectedValue) => {
     const selectedProduct = productOptionsForEdit.find(
-      (opt) => opt.value === selectedValue
+      (opt) => opt.value === selectedValue,
     );
 
     if (selectedProduct) {
@@ -1067,13 +1012,10 @@ const StockTransfer = () => {
           qtyPerCarton: selectedProduct.qtyPerCarton || 0,
           lc: selectedProduct.lc || 0,
         };
-
-        // Keep the existing box quantity
         updatedProduct.boxQuantity = prev.boxQuantity || 0;
         updatedProduct.productCost = parseFloat(
-          ((selectedProduct.lc || 0) * (prev.boxQuantity || 0)).toFixed(2)
+          ((selectedProduct.lc || 0) * (prev.boxQuantity || 0)).toFixed(2),
         );
-
         return updatedProduct;
       });
     }
@@ -1123,7 +1065,6 @@ const StockTransfer = () => {
     setCurrentProductIndex(null);
   };
 
-  // Handle MR Name change in edit modal
   const handleMRNameChange = (selectedValue) => {
     const selectedMR = mrOptions.find((mr) => mr.value === selectedValue);
     setForm((prev) => ({
@@ -1174,7 +1115,6 @@ const StockTransfer = () => {
 
   return (
     <div className="p-6">
-      {/* Breadcrumb */}
       <div className="mb-4 text-gray-600 text-sm">
         Dashboard <span className="mx-2">{">"}</span> Stock Transfer
       </div>
@@ -1185,7 +1125,6 @@ const StockTransfer = () => {
         </div>
       )}
 
-      {/* Header / Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div className="flex gap-3">
           <button
@@ -1205,7 +1144,6 @@ const StockTransfer = () => {
         </div>
       </div>
 
-      {/* Tabs and Search Section */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div className="flex gap-3">
           <button
@@ -1231,7 +1169,6 @@ const StockTransfer = () => {
         </div>
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
-          {/* Total Count */}
           <div className="flex items-center">
             <p className="text-base font-semibold text-gray-700 whitespace-nowrap">
               Total Count:{" "}
@@ -1241,7 +1178,6 @@ const StockTransfer = () => {
             </p>
           </div>
 
-          {/* Search Input */}
           <div className="relative w-full lg:w-60">
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -1267,7 +1203,6 @@ const StockTransfer = () => {
         </div>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1296,7 +1231,6 @@ const StockTransfer = () => {
               <th className="p-3 min-w-[120px] text-sm font-medium">
                 Total LC Cost ($)
               </th>
-
               <th className="p-3 min-w-[120px] text-sm font-medium">
                 # Products
               </th>
@@ -1320,15 +1254,6 @@ const StockTransfer = () => {
 
                 const calculatedTotal = calculateTotalTransferCost(item.items);
                 const displayTotal = item.totalTransferCost || calculatedTotal;
-
-                // Calculate average LC per box
-                let avgLcPerBox = 0;
-                if (item.items && item.items.length > 0) {
-                  const totalLc = item.items.reduce((sum, product) => {
-                    return sum + (parseFloat(product.lc) || 0);
-                  }, 0);
-                  avgLcPerBox = totalLc / item.items.length;
-                }
 
                 return (
                   <tr
@@ -1362,17 +1287,17 @@ const StockTransfer = () => {
                           item.transferType === "send"
                             ? "bg-green-100 text-green-800"
                             : item.transferType === "receive"
-                            ? "bg-blue-100 text-blue-800"
-                            : "bg-gray-100 text-gray-800"
+                              ? "bg-blue-100 text-blue-800"
+                              : "bg-gray-100 text-gray-800"
                         }`}
                       >
                         {item.transferType === "send"
                           ? "Send"
                           : item.transferType === "receive"
-                          ? "Receive"
-                          : activeTab === "mr"
-                          ? "MR Transfer"
-                          : "General"}
+                            ? "Receive"
+                            : activeTab === "mr"
+                              ? "MR Transfer"
+                              : "General"}
                       </span>
                     </td>
                     <td className="p-3 min-w-[120px]">
@@ -1386,7 +1311,6 @@ const StockTransfer = () => {
                         </span>
                       </div>
                     </td>
-
                     <td className="p-3 min-w-[120px]">
                       <div className="flex items-center justify-center gap-3">
                         <span className="font-medium">{productCount}</span>
@@ -1474,7 +1398,6 @@ const StockTransfer = () => {
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsViewModalOpen(false)}
             />
-
             <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsViewModalOpen(false)}
@@ -1489,7 +1412,6 @@ const StockTransfer = () => {
               </h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
-                {/* Row 1: Stock Transfer No and Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Stock Transfer No
@@ -1507,10 +1429,8 @@ const StockTransfer = () => {
                   </p>
                 </div>
 
-                {/* Type-specific fields */}
                 {activeTab === "general" ? (
                   <>
-                    {/* For General Transfer */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         Transfer Type
@@ -1534,7 +1454,6 @@ const StockTransfer = () => {
                   </>
                 ) : (
                   <>
-                    {/* Row 2: MR Name and MR ID */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         MR Name
@@ -1563,7 +1482,6 @@ const StockTransfer = () => {
                   </p>
                 </div>
 
-                {/* Items Section - Full width */}
                 <div className="md:col-span-2">
                   <h3 className="text-lg font-medium text-gray-800 mb-3">
                     Products ({form.items?.length || 0})
@@ -1633,7 +1551,6 @@ const StockTransfer = () => {
                       <p className="text-gray-500 text-center">No items</p>
                     )}
 
-                    {/* Total Row */}
                     {form.items && form.items.length > 0 && (
                       <div className="border-t pt-4 mt-4">
                         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
@@ -1648,8 +1565,8 @@ const StockTransfer = () => {
                                 form.items.reduce(
                                   (sum, item) =>
                                     sum + (parseFloat(item.lc) || 0),
-                                  0
-                                ) / form.items.length
+                                  0,
+                                ) / form.items.length,
                               )}
                             </p>
                           </div>
@@ -1657,7 +1574,7 @@ const StockTransfer = () => {
                             <p className="px-3 py-2 rounded bg-green-50 font-semibold text-green-800">
                               $
                               {formatCurrency(
-                                calculateTotalTransferCost(form.items)
+                                calculateTotalTransferCost(form.items),
                               )}
                             </p>
                           </div>
@@ -1678,7 +1595,7 @@ const StockTransfer = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Edit Modal */}
@@ -1703,7 +1620,6 @@ const StockTransfer = () => {
               </h2>
 
               <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
-                {/* Row 1: Stock Transfer No and Date in one row */}
                 <div className="md:col-span-2">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -1733,7 +1649,6 @@ const StockTransfer = () => {
                   </div>
                 </div>
 
-                {/* Row 2: Conditional fields based on activeTab */}
                 <div className="md:col-span-1">
                   <div className="grid grid-cols-1 gap-4">
                     {activeTab === "general" ? (
@@ -1772,7 +1687,6 @@ const StockTransfer = () => {
                   </div>
                 </div>
 
-                {/* Row 3: Source/Destination for General Transfer or MR ID display for MR transfer */}
                 {activeTab === "general" ? (
                   <div className="md:col-span-3">
                     {form.transferType === "send" ? (
@@ -1827,7 +1741,6 @@ const StockTransfer = () => {
                   </div>
                 )}
 
-                {/* Row 4: Product Cost ($) - Full width */}
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700">
                     Total LC Cost ($)
@@ -1847,7 +1760,6 @@ const StockTransfer = () => {
                   </p>
                 </div>
 
-                {/* Row 5: Remarks - Full width */}
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700">
                     Remarks
@@ -1863,7 +1775,6 @@ const StockTransfer = () => {
                   />
                 </div>
 
-                {/* Items Section - Full width */}
                 <div className="md:col-span-3">
                   <h3 className="text-lg font-medium text-gray-800 mb-3">
                     Products ({form.items?.length || 0})
@@ -1924,7 +1835,6 @@ const StockTransfer = () => {
                     )}
                   </div>
 
-                  {/* Add New Product Button - Opens Modal */}
                   <div className="mt-4">
                     <button
                       type="button"
@@ -1956,10 +1866,10 @@ const StockTransfer = () => {
               </form>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
-      {/* NEW: Add Product Modal */}
+      {/* Add Product Modal */}
       {isAddProductModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1980,7 +1890,6 @@ const StockTransfer = () => {
               </h2>
 
               <div className="space-y-4">
-                {/* Product Name Dropdown */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Product Name <span className="text-red-500">*</span>
@@ -1997,19 +1906,18 @@ const StockTransfer = () => {
                     <p className="text-xs text-gray-500 mt-1">
                       Available:{" "}
                       {productOptions.find(
-                        (p) => p.value === newProductForm.productId
+                        (p) => p.value === newProductForm.productId,
                       )?.availableStock || 0}{" "}
                       boxes | LC: $
                       {formatCurrency(
                         productOptions.find(
-                          (p) => p.value === newProductForm.productId
-                        )?.lc || 0
+                          (p) => p.value === newProductForm.productId,
+                        )?.lc || 0,
                       )}
                     </p>
                   )}
                 </div>
 
-                {/* Box Quantity */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Box Quantity <span className="text-red-500">*</span>
@@ -2019,7 +1927,7 @@ const StockTransfer = () => {
                     min="1"
                     max={
                       productOptions.find(
-                        (p) => p.value === newProductForm.productId
+                        (p) => p.value === newProductForm.productId,
                       )?.availableStock || 1000
                     }
                     value={newProductForm.boxQuantity}
@@ -2030,7 +1938,6 @@ const StockTransfer = () => {
                   />
                 </div>
 
-                {/* LC ($) - Auto-filled and Disabled */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     LC ($) Per Box
@@ -2051,7 +1958,6 @@ const StockTransfer = () => {
                   </p>
                 </div>
 
-                {/* Product Cost ($) - Auto-calculated and Disabled */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Total LC Cost ($)
@@ -2092,7 +1998,7 @@ const StockTransfer = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Product Edit Modal */}
@@ -2116,7 +2022,6 @@ const StockTransfer = () => {
               </h2>
 
               <div className="space-y-4">
-                {/* Product Name - Searchable Dropdown with all products */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Product Name <span className="text-red-500">*</span>
@@ -2131,7 +2036,6 @@ const StockTransfer = () => {
                   />
                 </div>
 
-                {/* Box Quantity */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Box Quantity <span className="text-red-500">*</span>
@@ -2147,7 +2051,6 @@ const StockTransfer = () => {
                   />
                 </div>
 
-                {/* LC ($) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     LC ($) Per Box <span className="text-red-500">*</span>
@@ -2166,7 +2069,6 @@ const StockTransfer = () => {
                   </p>
                 </div>
 
-                {/* Product Cost ($) - Read only */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Total LC Cost ($)
@@ -2174,7 +2076,7 @@ const StockTransfer = () => {
                   <input
                     type="text"
                     value={`$${formatCurrency(
-                      currentProduct?.productCost || 0
+                      currentProduct?.productCost || 0,
                     )}`}
                     className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium text-green-700"
                     readOnly
@@ -2208,7 +2110,7 @@ const StockTransfer = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Product Modal */}
@@ -2219,7 +2121,6 @@ const StockTransfer = () => {
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsProductModalOpen(false)}
             />
-
             <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-lg relative flex flex-col border border-gray-200">
               <div className="flex items-center justify-between p-6 border-b">
                 <h2 className="text-xl font-semibold text-gray-800">
@@ -2283,7 +2184,6 @@ const StockTransfer = () => {
                                     size={14}
                                     className="text-green-600"
                                   />
-
                                   {formatCurrency(product.lc)}
                                 </div>
                               </td>
@@ -2330,7 +2230,7 @@ const StockTransfer = () => {
                                     (product.lc || 0) *
                                       (product.boxQuantity || 0);
                                   return sum + cost;
-                                }, 0)
+                                }, 0),
                               )}
                             </div>
                           </td>
@@ -2351,7 +2251,7 @@ const StockTransfer = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

@@ -6,20 +6,12 @@ import Product from "../../models/projectManger/product.js";
 import mongoose from "mongoose";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
-
+import { all } from "axios";
 const router = express.Router();
 
-// ------------------------------------------------------------------
-// TRANSACTION‑SAFE HELPER FUNCTIONS
-// ------------------------------------------------------------------
-
-/**
- * Deduct boxes from ReportInHand inside a transaction.
- * Returns the LC value of the batch used.
- */
 const deductFromReportInHand = async (productName, qty, session) => {
   const productStock = await ReportInHand.findOne({
-    productName: { $regex: new RegExp(`^${productName}$`, 'i') }
+    productName: { $regex: new RegExp(`^${productName}$`, "i") },
   }).session(session);
 
   if (!productStock)
@@ -42,7 +34,8 @@ const deductFromReportInHand = async (productName, qty, session) => {
   }
 
   productStock.totalBoxes = productStock.batches.reduce(
-    (sum, b) => sum + b.boxes, 0
+    (sum, b) => sum + b.boxes,
+    0
   );
 
   const lastBatch = productStock.batches[productStock.batches.length - 1];
@@ -53,13 +46,9 @@ const deductFromReportInHand = async (productName, qty, session) => {
   return lcValue;
 };
 
-/**
- * Add boxes back to ReportInHand inside a transaction.
- * Returns the LC value of the batch used.
- */
 const addBackToReportInHand = async (productName, qty, session) => {
   const productStock = await ReportInHand.findOne({
-    productName: { $regex: new RegExp(`^${productName}$`, 'i') }
+    productName: { $regex: new RegExp(`^${productName}$`, "i") },
   }).session(session);
 
   if (!productStock)
@@ -76,40 +65,34 @@ const addBackToReportInHand = async (productName, qty, session) => {
   return lastBatch.lc;
 };
 
-/**
- * Update StockInMRHand (add/subtract) inside a transaction.
- */
 const updateStockInMRHand = async (
   mrId,
   mrName,
   productId,
   productName,
   quantity,
-  operation,   // "add" or "subtract"
+  operation,
   session
 ) => {
-  const cleanedMrName = mrName.replace(/\s+/g, ' ').trim();
+  const cleanedMrName = mrName.replace(/\s+/g, " ").trim();
 
-  // Find the MR stock document
   let mrStock;
   if (mrId) {
     mrStock = await StockInMRHand.findOne({ mrId }).session(session);
   }
   if (!mrStock) {
     mrStock = await StockInMRHand.findOne({
-      mrName: { $regex: new RegExp(`^${cleanedMrName}$`, 'i') }
+      mrName: { $regex: new RegExp(`^${cleanedMrName}$`, "i") },
     }).session(session);
   }
 
-  // If adding and MR doesn't exist, create it
   if (!mrStock) {
     if (operation === "add") {
       mrStock = new StockInMRHand({
         mrId,
         mrName: cleanedMrName,
-        productsInHand: []
+        productsInHand: [],
       });
-      // Save after adding product below
     } else {
       throw new Error(`MR ${cleanedMrName} not found in stock`);
     }
@@ -117,20 +100,18 @@ const updateStockInMRHand = async (
 
   if (!mrStock.productsInHand) mrStock.productsInHand = [];
 
-  // Find the product entry
-  let productEntry = mrStock.productsInHand.find(p =>
-    (p.productId && p.productId.toString() === productId.toString()) ||
-    (p.productName && p.productName.toLowerCase() === productName.toLowerCase())
+  let productEntry = mrStock.productsInHand.find(
+    (p) =>
+      (p.productId && p.productId.toString() === productId.toString()) ||
+      (p.productName &&
+        p.productName.toLowerCase() === productName.toLowerCase())
   );
 
   if (productEntry) {
     if (operation === "add") {
       productEntry.quantity += quantity;
-    } else { // subtract
+    } else {
       productEntry.quantity = Math.max(0, productEntry.quantity - quantity);
-      if (productEntry.quantity === 0) {
-        // Remove zero‑quantity entries later
-      }
     }
     productEntry.lastUpdated = new Date();
   } else {
@@ -142,27 +123,23 @@ const updateStockInMRHand = async (
         productName,
         quantity,
         lc: lcValue,
-        lastUpdated: new Date()
+        lastUpdated: new Date(),
       });
     } else {
-      throw new Error(`Product ${productName} not found in MR ${cleanedMrName} stock`);
+      throw new Error(
+        `Product ${productName} not found in MR ${cleanedMrName} stock`
+      );
     }
   }
 
-  // Remove zero‑quantity entries
-  mrStock.productsInHand = mrStock.productsInHand.filter(p => p.quantity > 0);
+  mrStock.productsInHand = mrStock.productsInHand.filter(
+    (p) => p.quantity > 0
+  );
 
-  if (mrStock.isNew) {
-    await mrStock.save({ session });
-  } else {
-    await mrStock.save({ session });
-  }
+  await mrStock.save({ session });
   return mrStock;
 };
 
-// ------------------------------------------------------------------
-// UTILITY: Generate next invoice number
-// ------------------------------------------------------------------
 const generateNextStockTransferNumber = async () => {
   try {
     const lastTransfer = await StockTransferToMR.findOne()
@@ -177,11 +154,6 @@ const generateNextStockTransferNumber = async () => {
   }
 };
 
-// ------------------------------------------------------------------
-// ROUTES
-// ------------------------------------------------------------------
-
-// Get next transfer number (public, or can be protected)
 router.get("/next-number", async (req, res) => {
   try {
     const nextNumber = await generateNextStockTransferNumber();
@@ -191,7 +163,6 @@ router.get("/next-number", async (req, res) => {
   }
 });
 
-// Get last transfer number
 router.get("/last-number", async (req, res) => {
   try {
     const lastTransfer = await StockTransferToMR.findOne()
@@ -205,8 +176,7 @@ router.get("/last-number", async (req, res) => {
   }
 });
 
-// GET all transfers (protected)
-router.get("/", protect, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const transfers = await StockTransferToMR.find()
       .populate({
@@ -222,10 +192,8 @@ router.get("/", protect, async (req, res) => {
       if (transfer.items && Array.isArray(transfer.items)) {
         const itemsWithCosts = transfer.items.map((item) => {
           const itemObj = item.toObject ? item.toObject() : item;
-          let lc = item.lc ||
-                   item.productId?.lc ||
-                   item.productId?.costPrice ||
-                   0;
+          let lc =
+            item.lc || item.productId?.lc || item.productId?.costPrice || 0;
           const boxQuantity = item.boxQuantity || 0;
           const itemCost = lc * boxQuantity;
           totalTransferCost += itemCost;
@@ -234,9 +202,10 @@ router.get("/", protect, async (req, res) => {
             ...itemObj,
             lc,
             itemCost,
-            productName: item.productName ||
-                         item.productId?.productName ||
-                         "Unknown Product",
+            productName:
+              item.productName ||
+              item.productId?.productName ||
+              "Unknown Product",
           };
         });
         transferObj.items = itemsWithCosts;
@@ -252,13 +221,12 @@ router.get("/", protect, async (req, res) => {
   }
 });
 
-// GET MR stock detailed (for admin)
-router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
+router.get("/mr-hand-admin", async (req, res) => {
   try {
     const { mrName, search } = req.query;
     let matchStage = { $match: {} };
     if (mrName && mrName !== "all") {
-      matchStage.$match.mrName = { $regex: new RegExp(`^${mrName}$`, 'i') };
+      matchStage.$match.mrName = { $regex: new RegExp(`^${mrName}$`, "i") };
     }
 
     const stockAggregation = [
@@ -293,7 +261,7 @@ router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
               if: { $gt: ["$productsInHand.lc", 0] },
               then: "$productsInHand.lc",
               else: "$productDetails.lc",
-            }
+            },
           },
           costPrice: "$productDetails.costPrice",
           unit: "$productDetails.unit",
@@ -311,20 +279,22 @@ router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
 
     const transferMatch = { transferType: "send" };
     if (mrName && mrName !== "all") {
-      transferMatch.stockTransferToMr = { $regex: new RegExp(`^${mrName}$`, 'i') };
+      transferMatch.stockTransferToMr = {
+        $regex: new RegExp(`^${mrName}$`, "i"),
+      };
     }
 
     const transfers = await StockTransferToMR.find(transferMatch);
 
     const assignedMap = {};
-    transfers.forEach(transfer => {
-      transfer.items.forEach(item => {
+    transfers.forEach((transfer) => {
+      transfer.items.forEach((item) => {
         const key = `${transfer.stockTransferToMr}_${item.productId}`;
         if (!assignedMap[key]) {
           assignedMap[key] = {
             totalAssigned: 0,
             latestTransferDate: transfer.createdAt,
-            invoiceNo: transfer.invoiceNo
+            invoiceNo: transfer.invoiceNo,
           };
         }
         assignedMap[key].totalAssigned += item.boxQuantity || 0;
@@ -339,7 +309,7 @@ router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
       const assignedData = assignedMap[key] || {
         totalAssigned: item.quantity || 0,
         latestTransferDate: item.createdAt,
-        invoiceNo: null
+        invoiceNo: null,
       };
       const remainingQty = item.quantity || 0;
       const assignedQty = assignedData.totalAssigned;
@@ -347,7 +317,9 @@ router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
 
       return {
         assignedDate: assignedData.latestTransferDate
-          ? new Date(assignedData.latestTransferDate).toISOString().split("T")[0]
+          ? new Date(assignedData.latestTransferDate)
+              .toISOString()
+              .split("T")[0]
           : item.createdAt
           ? new Date(item.createdAt).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
@@ -357,11 +329,15 @@ router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
           ? new Date(item.createdAt).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
         expiry: "N/A",
-        id: item.stockId?.toString() || `${item.mrName}-${item.productId}-${index}`,
+        id:
+          item.stockId?.toString() ||
+          `${item.mrName}-${item.productId}-${index}`,
         invoiceNumbers: assignedData.invoiceNo ? [assignedData.invoiceNo] : [],
         mrCode: item.mrName,
         mrName: item.mrName,
-        productCode: item.productCode || `PROD-${item.productId?.toString().slice(-4) || "0000"}`,
+        productCode:
+          item.productCode ||
+          `PROD-${item.productId?.toString().slice(-4) || "0000"}`,
         productId: item.productId,
         productName: item.productName || "Unknown Product",
         remainingQty,
@@ -381,22 +357,27 @@ router.get("/mr-hand-admin", protect, allowAdminOnly, async (req, res) => {
     let filteredResult = formattedResult;
     if (search && search.trim()) {
       const searchLower = search.toLowerCase();
-      filteredResult = formattedResult.filter(item =>
-        item.productName?.toLowerCase().includes(searchLower) ||
-        item.productCode?.toLowerCase().includes(searchLower) ||
-        item.mrName?.toLowerCase().includes(searchLower)
+      filteredResult = formattedResult.filter(
+        (item) =>
+          item.productName?.toLowerCase().includes(searchLower) ||
+          item.productCode?.toLowerCase().includes(searchLower) ||
+          item.mrName?.toLowerCase().includes(searchLower)
       );
     }
 
-    res.json({ success: true, data: filteredResult, count: filteredResult.length });
+    res.json({
+      success: true,
+      data: filteredResult,
+      count: filteredResult.length,
+    });
   } catch (err) {
     console.error("Failed to fetch MR stock:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// GET flattened MR stock (simpler list)
-router.get("/mr-hand", protect, async (req, res) => {
+// GET flattened MR stock
+router.get("/mr-hand", async (req, res) => {
   try {
     const stock = await StockInMRHand.find()
       .populate({
@@ -411,10 +392,15 @@ router.get("/mr-hand", protect, async (req, res) => {
           mrId: mrStock.mrId,
           mrName: mrStock.mrName,
           productId: product.productId?._id || product.productId,
-          productName: product.productName || product.productId?.productName,
+          productName:
+            product.productName || product.productId?.productName,
           quantity: product.quantity || 0,
           boxQuantity: product.quantity || 0,
-          lc: product.lc || product.productId?.lc || product.productId?.costPrice || 0,
+          lc:
+            product.lc ||
+            product.productId?.lc ||
+            product.productId?.costPrice ||
+            0,
           lastUpdated: product.lastUpdated || mrStock.updatedAt,
         }));
         return products;
@@ -428,24 +414,49 @@ router.get("/mr-hand", protect, async (req, res) => {
   }
 });
 
-// GET list of MRs (id + name)
-router.get("/mrs", protect, async (req, res) => {
+// GET list of MRs
+router.get("/mrs", async (req, res) => {
   try {
     const mrs = await StockInMRHand.aggregate([
-      { $group: { _id: "$mrId", mrName: { $first: "$mrName" } } },
-      { $project: { mrId: "$_id", mrName: 1, _id: 0 } },
-      { $sort: { mrName: 1 } }
+      // ✅ Only include documents where productsInHand is NOT empty
+      {
+        $match: {
+          productsInHand: { $exists: true, $ne: [] }
+        }
+      },
+
+      // Group by MR
+      {
+        $group: {
+          _id: "$mrId",
+          mrName: { $first: "$mrName" }
+        }
+      },
+
+      // Format output
+      {
+        $project: {
+          mrId: "$_id",
+          mrName: 1,
+          _id: 0
+        }
+      },
+
+      // Sort by name
+      {
+        $sort: { mrName: 1 }
+      }
     ]);
+
     res.json({ success: true, data: mrs });
+
   } catch (error) {
     console.error("Error fetching MR list:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ------------------------------------------------------------------
-// CREATE transfer (protected)
-// ------------------------------------------------------------------
+
 router.post("/", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -457,7 +468,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       invoiceNo = await generateNextStockTransferNumber();
     }
 
-    // Enrich items with LC values
     const itemsWithLC = await Promise.all(
       data.items.map(async (item) => {
         try {
@@ -469,7 +479,8 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
               productName: item.productName,
             }).session(session);
             if (productStock?.batches?.length) {
-              const lastBatch = productStock.batches[productStock.batches.length - 1];
+              const lastBatch =
+                productStock.batches[productStock.batches.length - 1];
               lcValue = lastBatch?.lc || 0;
             }
           }
@@ -477,19 +488,24 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
           return {
             ...item,
             lc: lcValue,
-            productName: item.productName || product?.productName || "Unknown",
+            productName:
+              item.productName || product?.productName || "Unknown",
           };
         } catch (error) {
-          console.error(`Error fetching lc for product ${item.productName}:`, error);
+          console.error(
+            `Error fetching lc for product ${item.productName}:`,
+            error
+          );
           return { ...item, lc: 0, productName: item.productName || "Unknown" };
         }
       })
     );
 
     const transferData = { ...data, invoiceNo, items: itemsWithLC };
-    const [newTransfer] = await StockTransferToMR.create([transferData], { session });
+    const [newTransfer] = await StockTransferToMR.create([transferData], {
+      session,
+    });
 
-    // Handle stock movements based on transfer type
     if (data.transferType === "send") {
       const { mrId, stockTransferToMr: mrName } = data;
       for (const item of itemsWithLC) {
@@ -525,19 +541,27 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         }).session(session);
 
         if (!productStock) {
-          await ReportInHand.create([{
-            productName: item.productName,
-            batches: [{
-              batchNo: `BATCH-${Date.now()}`,
-              boxes: item.boxQuantity,
-              lc: lcValue,
-              date: new Date().toISOString().split("T")[0],
-            }],
-            totalBoxes: item.boxQuantity,
-            totalAmount: item.boxQuantity * lcValue,
-          }], { session });
+          await ReportInHand.create(
+            [
+              {
+                productName: item.productName,
+                batches: [
+                  {
+                    batchNo: `BATCH-${Date.now()}`,
+                    boxes: item.boxQuantity,
+                    lc: lcValue,
+                    date: new Date().toISOString().split("T")[0],
+                  },
+                ],
+                totalBoxes: item.boxQuantity,
+                totalAmount: item.boxQuantity * lcValue,
+              },
+            ],
+            { session }
+          );
         } else {
-          const lastBatch = productStock.batches[productStock.batches.length - 1];
+          const lastBatch =
+            productStock.batches[productStock.batches.length - 1];
           if (!lastBatch || Math.abs(lastBatch.lc - lcValue) > 0.01) {
             productStock.batches.push({
               batchNo: `BATCH-${Date.now()}`,
@@ -551,7 +575,8 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
 
           productStock.totalBoxes += item.boxQuantity;
           productStock.totalAmount = productStock.batches.reduce(
-            (sum, b) => sum + b.boxes * b.lc, 0
+            (sum, b) => sum + b.boxes * b.lc,
+            0
           );
           await productStock.save({ session });
         }
@@ -573,9 +598,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------------
-// UPDATE transfer (protected)
-// ------------------------------------------------------------------
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -585,14 +607,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     const existing = await StockTransferToMR.findById(id).session(session);
     if (!existing) {
       await session.abortTransaction();
-      return res.status(404).json({ success: false, message: "Transfer not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Transfer not found" });
     }
 
-    // First revert the original stock movements (opposite of what was done)
+    // Revert original stock movements
     if (existing.transferType === "send") {
       const { mrId, stockTransferToMr: mrName } = existing;
       for (const item of existing.items) {
-        // Reverse: remove from MR, add back to ReportInHand
         await updateStockInMRHand(
           mrId,
           mrName,
@@ -607,7 +630,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     } else if (existing.transferType === "receive") {
       const { mrId, stockTransferFromMrToMain: mrName } = existing;
       for (const item of existing.items) {
-        // Reverse: add back to MR, remove from ReportInHand
         await updateStockInMRHand(
           mrId,
           mrName,
@@ -617,13 +639,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           "add",
           session
         );
-        await deductFromReportInHand(item.productName, item.boxQuantity, session);
+        await deductFromReportInHand(
+          item.productName,
+          item.boxQuantity,
+          session
+        );
       }
     }
 
-    // Now apply the new data (similar to POST)
     const data = req.body;
-    // Re‑fetch LC values for new items
     const itemsWithLC = await Promise.all(
       data.items.map(async (item) => {
         try {
@@ -634,22 +658,27 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
               productName: item.productName,
             }).session(session);
             if (productStock?.batches?.length) {
-              const lastBatch = productStock.batches[productStock.batches.length - 1];
+              const lastBatch =
+                productStock.batches[productStock.batches.length - 1];
               lcValue = lastBatch?.lc || 0;
             }
           }
           return {
             ...item,
             lc: lcValue,
-            productName: item.productName || product?.productName || "Unknown",
+            productName:
+              item.productName || product?.productName || "Unknown",
           };
         } catch (error) {
-          return { ...item, lc: 0, productName: item.productName || "Unknown" };
+          return {
+            ...item,
+            lc: 0,
+            productName: item.productName || "Unknown",
+          };
         }
       })
     );
 
-    // Update the transfer document
     const updated = await StockTransferToMR.findByIdAndUpdate(
       id,
       { ...data, items: itemsWithLC },
@@ -692,19 +721,27 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         }).session(session);
 
         if (!productStock) {
-          await ReportInHand.create([{
-            productName: item.productName,
-            batches: [{
-              batchNo: `BATCH-${Date.now()}`,
-              boxes: item.boxQuantity,
-              lc: lcValue,
-              date: new Date().toISOString().split("T")[0],
-            }],
-            totalBoxes: item.boxQuantity,
-            totalAmount: item.boxQuantity * lcValue,
-          }], { session });
+          await ReportInHand.create(
+            [
+              {
+                productName: item.productName,
+                batches: [
+                  {
+                    batchNo: `BATCH-${Date.now()}`,
+                    boxes: item.boxQuantity,
+                    lc: lcValue,
+                    date: new Date().toISOString().split("T")[0],
+                  },
+                ],
+                totalBoxes: item.boxQuantity,
+                totalAmount: item.boxQuantity * lcValue,
+              },
+            ],
+            { session }
+          );
         } else {
-          const lastBatch = productStock.batches[productStock.batches.length - 1];
+          const lastBatch =
+            productStock.batches[productStock.batches.length - 1];
           if (!lastBatch || Math.abs(lastBatch.lc - lcValue) > 0.01) {
             productStock.batches.push({
               batchNo: `BATCH-${Date.now()}`,
@@ -717,7 +754,8 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           }
           productStock.totalBoxes += item.boxQuantity;
           productStock.totalAmount = productStock.batches.reduce(
-            (sum, b) => sum + b.boxes * b.lc, 0
+            (sum, b) => sum + b.boxes * b.lc,
+            0
           );
           await productStock.save({ session });
         }
@@ -739,21 +777,19 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------------
-// DELETE transfer (by ID, protected)
-// ------------------------------------------------------------------
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const transfer = await StockTransferToMR.findById(req.params.id).session(session);
+    const transfer = await StockTransferToMR.findById(req.params.id).session(
+      session
+    );
     if (!transfer) {
       await session.abortTransaction();
       return res.status(404).json({ message: "Transfer not found" });
     }
 
-    // Reverse stock movements
     if (transfer.transferType === "send") {
       const { mrId, stockTransferToMr: mrName } = transfer;
       for (const item of transfer.items) {
@@ -780,7 +816,11 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
           "add",
           session
         );
-        await deductFromReportInHand(item.productName, item.boxQuantity, session);
+        await deductFromReportInHand(
+          item.productName,
+          item.boxQuantity,
+          session
+        );
       }
     }
 
@@ -800,69 +840,80 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------------
-// DELETE by invoice number (protected)
-// ------------------------------------------------------------------
-router.delete("/by-invoice/:invoiceNo", protect, allowAdminOnly, async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+router.delete(
+  "/by-invoice/:invoiceNo",
+  protect,
+  allowAdminOnly,
+  async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-  try {
-    const { invoiceNo } = req.params;
-    const transfer = await StockTransferToMR.findOne({ invoiceNo }).session(session);
-    if (!transfer) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: `Transfer with invoice number ${invoiceNo} not found`
+    try {
+      const { invoiceNo } = req.params;
+      const transfer = await StockTransferToMR.findOne({ invoiceNo }).session(
+        session
+      );
+      if (!transfer) {
+        await session.abortTransaction();
+        return res.status(404).json({
+          success: false,
+          message: `Transfer with invoice number ${invoiceNo} not found`,
+        });
+      }
+
+      if (transfer.transferType === "send") {
+        const { mrId, stockTransferToMr: mrName } = transfer;
+        for (const item of transfer.items) {
+          await updateStockInMRHand(
+            mrId,
+            mrName,
+            item.productId,
+            item.productName,
+            item.boxQuantity,
+            "subtract",
+            session
+          );
+          await addBackToReportInHand(
+            item.productName,
+            item.boxQuantity,
+            session
+          );
+        }
+      } else if (transfer.transferType === "receive") {
+        const { mrId, stockTransferFromMrToMain: mrName } = transfer;
+        for (const item of transfer.items) {
+          await updateStockInMRHand(
+            mrId,
+            mrName,
+            item.productId,
+            item.productName,
+            item.boxQuantity,
+            "add",
+            session
+          );
+          await deductFromReportInHand(
+            item.productName,
+            item.boxQuantity,
+            session
+          );
+        }
+      }
+
+      await transfer.deleteOne({ session });
+      await session.commitTransaction();
+
+      res.json({
+        success: true,
+        message: `Transfer ${invoiceNo} deleted and stock reverted successfully!`,
       });
+    } catch (error) {
+      await session.abortTransaction();
+      console.error("DELETE BY INVOICE ERROR →", error);
+      res.status(500).json({ success: false, error: error.message });
+    } finally {
+      session.endSession();
     }
-
-    // Reverse stock movements
-    if (transfer.transferType === "send") {
-      const { mrId, stockTransferToMr: mrName } = transfer;
-      for (const item of transfer.items) {
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "subtract",
-          session
-        );
-        await addBackToReportInHand(item.productName, item.boxQuantity, session);
-      }
-    } else if (transfer.transferType === "receive") {
-      const { mrId, stockTransferFromMrToMain: mrName } = transfer;
-      for (const item of transfer.items) {
-        await updateStockInMRHand(
-          mrId,
-          mrName,
-          item.productId,
-          item.productName,
-          item.boxQuantity,
-          "add",
-          session
-        );
-        await deductFromReportInHand(item.productName, item.boxQuantity, session);
-      }
-    }
-
-    await transfer.deleteOne({ session });
-    await session.commitTransaction();
-
-    res.json({
-      success: true,
-      message: `Transfer ${invoiceNo} deleted and stock reverted successfully!`,
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    console.error("DELETE BY INVOICE ERROR →", error);
-    res.status(500).json({ success: false, error: error.message });
-  } finally {
-    session.endSession();
   }
-});
+);
 
 export default router;

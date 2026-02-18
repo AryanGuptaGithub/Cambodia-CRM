@@ -1,10 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-} from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Plus,
   Trash2,
@@ -26,6 +20,17 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const returnsPerPage = 9;
+
+// Helper function to get auth headers
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  return {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  };
+};
 
 // Create Stock Return Component
 const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
@@ -90,7 +95,10 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
       const response = await axios.get(
         `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
-        { params: { mrName } }
+        { 
+          params: { mrName },
+          ...getAuthHeaders()
+        }
       );
 
       if (response.data.success) {
@@ -224,10 +232,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         originalProductData: selectedProduct.originalProductData,
       };
       setReturnItems([...returnItems, item]);
-      showToast(
-        "success",
-        `${selectedProduct.productName} added to return list`
-      );
     }
 
     // Reset form for next item
@@ -301,12 +305,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       const response = await axios.post(
         `${backendUrl}/api/stock-return`,
         returnData,
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
+        getAuthHeaders()
       );
 
       if (response.data.success) {
@@ -538,11 +537,7 @@ const StockReturn = () => {
     try {
       const response = await axios.get(
         `${backendUrl}/api/stock-transfer-to-mr/mrs`,
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
+        getAuthHeaders()
       );
 
       if (response.data.success) {
@@ -567,9 +562,7 @@ const StockReturn = () => {
           limit: returnsPerPage,
           search: searchTerm || undefined,
         },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
+        ...getAuthHeaders()
       });
       if (response.data.success) {
         const data = response.data.data || [];
@@ -592,7 +585,7 @@ const StockReturn = () => {
   // Initial data load
   useEffect(() => {
     fetchMRList();
-  }, []);
+  }, [fetchMRList]);
 
   useEffect(() => {
     fetchReturnsHistory();
@@ -650,7 +643,7 @@ const StockReturn = () => {
     [currentReturns]
   );
 
-  // Delete selected returns
+  // Delete selected returns (Admin only)
   const handleDeleteSelected = async () => {
     if (selected.length === 0) {
       showToast("error", "Please select returns to delete");
@@ -681,9 +674,7 @@ const StockReturn = () => {
           `${backendUrl}/api/stock-return/bulk`,
           {
             data: { ids: selected.map((s) => s.id) },
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
+            ...getAuthHeaders()
           }
         );
 
@@ -693,15 +684,19 @@ const StockReturn = () => {
           setSelected([]);
         }
       } catch (error) {
-        showToast(
-          "error",
-          error.response?.data?.message || "Failed to delete selected returns."
-        );
+        if (error.response?.status === 403) {
+          showToast("error", "Access denied. Only Admin can delete returns.");
+        } else {
+          showToast(
+            "error",
+            error.response?.data?.message || "Failed to delete selected returns."
+          );
+        }
       }
     }
   };
 
-  // Delete single return
+  // Delete single return (Admin only)
   const deleteReturn = async (returnItem) => {
     if (returnItem.status !== "Pending") {
       showToast("error", "Only pending returns can be deleted");
@@ -719,11 +714,7 @@ const StockReturn = () => {
       try {
         const response = await axios.delete(
           `${backendUrl}/api/stock-return/${returnItem._id}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-          }
+          getAuthHeaders()
         );
 
         if (response.data.success) {
@@ -731,10 +722,14 @@ const StockReturn = () => {
           fetchReturnsHistory();
         }
       } catch (error) {
-        showToast(
-          "error",
-          error.response?.data?.message || "Failed to delete return."
-        );
+        if (error.response?.status === 403) {
+          showToast("error", "Access denied. Only Admin can delete returns.");
+        } else {
+          showToast(
+            "error",
+            error.response?.data?.message || "Failed to delete return."
+          );
+        }
       }
     }
   };
@@ -745,7 +740,7 @@ const StockReturn = () => {
     setIsViewModalOpen(true);
   }, []);
 
-  // Handle status update
+  // Handle status update (Admin only)
   const handleStatusUpdate = async (status, rejectedReason = "") => {
     if (!selectedReturn) return;
 
@@ -753,11 +748,7 @@ const StockReturn = () => {
       const response = await axios.put(
         `${backendUrl}/api/stock-return/${selectedReturn._id}/status`,
         { status, rejectedReason },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
+        getAuthHeaders()
       );
 
       if (response.data.success) {
@@ -766,7 +757,11 @@ const StockReturn = () => {
         setIsViewModalOpen(false);
       }
     } catch (error) {
-      showToast("error", error.response?.data?.message || "Failed to update status");
+      if (error.response?.status === 403) {
+        showToast("error", "Access denied. Only Admin can update return status.");
+      } else {
+        showToast("error", error.response?.data?.message || "Failed to update status");
+      }
     }
   };
 

@@ -148,7 +148,7 @@ const AddProduct = () => {
     setIsSubmitting(true);
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL;
-      const response = await fetch(`${backendUrl}/api/product/add`, {
+      const response = await fetch(`${backendUrl}/api/products/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

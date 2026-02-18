@@ -445,7 +445,7 @@ const mapPaymentStatus = (status) => {
   if (!status) return "Credit";
   const s = status.toLowerCase().trim();
   const map = {
-    paid: "Cash",
+    paid: "Paid", // Changed from "Cash" to "Paid" to match schema enum
     cash: "Cash",
     credit: "Credit",
     pending: "Credit",
@@ -457,45 +457,80 @@ const mapPaymentStatus = (status) => {
   return map[s] || "Credit";
 };
 
+// IMPROVED: Get customer by code with better search
 const getCustomerByCode = async (customerCode, session = null) => {
   try {
     if (!customerCode || customerCode.trim() === "") {
       return {
         success: false,
         message: "Customer code is required",
+        customer: null
       };
     }
 
     const cleanedCode = customerCode.trim();
+    console.log(`Looking up customer with code: "${cleanedCode}"`);
 
-    const digitsMatch = cleanedCode.match(/\d+/);
-    if (!digitsMatch) {
-      return {
-        success: false,
-        message: `Invalid customer code format: "${cleanedCode}"`,
-      };
-    }
-
-    const digits = digitsMatch[0];
-    const normalizedCode = digits.padStart(5, "0");
-    const query = Customer.findOne({
-      customerCode: normalizedCode,
+    // Try to find customer by exact code first
+    let query = Customer.findOne({
+      customerCode: cleanedCode,
       enabled: true,
     });
 
     if (session) {
-      query.session(session);
+      query = query.session(session);
     }
 
-    const customer = await query;
+    let customer = await query;
+
+    // If not found, try to find by code with padding
+    if (!customer) {
+      // Try to extract digits and pad
+      const digitsMatch = cleanedCode.match(/\d+/);
+      if (digitsMatch) {
+        const digits = digitsMatch[0];
+        const paddedCode = digits.padStart(5, "0");
+        
+        console.log(`Trying padded code: "${paddedCode}"`);
+        
+        query = Customer.findOne({
+          customerCode: paddedCode,
+          enabled: true,
+        });
+
+        if (session) {
+          query = query.session(session);
+        }
+
+        customer = await query;
+      }
+    }
+
+    // If still not found, try case-insensitive search
+    if (!customer) {
+      query = Customer.findOne({
+        customerCode: { $regex: new RegExp(`^${cleanedCode}$`, 'i') },
+        enabled: true,
+      });
+
+      if (session) {
+        query = query.session(session);
+      }
+
+      customer = await query;
+    }
 
     if (!customer) {
+      console.warn(`Customer with code "${cleanedCode}" not found`);
       return {
         success: false,
-        message: `Customer with code "${cleanedCode}" (normalized to "${normalizedCode}") not found`,
+        message: `Customer with code "${cleanedCode}" not found`,
+        customer: null
       };
     }
 
+    console.log(`Found customer: ${customer.name} with code ${customer.customerCode}`);
+    
     return {
       success: true,
       customer: {
@@ -505,13 +540,11 @@ const getCustomerByCode = async (customerCode, session = null) => {
       },
     };
   } catch (error) {
-    console.error(
-      `Error fetching customer with code "${customerCode}":`,
-      error,
-    );
+    console.error(`Error fetching customer with code "${customerCode}":`, error);
     return {
       success: false,
       message: `Error fetching customer: ${error.message}`,
+      customer: null
     };
   }
 };
@@ -1341,6 +1374,7 @@ const deductStockFromMRHand = async (
     };
   }
 };
+
 // ==========================================
 // ROUTES
 // ==========================================
@@ -1810,11 +1844,31 @@ router.post("/validate-import-mrs", async (req, res) => {
   }
 });
 
+// Add debug route for customer lookup
+router.get("/debug/customer/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    const result = await getCustomerByCode(code);
+    res.json({
+      success: true,
+      code: code,
+      result: result
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post("/import-with-stock-deduction", async (req, res) => {
   let sessionId = null;
   try {
     const { invoices, bypassStockCheck = false } = req.body;
-    const invoiceData = Array.isArray(invoices) ? invoices : [];
+    
+    // Ensure each invoice has a customerName
+    const invoiceData = (Array.isArray(invoices) ? invoices : []).map(inv => ({
+      ...inv,
+      customerName: inv.customerName || "Unknown", // Default to "Unknown" if missing
+    }));
 
     if (!invoiceData.length) {
       return res
@@ -1924,6 +1978,7 @@ const processSingleInvoiceWithMRDistribution = async (
   index,
   skipDuplicates = true,
   bypassStockCheck = false,
+  isImport = false,
 ) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1987,21 +2042,25 @@ const processSingleInvoiceWithMRDistribution = async (
     }
 
     // Get customer details
-    let customerName = invoiceData.customerName || "";
+    let customerName = invoiceData.customerName || "Unknown"; // Default to "Unknown"
     let customerId = invoiceData.customerId || null;
+    let customerCode = invoiceData.customerCode || "";
 
-    if (invoiceData.customerCode && invoiceData.customerCode.trim() !== "") {
-      const customerResult = await getCustomerByCode(
-        invoiceData.customerCode,
-        session,
-      );
-      if (!customerResult.success) {
-        throw new Error(customerResult.message);
+    console.log(`Processing invoice ${invoiceData.invoiceNumber} with customer code: "${customerCode}"`);
+
+    if (customerCode && customerCode.trim() !== "") {
+      const customerResult = await getCustomerByCode(customerCode, session);
+      if (customerResult.success) {
+        customerName = customerResult.customer.customerName;
+        customerId = customerResult.customer.customerId;
+        customerCode = customerResult.customer.customerCode; // Use normalized code
+        console.log(`Found customer: ${customerName} (ID: ${customerId})`);
+      } else {
+        console.warn(`Customer not found for code: ${customerCode}, using "Unknown" as customer name`);
+        // Keep "Unknown" as customer name
       }
-      customerName = customerResult.customer.customerName;
-      customerId = customerResult.customer.customerId;
-    } else if (!customerName) {
-      throw new Error("Customer code or customer name is required");
+    } else {
+      console.log(`No customer code provided, using "Unknown" as customer name`);
     }
 
     // Build product -> MR name mapping from _mrDistribution (set during grouping)
@@ -2038,9 +2097,12 @@ const processSingleInvoiceWithMRDistribution = async (
 
       // Determine if this product belongs to a specific MR
       const productMrName = productToMrMap.get(productName);
-      const isMRSale =
-        productMrName && productMrName.toLowerCase() !== "unknown";
 
+      // During import: always deduct from warehouse (ReportInHand), never from MR hand
+      const isMRSale =
+        (!isImport || invoiceData.isMrSaleImport) &&
+        productMrName &&
+        productMrName.toLowerCase() !== "unknown";
       let lc = 0;
       let profitLoss = 0;
 
@@ -2234,6 +2296,19 @@ const processSingleInvoiceWithMRDistribution = async (
       primaryMR = Array.from(invoiceData._mrDistribution.keys())[0];
     }
 
+    console.log("Creating sale record with:", {
+      recordingDate: invoiceData.recordingDate,
+      invoiceNumber: invoiceData.invoiceNumber,
+      invoiceDate: invoiceData.invoiceDate,
+      mrName: primaryMR,
+      customerName: customerName,
+      customerCode: customerCode,
+      productsCount: processedProducts.length,
+      totalAmount: totalAmount,
+      paidAmount: paidAmount,
+      paymentStatus: paymentStatus,
+    });
+
     const saleRecord = new SaleSummary({
       recordingDate: invoiceData.recordingDate
         ? new Date(invoiceData.recordingDate)
@@ -2245,7 +2320,7 @@ const processSingleInvoiceWithMRDistribution = async (
       mrName: primaryMR,
       mrId: invoiceData.mrId || null,
       customerName: customerName,
-      customerCode: invoiceData.customerCode || "",
+      customerCode: customerCode,
       customerId: customerId,
       products: processedProducts,
       creditDays: parseInt(invoiceData.creditDays) || 0,
@@ -2372,6 +2447,7 @@ const processImportWithStockDeduction = async (
           row: i + 2,
           invoiceNumber: "Unknown",
           customerName: invoice.customerName || "N/A",
+          customerCode: invoice.customerCode || "",
           message: "Invoice number is required",
           type: "validation_error",
         });
@@ -2388,6 +2464,7 @@ const processImportWithStockDeduction = async (
             invoiceNumber: invoiceNumber,
             mrName: invoice.mrName,
             customerName: invoice.customerName || "N/A",
+            customerCode: invoice.customerCode || "",
             message: `MR not found in Staff: ${mrValidation.message}`,
             type: "mr_validation_error",
           });
@@ -2498,6 +2575,7 @@ const processImportWithStockDeduction = async (
           groupedInvoice._rowIndex,
           skipDuplicates,
           bypassStockCheck,
+          true,
         );
 
         if (result.skipped) {
@@ -2935,7 +3013,7 @@ router.get("/payment-status", async (req, res) => {
   }
 });
 
-router.post("/batch-delete",protect, allowAdminOnly, async (req, res) => {
+router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
 
@@ -3063,6 +3141,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
     let customerName = originalSale.customerName;
     let customerId = originalSale.customerId;
+    let customerCode = originalSale.customerCode;
 
     if (saleData.customerCode && saleData.customerCode.trim() !== "") {
       const customerResult = await getCustomerByCode(
@@ -3072,6 +3151,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       if (customerResult.success) {
         customerName = customerResult.customer.customerName;
         customerId = customerResult.customer.customerId;
+        customerCode = customerResult.customer.customerCode;
       }
     }
 
@@ -3217,7 +3297,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         mrName: saleData.mrName || originalSale.mrName,
         mrId: saleData.mrId || originalSale.mrId,
         customerName: customerName,
-        customerCode: saleData.customerCode || originalSale.customerCode,
+        customerCode: customerCode,
         customerId: customerId,
         products: updatedProducts,
         creditDays: Number(saleData.creditDays) || originalSale.creditDays || 0,
@@ -3293,23 +3373,22 @@ router.post("/create", async (req, res) => {
       throw new Error("Invoice number already exists");
     }
 
-    let customerName = "";
-    let customerId = null;
+    let customerName = data.customerName || "Unknown";
+    let customerId = data.customerId || null;
+    let customerCode = data.customerCode || "";
 
     if (data.customerCode && data.customerCode.trim() !== "") {
       const customerResult = await getCustomerByCode(
         data.customerCode,
         session,
       );
-      if (!customerResult.success) {
-        throw new Error(customerResult.message);
+      if (customerResult.success) {
+        customerName = customerResult.customer.customerName;
+        customerId = customerResult.customer.customerId;
+        customerCode = customerResult.customer.customerCode;
+      } else {
+        console.warn(`Customer not found for code: ${data.customerCode}, using "Unknown"`);
       }
-      customerName = customerResult.customer.customerName;
-      customerId = customerResult.customer.customerId;
-    } else if (data.customerName) {
-      customerName = data.customerName;
-    } else {
-      throw new Error("Customer code or customer name is required");
     }
 
     const processedProducts = [];
@@ -3571,7 +3650,7 @@ router.post("/create", async (req, res) => {
       mrName: mrName?.trim() || "No MR Name Provided",
       mrId: mrId || null,
       customerName: customerName,
-      customerCode: data.customerCode || "",
+      customerCode: customerCode,
       customerId: customerId,
       products: processedProducts,
       creditDays: Number(data.creditDays) || 0,

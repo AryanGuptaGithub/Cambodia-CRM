@@ -54,6 +54,19 @@ import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
+
+//suraj
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("token");
+  return {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+  };
+};
+
+// Stock Validation Modal Component
 const StockValidationModal = ({
   isOpen,
   onClose,
@@ -72,7 +85,6 @@ const StockValidationModal = ({
     message = "",
   } = stockValidationResult;
 
-  // Check if import is blocked due to insufficient stock
   const isBlocked =
     importBlocked ||
     (summary.hasInsufficientStock && summary.totalInsufficient > 0);
@@ -108,58 +120,6 @@ const StockValidationModal = ({
     }
   }, [stockIssues]);
 
-  const downloadStockIssuesCSV = useCallback(() => {
-    try {
-      const csvRows = [
-        [
-          "S.No",
-          "Product Name",
-          "Required Quantity",
-          "Available Stock",
-          "Shortage",
-          "Status",
-          "Issue Type",
-          "Affected Invoices",
-        ],
-        ...stockIssues.map((issue, index) => [
-          index + 1,
-          issue.productName,
-          issue.totalRequired,
-          issue.availableStock,
-          issue.insufficientQty || 0,
-          issue.productExists
-            ? issue.insufficient
-              ? "Insufficient Stock"
-              : "Available"
-            : "Product Not Found",
-          issue.message,
-          issue.requiredByInvoices?.length || 0,
-        ]),
-      ];
-
-      const csvContent = csvRows
-        .map((row) =>
-          row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
-        )
-        .join("\n");
-
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `stock_issues_${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      showToast("success", "Stock issues CSV downloaded");
-    } catch (error) {
-      console.error("Download error:", error);
-      showToast("error", "Failed to download CSV");
-    }
-  }, [stockIssues]);
-
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
       <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
@@ -190,24 +150,14 @@ const StockValidationModal = ({
               >
                 {stockIssues.length} Stock Issues
               </span>
-              <div className="flex gap-2">
-                <button
-                  onClick={downloadStockIssuesCSV}
-                  disabled={isDownloading}
-                  className="px-3 py-1 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Download as CSV"
-                >
-                  <Download size={14} /> CSV
-                </button>
-                <button
-                  onClick={downloadStockIssuesExcel}
-                  disabled={isDownloading}
-                  className="px-3 py-1 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Download as Excel"
-                >
-                  <Download size={14} /> Excel
-                </button>
-              </div>
+              <button
+                onClick={downloadStockIssuesExcel}
+                disabled={isDownloading}
+                className="px-3 py-1 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Download as Excel"
+              >
+                <Download size={14} /> Excel
+              </button>
             </div>
           </div>
 
@@ -258,9 +208,6 @@ const StockValidationModal = ({
                   2. Or reduce quantities in your import file
                   <br />
                   3. Then try the import again
-                  <br />
-                  <br />
-                  <strong>Cannot proceed until stock is available.</strong>
                 </>
               ) : (
                 <>
@@ -292,9 +239,6 @@ const StockValidationModal = ({
             <h3 className="font-medium text-gray-700">
               Stock Issues Details ({stockIssues.length} products)
             </h3>
-            <div className="text-sm text-gray-500">
-              Click download buttons above to get full report
-            </div>
           </div>
 
           <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-[400px] overflow-y-auto">
@@ -306,122 +250,66 @@ const StockValidationModal = ({
                   <th className="p-3 text-left">Available Stock</th>
                   <th className="p-3 text-left">Shortage</th>
                   <th className="p-3 text-left">Status</th>
-                  <th className="p-3 text-left">Issue Type</th>
                 </tr>
               </thead>
               <tbody>
-                {stockIssues.map((issue, idx) => {
-                  const isInsufficient =
-                    issue.productExists && issue.insufficient;
-                  const isMissing = !issue.productExists;
-
-                  return (
-                    <tr
-                      key={idx}
-                      className={`hover:${isInsufficient ? "bg-red-50" : "bg-yellow-50"} border-b ${
-                        isInsufficient
+                {stockIssues.map((issue, idx) => (
+                  <tr
+                    key={idx}
+                    className={`hover:bg-gray-50 border-b ${
+                      !issue.productExists
+                        ? "bg-yellow-50"
+                        : issue.insufficient
                           ? "bg-red-50"
-                          : isMissing
-                            ? "bg-yellow-50"
-                            : ""
-                      }`}
-                    >
-                      <td className="p-3 font-medium">
-                        <div className="text-gray-700">{issue.productName}</div>
-                        <div className="text-xs text-gray-500">
-                          Required by {issue.requiredByInvoices?.length || 0}{" "}
-                          invoices
-                        </div>
-                      </td>
-                      <td className="p-3 font-bold text-red-700">
-                        {issue.totalRequired}
-                      </td>
-                      <td className="p-3 font-medium text-green-700">
-                        {issue.availableStock}
-                      </td>
-                      <td className="p-3 font-bold text-red-800">
-                        {issue.insufficientQty || 0}
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`px-2 py-1 text-xs rounded ${
-                            isInsufficient
+                          : ""
+                    }`}
+                  >
+                    <td className="p-3 font-medium">{issue.productName}</td>
+                    <td className="p-3 font-bold text-red-700">
+                      {issue.totalRequired}
+                    </td>
+                    <td className="p-3 font-medium text-green-700">
+                      {issue.availableStock}
+                    </td>
+                    <td className="p-3 font-bold text-red-800">
+                      {issue.insufficientQty || 0}
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className={`px-2 py-1 text-xs rounded ${
+                          !issue.productExists
+                            ? "bg-yellow-100 text-yellow-800"
+                            : issue.insufficient
                               ? "bg-red-100 text-red-800"
-                              : isMissing
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                          }`}
-                        >
-                          {isInsufficient
-                            ? "❌ Insufficient Stock"
-                            : isMissing
-                              ? "⚠️ Product Not Found"
-                              : "Warning"}
-                        </span>
-                      </td>
-                      <td className="p-3 text-xs text-gray-600">
-                        {issue.message}
-                      </td>
-                    </tr>
-                  );
-                })}
+                              : "bg-green-100 text-green-800"
+                        }`}
+                      >
+                        {!issue.productExists
+                          ? "⚠️ Missing"
+                          : issue.insufficient
+                            ? "❌ Insufficient"
+                            : "✅ Available"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          </div>
-
-          <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <h4 className="font-medium text-gray-700 mb-2">Summary</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="text-center">
-                <div className="text-sm text-gray-600">Total Products</div>
-                <div className="text-lg font-bold text-gray-800">
-                  {stockIssues.length}
-                </div>
-              </div>
-              <div className="text-center">
-                <div className="text-sm text-gray-600">Blocking Issues</div>
-                <div className="text-lg font-bold text-red-700">
-                  {summary.totalInsufficient || 0}
-                </div>
-                <div className="text-xs text-red-600">(Insufficient Stock)</div>
-              </div>
-              <div className="text-center">
-                <div className="text-sm text-gray-600">Warning Issues</div>
-                <div className="text-lg font-bold text-yellow-700">
-                  {summary.missingProducts || 0}
-                </div>
-                <div className="text-xs text-yellow-600">
-                  (Missing Products)
-                </div>
-              </div>
-              <div className="text-center">
-                <div className="text-sm text-gray-600">Total Shortage</div>
-                <div className="text-lg font-bold text-red-800">
-                  {stockIssues.reduce(
-                    (sum, issue) => sum + (issue.insufficientQty || 0),
-                    0,
-                  )}
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
         <div className="flex justify-between items-center pt-4 border-t border-gray-300">
           <div className="text-sm text-gray-600">
-            {summary.totalInvoices || 0} invoices affected by stock issues
-            {isBlocked && " - Import is blocked due to insufficient stock"}
+            {summary.totalInvoices || 0} invoices affected
           </div>
           <div className="flex gap-3">
             {isBlocked ? (
-              <>
-                <button
-                  onClick={onClose}
-                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium cursor-pointer"
-                >
-                  Cancel Import
-                </button>
-              </>
+              <button
+                onClick={onClose}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium cursor-pointer"
+              >
+                Cancel Import
+              </button>
             ) : (
               <>
                 <button
@@ -457,88 +345,20 @@ const MRValidationModal = ({
 
   const { mrIssues = [], summary = {}, totalInvoices = 0 } = mrValidationResult;
 
-  const downloadMRIssuesExcel = () => {
-    try {
-      const excelData = mrIssues.map((issue, index) => ({
-        "S.No": index + 1,
-        "MR Name": issue.mrName,
-        "Error Message": issue.message,
-        "Affected Invoices": issue.affectedCount,
-        "Invoice Numbers":
-          issue.affectedInvoices?.map((inv) => inv.invoiceNumber).join(", ") ||
-          "N/A",
-        Customers:
-          issue.affectedInvoices?.map((inv) => inv.customerName).join(", ") ||
-          "N/A",
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(excelData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Invalid MRs");
-
-      const fileName = `invalid_mrs_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      XLSX.writeFile(wb, fileName);
-
-      showToast("success", "Invalid MRs report downloaded");
-    } catch (error) {
-      console.error("Download error:", error);
-      showToast("error", "Failed to download report");
-    }
-  };
-
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
       <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-        {/* ✅ CHANGED: Header shows WARNING (yellow) instead of ERROR (red) */}
         <div className="mb-6 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-5">
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-xl font-bold text-yellow-800 flex items-center gap-2">
               <AlertCircle size={24} />
-              ⚠️ Invalid MRs Detected - Review Required
+              ⚠️ Invalid MRs Detected
             </h2>
-            <div className="flex items-center gap-2">
-              <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                {mrIssues.length} Invalid MRs
-              </span>
-              <button
-                onClick={downloadMRIssuesExcel}
-                className="px-3 py-1 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 cursor-pointer flex items-center gap-1"
-                title="Download Excel Report"
-              >
-                <Download size={14} /> Excel
-              </button>
-            </div>
+            <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+              {mrIssues.length} Invalid MRs
+            </span>
           </div>
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-xs text-gray-600">Total Invoices</div>
-              <div className="text-xl font-bold text-gray-800">
-                {totalInvoices}
-              </div>
-            </div>
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-xs text-gray-600">Total MRs</div>
-              <div className="text-xl font-bold text-blue-800">
-                {summary.totalMRs || 0}
-              </div>
-            </div>
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-xs text-gray-600">Valid MRs</div>
-              <div className="text-xl font-bold text-green-800">
-                {summary.validMRs || 0}
-              </div>
-            </div>
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-xs text-gray-600">Invalid MRs</div>
-              <div className="text-xl font-bold text-yellow-800">
-                {summary.invalidMRs || 0}
-              </div>
-            </div>
-          </div>
-
-          {/* ✅ CHANGED: Warning message instead of error - allows proceeding */}
           <div className="p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
             <p className="text-sm text-yellow-900 font-medium">
               ⚠️ <strong>Warning:</strong> The following MRs are not registered
@@ -546,11 +366,13 @@ const MRValidationModal = ({
               <br />
               <br />
               <strong>These invoices will still be imported, but:</strong>
-              <ol className="list-decimal ml-6 mt-2">
-                <li>MR names will be saved as provided</li>
-                <li>You can add these MRs to Staff module later</li>
-                <li>Reports may show "Unknown" for unregistered MRs</li>
-              </ol>
+              <br />
+              1. MR names will be saved as provided
+              <br />
+              2. You can add these MRs to Staff module later
+              <br />
+              3. Reports may show "Unknown" for unregistered MRs
+              <br />
               <br />
               <strong className="text-yellow-700">
                 You can proceed with import if this is acceptable.
@@ -559,7 +381,6 @@ const MRValidationModal = ({
           </div>
         </div>
 
-        {/* Invalid MRs Table */}
         <div className="mb-6">
           <h3 className="font-medium text-gray-700 mb-3 text-lg">
             Invalid MRs List ({mrIssues.length} MRs)
@@ -569,11 +390,9 @@ const MRValidationModal = ({
             <table className="w-full text-sm">
               <thead className="bg-yellow-100 sticky top-0">
                 <tr>
-                  <th className="p-3 text-left font-bold">S.No</th>
                   <th className="p-3 text-left font-bold">MR Name</th>
                   <th className="p-3 text-left font-bold">Error</th>
                   <th className="p-3 text-left font-bold">Affected Invoices</th>
-                  <th className="p-3 text-left font-bold">Sample Invoices</th>
                 </tr>
               </thead>
               <tbody>
@@ -582,11 +401,8 @@ const MRValidationModal = ({
                     key={idx}
                     className="hover:bg-yellow-50 border-b border-yellow-100"
                   >
-                    <td className="p-3 font-medium text-gray-700">{idx + 1}</td>
-                    <td className="p-3">
-                      <div className="font-bold text-yellow-700">
-                        {issue.mrName}
-                      </div>
+                    <td className="p-3 font-bold text-yellow-700">
+                      {issue.mrName}
                     </td>
                     <td className="p-3 text-yellow-600 text-xs font-medium">
                       {issue.message}
@@ -596,28 +412,6 @@ const MRValidationModal = ({
                         {issue.affectedCount} invoices
                       </span>
                     </td>
-                    <td className="p-3">
-                      {issue.affectedInvoices &&
-                        issue.affectedInvoices.length > 0 && (
-                          <div className="text-xs text-gray-600">
-                            <div className="font-medium">
-                              {issue.affectedInvoices
-                                .slice(0, 3)
-                                .map((inv, i) => (
-                                  <div key={i} className="mb-1">
-                                    • {inv.invoiceNumber} ({inv.customerName})
-                                  </div>
-                                ))}
-                              {issue.affectedInvoices.length > 3 && (
-                                <div className="text-gray-500 italic">
-                                  ... and {issue.affectedInvoices.length - 3}{" "}
-                                  more
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -625,7 +419,6 @@ const MRValidationModal = ({
           </div>
         </div>
 
-        {/* ✅ CHANGED: Footer now shows "Proceed Anyway" button instead of blocking */}
         <div className="flex justify-between items-center pt-4 border-t-2 border-gray-300">
           <div className="text-sm text-gray-600">
             <strong className="text-yellow-600">Warning:</strong> MRs not found
@@ -653,99 +446,7 @@ const MRValidationModal = ({
   );
 };
 
-// ===================== FAILED INVOICES MODAL (Separated Component) =====================
-const FailedInvoicesModal = ({
-  isOpen,
-  onClose,
-  failedInvoices,
-  sessionId,
-}) => {
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [expandedRow, setExpandedRow] = useState(null);
-
-  const toggleRowExpand = useCallback(
-    (invoiceNumber) => {
-      setExpandedRow(expandedRow === invoiceNumber ? null : invoiceNumber);
-    },
-    [expandedRow],
-  );
-
-  const downloadFailedReport = useCallback(async () => {
-    try {
-      setIsDownloading(true);
-
-      let dataToDownload = failedInvoices;
-
-      if (sessionId) {
-        try {
-          const response = await axios.get(
-            `${backendUrl}/api/sales/import/failed/${sessionId}`,
-          );
-          if (response.data.success && response.data.data.failedInvoices) {
-            dataToDownload = response.data.data.failedInvoices;
-          }
-        } catch (fetchError) {
-          console.error("Failed to fetch failed invoices:", fetchError);
-        }
-      }
-
-      const csvRows = [
-        [
-          "Row",
-          "Invoice Number",
-          "Customer Name",
-          "MR Name",
-          "Product",
-          "Error Type",
-          "Error Message",
-          "Timestamp",
-          "Products Details",
-        ],
-        ...dataToDownload.map((inv, index) => [
-          inv.row || index + 1,
-          inv.invoiceNumber || "N/A",
-          inv.customerName || inv.originalData?.customerName || "N/A",
-          inv.mrName || inv.originalData?.mrName || "N/A",
-          inv.productName || "N/A",
-          inv.type || "processing_error",
-          inv.error || inv.message || "Unknown error",
-          inv.timestamp || new Date().toISOString(),
-          inv.products
-            ? JSON.stringify(inv.products)
-            : inv.data?.products
-              ? JSON.stringify(inv.data.products)
-              : "N/A",
-        ]),
-      ];
-
-      const csvContent = csvRows
-        .map((row) =>
-          row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
-        )
-        .join("\n");
-
-      const blob = new Blob([csvContent], {
-        type: "text/csv;charset=utf-8;",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `failed_invoices_${new Date()
-        .toISOString()
-        .slice(0, 10)}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      showToast("success", "Failed invoices report downloaded");
-    } catch (error) {
-      showToast("error", "Failed to download report");
-    } finally {
-      setIsDownloading(false);
-    }
-  }, [failedInvoices, sessionId]);
-
+const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
   if (!isOpen) return null;
 
   return ReactDOM.createPortal(
@@ -763,21 +464,6 @@ const FailedInvoicesModal = ({
         </h2>
 
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="text-sm text-gray-600">
-              These invoices could not be imported. Please review and correct
-              the errors.
-            </div>
-            <button
-              onClick={downloadFailedReport}
-              disabled={isDownloading}
-              className="flex items-center gap-2 px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download size={16} />
-              {isDownloading ? "Downloading..." : "Download Report"}
-            </button>
-          </div>
-
           <div className="overflow-x-auto border border-gray-200 rounded-lg">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
@@ -786,50 +472,20 @@ const FailedInvoicesModal = ({
                   <th className="p-3 text-left border-b">Invoice #</th>
                   <th className="p-3 text-left border-b">Customer</th>
                   <th className="p-3 text-left border-b">MR Name</th>
-                  <th className="p-3 text-left border-b">Product</th>
                   <th className="p-3 text-left border-b">Error Message</th>
                 </tr>
               </thead>
               <tbody>
                 {failedInvoices.slice(0, 50).map((inv, idx) => (
-                  <React.Fragment key={idx}>
-                    <tr className="hover:bg-red-50 border-b">
-                      <td className="p-3 font-mono">{inv.row || idx + 1}</td>
-                      <td className="p-3 font-medium">{inv.invoiceNumber}</td>
-                      <td className="p-3">{inv.customerName || "N/A"}</td>
-                      <td className="p-3">{inv.mrName || "N/A"}</td>
-                      <td className="p-3">{inv.productName || "N/A"}</td>
-                      <td
-                        className="p-3 text-red-600 max-w-xs"
-                        title={inv.error || inv.message}
-                      >
-                        <div className="truncate">
-                          {inv.error || inv.message || "Unknown error"}
-                        </div>
-                      </td>
-                    </tr>
-                    {expandedRow === inv.invoiceNumber && (
-                      <tr className="bg-gray-50">
-                        <td colSpan="6" className="p-4">
-                          <div className="mb-2">
-                            <strong>Additional Details:</strong>
-                          </div>
-                          <div className="text-sm">
-                            <p>
-                              <strong>Timestamp:</strong>{" "}
-                              {inv.timestamp || "N/A"}
-                            </p>
-                            <p>
-                              <strong>Products Details:</strong>{" "}
-                              {inv.products
-                                ? JSON.stringify(inv.products)
-                                : "N/A"}
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
+                  <tr key={idx} className="hover:bg-red-50 border-b">
+                    <td className="p-3 font-mono">{inv.row || idx + 1}</td>
+                    <td className="p-3 font-medium">{inv.invoiceNumber}</td>
+                    <td className="p-3">{inv.customerName || "N/A"}</td>
+                    <td className="p-3">{inv.mrName || "N/A"}</td>
+                    <td className="p-3 text-red-600 max-w-xs">
+                      {inv.error || inv.message || "Unknown error"}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -842,20 +498,12 @@ const FailedInvoicesModal = ({
           </div>
         </div>
 
-        <div className="flex justify-between border-t border-gray-300 pt-4">
+        <div className="flex justify-end border-t border-gray-300 pt-4">
           <button
             onClick={onClose}
             className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
           >
             Close
-          </button>
-          <button
-            onClick={downloadFailedReport}
-            disabled={isDownloading}
-            className="px-5 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download size={16} />
-            {isDownloading ? "Downloading..." : "Download CSV"}
           </button>
         </div>
       </div>
@@ -864,45 +512,35 @@ const FailedInvoicesModal = ({
   );
 };
 
-// ===================== IMPORT SALES MODAL =====================
 const ImportSalesModal = ({
   isOpen,
   onClose,
   onImportSuccess,
   mrList = [],
-  customerList = [],
-  productsList = [],
 }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [importMessage, setImportMessage] = useState("");
   const [importErrorDetails, setImportErrorDetails] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
-  const [showValidationErrors, setShowValidationErrors] = useState(false);
+  const [showParsedSection, setShowParsedSection] = useState(false);
   const [importStep, setImportStep] = useState("");
   const [isCancelled, setIsCancelled] = useState(false);
   const abortControllerRef = useRef(null);
   const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [showParsedSection, setShowParsedSection] = useState(false);
-
-  const [failedInvoices, setFailedInvoices] = useState([]);
-  const [showFailedInvoices, setShowFailedInvoices] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
-  const [showStockValidation, setShowStockValidation] = useState(false);
-  const [stockValidationResult, setStockValidationResult] = useState(null);
-  const [isValidatingStock, setIsValidatingStock] = useState(false);
-  const [shouldProceedDespiteStockIssues, setShouldProceedDespiteStockIssues] =
-    useState(false);
-
-  // MR Validation states
-  const [mrValidationResult, setMrValidationResult] = useState(null);
-  const [showMRValidation, setShowMRValidation] = useState(false);
-  const [isValidatingMR, setIsValidatingMR] = useState(false);
-
-  // Progress state
+  const [importSaleType, setImportSaleType] = useState("normal");
   const [serverProgress, setServerProgress] = useState(0);
   const [serverProcessed, setServerProcessed] = useState(0);
   const [serverTotal, setServerTotal] = useState(0);
+  const [sessionId, setSessionId] = useState(null);
+  const [failedInvoices, setFailedInvoices] = useState([]);
+  const [showFailedInvoices, setShowFailedInvoices] = useState(false);
+  const [showStockValidation, setShowStockValidation] = useState(false);
+  const [stockValidationResult, setStockValidationResult] = useState(null);
+  const [isValidatingStock, setIsValidatingStock] = useState(false);
+  const [mrValidationResult, setMrValidationResult] = useState(null);
+  const [showMRValidation, setShowMRValidation] = useState(false);
+  const [isValidatingMR, setIsValidatingMR] = useState(false);
 
   const pollingIntervalRef = useRef(null);
 
@@ -913,108 +551,6 @@ const ImportSalesModal = ({
     }
   }, []);
 
-  // MR Validation function
-  const validateMRsBeforeImport = async (invoices) => {
-    try {
-      setIsValidatingMR(true);
-      setImportMessage(`🔍 Validating MRs for ${invoices.length} invoices...`);
-
-      const mrNames = new Set();
-      const mrToInvoices = new Map(); // Track which invoices use which MR
-
-      // Collect all unique MR names and track their invoices
-      for (const invoice of invoices) {
-        if (invoice.mrName && invoice.mrName.trim()) {
-          const mrName = invoice.mrName.trim();
-          mrNames.add(mrName);
-
-          if (!mrToInvoices.has(mrName)) {
-            mrToInvoices.set(mrName, []);
-          }
-          mrToInvoices.get(mrName).push({
-            invoiceNumber: invoice.invoiceNumber,
-            customerName: invoice.customerName,
-            products: invoice.products?.length || 0,
-          });
-        }
-      }
-
-      if (mrNames.size === 0) {
-        setIsValidatingMR(false);
-        return {
-          mrIssues: [],
-          totalInvoices: invoices.length,
-          summary: {
-            totalMRs: 0,
-            validMRs: 0,
-            invalidMRs: 0,
-          },
-        };
-      }
-
-      // Validate MRs via API
-      const response = await axios.post(`${backendUrl}/api/sales/validate-mr`, {
-        mrNames: Array.from(mrNames),
-      });
-
-      if (response.data.success) {
-        setIsValidatingMR(false);
-        return {
-          mrIssues: [],
-          totalInvoices: invoices.length,
-          summary: {
-            totalMRs: mrNames.size,
-            validMRs: mrNames.size,
-            invalidMRs: 0,
-          },
-        };
-      }
-
-      // Build MR issues with affected invoices
-      const mrIssues = [];
-      const invalidMRMap = new Map();
-
-      response.data.invalidMRs.forEach((invalidMR) => {
-        const affectedInvoices = mrToInvoices.get(invalidMR.mrName) || [];
-
-        invalidMRMap.set(invalidMR.mrName, {
-          mrName: invalidMR.mrName,
-          message: invalidMR.message,
-          affectedInvoices: affectedInvoices,
-          affectedCount: affectedInvoices.length,
-        });
-      });
-
-      mrIssues.push(...Array.from(invalidMRMap.values()));
-      setIsValidatingMR(false);
-
-      return {
-        mrIssues,
-        totalInvoices: invoices.length,
-        summary: {
-          totalMRs: mrNames.size,
-          validMRs: mrNames.size - mrIssues.length,
-          invalidMRs: mrIssues.length,
-        },
-      };
-    } catch (error) {
-      console.error("MR validation error:", error);
-      setIsValidatingMR(false);
-
-      return {
-        mrIssues: [],
-        totalInvoices: invoices.length,
-        summary: {
-          totalMRs: 0,
-          validMRs: 0,
-          invalidMRs: 0,
-        },
-        error: error.message,
-      };
-    }
-  };
-
-  // Enhanced reset modal function
   const resetModal = useCallback(
     (fullReset = true) => {
       if (fullReset) {
@@ -1024,11 +560,9 @@ const ImportSalesModal = ({
         setSessionId(null);
         setStockValidationResult(null);
         setMrValidationResult(null);
-        setShouldProceedDespiteStockIssues(false);
       }
 
       setShowParsedSection(false);
-      setShowValidationErrors(false);
       setShowFailedInvoices(false);
       setShowStockValidation(false);
       setShowMRValidation(false);
@@ -1042,29 +576,19 @@ const ImportSalesModal = ({
       setIsProcessingFile(false);
       setImportStep("");
       setIsCancelled(false);
-
       clearPolling();
 
-      // Clear any active file input
       const fileInput = document.querySelector('input[type="file"]');
       if (fileInput) fileInput.value = "";
     },
     [clearPolling],
   );
 
-  // Handle modal close properly
   const handleClose = useCallback(() => {
-    if (
-      isImporting ||
-      isUploading ||
-      isProcessingFile ||
-      isValidatingStock ||
-      isValidatingMR
-    ) {
+    if (isImporting || isUploading || isProcessingFile) {
       const shouldCancel = window.confirm(
-        "Import/Validation is in progress. Are you sure you want to cancel and close?",
+        "Import is in progress. Are you sure you want to cancel and close?",
       );
-
       if (shouldCancel) {
         handleCancelImport();
         setTimeout(() => {
@@ -1074,253 +598,484 @@ const ImportSalesModal = ({
       }
       return;
     }
-
     resetModal();
     onClose();
-  }, [
-    isImporting,
-    isUploading,
-    isProcessingFile,
-    isValidatingStock,
-    isValidatingMR,
-    resetModal,
-    onClose,
-  ]);
+  }, [isImporting, isUploading, isProcessingFile, resetModal, onClose]);
 
-  // Proper cancel import function
   const handleCancelImport = useCallback(() => {
     setIsCancelled(true);
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     clearPolling();
     setIsImporting(false);
-    setIsValidatingStock(false);
-    setIsValidatingMR(false);
     setImportStep("Import cancelled by user");
     showToast("info", "Import cancelled");
   }, [clearPolling]);
 
-  // Parse Excel date function - IMPROVED
+  // Parse Excel date function
   const parseExcelDate = useCallback((value) => {
     if (value === null || value === undefined || value === "") {
       return new Date().toISOString().split("T")[0];
     }
 
     try {
-      // If it's already a Date object
       if (value instanceof Date && !isNaN(value)) {
         return value.toISOString().split("T")[0];
       }
 
-      // If it's an Excel serial date (number)
       if (typeof value === "number") {
-        // Excel incorrectly treats 1900 as a leap year
         const excelEpoch = new Date(1899, 11, 30);
         const date = new Date(excelEpoch.getTime() + (value - 1) * 86400000);
         return date.toISOString().split("T")[0];
       }
 
-      // If it's a string
       if (typeof value === "string") {
         const str = value.trim();
 
-        // Remove any time portion
-        const dateStr = str.split(" ")[0].split("T")[0];
+        const ddmmyyyyPattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+        const ddmmyyyyMatch = str.match(ddmmyyyyPattern);
 
-        // Try direct parsing first
-        const parsed = new Date(dateStr);
+        if (ddmmyyyyMatch) {
+          const day = parseInt(ddmmyyyyMatch[1], 10);
+          const month = parseInt(ddmmyyyyMatch[2], 10) - 1;
+          const year = parseInt(ddmmyyyyMatch[3], 10);
+          const date = new Date(year, month, day);
+          if (!isNaN(date.getTime())) {
+            return date.toISOString().split("T")[0];
+          }
+        }
+
+        const yyyymmddPattern = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
+        const yyyymmddMatch = str.match(yyyymmddPattern);
+
+        if (yyyymmddMatch) {
+          const year = parseInt(yyyymmddMatch[1], 10);
+          const month = parseInt(yyyymmddMatch[2], 10) - 1;
+          const day = parseInt(yyyymmddMatch[3], 10);
+          const date = new Date(year, month, day);
+          if (!isNaN(date.getTime())) {
+            return date.toISOString().split("T")[0];
+          }
+        }
+
+        const parsed = new Date(str);
         if (!isNaN(parsed.getTime())) {
           return parsed.toISOString().split("T")[0];
         }
-
-        // Try common date formats
-        const formats = [
-          // DD/MM/YYYY or MM/DD/YYYY
-          /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
-          // YYYY-MM-DD
-          /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
-          // DD-MMM-YY
-          /^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/i,
-          // YYYY/MM/DD
-          /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/,
-        ];
-
-        for (const format of formats) {
-          const match = dateStr.match(format);
-          if (match) {
-            let year, month, day;
-
-            if (format === formats[0]) {
-              // DD/MM/YYYY or MM/DD/YYYY
-              const part1 = parseInt(match[1]);
-              const part2 = parseInt(match[2]);
-              year = parseInt(match[3]);
-
-              if (part1 > 31) {
-                // Must be YYYY-MM-DD
-                year = part1;
-                month = part2 - 1;
-                day = parseInt(match[3]);
-              } else if (part2 > 12) {
-                // DD/MM/YYYY
-                day = part1;
-                month = part2 - 1;
-              } else {
-                // Ambiguous, try to guess
-                if (part1 <= 12 && part2 <= 31) {
-                  // Assume MM/DD/YYYY
-                  month = part1 - 1;
-                  day = part2;
-                } else {
-                  // Assume DD/MM/YYYY
-                  day = part1;
-                  month = part2 - 1;
-                }
-              }
-            } else if (format === formats[1] || format === formats[3]) {
-              // YYYY-MM-DD or YYYY/MM/DD
-              year = parseInt(match[1]);
-              month = parseInt(match[2]) - 1;
-              day = parseInt(match[3]);
-            } else if (format === formats[2]) {
-              // DD-MMM-YY
-              day = parseInt(match[1]);
-              const monthNames = {
-                jan: 0,
-                feb: 1,
-                mar: 2,
-                apr: 3,
-                may: 4,
-                jun: 5,
-                jul: 6,
-                aug: 7,
-                sep: 8,
-                oct: 9,
-                nov: 10,
-                dec: 11,
-              };
-              const monthAbbr = match[2].toLowerCase().substring(0, 3);
-              month = monthNames[monthAbbr];
-              year = parseInt(match[3]);
-              if (year < 100) {
-                year = year < 50 ? 2000 + year : 1900 + year;
-              }
-            }
-
-            const date = new Date(year, month, day);
-            if (!isNaN(date.getTime())) {
-              return date.toISOString().split("T")[0];
-            }
-          }
-        }
       }
 
-      // Final fallback
       return new Date().toISOString().split("T")[0];
-    } catch (error) {
+    } catch {
       return new Date().toISOString().split("T")[0];
     }
   }, []);
 
-  // Parse Excel quantity function - IMPROVED
   const parseExcelQuantity = useCallback((value) => {
     if (value === null || value === undefined || value === "") return 0;
 
     try {
-      if (typeof value === "number") {
-        return Math.max(0, value);
-      }
+      if (typeof value === "number") return Math.max(0, value);
 
       const str = String(value).trim();
-      // Remove non-numeric characters except decimal point and minus sign
       const cleaned = str.replace(/,/g, "").replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
 
       if (isNaN(num) || !isFinite(num)) return 0;
-
       return Math.max(0, num);
-    } catch (error) {
+    } catch {
       return 0;
     }
   }, []);
 
-  // Optimized product stock check
-  const findProductStockInHandOptimized = useCallback(
-    async (productName, requiredQty) => {
-      try {
-        const response = await axios.post(
-          `${backendUrl}/api/sales/check-stock`,
-          {
-            productName,
-            requiredQty,
-          },
-          { timeout: 5000 },
-        );
+  const parseExcelAmount = useCallback((value) => {
+    if (value === null || value === undefined || value === "") return 0;
 
-        if (response.data?.success !== false) {
-          const stockData = response.data;
-          const availableStock =
-            stockData.availableStock ||
-            stockData.totalStockCalculated ||
-            stockData.totalStockField ||
-            0;
+    try {
+      if (typeof value === "number") return Math.max(0, value);
 
-          return {
-            success: true,
-            productName,
-            actualProductName: stockData.productName || productName,
-            availableStock,
-            requiredQty,
-            insufficient: availableStock < requiredQty,
-            insufficientQty: Math.max(0, requiredQty - availableStock),
-            calculationMethod: "backend_api",
-            message:
-              availableStock < requiredQty
-                ? `Insufficient stock: Available ${availableStock}, Required ${requiredQty}`
-                : `Stock available: ${availableStock}`,
-            rawResponse: stockData,
+      const str = String(value).trim();
+      const cleaned = str.replace(/[$,\s]/g, "").replace(/[^\d.-]/g, "");
+      const num = parseFloat(cleaned);
+
+      if (isNaN(num) || !isFinite(num)) return 0;
+      return Math.max(0, num);
+    } catch {
+      return 0;
+    }
+  }, []);
+
+// Main Excel parsing function - FIXED for your specific format with headers
+// Main Excel parsing function - FIXED for your specific format with headers
+const parseExcelFile = useCallback(
+  async (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = (evt) => {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, {
+            type: "array",
+            cellDates: true,
+            cellNF: false,
+            cellText: true,
+          });
+
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+
+          // Convert to array of arrays (raw values)
+          const rows = XLSX.utils.sheet_to_json(worksheet, {
+            header: 1,
+            defval: "",
+            raw: true,
+          });
+
+          console.log("RAW EXCEL DATA - Full rows:", rows);
+          console.log("Number of rows:", rows.length);
+
+          // Keywords that must be present in a valid header row (case‑insensitive)
+          const requiredHeaderKeywords = [
+            "invoice",
+            "product name",
+            "sales qty",
+          ];
+
+          // Helper: check if a row could be a header
+          const isHeaderRow = (row) => {
+            if (!Array.isArray(row) || row.length === 0) return false;
+            const rowString = row
+              .map((cell) => String(cell || "").toLowerCase().trim())
+              .join(" ");
+            // All required keywords must appear somewhere in the row
+            return requiredHeaderKeywords.every((kw) =>
+              rowString.includes(kw.toLowerCase())
+            );
           };
+
+          // Find the index of the header row
+          let headerIndex = -1;
+          for (let i = 0; i < rows.length; i++) {
+            if (isHeaderRow(rows[i])) {
+              headerIndex = i;
+              break;
+            }
+          }
+
+          if (headerIndex === -1) {
+            reject(
+              new Error(
+                "Could not find header row. Ensure the file contains a row with column names like 'Invoice #', 'Product Name', 'Sales Qty'."
+              )
+            );
+            return;
+          }
+
+          const headerRow = rows[headerIndex];
+          console.log("Detected header row at index", headerIndex, ":", headerRow);
+
+          // Map column headers to indices
+          const headerMap = {};
+          if (headerRow && Array.isArray(headerRow)) {
+            headerRow.forEach((header, index) => {
+              if (header && typeof header === "string") {
+                const headerLower = header.toLowerCase().trim();
+                headerMap[headerLower] = index;
+                console.log(`Header "${header}" at column ${index}`);
+              }
+            });
+          }
+
+          console.log("Header map:", headerMap);
+
+          // Define column indices based on your known header structure
+          const columnIndices = {
+            recordingDate:
+              headerMap["recording date"] !== undefined
+                ? headerMap["recording date"]
+                : 0,
+            invoiceNumber:
+              headerMap["invoice #"] !== undefined
+                ? headerMap["invoice #"]
+                : headerMap["invoice"] !== undefined
+                ? headerMap["invoice"]
+                : 1,
+            invoiceDate:
+              headerMap["invoice date"] !== undefined
+                ? headerMap["invoice date"]
+                : 2,
+            mrName:
+              headerMap["mr name"] !== undefined ? headerMap["mr name"] : 3,
+            customerCode:
+              headerMap["customer code"] !== undefined
+                ? headerMap["customer code"]
+                : 4,
+            productName:
+              headerMap["product name"] !== undefined
+                ? headerMap["product name"]
+                : 5,
+            salesQty:
+              headerMap["sales qty"] !== undefined ? headerMap["sales qty"] : 6,
+            bonusQty:
+              headerMap["bonus qty"] !== undefined ? headerMap["bonus qty"] : 7,
+            sellingPrice:
+              headerMap["selling price"] !== undefined
+                ? headerMap["selling price"]
+                : 8,
+            discount:
+              headerMap["discount"] !== undefined ? headerMap["discount"] : 9,
+            creditDays:
+              headerMap["credit days"] !== undefined
+                ? headerMap["credit days"]
+                : 10,
+            paidAmount:
+              headerMap["paid amount"] !== undefined
+                ? headerMap["paid amount"]
+                : 11,
+            paymentStatus:
+              headerMap["payment status"] !== undefined
+                ? headerMap["payment status"]
+                : 12,
+            remarks:
+              headerMap["remarks"] !== undefined ? headerMap["remarks"] : 13,
+          };
+
+          console.log("Using column indices:", columnIndices);
+
+          // Data rows start after the header row
+          const dataRows = rows.slice(headerIndex + 1);
+          console.log(`Processing ${dataRows.length} data rows`);
+
+          const groupedInvoices = {};
+          const validationErrors = [];
+          let validRowCount = 0;
+          let emptyRowCount = 0;
+
+          for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
+            const row = dataRows[rowIndex];
+            const excelRowNumber = headerIndex + 2 + rowIndex; // correct row number for user feedback
+
+            // Skip completely empty rows
+            if (
+              !row ||
+              !Array.isArray(row) ||
+              row.length === 0 ||
+              row.every(
+                (cell) =>
+                  cell === null ||
+                  cell === undefined ||
+                  String(cell).trim() === ""
+              )
+            ) {
+              console.log(`Row ${excelRowNumber} is empty, skipping`);
+              emptyRowCount++;
+              continue;
+            }
+
+            console.log(`\n--- Processing row ${excelRowNumber} ---`);
+            console.log("Raw row data:", row);
+
+            const getValue = (index) => {
+              if (index === -1 || index >= row.length) return "";
+              const value = row[index];
+              if (value === null || value === undefined) return "";
+              const strValue = String(value).trim();
+              console.log(
+                `  Col ${index}: "${strValue}" (original: ${value}, type: ${typeof value})`
+              );
+              return strValue;
+            };
+
+            const invoiceNumber = getValue(columnIndices.invoiceNumber);
+            const invoiceDate = getValue(columnIndices.invoiceDate);
+            const recordingDate =
+              getValue(columnIndices.recordingDate) || invoiceDate;
+            const mrName = getValue(columnIndices.mrName);
+            const customerCode = getValue(columnIndices.customerCode);
+            const productName = getValue(columnIndices.productName);
+
+            const salesQty = parseExcelQuantity(
+              getValue(columnIndices.salesQty)
+            );
+            const bonusQty = parseExcelQuantity(
+              getValue(columnIndices.bonusQty)
+            );
+            const sellingPrice = parseExcelAmount(
+              getValue(columnIndices.sellingPrice)
+            );
+            const discount = parseExcelAmount(getValue(columnIndices.discount));
+            const creditDays = parseExcelAmount(
+              getValue(columnIndices.creditDays)
+            );
+            const paidAmount = parseExcelAmount(
+              getValue(columnIndices.paidAmount)
+            );
+            const paymentStatus = getValue(columnIndices.paymentStatus);
+            const remarks = getValue(columnIndices.remarks);
+
+            console.log(`Parsed values for row ${excelRowNumber}:`, {
+              invoiceNumber,
+              invoiceDate,
+              recordingDate,
+              mrName,
+              customerCode,
+              productName,
+              salesQty,
+              bonusQty,
+              sellingPrice,
+              discount,
+              creditDays,
+              paidAmount,
+              paymentStatus,
+              remarks,
+            });
+
+            const rowErrors = [];
+
+            if (!invoiceNumber || invoiceNumber === "") {
+              rowErrors.push("Invoice number is required");
+            }
+
+            if (!productName || productName === "") {
+              rowErrors.push("Product name is required");
+            }
+
+            if (salesQty <= 0 && bonusQty <= 0) {
+              rowErrors.push("Total quantity must be greater than 0");
+            }
+
+            if (rowErrors.length > 0) {
+              console.log(
+                `Row ${excelRowNumber} validation errors:`,
+                rowErrors
+              );
+              validationErrors.push({
+                row: excelRowNumber,
+                invoiceNumber: invoiceNumber || "N/A",
+                productName: productName || "N/A",
+                mrName: mrName || "Unknown",
+                error: rowErrors.join("; "),
+                type: "validation",
+              });
+              continue;
+            }
+
+            validRowCount++;
+
+            // Calculate net amount
+            const amount = sellingPrice * salesQty;
+            const netSellingAmount = amount - discount;
+
+            if (!groupedInvoices[invoiceNumber]) {
+              groupedInvoices[invoiceNumber] = {
+                recordingDate: parseExcelDate(recordingDate),
+                invoiceNumber,
+                invoiceDate: parseExcelDate(invoiceDate),
+                mrName: mrName || "Unknown",
+                customerName: "Unknown",
+                customerCode: customerCode || "",
+                customerId: "",
+                creditDays: creditDays || 0,
+                paidAmount: paidAmount || 0,
+                products: [],
+                totalAmount: 0,
+                dueAmount: 0,
+                paymentStatus: paymentStatus || "Credit",
+                remark: remarks || "",
+              };
+              console.log(`Created new invoice group: ${invoiceNumber}`);
+            }
+
+            groupedInvoices[invoiceNumber].products.push({
+              productName,
+              salesQty,
+              bonusQty,
+              totalQty: salesQty + bonusQty,
+              sellingPrice,
+              amount: netSellingAmount,
+              discount,
+              netSellingAmount,
+              averageUnitPrice:
+                salesQty + bonusQty > 0
+                  ? netSellingAmount / (salesQty + bonusQty)
+                  : 0,
+              lc: 0,
+              profitLoss: 0,
+              isProductAccept: true,
+              remark: "",
+            });
+
+            groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
+          }
+
+          console.log("\n=== PARSING SUMMARY ===");
+          console.log(`Total rows processed: ${rows.length}`);
+          console.log(`Data rows: ${dataRows.length}`);
+          console.log(`Empty rows skipped: ${emptyRowCount}`);
+          console.log(`Valid rows: ${validRowCount}`);
+          console.log(`Validation errors: ${validationErrors.length}`);
+          console.log("Grouped invoices:", Object.keys(groupedInvoices));
+
+          const validInvoices = Object.values(groupedInvoices).filter(
+            (inv) => inv.products && inv.products.length > 0
+          );
+
+          validInvoices.forEach((inv) => {
+            inv.dueAmount = Math.max(
+              0,
+              inv.totalAmount - (inv.paidAmount || 0)
+            );
+          });
+
+          console.log(`\nFinal result: ${validInvoices.length} valid invoices`);
+
+          if (validInvoices.length === 0) {
+            if (validationErrors.length > 0) {
+              const errorSummary = validationErrors
+                .slice(0, 3)
+                .map((err) => `Row ${err.row}: ${err.error}`)
+                .join("; ");
+
+              reject(
+                new Error(
+                  `No valid invoices found. ${validationErrors.length} validation errors. First errors: ${errorSummary}`
+                )
+              );
+            } else {
+              reject(
+                new Error(
+                  "No valid invoices found in the file. Please check that your Excel file has data rows after the header."
+                )
+              );
+            }
+            return;
+          }
+
+          resolve({ validInvoices, validationErrors });
+        } catch (error) {
+          console.error("Error parsing Excel:", error);
+          reject(error);
         }
+      };
 
-        return {
-          success: false,
-          productName,
-          actualProductName: productName,
-          availableStock: 0,
-          requiredQty,
-          insufficient: true,
-          insufficientQty: requiredQty,
-          calculationMethod: "product_not_found",
-          message: "Product not found in inventory",
-        };
-      } catch (error) {
-        console.error("Stock check error:", error);
-        return {
-          success: false,
-          productName,
-          actualProductName: productName,
-          availableStock: 0,
-          requiredQty,
-          insufficient: true,
-          insufficientQty: requiredQty,
-          calculationMethod: "error_fallback",
-          message: `Error checking stock: ${error.message || "Unknown error"}`,
-        };
-      }
-    },
-    [],
-  );
+      reader.onerror = () => {
+        reject(new Error("Failed to read file"));
+      };
 
-  // Enhanced file upload handler
+      reader.readAsArrayBuffer(file);
+    });
+  },
+  [parseExcelDate, parseExcelQuantity, parseExcelAmount]
+);
+
+  // Handle file upload
   const handleFileUpload = useCallback(
     async (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
-      // Validate file type
       const validExtensions = [".xlsx", ".xls", ".csv"];
       const fileExtension = "." + file.name.split(".").pop().toLowerCase();
+
       if (!validExtensions.includes(fileExtension)) {
         showToast(
           "error",
@@ -1340,348 +1095,18 @@ const ImportSalesModal = ({
       setIsProcessingFile(true);
 
       try {
-        const data = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (evt) => resolve(evt.target.result);
-          reader.onerror = () => reject(new Error("Failed to read file"));
-          reader.readAsArrayBuffer(file);
-        });
-
         setImportMessage("Processing Excel data...");
-        const workbook = XLSX.read(new Uint8Array(data), {
-          type: "array",
-          cellDates: true,
-          cellNF: false,
-          cellText: false,
-        });
-
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-          raw: false,
-        });
-
-        setImportMessage("Parsing rows...");
-
-        // Find header row
-        let headerIdx = -1;
-        const headerKeywords = [
-          "invoice",
-          "customer",
-          "mr",
-          "product",
-          "sales",
-          "qty",
-          "quantity",
-          "amount",
-          "price",
-          "date",
-          "status",
-        ];
-
-        for (let i = 0; i < Math.min(rows.length, 20); i++) {
-          const row = rows[i];
-          let headerMatchCount = 0;
-
-          for (let j = 0; j < row.length; j++) {
-            const cellValue = String(row[j] || "")
-              .toLowerCase()
-              .trim();
-
-            if (headerKeywords.some((keyword) => cellValue.includes(keyword))) {
-              headerMatchCount++;
-            }
-          }
-
-          if (headerMatchCount >= 3) {
-            headerIdx = i;
-            break;
-          }
-        }
-
-        if (headerIdx === -1) {
-          throw new Error(
-            "Could not find header row. Please make sure your Excel file has proper column headers.",
-          );
-        }
-
-        const headers = rows[headerIdx].map((h) => String(h || "").trim());
-
-        // Map column indices
-        const getColIndex = (possibleNames) => {
-          for (const name of possibleNames) {
-            const lowerName = name.toLowerCase();
-            for (let i = 0; i < headers.length; i++) {
-              if (headers[i].toLowerCase().includes(lowerName)) {
-                return i;
-              }
-            }
-          }
-          return -1;
-        };
-
-        const columnIndices = {
-          invoiceNumber: getColIndex([
-            "Invoice #",
-            "Invoice",
-            "InvoiceNumber",
-            "Invoice No",
-            "INVOICE",
-          ]),
-          invoiceDate: getColIndex([
-            "Invoice Date",
-            "Date",
-            "INVOICE DATE",
-            "Inv Date",
-          ]),
-          recordingDate: getColIndex([
-            "Recording Date",
-            "Record Date",
-            "Entry Date",
-          ]),
-          mrName: getColIndex([
-            "MR Name",
-            "MR",
-            "SalesPerson",
-            "Sales Person",
-            "SALESMAN",
-          ]),
-          customerCode: getColIndex([
-            "Customer Code",
-            "Code",
-            "CUST CODE",
-            "CustomerCode",
-          ]),
-          customerName: getColIndex([
-            "Customer Name",
-            "Customer",
-            "CUSTOMER NAME",
-            "Party Name",
-          ]),
-          productName: getColIndex([
-            "Product Name",
-            "Product",
-            "PRODUCT NAME",
-            "Item",
-          ]),
-          salesQty: getColIndex([
-            "Sales Qty",
-            "Quantity",
-            "SalesQuantity",
-            "Qty",
-            "QTY",
-          ]),
-          bonusQty: getColIndex([
-            "Bonus Qty",
-            "Bonus",
-            "BonusQuantity",
-            "Bonus Qty.",
-          ]),
-          sellingPrice: getColIndex([
-            "Selling Price",
-            "Price",
-            "Unit Price",
-            "Rate",
-            "PRICE",
-          ]),
-          amount: getColIndex(["Amount", "AMOUNT", "Total Amount"]),
-          discount: getColIndex(["Discount", "Disc", "DISCOUNT"]),
-          netAmount: getColIndex(["Net Amount", "Net", "NET AMOUNT"]),
-          dueDate: getColIndex(["Due Date", "DueDate", "DUE DATE"]),
-          deliveryDate: getColIndex([
-            "Delivery Date",
-            "DeliveryDate",
-            "DELIVERY DATE",
-          ]),
-          creditDays: getColIndex(["Credit Days", "Credit", "CREDIT DAYS"]),
-          paidAmount: getColIndex(["Paid Amount", "Paid", "PAID AMOUNT"]),
-          paymentStatus: getColIndex([
-            "Payment Status",
-            "Status",
-            "Payment",
-            "PAYMENT STATUS",
-          ]),
-          remark: getColIndex(["Remarks", "Remark", "Note", "REMARKS"]),
-        };
-
-        // Validate required columns
-        const requiredColumns = [
-          { name: "Invoice Number", index: columnIndices.invoiceNumber },
-          { name: "Customer Name", index: columnIndices.customerName },
-          { name: "Product Name", index: columnIndices.productName },
-          { name: "Sales Quantity", index: columnIndices.salesQty },
-        ];
-
-        const missingColumns = requiredColumns.filter(
-          (col) => col.index === -1,
-        );
-        if (missingColumns.length > 0) {
-          throw new Error(
-            `Missing required columns: ${missingColumns.map((col) => col.name).join(", ")}`,
-          );
-        }
-
-        const dataRows = rows.slice(headerIdx + 1);
-        const groupedInvoices = {};
-        const validationErrors = [];
-        let rowCount = headerIdx;
-
-        for (const row of dataRows) {
-          rowCount++;
-
-          // Skip empty rows
-          if (
-            !row ||
-            row.every((cell) => !cell || String(cell).trim() === "")
-          ) {
-            continue;
-          }
-
-          // Extract values
-          const getValue = (index) => {
-            if (index === -1 || index >= row.length) return "";
-            const value = row[index];
-            return value !== undefined && value !== null
-              ? String(value).trim()
-              : "";
-          };
-
-          const invoiceNumber = getValue(columnIndices.invoiceNumber);
-          const invoiceDate = parseExcelDate(
-            getValue(columnIndices.invoiceDate),
-          );
-          const recordingDate =
-            columnIndices.recordingDate !== -1
-              ? parseExcelDate(getValue(columnIndices.recordingDate))
-              : invoiceDate;
-          const mrName = getValue(columnIndices.mrName) || "Unknown";
-          const customerCode = getValue(columnIndices.customerCode);
-          const customerName = getValue(columnIndices.customerName);
-          const productName = getValue(columnIndices.productName);
-          const salesQty = parseExcelQuantity(getValue(columnIndices.salesQty));
-          const bonusQty =
-            columnIndices.bonusQty !== -1
-              ? parseExcelQuantity(getValue(columnIndices.bonusQty))
-              : 0;
-          const sellingPrice =
-            columnIndices.sellingPrice !== -1
-              ? parseFloat(getValue(columnIndices.sellingPrice)) || 0
-              : 0;
-          const discount =
-            columnIndices.discount !== -1
-              ? parseFloat(getValue(columnIndices.discount)) || 0
-              : 0;
-          const amount =
-            columnIndices.amount !== -1
-              ? parseFloat(getValue(columnIndices.amount)) || 0
-              : sellingPrice * salesQty;
-          const netAmount =
-            columnIndices.netAmount !== -1
-              ? parseFloat(getValue(columnIndices.netAmount)) || 0
-              : Math.max(0, amount - discount);
-          const dueDate =
-            columnIndices.dueDate !== -1
-              ? parseExcelDate(getValue(columnIndices.dueDate))
-              : invoiceDate;
-          const deliveryDate =
-            columnIndices.deliveryDate !== -1
-              ? parseExcelDate(getValue(columnIndices.deliveryDate))
-              : invoiceDate;
-          const creditDays =
-            columnIndices.creditDays !== -1
-              ? parseInt(getValue(columnIndices.creditDays)) || 0
-              : 0;
-          const paidAmount =
-            columnIndices.paidAmount !== -1
-              ? parseFloat(getValue(columnIndices.paidAmount)) || 0
-              : 0;
-          const paymentStatus =
-            columnIndices.paymentStatus !== -1
-              ? getValue(columnIndices.paymentStatus)
-              : "Credit";
-          const remark = getValue(columnIndices.remark);
-
-          // Validate row
-          const rowErrors = [];
-          if (!invoiceNumber) rowErrors.push("Invoice number is required");
-          if (!customerName) rowErrors.push("Customer name is required");
-          if (!productName) rowErrors.push("Product name is required");
-          if (salesQty <= 0 && bonusQty <= 0)
-            rowErrors.push("Total quantity must be > 0");
-          if (sellingPrice < 0)
-            rowErrors.push("Selling price cannot be negative");
-
-          if (rowErrors.length > 0) {
-            validationErrors.push({
-              row: rowCount + 1,
-              invoiceNumber: invoiceNumber || "N/A",
-              customerName: customerName || "N/A",
-              mrName: mrName || "Unknown",
-              productName: productName || "N/A",
-              error: rowErrors.join("; "),
-              type: "validation",
-            });
-            continue;
-          }
-
-          // Group by invoice number
-          const invoiceKey = invoiceNumber;
-          if (!groupedInvoices[invoiceKey]) {
-            groupedInvoices[invoiceKey] = {
-              recordingDate,
-              invoiceNumber,
-              invoiceDate,
-              mrName,
-              customerName,
-              customerCode,
-              customerId: "",
-              creditDays,
-              paidAmount,
-              paymentStatus,
-              remark,
-              products: [],
-              totalAmount: 0,
-              dueAmount: 0,
-              dueDate,
-              deliveryDate,
-            };
-          }
-
-          // Add product to invoice
-          groupedInvoices[invoiceKey].products.push({
-            productName,
-            salesQty,
-            bonusQty,
-            totalQty: salesQty + bonusQty,
-            sellingPrice,
-            amount,
-            discount,
-            netSellingAmount: netAmount,
-            averageUnitPrice:
-              salesQty + bonusQty > 0 ? netAmount / (salesQty + bonusQty) : 0,
-            lc: 0,
-            profitLoss: 0,
-            isProductAccept: true,
-            remark: "",
-          });
-
-          // Update invoice totals
-          groupedInvoices[invoiceKey].totalAmount += netAmount;
-        }
-
-        // Calculate due amounts
-        Object.values(groupedInvoices).forEach((inv) => {
-          inv.dueAmount = Math.max(0, inv.totalAmount - (inv.paidAmount || 0));
-        });
-
-        // Filter valid invoices
-        const validInvoices = Object.values(groupedInvoices).filter(
-          (inv) => inv.products.length > 0,
-        );
+        const { validInvoices, validationErrors } = await parseExcelFile(file);
+        console.log("values of validInvoices", validInvoices);
 
         if (validInvoices.length === 0) {
           throw new Error("No valid invoices found in the file");
+        }
+
+        if (importSaleType === "mr") {
+          validInvoices.forEach((inv) => {
+            inv.isMrSaleImport = true;
+          });
         }
 
         setParsedData(validInvoices);
@@ -1692,10 +1117,16 @@ const ImportSalesModal = ({
             "warning",
             `Found ${validInvoices.length} valid invoices with ${validationErrors.length} validation errors`,
           );
+        } else {
+          showToast(
+            "success",
+            `Successfully parsed ${validInvoices.length} invoices`,
+          );
         }
 
         setShowParsedSection(true);
       } catch (error) {
+        console.error("File processing error:", error);
         showToast("error", `Failed to process file: ${error.message}`);
         resetModal(false);
       } finally {
@@ -1703,236 +1134,264 @@ const ImportSalesModal = ({
         setIsProcessingFile(false);
       }
     },
-    [parseExcelDate, parseExcelQuantity, resetModal],
+    [importSaleType, resetModal, parseExcelFile],
   );
 
-  // Track failed invoices
-  const trackFailedInvoices = useCallback((errors, invoices) => {
-    const failedMap = new Map();
+  // Validate MRs before import
+  const validateMRsBeforeImport = useCallback(async (invoices) => {
+    try {
+      setIsValidatingMR(true);
+      setImportMessage(`🔍 Validating MRs for ${invoices.length} invoices...`);
 
-    errors.forEach((error) => {
-      const invoiceNumber = error.invoiceNumber || "Unknown";
+      const mrNames = new Set();
+      const mrToInvoices = new Map();
 
-      if (!failedMap.has(invoiceNumber)) {
-        const originalInvoice = invoices.find(
-          (inv) => inv.invoiceNumber === invoiceNumber,
-        );
+      for (const invoice of invoices) {
+        if (invoice.mrName && invoice.mrName.trim()) {
+          const mrName = invoice.mrName.trim();
+          mrNames.add(mrName);
 
-        failedMap.set(invoiceNumber, {
-          invoiceNumber,
-          row: error.row,
-          customerName:
-            error.customerName || originalInvoice?.customerName || "Unknown",
-          mrName: error.mrName || originalInvoice?.mrName || "Unknown",
-          productName: error.productName || "N/A",
-          error: error.error || error.message || "Unknown error",
-          type: error.type || "import_error",
-          timestamp: new Date().toISOString(),
-          originalData: originalInvoice || null,
-          products:
-            originalInvoice?.products?.map((p) => ({
-              name: p.productName,
-              salesQty: p.salesQty,
-              bonusQty: p.bonusQty,
-              totalQty: p.totalQty,
-            })) || [],
-        });
+          if (!mrToInvoices.has(mrName)) {
+            mrToInvoices.set(mrName, []);
+          }
+
+          mrToInvoices.get(mrName).push({
+            invoiceNumber: invoice.invoiceNumber,
+            customerName: invoice.customerName,
+          });
+        }
       }
-    });
 
-    return Array.from(failedMap.values());
+      if (mrNames.size === 0) {
+        setIsValidatingMR(false);
+        return {
+          mrIssues: [],
+          totalInvoices: invoices.length,
+          summary: { totalMRs: 0, validMRs: 0, invalidMRs: 0 },
+        };
+      }
+
+      const response = await axios.post(
+        `${backendUrl}/api/sales/validate-mr`,
+        { mrNames: Array.from(mrNames) },
+        getAuthHeaders(),
+      );
+
+      setIsValidatingMR(false);
+
+      if (response.data.success) {
+        return {
+          mrIssues: [],
+          totalInvoices: invoices.length,
+          summary: {
+            totalMRs: mrNames.size,
+            validMRs: mrNames.size,
+            invalidMRs: 0,
+          },
+        };
+      }
+
+      const mrIssues = [];
+      const invalidMRMap = new Map();
+
+      response.data.invalidMRs.forEach((invalidMR) => {
+        const affectedInvoices = mrToInvoices.get(invalidMR.mrName) || [];
+        invalidMRMap.set(invalidMR.mrName, {
+          mrName: invalidMR.mrName,
+          message: invalidMR.message,
+          affectedInvoices,
+          affectedCount: affectedInvoices.length,
+        });
+      });
+
+      mrIssues.push(...Array.from(invalidMRMap.values()));
+
+      return {
+        mrIssues,
+        totalInvoices: invoices.length,
+        summary: {
+          totalMRs: mrNames.size,
+          validMRs: mrNames.size - mrIssues.length,
+          invalidMRs: mrIssues.length,
+        },
+      };
+    } catch (error) {
+      console.error("MR validation error:", error);
+      setIsValidatingMR(false);
+      return {
+        mrIssues: [],
+        totalInvoices: invoices.length,
+        summary: { totalMRs: 0, validMRs: 0, invalidMRs: 0 },
+        error: error.message,
+      };
+    }
   }, []);
 
-  // Stock validation function
-  const validateStockBeforeImport = useCallback(
-    async (invoices) => {
-      try {
-        setIsValidatingStock(true);
-        setImportMessage(`Checking stock for ${invoices.length} invoices...`);
+  const validateStockBeforeImport = useCallback(async (invoices) => {
+    try {
+      setIsValidatingStock(true);
+      setImportMessage(`Checking stock for ${invoices.length} invoices...`);
 
-        const stockIssues = [];
-        const productStockMap = new Map();
+      const response = await axios.post(
+        `${backendUrl}/api/sales/validate-import-stock`,
+        { invoices },
+        getAuthHeaders(),
+      );
 
-        // Collect all products
-        for (const invoice of invoices) {
-          for (const product of invoice.products) {
-            const requiredQty =
-              (product.salesQty || 0) + (product.bonusQty || 0);
-            if (requiredQty > 0) {
-              const productName = product.productName;
-              if (!productStockMap.has(productName)) {
-                productStockMap.set(productName, {
-                  productName,
-                  totalRequired: 0,
-                  requiredByInvoices: [],
-                  checked: false,
-                  productExists: false,
-                  availableStock: 0,
-                });
-              }
-              const productData = productStockMap.get(productName);
-              productData.totalRequired += requiredQty;
-              productData.requiredByInvoices.push({
-                invoiceNumber: invoice.invoiceNumber,
-                requiredQty,
-              });
-            }
-          }
-        }
+      setIsValidatingStock(false);
 
-        // Check each product
-        for (const [productName, productData] of productStockMap.entries()) {
-          if (!productData.checked) {
-            try {
-              // Check if product exists
-              const existsResponse = await axios.get(
-                `${backendUrl}/api/sales/products/check/${encodeURIComponent(productName)}`,
-                { timeout: 3000 },
-              );
+      if (response.data.success) {
+        return response.data.validationResult;
+      } else {
+        throw new Error(response.data.message || "Stock validation failed");
+      }
+    } catch (error) {
+      console.error("Stock validation error:", error);
+      setIsValidatingStock(false);
 
-              if (existsResponse.data.exists) {
-                productData.productExists = true;
+      return {
+        stockIssues: [],
+        totalInvoices: invoices.length,
+        summary: {
+          totalProducts: 0,
+          totalRequired: 0,
+          totalAvailable: 0,
+          totalInsufficient: 0,
+          missingProducts: 0,
+          lowStockProducts: 0,
+          hasCriticalIssues: true,
+          hasInsufficientStock: false,
+          importBlocked: true,
+        },
+        insufficientStockIssues: [],
+        missingProductIssues: [],
+        importBlocked: true,
+        blockReason: "VALIDATION_ERROR",
+        message: `Stock validation failed: ${error.message}`,
+      };
+    }
+  }, []);
 
-                // Check stock
-                const stockCheck = await findProductStockInHandOptimized(
-                  productName,
-                  productData.totalRequired,
-                );
+  const handleImportData = useCallback(async () => {
+    if (parsedData.length === 0) {
+      showToast("error", "No data to import");
+      return;
+    }
 
-                productData.availableStock = stockCheck.availableStock;
-                productData.insufficient = stockCheck.insufficient;
-                productData.insufficientQty = stockCheck.insufficientQty;
-                productData.stockCheckSuccess = stockCheck.success;
+    const mrValResult = await validateMRsBeforeImport(parsedData);
 
-                if (stockCheck.insufficient || !stockCheck.success) {
-                  stockIssues.push({
-                    productName,
-                    totalRequired: productData.totalRequired,
-                    availableStock: stockCheck.availableStock,
-                    insufficientQty: stockCheck.insufficientQty || 0,
-                    requiredByInvoices: productData.requiredByInvoices,
-                    message: stockCheck.message,
-                    isCritical: !stockCheck.success,
-                    productExists: true,
-                    insufficient: stockCheck.insufficient,
-                    type: stockCheck.insufficient
-                      ? "insufficient_stock"
-                      : "product_not_found",
-                  });
-                }
-              } else {
-                // Product doesn't exist - consider as stock issue (warning, not blocker)
-                productData.productExists = false;
-                stockIssues.push({
-                  productName,
-                  totalRequired: productData.totalRequired,
-                  availableStock: 0,
-                  insufficientQty: productData.totalRequired,
-                  requiredByInvoices: productData.requiredByInvoices,
-                  message: "Product not found - will create stock adjustments",
-                  isCritical: false,
-                  productExists: false,
-                  insufficient: false,
-                  type: "missing_product",
-                });
-              }
+    if (mrValResult.mrIssues && mrValResult.mrIssues.length > 0) {
+      setMrValidationResult(mrValResult);
+      setShowMRValidation(true);
+      return;
+    }
 
-              productData.checked = true;
-            } catch (error) {
-              stockIssues.push({
-                productName,
-                totalRequired: productData.totalRequired,
-                availableStock: 0,
-                insufficientQty: productData.totalRequired,
-                requiredByInvoices: productData.requiredByInvoices,
-                message: "Could not verify product existence",
-                isCritical: false,
-                productExists: false,
-                insufficient: false,
-                type: "verification_error",
-              });
-            }
-          }
-        }
+    const svResult = await validateStockBeforeImport(parsedData);
 
-        // Calculate summary with better categorization
-        const insufficientCount = stockIssues.filter(
-          (issue) => issue.productExists && issue.insufficient,
-        ).length;
+    if (svResult.stockIssues?.length > 0) {
+      const insufficientStockIssues = svResult.stockIssues.filter(
+        (issue) => issue.productExists && issue.insufficient,
+      );
+      const missingProductIssues = svResult.stockIssues.filter(
+        (issue) => !issue.productExists,
+      );
 
-        const missingCount = stockIssues.filter(
-          (issue) => !issue.productExists,
-        ).length;
-
-        const stockValidationResult = {
-          stockIssues,
-          totalInvoices: invoices.length,
+      if (insufficientStockIssues.length > 0) {
+        setStockValidationResult({
+          ...svResult,
+          stockIssues: insufficientStockIssues,
           summary: {
-            totalProducts: productStockMap.size,
-            totalRequired: Array.from(productStockMap.values()).reduce(
-              (sum, p) => sum + (p.totalRequired || 0),
-              0,
-            ),
-            totalAvailable: Array.from(productStockMap.values()).reduce(
-              (sum, p) => sum + (p.availableStock || 0),
-              0,
-            ),
-            totalInsufficient: insufficientCount,
-            missingProducts: missingCount,
-            lowStockProducts: insufficientCount,
-            hasCriticalIssues: stockIssues.some((issue) => issue.isCritical),
-            hasInsufficientStock: insufficientCount > 0,
+            ...svResult.summary,
+            totalInsufficient: insufficientStockIssues.length,
+            hasInsufficientStock: true,
           },
-          // Add categorization
-          insufficientStockIssues: stockIssues.filter(
-            (issue) => issue.productExists && issue.insufficient,
-          ),
-          missingProductIssues: stockIssues.filter(
-            (issue) => !issue.productExists,
-          ),
-          importBlocked: insufficientCount > 0, // Block only if insufficient stock
-          blockReason:
-            insufficientCount > 0
-              ? "INSUFFICIENT_STOCK"
-              : "MISSING_PRODUCTS_ONLY",
-          message:
-            insufficientCount > 0
-              ? `${insufficientCount} products have insufficient stock. Please update inventory.`
-              : `${missingCount} products not found. They will be created during import.`,
-        };
+          importBlocked: true,
+          message: `${insufficientStockIssues.length} products have insufficient stock.`,
+        });
+        setShowStockValidation(true);
+        return;
+      }
 
-        return stockValidationResult;
-      } catch (error) {
-        // Return empty result on error
-        return {
-          stockIssues: [],
-          totalInvoices: invoices.length,
+      if (
+        missingProductIssues.length > 0 &&
+        insufficientStockIssues.length === 0
+      ) {
+        setStockValidationResult({
+          ...svResult,
+          stockIssues: missingProductIssues,
           summary: {
-            totalProducts: 0,
-            totalRequired: 0,
-            totalAvailable: 0,
-            totalInsufficient: 0,
-            missingProducts: 0,
-            lowStockProducts: 0,
-            hasCriticalIssues: false,
+            ...svResult.summary,
+            totalInsufficient: missingProductIssues.length,
             hasInsufficientStock: false,
           },
-          insufficientStockIssues: [],
-          missingProductIssues: [],
           importBlocked: false,
-          blockReason: "NO_ISSUES",
-          message: "Stock validation failed",
-        };
-      } finally {
-        setIsValidatingStock(false);
+          message: `${missingProductIssues.length} products not found in inventory.`,
+        });
+        setShowStockValidation(true);
+        return;
       }
-    },
-    [findProductStockInHandOptimized],
-  );
+    }
 
-  // Main import function
+    await handleProductImport(parsedData);
+  }, [parsedData, validateMRsBeforeImport, validateStockBeforeImport]);
+
+  const handleProceedWithMRIssues = useCallback(async () => {
+    const confirmProceed = await confirmDialog({
+      title: "Proceed with Invalid MRs",
+      text: `${
+        mrValidationResult?.summary?.invalidMRs || 0
+      } MRs are not registered. These will be saved as provided. Do you want to proceed?`,
+      icon: "warning",
+      confirmButtonText: "Yes, Proceed Anyway",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmProceed.isConfirmed) {
+      setShowMRValidation(false);
+      await handleProductImport(parsedData);
+    }
+  }, [mrValidationResult, parsedData]);
+
+  const handleProceedWithStockIssues = useCallback(async () => {
+    if (!stockValidationResult) {
+      showToast("error", "Stock validation data not available");
+      return;
+    }
+
+    if (stockValidationResult.summary?.hasInsufficientStock) {
+      showToast(
+        "error",
+        "Cannot proceed - there are insufficient stock issues",
+      );
+      return;
+    }
+
+    const confirmProceed = await confirmDialog({
+      title: "Proceed with Missing Products",
+      text: `${
+        stockValidationResult.summary?.missingProducts || 0
+      } products are not in inventory. These will be created during import. Do you want to proceed?`,
+      icon: "warning",
+      confirmButtonText: "Yes, Create Products",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmProceed.isConfirmed) {
+      setShowStockValidation(false);
+      await handleProductImport(parsedData);
+    }
+  }, [stockValidationResult, parsedData]);
+
+  const handleCancelStockValidation = useCallback(() => {
+    setShowStockValidation(false);
+    setStockValidationResult(null);
+    setIsValidatingStock(false);
+    setImportStep("");
+    showToast("info", "Import cancelled");
+  }, []);
+
   const handleProductImport = useCallback(
-    async (dataToImport, bypassStockCheck = false) => {
+    async (dataToImport) => {
       if (!dataToImport?.length) {
         showToast("error", "No data to import");
         return;
@@ -1948,6 +1407,8 @@ const ImportSalesModal = ({
       abortControllerRef.current = new AbortController();
 
       try {
+        const isMrSale = importSaleType === "mr";
+
         const transformedInvoices = dataToImport.map((inv) => ({
           ...inv,
           invoiceDate:
@@ -1955,10 +1416,9 @@ const ImportSalesModal = ({
           recordingDate:
             inv.recordingDate || new Date().toISOString().split("T")[0],
           paymentStatus: inv.paymentStatus || "Credit",
-          totalAmount:
-            inv.totalAmount ||
-            inv.products.reduce((s, p) => s + (p.netSellingAmount || 0), 0),
-          dueAmount: (inv.totalAmount || 0) - (inv.paidAmount || 0),
+          totalAmount: inv.totalAmount || 0,
+          dueAmount: inv.dueAmount || 0,
+          isMrSaleImport: isMrSale,
           products: inv.products.map((product) => ({
             ...product,
             salesQty: Number(product.salesQty) || 0,
@@ -1970,96 +1430,83 @@ const ImportSalesModal = ({
 
         setImportStep("Sending to server...");
 
-        const endpoint = `${backendUrl}/api/sales/import-with-stock-deduction`;
-
-        const res = await axios.post(
-          endpoint,
+        const response = await axios.post(
+          `${backendUrl}/api/sales/import-with-stock-deduction`,
           {
             invoices: transformedInvoices,
             updateInventory: true,
             importTimestamp: new Date().toISOString(),
-            bypassStockCheck: bypassStockCheck,
           },
           {
             timeout: 300000,
             signal: abortControllerRef.current.signal,
+            ...getAuthHeaders(),
           },
         );
 
-        if (res.data.success) {
-          const newSessionId = res.data.sessionId;
+        if (response.data.success) {
+          const newSessionId = response.data.sessionId;
           setSessionId(newSessionId);
           setImportStep("Import started – processing invoices...");
 
-          // Start polling
           pollingIntervalRef.current = setInterval(async () => {
             try {
-              const progRes = await axios.get(
+              const progressResponse = await axios.get(
                 `${backendUrl}/api/sales/import/progress/${newSessionId}`,
-                { timeout: 5000 },
+                { timeout: 5000, ...getAuthHeaders() },
               );
 
-              if (progRes.data.success) {
-                const prog = progRes.data.progress;
+              if (progressResponse.data.success) {
+                const progress = progressResponse.data.progress;
+                setServerProgress(progress.percentage || 0);
+                setServerProcessed(progress.processed || 0);
+                setServerTotal(progress.total || dataToImport.length);
 
-                setServerProgress(prog.percentage || 0);
-                setServerProcessed(prog.processed || 0);
-                setServerTotal(prog.total || dataToImport.length);
-
-                if (prog.completed) {
+                if (progress.completed) {
                   clearPolling();
                   setIsImporting(false);
 
-                  if (prog.failed > 0) {
+                  if (progress.failed > 0) {
                     try {
-                      const failedRes = await axios.get(
+                      const failedResponse = await axios.get(
                         `${backendUrl}/api/sales/import/failed/${newSessionId}`,
+                        getAuthHeaders(),
                       );
-                      if (failedRes.data.success) {
-                        let failedInvoicesData = [];
 
-                        if (failedRes.data.data?.failedInvoices?.length > 0) {
-                          failedInvoicesData =
-                            failedRes.data.data.failedInvoices;
-                        } else if (prog.errors?.length > 0) {
-                          failedInvoicesData = trackFailedInvoices(
-                            prog.errors,
-                            dataToImport,
-                          );
-                        }
+                      if (failedResponse.data.success) {
+                        const failedInvoicesData =
+                          failedResponse.data.data.failedInvoices || [];
                         if (failedInvoicesData.length > 0) {
                           setFailedInvoices(failedInvoicesData);
                           setShowFailedInvoices(true);
                         }
                       }
-                    } catch (e) {
-                      if (prog.errors?.length > 0) {
-                        const tracked = trackFailedInvoices(
-                          prog.errors,
-                          dataToImport,
-                        );
-                        setFailedInvoices(tracked);
-                        setShowFailedInvoices(true);
-                      }
+                    } catch (fetchError) {
+                      console.error(
+                        "Error fetching failed invoices:",
+                        fetchError,
+                      );
                     }
 
                     showToast(
                       "warning",
-                      `Import completed with ${prog.successful} successful and ${prog.failed} failed invoices`,
+                      `Import completed with ${progress.successful} successful and ${progress.failed} failed invoices`,
                     );
                   } else {
                     showToast(
                       "success",
-                      `Successfully imported ${prog.successful} invoices`,
+                      `Successfully imported ${progress.successful} invoices`,
                     );
 
                     if (onImportSuccess) {
                       onImportSuccess();
-                      setTimeout(() => {
-                        window.dispatchEvent(
-                          new CustomEvent("inventory-updated"),
-                        );
-                      }, 1000);
+                      setTimeout(
+                        () =>
+                          window.dispatchEvent(
+                            new CustomEvent("inventory-updated"),
+                          ),
+                        1000,
+                      );
                     }
                   }
 
@@ -2068,10 +1515,11 @@ const ImportSalesModal = ({
               }
             } catch (err) {
               if (err.code === "ERR_CANCELED") return;
+              console.error("Progress polling error:", err);
             }
           }, 1000);
         } else {
-          throw new Error(res.data.message || "Import failed");
+          throw new Error(response.data.message || "Import failed");
         }
       } catch (err) {
         clearPolling();
@@ -2089,227 +1537,33 @@ const ImportSalesModal = ({
           if (err.response?.data?.failedInvoices) {
             setFailedInvoices(err.response.data.failedInvoices);
             setShowFailedInvoices(true);
-          } else if (err.response?.data?.errors) {
-            const tracked = trackFailedInvoices(
-              err.response.data.errors,
-              dataToImport,
-            );
-            setFailedInvoices(tracked);
-            setShowFailedInvoices(true);
           }
         }
       }
     },
-    [clearPolling, isCancelled, onImportSuccess, trackFailedInvoices],
+    [clearPolling, isCancelled, onImportSuccess, importSaleType],
   );
 
-  // Handle proceed despite MR issues
-  const handleProceedWithMRIssues = useCallback(async () => {
-    const confirmProceed = await confirmDialog({
-      title: "Proceed with Invalid MRs",
-      text: `${mrValidationResult?.summary?.invalidMRs || 0} MRs are not registered. These will be saved as provided. Do you want to proceed?`,
-      icon: "warning",
-      confirmButtonText: "Yes, Proceed Anyway",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirmProceed.isConfirmed) {
-      setShowMRValidation(false);
-      await handleProductImport(parsedData, false);
-    }
-  }, [mrValidationResult, parsedData, handleProductImport]);
-
-  // Handle proceed despite stock issues
-  const handleProceedWithStockIssues = useCallback(async () => {
-    if (!stockValidationResult) {
-      showToast("error", "Stock validation data not available");
-      return;
-    }
-
-    // Check if there are any blocking issues
-    if (stockValidationResult.summary?.hasInsufficientStock) {
-      showToast(
-        "error",
-        "Cannot proceed - there are insufficient stock issues",
-      );
-      return;
-    }
-
-    const confirmProceed = await confirmDialog({
-      title: "Proceed with Missing Products",
-      text: `${stockValidationResult.summary?.missingProducts || 0} products are not in inventory. These will be created during import. Do you want to proceed?`,
-      icon: "warning",
-      confirmButtonText: "Yes, Create Products",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirmProceed.isConfirmed) {
-      setShowStockValidation(false);
-      const mrValidationResult = await validateMRsBeforeImport(parsedData);
-
-      if (
-        mrValidationResult.mrIssues &&
-        mrValidationResult.mrIssues.length > 0
-      ) {
-        setMrValidationResult(mrValidationResult);
-        setShowMRValidation(true);
-        return; // Wait for user decision on MR warning
-      }
-
-      await handleProductImport(parsedData, true);
-    }
-  }, [
-    stockValidationResult,
-    parsedData,
-    validateMRsBeforeImport,
-    handleProductImport,
-  ]);
-
-  // Handle cancel stock validation
-  const handleCancelStockValidation = useCallback(() => {
-    const confirmCancel = window.confirm(
-      "Are you sure you want to cancel the import?",
-    );
-
-    if (confirmCancel) {
-      setShowStockValidation(false);
-      setStockValidationResult(null);
-      setIsValidatingStock(false);
-      setImportStep("");
-      showToast("info", "Import cancelled");
-    }
-  }, []);
-
-  // Main import handler with correct flow
-  const handleImportData = useCallback(async () => {
-    if (parsedData.length === 0) {
-      showToast("error", "No data to import");
-      return;
-    }
-
-    const stockValidationResult = await validateStockBeforeImport(parsedData);
-
-    // Check if there are ANY stock issues
-    const hasStockIssues = stockValidationResult?.stockIssues?.length > 0;
-
-    if (hasStockIssues) {
-      const insufficientStockIssues = stockValidationResult.stockIssues.filter(
-        (issue) => issue.productExists && issue.insufficient,
-      );
-
-      const missingProductIssues = stockValidationResult.stockIssues.filter(
-        (issue) => !issue.productExists,
-      );
-
-      if (insufficientStockIssues.length > 0) {
-        const blockingStockValidationResult = {
-          ...stockValidationResult,
-          stockIssues: insufficientStockIssues,
-          summary: {
-            ...stockValidationResult.summary,
-            totalInsufficient: insufficientStockIssues.length,
-            hasInsufficientStock: true,
-          },
-          importBlocked: true,
-          blockReason: "INSUFFICIENT_STOCK",
-          message: `${insufficientStockIssues.length} products have insufficient stock. Please update inventory before importing.`,
-        };
-
-        setStockValidationResult(blockingStockValidationResult);
-        setShowStockValidation(true);
-        return; // STOP - Do not proceed with import
-      }
-
-      // 🔥 If only missing products (product not found), allow import with warning
-      if (
-        missingProductIssues.length > 0 &&
-        insufficientStockIssues.length === 0
-      ) {
-        const warningStockValidationResult = {
-          ...stockValidationResult,
-          stockIssues: missingProductIssues,
-          summary: {
-            ...stockValidationResult.summary,
-            totalInsufficient: missingProductIssues.length,
-            hasInsufficientStock: false,
-          },
-          importBlocked: false,
-          blockReason: "MISSING_PRODUCTS_ONLY",
-          message: `${missingProductIssues.length} products not found in inventory. They will be created during import.`,
-        };
-
-        setStockValidationResult(warningStockValidationResult);
-        setShowStockValidation(true);
-        // Wait for user decision in the modal
-        return;
-      }
-    } else {
-      const mrValidationResult = await validateMRsBeforeImport(parsedData);
-
-      if (
-        mrValidationResult.mrIssues &&
-        mrValidationResult.mrIssues.length > 0
-      ) {
-        setMrValidationResult(mrValidationResult);
-        setShowMRValidation(true);
-        return; // Wait for user decision on MR warning
-      }
-
-      await handleProductImport(parsedData, false);
-    }
-  }, [
-    parsedData,
-    validateStockBeforeImport,
-    validateMRsBeforeImport,
-    handleProductImport,
-  ]);
-
-  // Download error report
-  const downloadErrorReport = useCallback(() => {
-    const allErrors = [
-      ...importErrorDetails.map((e) => ({
-        Row: e.row,
-        "Invoice #": e.invoiceNumber,
-        Customer: e.customerName,
-        Product: e.productName || "N/A",
-        Error: e.error || "Validation error",
-        Type: "Validation",
-      })),
-    ];
-
-    if (allErrors.length === 0) {
-      showToast("warning", "No validation errors to download");
-      return;
-    }
-
-    try {
-      const ws = XLSX.utils.json_to_sheet(allErrors);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Validation Errors");
-      const fileName = `validation_errors_${new Date()
-        .toISOString()
-        .slice(0, 10)}.xlsx`;
-      XLSX.writeFile(wb, fileName);
-      showToast("success", "Report downloaded successfully");
-    } catch (error) {
-      showToast("error", "Failed to download report");
-    }
-  }, [importErrorDetails]);
-
-  // Reset parsed data
   const resetParsedData = useCallback(() => {
     setParsedData([]);
     setImportErrorDetails([]);
     setShowParsedSection(false);
-    setShowValidationErrors(false);
     setFailedInvoices([]);
     setShowFailedInvoices(false);
     setShowStockValidation(false);
     setStockValidationResult(null);
-    setShouldProceedDespiteStockIssues(false);
     setShowMRValidation(false);
     setMrValidationResult(null);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      clearPolling();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [clearPolling]);
 
   if (!isOpen) return null;
 
@@ -2317,24 +1571,93 @@ const ImportSalesModal = ({
     <>
       <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
         <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-          {/* Close button */}
           <button
             onClick={handleClose}
             className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-            disabled={
-              isImporting ||
-              isUploading ||
-              isProcessingFile ||
-              isValidatingStock ||
-              isValidatingMR
-            }
+            disabled={isImporting || isUploading || isProcessingFile}
           >
             <X size={20} />
           </button>
 
-          <h2 className="text-xl font-semibold text-gray-800 mb-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">
             Import Sales Data
           </h2>
+
+          {!isImporting && (
+            <div className="flex rounded-xl overflow-hidden border border-gray-200 mb-6">
+              <button
+                onClick={() => {
+                  setImportSaleType("normal");
+                  resetParsedData();
+                }}
+                disabled={isImporting || isValidatingStock || isValidatingMR}
+                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                  importSaleType === "normal"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                <Package size={16} />
+                Normal Sale
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${
+                    importSaleType === "normal"
+                      ? "bg-indigo-500 text-white"
+                      : "bg-gray-200 text-gray-600"
+                  }`}
+                >
+                  Warehouse Stock
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  setImportSaleType("mr");
+                  resetParsedData();
+                }}
+                disabled={isImporting || isValidatingStock || isValidatingMR}
+                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                  importSaleType === "mr"
+                    ? "bg-green-600 text-white"
+                    : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                <User size={16} />
+                MR Sale
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${
+                    importSaleType === "mr"
+                      ? "bg-green-500 text-white"
+                      : "bg-gray-200 text-gray-600"
+                  }`}
+                >
+                  MR Hand Stock
+                </span>
+              </button>
+            </div>
+          )}
+
+          {!isImporting && (
+            <div
+              className={`mb-5 p-3 rounded-lg text-sm ${
+                importSaleType === "normal"
+                  ? "bg-indigo-50 text-indigo-800 border border-indigo-200"
+                  : "bg-green-50 text-green-800 border border-green-200"
+              }`}
+            >
+              {importSaleType === "normal" ? (
+                <p>
+                  📦 <strong>Normal Sale:</strong> Stock will be deducted from
+                  the main warehouse inventory.
+                </p>
+              ) : (
+                <p>
+                  👤 <strong>MR Sale:</strong> Stock will be deducted from each
+                  MR's hand stock. The MR Name column in your Excel file
+                  determines which MR's stock is used.
+                </p>
+              )}
+            </div>
+          )}
 
           {!showParsedSection &&
             !isUploading &&
@@ -2344,38 +1667,27 @@ const ImportSalesModal = ({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Upload Excel/CSV File
                 </label>
-
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                <div className="border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-lg p-8 text-center transition-colors">
                   <Upload className="mx-auto text-gray-400 mb-3" size={48} />
-
                   <p className="text-gray-600 mb-2">
                     Drag & drop your file here or click to browse
                   </p>
-
                   <input
                     type="file"
                     accept=".xlsx,.xls,.csv"
                     onChange={handleFileUpload}
-                    className="block w-full text-sm text-gray-500
-            file:mr-4 file:py-2 file:px-4
-            file:rounded-lg file:border-0
-            file:text-sm file:font-semibold
-            file:bg-blue-50 file:text-blue-700
-            hover:file:bg-blue-100 cursor-pointer"
+                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
                     disabled={isUploading || isProcessingFile}
                   />
-
                   <p className="text-xs text-gray-500 mt-3">
                     Supported formats: Excel (.xlsx, .xls), CSV (.csv) | Max
                     size: 20MB
                   </p>
-
                   <SampleExcelDownloadSale />
                 </div>
               </div>
             )}
 
-          {/* Processing file */}
           {(isUploading || isProcessingFile) && (
             <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
               <div className="flex items-center justify-center gap-3 mb-4">
@@ -2385,17 +1697,9 @@ const ImportSalesModal = ({
                 </h3>
               </div>
               <p className="text-center text-gray-600">{importMessage}</p>
-              {isProcessingFile && (
-                <div className="mt-4">
-                  <div className="h-2 bg-blue-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full animate-pulse"></div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
-          {/* MR Validation Indicator */}
           {isValidatingMR && (
             <div className="mb-6 bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -2407,26 +1711,53 @@ const ImportSalesModal = ({
                   <p className="text-sm text-blue-700 mt-1">
                     Checking MR names for {parsedData.length} invoices...
                   </p>
-                  <div className="mt-2 w-full bg-blue-100 rounded-full h-2">
-                    <div
-                      className="bg-blue-500 h-2 rounded-full transition-all duration-300 animate-pulse"
-                      style={{ width: `60%` }}
-                    ></div>
-                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Parsed data summary */}
+          {isValidatingStock && (
+            <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-600"></div>
+                <div>
+                  <h3 className="font-medium text-yellow-800">
+                    Checking Stock Availability
+                  </h3>
+                  <p className="text-sm text-yellow-700 mt-1">
+                    Validating stock for {parsedData.length} invoices...
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {showParsedSection && parsedData.length > 0 && (
-            <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+            <div
+              className={`mb-6 border rounded-lg p-4 ${
+                importSaleType === "mr"
+                  ? "bg-green-50 border-green-200"
+                  : "bg-indigo-50 border-indigo-200"
+              }`}
+            >
               <div className="flex justify-between items-start">
                 <div>
-                  <h3 className="font-medium text-green-800">
+                  <h3
+                    className={`font-medium ${
+                      importSaleType === "mr"
+                        ? "text-green-800"
+                        : "text-indigo-800"
+                    }`}
+                  >
                     File Successfully Parsed
                   </h3>
-                  <p className="text-sm text-green-700">
+                  <p
+                    className={`text-sm ${
+                      importSaleType === "mr"
+                        ? "text-green-700"
+                        : "text-indigo-700"
+                    }`}
+                  >
                     Found {parsedData.length} valid invoices ready for import
                   </p>
                   {importErrorDetails.length > 0 && (
@@ -2445,20 +1776,9 @@ const ImportSalesModal = ({
                   >
                     Clear
                   </button>
-                  {importErrorDetails.length > 0 && (
-                    <button
-                      onClick={() =>
-                        setShowValidationErrors(!showValidationErrors)
-                      }
-                      className="text-sm text-yellow-600 hover:text-yellow-800 px-3 py-1 border border-yellow-300 rounded-lg cursor-pointer"
-                    >
-                      {showValidationErrors ? "Hide" : "Show"} Errors
-                    </button>
-                  )}
                 </div>
               </div>
 
-              {/* Quick stats */}
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <div className="bg-white p-2 rounded border text-center">
                   <div className="text-xs text-gray-500">Total Invoices</div>
@@ -2483,14 +1803,53 @@ const ImportSalesModal = ({
                   </div>
                 </div>
               </div>
+
+              {importSaleType === "mr" && (
+                <div className="mt-3 p-2 bg-green-100 rounded text-xs text-green-800">
+                  MRs detected in file:{" "}
+                  {[
+                    ...new Set(
+                      parsedData.map((inv) => inv.mrName).filter(Boolean),
+                    ),
+                  ].join(", ") || "None"}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">
+                  Sample Data (First 3 invoices):
+                </h4>
+                <div className="bg-white border rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="p-2 text-left">Invoice</th>
+                        <th className="p-2 text-left">MR</th>
+                        <th className="p-2 text-left">Products</th>
+                        <th className="p-2 text-left">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedData.slice(0, 3).map((inv, idx) => (
+                        <tr key={idx} className="border-t">
+                          <td className="p-2 font-mono">{inv.invoiceNumber}</td>
+                          <td className="p-2">{inv.mrName}</td>
+                          <td className="p-2">{inv.products?.length || 0}</td>
+                          <td className="p-2">
+                            ${inv.totalAmount?.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Validation errors */}
           {importErrorDetails.length > 0 &&
             showParsedSection &&
-            !isImporting &&
-            showValidationErrors && (
+            !isImporting && (
               <div className="mb-6 border border-yellow-200 rounded-lg overflow-hidden">
                 <div className="bg-yellow-50 p-3 flex justify-between items-center">
                   <div className="flex items-center gap-2">
@@ -2499,29 +1858,23 @@ const ImportSalesModal = ({
                       Validation Errors ({importErrorDetails.length})
                     </h3>
                   </div>
-                  <button
-                    onClick={downloadErrorReport}
-                    className="text-sm text-yellow-600 hover:text-yellow-800 border border-yellow-300 px-3 py-1 rounded cursor-pointer flex items-center gap-1"
-                  >
-                    <Download size={14} /> Download
-                  </button>
                 </div>
-                <div className="max-h-60 overflow-y-auto bg-white">
+                <div className="max-h-40 overflow-y-auto bg-white">
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="p-2 text-left border-b">Row</th>
                         <th className="p-2 text-left border-b">Invoice #</th>
-                        <th className="p-2 text-left border-b">Customer</th>
+                        <th className="p-2 text-left border-b">Product</th>
                         <th className="p-2 text-left border-b">Error</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {importErrorDetails.slice(0, 20).map((err, i) => (
+                      {importErrorDetails.slice(0, 10).map((err, i) => (
                         <tr key={i} className="hover:bg-yellow-50 border-b">
                           <td className="p-2 font-mono">{err.row}</td>
                           <td className="p-2">{err.invoiceNumber}</td>
-                          <td className="p-2">{err.customerName}</td>
+                          <td className="p-2">{err.productName}</td>
                           <td className="p-2 text-yellow-600 text-xs">
                             {err.error}
                           </td>
@@ -2529,49 +1882,26 @@ const ImportSalesModal = ({
                       ))}
                     </tbody>
                   </table>
-                  {importErrorDetails.length > 20 && (
+                  {importErrorDetails.length > 10 && (
                     <div className="p-2 text-center text-gray-500 text-sm">
-                      Showing 20 of {importErrorDetails.length} errors
+                      Showing 10 of {importErrorDetails.length} errors
                     </div>
                   )}
                 </div>
               </div>
             )}
 
-          {isValidatingStock && (
-            <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <div className="flex items-center gap-3">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-600"></div>
-                <div>
-                  <h3 className="font-medium text-yellow-800">
-                    Checking Stock Availability
-                  </h3>
-                  <p className="text-sm text-yellow-700 mt-1">
-                    Validating stock for {parsedData.length} invoices...
-                  </p>
-                  <div className="mt-2 w-full bg-yellow-100 rounded-full h-2">
-                    <div
-                      className="bg-yellow-500 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.random() * 50 + 30}%` }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Import progress */}
           {isImporting && (
             <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6 shadow-xl">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-2xl font-bold text-blue-900">
-                  Importing Sales Data...
+                  Importing{" "}
+                  {importSaleType === "mr" ? "MR Sale" : "Normal Sale"} Data...
                 </h3>
                 <span className="text-3xl font-extrabold text-indigo-700">
                   {serverProgress}%
                 </span>
               </div>
-
               <div className="w-full bg-gray-300 rounded-full h-12 overflow-hidden shadow-inner mb-4">
                 <div
                   className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 h-full rounded-full transition-all duration-1000 ease-out flex items-center justify-end pr-6 shadow-lg"
@@ -2582,11 +1912,9 @@ const ImportSalesModal = ({
                   </span>
                 </div>
               </div>
-
               <p className="text-center text-gray-700 font-medium text-lg mb-6">
                 {importStep}
               </p>
-
               <div className="flex justify-center">
                 <button
                   onClick={handleCancelImport}
@@ -2598,36 +1926,27 @@ const ImportSalesModal = ({
             </div>
           )}
 
-          {/* Import button */}
           {!isImporting &&
             showParsedSection &&
             parsedData.length > 0 &&
             !isValidatingStock &&
             !isValidatingMR && (
               <div className="mb-6">
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleImportData}
-                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer"
-                    disabled={
-                      isImporting || isValidatingStock || isValidatingMR
-                    }
-                  >
-                    Start Import ({parsedData.length} invoices)
-                  </button>
-                </div>
-                <p className="text-center text-gray-500 text-sm mt-2">
-                  Click to import {parsedData.length} invoices with{" "}
-                  {parsedData.reduce(
-                    (sum, inv) => sum + (inv.products?.length || 0),
-                    0,
-                  )}{" "}
-                  products
-                </p>
+                <button
+                  onClick={handleImportData}
+                  className={`w-full py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer text-white ${
+                    importSaleType === "mr"
+                      ? "bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800"
+                      : "bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800"
+                  }`}
+                  disabled={isImporting || isValidatingStock || isValidatingMR}
+                >
+                  Start {importSaleType === "mr" ? "MR Sale" : "Normal Sale"}{" "}
+                  Import ({parsedData.length} invoices)
+                </button>
               </div>
             )}
 
-          {/* Footer */}
           <div className="flex justify-between pt-4 border-t border-gray-200">
             <div>
               {showParsedSection && parsedData.length > 0 && (
@@ -2642,13 +1961,7 @@ const ImportSalesModal = ({
             </div>
             <button
               onClick={handleClose}
-              disabled={
-                isUploading ||
-                isProcessingFile ||
-                isImporting ||
-                isValidatingStock ||
-                isValidatingMR
-              }
+              disabled={isUploading || isProcessingFile || isImporting}
               className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {isImporting || isUploading ? "Cancel" : "Close"}
@@ -2657,7 +1970,6 @@ const ImportSalesModal = ({
         </div>
       </div>
 
-      {/* Render modals */}
       {showStockValidation && stockValidationResult && (
         <StockValidationModal
           isOpen={showStockValidation}
@@ -2682,7 +1994,6 @@ const ImportSalesModal = ({
           isOpen={showFailedInvoices}
           onClose={() => setShowFailedInvoices(false)}
           failedInvoices={failedInvoices}
-          sessionId={sessionId}
         />
       )}
     </>,
@@ -2690,7 +2001,8 @@ const ImportSalesModal = ({
   );
 };
 
-// ===================== PRODUCT DETAILS MODAL (Fixed) =====================
+//suraj 
+
 const ProductDetailsModal = ({
   isOpen,
   onClose,
