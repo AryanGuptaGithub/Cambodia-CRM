@@ -6,6 +6,7 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 
+// ==================== HELPER FUNCTIONS ====================
 const parseDate = (dateStr) => {
   if (!dateStr) return null;
 
@@ -186,302 +187,213 @@ const normalizeString = (str) => {
   return str.toString().trim().toLowerCase();
 };
 
-// IMPORT PRODUCTS
+// ==================== NEW ENDPOINT FOR IMPORT PREVIEW ====================
+router.get("/all-for-import", async (req, res) => {
+  try {
+    const products = await Product.find({}, "productName type packing supplierName").lean();
+    res.json(products.map(p => ({
+      _id: p._id,
+      productName: p.productName,
+      type: p.type,
+      packing: p.packing,
+      supplierName: p.supplierName,
+    })));
+  } catch (err) {
+    console.error("Error fetching products for import:", err);
+    res.status(500).json({ message: "Failed to fetch products." });
+  }
+});
+
+// ==================== OPTIMIZED IMPORT ====================
 router.post("/import", async (req, res) => {
   try {
     const products = req.body;
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({
+        message: "Invalid or empty data. Expected an array of products.",
+        ok: false,
+      });
+    }
 
+    // 1. Fetch all existing products (only fields needed for duplicate key)
+    const allExisting = await Product.find({}, {
+      productName: 1,
+      type: 1,
+      packing: 1,
+      supplierName: 1,
+    }).lean();
+
+    // Build a Set of keys from existing products (lowercased concatenation)
+    const existingKeys = new Set();
+    allExisting.forEach(p => {
+      const key = JSON.stringify({
+        productName: normalizeString(p.productName),
+        type: normalizeString(p.type),
+        packing: normalizeString(p.packing),
+        supplierName: normalizeString(p.supplierName),
+      });
+      existingKeys.add(key);
+    });
+
+    const toInsert = [];
+    const results = [];
+    const warnings = [];
     const errors = [];
-    const successfulImports = [];
-    const duplicateProducts = [];
-    const uniqueProducts = new Set();
 
-    // First pass: identify duplicates in the import data itself
-    for (const [index, productData] of products.entries()) {
+    // Intra‑file duplicate detection
+    const fileKeys = new Map(); // key -> first occurrence index
+
+    for (let [index, item] of products.entries()) {
       try {
-        const {
-          productName,
-          type,
-          packing,
-          sellingPriceUSD,
-          lcUSD,
-          fobUSD,
-          taxSellingPriceUSD,
-          qtyPerBoxStrip,
-          supplierName,
-          drugLicense,
-          licenseValidityDate,
-          remarks,
-        } = productData;
+        const productName = normalizeString(item.productName);
+        const type = normalizeString(item.type);
+        const packing = normalizeString(item.packing);
+        const supplierName = normalizeString(item.supplierName);
 
-        // Validate required fields
-        if (!productName || productName.toString().trim() === "") {
+        // Required fields validation
+        if (!productName) {
           errors.push(`Row ${index + 1}: Product name is required`);
           continue;
         }
-
-        if (!type || type.toString().trim() === "") {
+        if (!type) {
           errors.push(`Row ${index + 1}: Product type is required`);
           continue;
         }
-
-        if (!packing || packing.toString().trim() === "") {
+        if (!packing) {
           errors.push(`Row ${index + 1}: Packing is required`);
           continue;
         }
 
-        // Enhanced qtyPerBoxStrip validation
-        let parsedQtyPerBoxStrip;
+        // Build unique key for this row (using same fields as existing set)
+        const rowKey = JSON.stringify({
+          productName,
+          type,
+          packing,
+          supplierName,
+        });
 
-        if (
-          qtyPerBoxStrip === undefined ||
-          qtyPerBoxStrip === null ||
-          qtyPerBoxStrip === ""
-        ) {
-          errors.push(`Row ${index + 1}: Quantity per box/strip is required`);
-          continue;
-        }
-
-        const qtyString = qtyPerBoxStrip.toString().trim();
-
-        // Check if it's already a valid number
-        if (!isNaN(qtyString) && qtyString !== "") {
-          parsedQtyPerBoxStrip = parseInt(qtyString, 10);
-        } else {
-          // Extract numbers from string
-          const numericMatch = qtyString.match(/\d+/g);
-          if (numericMatch && numericMatch.length > 0) {
-            parsedQtyPerBoxStrip = parseInt(numericMatch[0], 10);
-          } else {
-            errors.push(
-              `Row ${
-                index + 1
-              }: Quantity must contain a number. Received: "${qtyString}"`,
-            );
-            continue;
-          }
-        }
-
-        // Final validation
-        if (isNaN(parsedQtyPerBoxStrip) || parsedQtyPerBoxStrip <= 0) {
-          errors.push(
-            `Row ${
-              index + 1
-            }: Quantity must be a positive number. Received: "${qtyString}"`,
-          );
-          continue;
-        }
-
-        // Parse numeric fields
-        const parseNumericField = (value, fieldName, defaultValue = 0) => {
-          if (value === undefined || value === null || value === "") {
-            return defaultValue;
-          }
-
-          const strValue = value.toString().trim();
-          if (strValue === "") {
-            return defaultValue;
-          }
-
-          // Remove any commas or currency symbols
-          const cleanValue = strValue.replace(/[$,]/g, "").trim();
-
-          const num = parseFloat(cleanValue);
-          if (isNaN(num)) {
-            console.warn(
-              `Row ${
-                index + 1
-              }: ${fieldName} is not a valid number. Using default: ${defaultValue}`,
-            );
-            return defaultValue;
-          }
-          return num;
-        };
-
-        // Parse all numeric fields
-        const parsedSellingPrice = parseNumericField(
-          sellingPriceUSD,
-          "Selling Price",
-          0,
-        );
-
-        const parsedLc = parseNumericField(lcUSD, "LC Price", 0);
-
-        const parsedFob = parseNumericField(fobUSD, "FOB Price", 0);
-
-        const parsedTaxSellingPrice = parseNumericField(
-          taxSellingPriceUSD,
-          "Tax Selling Price",
-          0,
-        );
-
-        // Parse date - handle "N/A", empty, and various formats
-        let parsedDate = null;
-        if (
-          licenseValidityDate &&
-          licenseValidityDate.toString().trim() !== "" &&
-          licenseValidityDate.toString().trim().toLowerCase() !== "n/a"
-        ) {
-          parsedDate = parseDate(licenseValidityDate);
-          if (!parsedDate) {
-            console.warn(
-              `Row ${
-                index + 1
-              }: Could not parse date "${licenseValidityDate}", using null`,
-            );
-          }
-        }
-
-        // Clean up drug license and other string fields - store as lowercase
-        const cleanProductName = normalizeString(productName);
-        const cleanType = normalizeString(type);
-        const cleanPacking = normalizeString(packing);
-        const cleanSupplierName = normalizeString(supplierName);
-        let cleanDrugLicense = normalizeString(drugLicense);
-
-        if (cleanDrugLicense === "n/a") {
-          cleanDrugLicense = "";
-        }
-
-        // Check for duplicate in current import batch
-        const productKey = `${cleanProductName}_${cleanType}_${cleanPacking}_${cleanSupplierName}`;
-
-        if (uniqueProducts.has(productKey)) {
-          // This is a duplicate within the import file
-          duplicateProducts.push({
+        // Check intra‑file duplicate
+        if (fileKeys.has(rowKey)) {
+          results.push({
             name: productName,
             row: index + 1,
-            reason: "Duplicate in import file",
+            status: "skipped",
+            reason: "Duplicate within the file",
           });
           continue;
         }
+        fileKeys.set(rowKey, index);
 
-        uniqueProducts.add(productKey);
-
-        // Check for existing product in database (case-insensitive search)
-        const existingProduct = await Product.findOne({
-          productName: { $regex: new RegExp(`^${cleanProductName}$`, "i") },
-          type: { $regex: new RegExp(`^${cleanType}$`, "i") },
-          packing: { $regex: new RegExp(`^${cleanPacking}$`, "i") },
-          supplierName: { $regex: new RegExp(`^${cleanSupplierName}$`, "i") },
-        });
-
-        if (existingProduct) {
-          // Duplicate found in database
-          duplicateProducts.push({
+        // Check duplicate in database
+        if (existingKeys.has(rowKey)) {
+          results.push({
             name: productName,
             row: index + 1,
+            status: "skipped",
             reason: "Already exists in database",
           });
           continue;
         }
 
-        // Create new product with lowercase storage
-        const product = new Product({
-          productName: cleanProductName, // Store as lowercase
-          type: cleanType, // Store as lowercase
-          packing: cleanPacking, // Store as lowercase
-          sellingPrice: parsedSellingPrice,
-          lc: parsedLc,
-          fob: parsedFob,
-          taxSellingPrice: parsedTaxSellingPrice,
-          qtyPerBoxStrip: parsedQtyPerBoxStrip,
-          supplierName: cleanSupplierName, // Store as lowercase
-          drugLicense: cleanDrugLicense, // Store as lowercase
-          licenseValidityDate: parsedDate,
-          remarks: normalizeString(remarks),
-        });
-
-        await product.save();
-        successfulImports.push({
-          name: productName,
-          row: index + 1,
-          action: "created",
-        });
-      } catch (productError) {
-        console.error(
-          `Error processing product at row ${index + 1}:`,
-          productError.message || productError,
-        );
-
-        let errorMessage = `Row ${index + 1}: Failed to process product "${
-          productData.productName
-        }"`;
-
-        if (productError.name === "ValidationError") {
-          const validationErrors = Object.values(productError.errors).map(
-            (err) => `${err.path}: ${err.message}`,
-          );
-          errorMessage = `Row ${index + 1}: ${validationErrors.join(", ")}`;
-        } else if (productError.code === 11000) {
-          errorMessage = `Row ${index + 1}: Product "${
-            productData.productName
-          }" already exists`;
-          duplicateProducts.push({
-            name: productData.productName,
-            row: index + 1,
-            reason: "Database constraint violation",
-          });
-        } else {
-          errorMessage = `Row ${index + 1}: ${productError.message}`;
+        // Parse numeric fields (required)
+        const qtyPerBoxStrip = parseInt(item.qtyPerBoxStrip, 10);
+        if (isNaN(qtyPerBoxStrip) || qtyPerBoxStrip <= 0) {
+          errors.push(`Row ${index + 1}: Quantity per box/strip must be a positive number`);
+          continue;
         }
 
-        errors.push(errorMessage);
+        const parseNumericField = (value, defaultValue = 0) => {
+          if (value === undefined || value === null || value === "") return defaultValue;
+          const str = value.toString().trim().replace(/[$,]/g, "");
+          const num = parseFloat(str);
+          return isNaN(num) ? defaultValue : num;
+        };
+
+        const sellingPriceUSD = parseNumericField(item.sellingPriceUSD);
+        const lcUSD = parseNumericField(item.lcUSD);
+        const fobUSD = parseNumericField(item.fobUSD);
+        const taxSellingPriceUSD = parseNumericField(item.taxSellingPriceUSD);
+
+        // Parse license validity date
+        let licenseValidityDate = null;
+        if (item.licenseValidityDate) {
+          licenseValidityDate = parseDate(item.licenseValidityDate);
+          if (!licenseValidityDate) {
+            warnings.push(`Row ${index + 1}: Could not parse date "${item.licenseValidityDate}", set to null`);
+          }
+        }
+
+        const drugLicense = normalizeString(item.drugLicense) === "n/a" ? "" : normalizeString(item.drugLicense);
+        const remarks = normalizeString(item.remarks);
+
+        // Prepare document
+        toInsert.push({
+          productName,
+          type,
+          packing,
+          sellingPrice: sellingPriceUSD,
+          lc: lcUSD,
+          fob: fobUSD,
+          taxSellingPrice: taxSellingPriceUSD,
+          qtyPerBoxStrip,
+          supplierName,
+          drugLicense,
+          licenseValidityDate,
+          remarks,
+        });
+
+      } catch (err) {
+        errors.push(`Row ${index + 1}: ${err.message}`);
+        console.error(`Error processing row ${index + 1}:`, err);
       }
     }
 
-    const totalProcessed =
-      successfulImports.length + duplicateProducts.length + errors.length;
-    let message = `Successfully imported ${successfulImports.length} product(s)`;
-    if (duplicateProducts.length > 0) {
-      message += `, ${duplicateProducts.length} duplicate record(s) found`;
-    }
-    if (errors.length > 0) {
-      message += `, ${errors.length} error(s) encountered`;
+    // Bulk insert
+    let inserted = [];
+    if (toInsert.length > 0) {
+      inserted = await Product.insertMany(toInsert, { ordered: false });
     }
 
-    if (errors.length > 0 && successfulImports.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "All products failed to import",
-        errors: errors,
-        importedCount: 0,
-        duplicateCount: duplicateProducts.length,
-        failedCount: errors.length,
-        totalProcessed: totalProcessed,
+    // Build results for inserted rows
+    inserted.forEach(doc => {
+      results.push({
+        name: doc.productName,
+        status: "created",
+        reason: "Imported successfully",
       });
-    } else if (errors.length > 0 || duplicateProducts.length > 0) {
-      return res.status(207).json({
-        success: true,
-        message: message,
-        importedCount: successfulImports.length,
-        duplicateCount: duplicateProducts.length,
-        failedCount: errors.length,
-        importedProducts: successfulImports,
-        duplicateProducts: duplicateProducts,
-        errors: errors,
-        totalProcessed: totalProcessed,
-      });
-    } else {
-      return res.status(200).json({
-        success: true,
-        message: message,
-        importedCount: successfulImports.length,
-        duplicateCount: duplicateProducts.length,
-        importedProducts: successfulImports,
-        totalProcessed: totalProcessed,
-      });
-    }
+    });
+
+    const createdCount = inserted.length;
+    const skippedCount = results.filter(r => r.status === "skipped").length;
+
+    let message = `${createdCount} product(s) imported successfully.`;
+    if (skippedCount > 0) message += ` ${skippedCount} product(s) skipped (duplicates).`;
+    if (warnings.length > 0) message += ` ${warnings.length} row(s) had warnings.`;
+    if (errors.length > 0) message += ` ${errors.length} row(s) had errors.`;
+
+    return res.status(200).json({
+      message,
+      results,
+      warnings: warnings.slice(0, 20),
+      errors: errors.slice(0, 20),
+      createdCount,
+      skippedCount,
+      warningCount: warnings.length,
+      errorCount: errors.length,
+      ok: true,
+    });
+
   } catch (err) {
-    console.error("Error importing products:", err);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to import products due to server error",
-      error: process.env.NODE_ENV === "development" ? err.message : undefined,
+    console.error("Import error:", err);
+    return res.status(500).json({
+      message: "Server error while importing products.",
+      error: err.message,
+      ok: false,
     });
   }
 });
+
+// ==================== ALL YOUR EXISTING ROUTES (UNCHANGED) ====================
 
 // GET DROPDOWN PRODUCTS
 router.get("/dropdown", async (req, res) => {
@@ -944,6 +856,34 @@ router.post("/add", async (req, res) => {
 
     return res.status(500).json({
       message: "Server error while adding product",
+    });
+  }
+});
+
+router.get("/types", async (req, res) => {
+  try {
+    const types = await Product.distinct("type");
+
+    // Format types for display
+    const formattedTypes = types
+      .filter((type) => type && type.trim() !== "")
+      .map((type) =>
+        type
+          .split(" ")
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(" "),
+      )
+      .sort();
+
+    res.status(200).json({
+      success: true,
+      data: formattedTypes,
+    });
+  } catch (err) {
+    console.error("Error fetching product types:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch product types.",
     });
   }
 });

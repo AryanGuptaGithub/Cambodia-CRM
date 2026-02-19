@@ -27,69 +27,81 @@ const toTitleCase = (str) => {
   return str
     .toLowerCase()
     .split(" ")
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
 };
 
 // Convert Excel serial date to JS Date
 const excelDateToJSDate = (value) => {
   if (!value) return null;
-  
+
   if (typeof value === "number") {
     // Excel dates start from 1899-12-30
     const epoch = new Date(1899, 11, 30);
     return new Date(epoch.getTime() + value * 86400000);
   }
-  
+
   const parsed = new Date(value);
   return isNaN(parsed.getTime()) ? null : parsed;
 };
 
 // Parse date string in various formats
 const parseDateString = (dateStr) => {
-  if (!dateStr || typeof dateStr !== 'string') return null;
-  
+  if (!dateStr || typeof dateStr !== "string") return null;
+
   const str = dateStr.trim();
-  if (str === '') return null;
-  
+  if (str === "") return null;
+
   // Try DD/MM/YYYY format
-  if (str.includes('/')) {
-    const parts = str.split('/');
+  if (str.includes("/")) {
+    const parts = str.split("/");
     if (parts.length === 3) {
       const day = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const year = parseInt(parts[2], 10);
-      
+
       // Handle 2-digit year
       const fullYear = year < 100 ? year + 2000 : year;
       return new Date(fullYear, month, day);
     }
   }
-  
+
   // Try MM/DD/YYYY format
-  if (str.includes('-')) {
-    const parts = str.split('-');
+  if (str.includes("-")) {
+    const parts = str.split("-");
     if (parts.length === 3) {
       // Check if it's DD-MM-YYYY or MM-DD-YYYY
       const first = parseInt(parts[0], 10);
       const second = parseInt(parts[1], 10);
-      
+
       if (first > 12) {
         // DD-MM-YYYY
-        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+        return new Date(
+          parseInt(parts[2], 10),
+          parseInt(parts[1], 10) - 1,
+          parseInt(parts[0], 10),
+        );
       } else {
         // MM-DD-YYYY or YYYY-MM-DD
         if (parts[0].length === 4) {
           // YYYY-MM-DD
-          return new Date(parts[0], parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          return new Date(
+            parts[0],
+            parseInt(parts[1], 10) - 1,
+            parseInt(parts[2], 10),
+          );
         } else {
           // MM-DD-YYYY
-          return new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
+          return new Date(
+            parseInt(parts[2], 10),
+            parseInt(parts[0], 10) - 1,
+            parseInt(parts[1], 10),
+          );
         }
       }
     }
   }
-  
+
   // Try parsing as ISO date
   const date = new Date(str);
   return isNaN(date.getTime()) ? null : date;
@@ -98,9 +110,9 @@ const parseDateString = (dateStr) => {
 // Helper to format supplier response with title case for display
 const formatSupplierResponse = (supplier) => {
   if (!supplier) return supplier;
-  
+
   const supplierObj = supplier.toObject ? supplier.toObject() : supplier;
-  
+
   return {
     ...supplierObj,
     name: toTitleCase(supplierObj.name),
@@ -112,7 +124,7 @@ const formatSupplierResponse = (supplier) => {
 router.get("/all", async (req, res) => {
   try {
     const { search = "" } = req.query;
-    
+
     // Build search query
     const searchQuery = {};
     if (search && search.trim() !== "") {
@@ -120,7 +132,7 @@ router.get("/all", async (req, res) => {
       searchQuery.$or = [
         { name: { $regex: searchLower, $options: "i" } },
         { supplierName: { $regex: searchLower, $options: "i" } },
-        { address: { $regex: searchLower, $options: "i" } }
+        { address: { $regex: searchLower, $options: "i" } },
       ];
     }
 
@@ -130,13 +142,13 @@ router.get("/all", async (req, res) => {
       .sort({ name: 1 });
 
     // Format suppliers
-    const formattedSuppliers = suppliers.map(supplier => ({
+    const formattedSuppliers = suppliers.map((supplier) => ({
       _id: supplier._id,
       name: supplier.name || "",
       supplierName: supplier.supplierName || supplier.name || "",
       address: supplier.address || "",
       contact: supplier.contact || "",
-      email: supplier.email || ""
+      email: supplier.email || "",
     }));
 
     res.json(formattedSuppliers); // Returns array directly
@@ -160,7 +172,7 @@ router.get("/", async (req, res) => {
       searchQuery.$or = [
         { name: { $regex: searchLower, $options: "i" } },
         { supplierName: { $regex: searchLower, $options: "i" } },
-        { address: { $regex: searchLower, $options: "i" } }
+        { address: { $regex: searchLower, $options: "i" } },
       ];
     }
 
@@ -174,7 +186,9 @@ router.get("/", async (req, res) => {
       .limit(limitNum);
 
     // Format suppliers
-    const formattedSuppliers = suppliers.map(supplier => formatSupplierResponse(supplier));
+    const formattedSuppliers = suppliers.map((supplier) =>
+      formatSupplierResponse(supplier),
+    );
 
     res.json({
       success: true,
@@ -193,7 +207,7 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
-    
+
     if (!supplier) {
       return res.status(404).json({
         success: false,
@@ -213,7 +227,15 @@ router.get("/:id", async (req, res) => {
 /* ----------------------------- CREATE Supplier ----------------------------- */
 router.post("/", async (req, res) => {
   try {
-    const { name, supplierName, address, contact, email, gstNumber, panNumber } = req.body;
+    const {
+      name,
+      supplierName,
+      address,
+      contact,
+      email,
+      gstNumber,
+      panNumber,
+    } = req.body;
 
     // Check for duplicates
     const existingSupplier = await Supplier.findOne({
@@ -221,8 +243,8 @@ router.post("/", async (req, res) => {
         { name: name?.trim() },
         { supplierName: supplierName?.trim() },
         { email: email?.trim() },
-        { contact: contact?.trim() }
-      ]
+        { contact: contact?.trim() },
+      ],
     });
 
     if (existingSupplier) {
@@ -254,10 +276,19 @@ router.post("/", async (req, res) => {
   }
 });
 
-/* ----------------------------- UPDATE Supplier ----------------------------- */
-router.put("/:id",protect, allowAdminOnly, async (req, res) => {
+/* ----------------------------- UPDATE Supplier (including enabled) ----------------------------- */
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
-    const { name, supplierName, address, contact, email, gstNumber, panNumber } = req.body;
+    const {
+      name,
+      supplierName,
+      address,
+      contact,
+      email,
+      gstNumber,
+      panNumber,
+      enabled, // <-- added
+    } = req.body;
 
     // Check if supplier exists
     const supplier = await Supplier.findById(req.params.id);
@@ -268,19 +299,22 @@ router.put("/:id",protect, allowAdminOnly, async (req, res) => {
       });
     }
 
+    // Build update object dynamically (only include fields that are provided)
+    const updateData = {};
+    if (name !== undefined) updateData.name = name?.trim();
+    if (supplierName !== undefined) updateData.supplierName = supplierName?.trim();
+    if (address !== undefined) updateData.address = address?.trim();
+    if (contact !== undefined) updateData.contact = contact?.trim();
+    if (email !== undefined) updateData.email = email?.trim().toLowerCase();
+    if (gstNumber !== undefined) updateData.gstNumber = gstNumber?.trim();
+    if (panNumber !== undefined) updateData.panNumber = panNumber?.trim();
+    if (enabled !== undefined) updateData.enabled = enabled; // <-- allow updating enabled
+
     // Update supplier
     const updatedSupplier = await Supplier.findByIdAndUpdate(
       req.params.id,
-      {
-        name: name?.trim(),
-        supplierName: supplierName?.trim(),
-        address: address?.trim(),
-        contact: contact?.trim(),
-        email: email?.trim().toLowerCase(),
-        gstNumber: gstNumber?.trim(),
-        panNumber: panNumber?.trim(),
-      },
-      { new: true, runValidators: true }
+      updateData,
+      { new: true, runValidators: true },
     );
 
     res.json({
@@ -294,10 +328,10 @@ router.put("/:id",protect, allowAdminOnly, async (req, res) => {
 });
 
 /* ----------------------------- DELETE Supplier ----------------------------- */
-router.delete("/:id",protect, allowAdminOnly, async (req, res) => {
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
-    
+
     if (!supplier) {
       return res.status(404).json({
         success: false,
@@ -339,7 +373,7 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-/* ----------------------------- EXCEL Import ----------------------------- */
+/* ----------------------------- EXCEL Import (OPTIMIZED) ----------------------------- */
 router.post("/import", async (req, res) => {
   try {
     const suppliers = req.body;
@@ -351,13 +385,20 @@ router.post("/import", async (req, res) => {
       });
     }
 
+    // 1. Fetch all existing supplier names (case-insensitive) into a Set
+    const allExisting = await Supplier.find({}, { name: 1 }).lean();
+    const existingNamesSet = new Set(
+      allExisting.map((s) => s.name.toLowerCase()),
+    );
+
+    const toInsert = [];
     const results = [];
-    const importErrors = [];
     const warnings = [];
+    const errors = [];
 
     for (let [index, supplier] of suppliers.entries()) {
       try {
-        // Normalize field names and convert to lowercase
+        // Normalize field names
         const name = (
           supplier.supplierName ||
           supplier.name ||
@@ -382,12 +423,22 @@ router.post("/import", async (req, res) => {
 
         // Validate required fields
         if (!name) {
-          importErrors.push(`Row ${index + 1}: Missing supplier name`);
+          errors.push(`Row ${index + 1}: Missing supplier name`);
           continue;
         }
 
         if (!address) {
-          importErrors.push(`Row ${index + 1}: Missing address`);
+          errors.push(`Row ${index + 1}: Missing address`);
+          continue;
+        }
+
+        // Check duplicate in existing DB
+        if (existingNamesSet.has(name)) {
+          results.push({
+            supplier: toTitleCase(name),
+            status: "skipped",
+            message: `Supplier "${toTitleCase(name)}" already exists.`,
+          });
           continue;
         }
 
@@ -396,105 +447,118 @@ router.post("/import", async (req, res) => {
         if (supplier.siteRegistrationDate) {
           siteRegistrationDate = new Date(supplier.siteRegistrationDate);
           if (isNaN(siteRegistrationDate.getTime())) {
-            // Try parsing as Excel serial date
-            if (typeof supplier.siteRegistrationDate === 'number') {
-              siteRegistrationDate = excelDateToJSDate(supplier.siteRegistrationDate);
+            if (typeof supplier.siteRegistrationDate === "number") {
+              siteRegistrationDate = excelDateToJSDate(
+                supplier.siteRegistrationDate,
+              );
             } else {
-              siteRegistrationDate = parseDateString(supplier.siteRegistrationDate.toString());
+              siteRegistrationDate = parseDateString(
+                supplier.siteRegistrationDate.toString(),
+              );
             }
-            
-            if (!siteRegistrationDate || isNaN(siteRegistrationDate.getTime())) {
-              siteRegistrationDate = new Date(); // Default to current date
-              warnings.push(`Row ${index + 1}: Invalid registration date, using current date`);
+            if (
+              !siteRegistrationDate ||
+              isNaN(siteRegistrationDate.getTime())
+            ) {
+              siteRegistrationDate = new Date();
+              warnings.push(
+                `Row ${index + 1}: Invalid registration date, using current date`,
+              );
             }
           }
         } else {
-          siteRegistrationDate = new Date(); // Default to current date
-          warnings.push(`Row ${index + 1}: Site registration date not provided, using current date`);
+          siteRegistrationDate = new Date();
+          warnings.push(
+            `Row ${index + 1}: Site registration date not provided, using current date`,
+          );
         }
 
         let siteRegistrationExpiryDate = null;
         if (supplier.siteRegistrationExpiryDate) {
-          siteRegistrationExpiryDate = new Date(supplier.siteRegistrationExpiryDate);
-          
+          siteRegistrationExpiryDate = new Date(
+            supplier.siteRegistrationExpiryDate,
+          );
           if (isNaN(siteRegistrationExpiryDate.getTime())) {
-            // Try different parsing methods
-            if (typeof supplier.siteRegistrationExpiryDate === 'number') {
-              siteRegistrationExpiryDate = excelDateToJSDate(supplier.siteRegistrationExpiryDate);
+            if (typeof supplier.siteRegistrationExpiryDate === "number") {
+              siteRegistrationExpiryDate = excelDateToJSDate(
+                supplier.siteRegistrationExpiryDate,
+              );
             } else {
-              siteRegistrationExpiryDate = parseDateString(supplier.siteRegistrationExpiryDate.toString());
+              siteRegistrationExpiryDate = parseDateString(
+                supplier.siteRegistrationExpiryDate.toString(),
+              );
             }
-            
-            if (!siteRegistrationExpiryDate || isNaN(siteRegistrationExpiryDate.getTime())) {
-              // Default to 1 year from registration date
+            if (
+              !siteRegistrationExpiryDate ||
+              isNaN(siteRegistrationExpiryDate.getTime())
+            ) {
               siteRegistrationExpiryDate = new Date(siteRegistrationDate);
-              siteRegistrationExpiryDate.setFullYear(siteRegistrationExpiryDate.getFullYear() + 1);
-              warnings.push(`Row ${index + 1}: Invalid expiry date, defaulting to 1 year from registration date`);
+              siteRegistrationExpiryDate.setFullYear(
+                siteRegistrationExpiryDate.getFullYear() + 1,
+              );
+              warnings.push(
+                `Row ${index + 1}: Invalid expiry date, defaulting to 1 year from registration date`,
+              );
             }
           }
         } else {
-          // Default to 1 year from registration date
           siteRegistrationExpiryDate = new Date(siteRegistrationDate);
-          siteRegistrationExpiryDate.setFullYear(siteRegistrationExpiryDate.getFullYear() + 1);
-          warnings.push(`Row ${index + 1}: Expiry date not provided, defaulting to 1 year from registration date`);
+          siteRegistrationExpiryDate.setFullYear(
+            siteRegistrationExpiryDate.getFullYear() + 1,
+          );
+          warnings.push(
+            `Row ${index + 1}: Expiry date not provided, defaulting to 1 year from registration date`,
+          );
         }
 
-        const mappedSupplier = {
-          name: name.toLowerCase(),
-          address: address.toLowerCase(),
+        // Prepare supplier document
+        toInsert.push({
+          name,
+          address,
           siteRegistrationDate,
           siteRegistrationExpiryDate,
           enabled: true,
-        };
-
-        // Check if supplier already exists (case-insensitive name match)
-        const exists = await Supplier.findOne({
-          name: { $regex: new RegExp(`^${mappedSupplier.name}$`, "i") },
         });
-
-        if (exists) {
-          results.push({
-            supplier: toTitleCase(mappedSupplier.name),
-            status: "skipped",
-            message: `Supplier "${toTitleCase(mappedSupplier.name)}" already exists.`,
-          });
-        } else {
-          await Supplier.create(mappedSupplier);
-          results.push({
-            supplier: toTitleCase(mappedSupplier.name),
-            status: "created",
-            message: `Supplier "${toTitleCase(mappedSupplier.name)}" imported successfully.`,
-          });
-        }
       } catch (err) {
-        importErrors.push(`Row ${index + 1}: ${err.message}`);
-        console.error(`Error importing row ${index + 1}:`, err);
+        errors.push(`Row ${index + 1}: ${err.message}`);
+        console.error(`Error processing row ${index + 1}:`, err);
       }
     }
 
-    const createdCount = results.filter((r) => r.status === "created").length;
+    // Bulk insert new suppliers
+    let inserted = [];
+    if (toInsert.length > 0) {
+      inserted = await Supplier.insertMany(toInsert, { ordered: false });
+    }
+
+    // Build results for inserted rows
+    inserted.forEach((doc) => {
+      results.push({
+        supplier: toTitleCase(doc.name),
+        status: "created",
+        message: `Supplier "${toTitleCase(doc.name)}" imported successfully.`,
+      });
+    });
+
+    const createdCount = inserted.length;
     const skippedCount = results.filter((r) => r.status === "skipped").length;
 
     let message = `${createdCount} supplier(s) imported successfully.`;
-    if (skippedCount > 0) {
+    if (skippedCount > 0)
       message += ` ${skippedCount} supplier(s) skipped (already exist).`;
-    }
-    if (warnings.length > 0) {
+    if (warnings.length > 0)
       message += ` ${warnings.length} row(s) had date warnings.`;
-    }
-    if (importErrors.length > 0) {
-      message += ` ${importErrors.length} row(s) had errors.`;
-    }
+    if (errors.length > 0) message += ` ${errors.length} row(s) had errors.`;
 
     return res.status(200).json({
       message,
       results,
-      warnings: warnings.slice(0, 10), // Limit warnings to first 10
-      errors: importErrors,
+      warnings: warnings.slice(0, 20),
+      errors: errors.slice(0, 20),
       createdCount,
       skippedCount,
       warningCount: warnings.length,
-      errorCount: importErrors.length,
+      errorCount: errors.length,
       ok: true,
     });
   } catch (err) {

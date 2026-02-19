@@ -1,5 +1,15 @@
 import { useNavigate } from "react-router-dom";
-import { UserPlus, Upload, Search, Eye, Edit, Trash2, X } from "lucide-react";
+import {
+  UserPlus,
+  Upload,
+  Search,
+  Eye,
+  Edit,
+  Trash2,
+  X,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { confirmDialog } from "../../utils/confirmationDialog";
@@ -16,6 +26,25 @@ import LoadingOverlay from "../../components/Loading";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const SUPPLIERS_PER_PAGE = 10; // Match backend default
+
+// --- Axios Interceptor to automatically attach token ---
+axios.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+
+function capitalizeFirstLetter(str) {
+  if (!str) return "";
+  str = str.toString();
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+// -------------------------------------------------------
 
 // Helper to convert to title case for display
 const toTitleCase = (str) => {
@@ -36,7 +65,7 @@ const toLowerCase = (str) => {
 // Helper to display value with title case
 const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
-// Subcomponents (same as before)
+// Subcomponents
 const TopBar = ({ onAddNew, onImport, onDeleteSelected, selectedCount }) => (
   <div className="flex justify-between items-center mb-4">
     <div className="flex gap-3">
@@ -64,23 +93,50 @@ const TopBar = ({ onAddNew, onImport, onDeleteSelected, selectedCount }) => (
   </div>
 );
 
-const Tabs = ({ activeTab, setActiveTab, totalSuppliers }) => (
+const Tabs = ({
+  activeTab,
+  setActiveTab,
+  totalSuppliers,
+  hasEnabled,
+  hasDisabled,
+}) => (
   <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
     {totalSuppliers > 0 ? (
       <div className="flex gap-4">
-        {["All", "Enabled", "Disabled"].map((tab) => (
+        <button
+          onClick={() => setActiveTab("All")}
+          className={`px-4 py-2 rounded-lg cursor-pointer ${
+            activeTab === "All"
+              ? "bg-indigo-600 text-white"
+              : "bg-gray-200 text-gray-700"
+          }`}
+        >
+          All
+        </button>
+        {hasEnabled && (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => setActiveTab("Enabled")}
             className={`px-4 py-2 rounded-lg cursor-pointer ${
-              activeTab === tab
+              activeTab === "Enabled"
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-200 text-gray-700"
             }`}
           >
-            {tab}
+            Enabled
           </button>
-        ))}
+        )}
+        {hasDisabled && (
+          <button
+            onClick={() => setActiveTab("Disabled")}
+            className={`px-4 py-2 rounded-lg cursor-pointer ${
+              activeTab === "Disabled"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700"
+            }`}
+          >
+            Disabled
+          </button>
+        )}
       </div>
     ) : (
       <div />
@@ -229,7 +285,6 @@ const SupplierTable = ({
 );
 
 const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
-  // Generate visible page numbers
   const getVisiblePages = () => {
     const pages = [];
     const maxVisible = 5;
@@ -239,44 +294,28 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
         pages.push(i);
       }
     } else {
-      // Always show first page
       pages.push(1);
-
-      // Calculate start and end
       let start = Math.max(2, currentPage - 1);
       let end = Math.min(totalPages - 1, currentPage + 1);
-
-      // Adjust if near the beginning
       if (currentPage <= 3) {
         start = 2;
         end = 4;
       }
-
-      // Adjust if near the end
       if (currentPage >= totalPages - 2) {
         start = totalPages - 3;
         end = totalPages - 1;
       }
-
-      // Add ellipsis if needed
       if (start > 2) {
         pages.push("...");
       }
-
-      // Add middle pages
       for (let i = start; i <= end; i++) {
         pages.push(i);
       }
-
-      // Add ellipsis if needed
       if (end < totalPages - 1) {
         pages.push("...");
       }
-
-      // Always show last page
       pages.push(totalPages);
     }
-
     return pages;
   };
 
@@ -291,7 +330,6 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
       >
         ← Prev
       </button>
-
       {visiblePages.map((page, index) => (
         <button
           key={index}
@@ -308,7 +346,6 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
           {page}
         </button>
       ))}
-
       <button
         onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
         disabled={currentPage === totalPages}
@@ -320,66 +357,436 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
   );
 };
 
-const ImportModal = ({
-  show,
-  onClose,
-  isUploading,
-  onFileUpload,
-  onImport,
-  parsedData,
-  isSampleFile,
-}) =>
-  show &&
-  ReactDOM.createPortal(
+// --- Self-contained Import Modal ---
+const ImportModal = ({ show, onClose, isSampleFile }) => {
+  const [parsedData, setParsedData] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [parseErrors, setParseErrors] = useState([]);
+  const [fileName, setFileName] = useState("");
+  const [existingSuppliers, setExistingSuppliers] = useState([]);
+  const [duplicateRows, setDuplicateRows] = useState([]);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+
+  // Fetch existing suppliers when modal opens
+  useEffect(() => {
+    if (show) {
+      fetchExistingSuppliers();
+    }
+  }, [show]);
+
+  const fetchExistingSuppliers = async () => {
+    setLoadingExisting(true);
+    try {
+      const res = await axios.get(`${backendUrl}/api/suppliers?limit=10000`);
+      if (res.data.success || res.data.ok) {
+        const suppliers = res.data.data || res.data.suppliers || [];
+        setExistingSuppliers(suppliers.map((s) => ({ name: s.name })));
+      }
+    } catch (error) {
+      console.error("Failed to fetch existing suppliers", error);
+      showToast(
+        "error",
+        "Could not load existing suppliers for duplicate check",
+      );
+    } finally {
+      setLoadingExisting(false);
+    }
+  };
+
+  // Generate a unique key for a row (all fields, trimmed + lowercased)
+  const getRowKey = (row) => {
+    const fields = [
+      row.supplierName || "",
+      row.address || "",
+      row.siteRegistrationDate || "",
+      row.siteRegistrationExpiryDate || "",
+    ];
+    return fields.map((f) => f.toString().trim().toLowerCase()).join("||");
+  };
+
+  // Check for duplicates whenever parsedData or existingSuppliers change
+  useEffect(() => {
+    if (!parsedData.length) {
+      setDuplicateRows([]);
+      return;
+    }
+
+    const duplicateIndices = new Set();
+
+    // 1. Intra‑file duplicates (full row equality)
+    const keyCount = new Map();
+    parsedData.forEach((row, idx) => {
+      const key = getRowKey(row);
+      keyCount.set(key, (keyCount.get(key) || 0) + 1);
+    });
+    parsedData.forEach((row, idx) => {
+      const key = getRowKey(row);
+      if (keyCount.get(key) > 1) duplicateIndices.add(idx);
+    });
+
+    // 2. Database duplicates by supplier name (case‑insensitive)
+    if (existingSuppliers.length > 0) {
+      const existingNames = new Set(
+        existingSuppliers
+          .map((s) => s.name?.trim().toLowerCase())
+          .filter(Boolean),
+      );
+      parsedData.forEach((row, idx) => {
+        const name = row.supplierName?.trim().toLowerCase();
+        if (name && existingNames.has(name)) {
+          duplicateIndices.add(idx);
+        }
+      });
+    }
+
+    const dupes = parsedData.filter((_, idx) => duplicateIndices.has(idx));
+    setDuplicateRows(dupes);
+  }, [parsedData, existingSuppliers]);
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    setParseErrors([]);
+    setParsedData([]);
+    setDuplicateRows([]);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array", cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+
+        const rows = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          defval: "",
+          blankrows: true,
+          raw: true,
+        });
+
+        if (!rows.length) {
+          showToast("warning", "Excel file is empty");
+          return;
+        }
+
+        // Find header row containing "supplier name"
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          for (let j = 0; j < (rows[i]?.length || 0); j++) {
+            const cell = rows[i]?.[j]?.toString().trim().toLowerCase();
+            if (cell === "supplier name") {
+              headerIdx = i;
+              break;
+            }
+          }
+          if (headerIdx !== -1) break;
+        }
+
+        if (headerIdx === -1) {
+          showToast("error", "Header row with 'Supplier Name' not found.");
+          return;
+        }
+
+        const headers = rows[headerIdx].map((h) => h.toString().trim());
+        const dataRows = rows.slice(headerIdx + 1);
+
+        const getValue = (obj, keys) => {
+          for (const key of keys) {
+            for (const k in obj) {
+              if (
+                k.toLowerCase() === key.toLowerCase() &&
+                obj[k]?.toString().trim() !== ""
+              ) {
+                return obj[k];
+              }
+            }
+          }
+          return "";
+        };
+
+        const rowErrors = [];
+        const validRows = [];
+
+        dataRows.forEach((row, idx) => {
+          const obj = {};
+          headers.forEach((h, i) => {
+            obj[h] = row[i] !== undefined ? row[i] : "";
+          });
+
+          if (!Object.values(obj).some((v) => v.toString().trim() !== ""))
+            return;
+
+          const supplierName = capitalizeFirstLetter(
+            String(getValue(obj, ["Supplier Name", "Name"]) || "").trim(),
+          );
+
+          if (!supplierName) {
+            rowErrors.push(
+              `Row ${headerIdx + idx + 2}: Missing supplier name — skipped`,
+            );
+            return;
+          }
+
+          const address = String(getValue(obj, ["Address"]) || "").trim();
+          const siteRegistrationDateStr = String(
+            getValue(obj, ["Site Registration Date", "Registration Date"]) ||
+              "",
+          ).trim();
+          const siteRegistrationExpiryDateStr = String(
+            getValue(obj, ["Site Registration Expiry Date", "Expiry Date"]) ||
+              "",
+          ).trim();
+
+          const dataObj = {
+            supplierName: supplierName.toLowerCase(),
+            address: address.toLowerCase(),
+          };
+
+          const parsedRegDate = parseExcelDate(siteRegistrationDateStr);
+          if (parsedRegDate) dataObj.siteRegistrationDate = parsedRegDate;
+
+          const parsedExpDate = parseExcelDate(siteRegistrationExpiryDateStr);
+          if (parsedExpDate) dataObj.siteRegistrationExpiryDate = parsedExpDate;
+
+          validRows.push(dataObj);
+        });
+
+        if (validRows.length === 0) {
+          showToast("warning", "No valid supplier records found.");
+          return;
+        }
+
+        setParsedData(validRows);
+        setParseErrors(rowErrors);
+        if (rowErrors.length) {
+          showToast(
+            "warning",
+            `${validRows.length} valid rows, ${rowErrors.length} skipped`,
+          );
+        }
+      } catch (err) {
+        console.error("Parse error:", err);
+        showToast("error", "Failed to parse file: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleImport = async () => {
+    if (!parsedData.length) {
+      showToast("warning", "Upload a valid file first");
+      return;
+    }
+
+    // Filter out duplicate rows
+    const uniqueData = parsedData.filter((row) => !duplicateRows.includes(row));
+
+    if (uniqueData.length === 0) {
+      showToast("warning", "No unique records to import");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const res = await axios.post(
+        `${backendUrl}/api/suppliers/import`,
+        uniqueData,
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 60000,
+        },
+      );
+      if (res.status === 200 || res.status === 201) {
+        showToast(
+          "success",
+          res.data.message ||
+            `Imported ${uniqueData.length} records successfully`,
+        );
+        onClose(true); // true = refresh
+      }
+    } catch (err) {
+      console.error("Import error:", err);
+      let msg = "Import failed";
+      if (err.response?.data?.message) msg = err.response.data.message;
+      else if (err.request) msg = "No response from server. Check network.";
+      else msg = err.message || "Unknown error";
+      showToast("error", msg);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  if (!show) return null;
+
+  const isDuplicateRow = (row) => duplicateRows.includes(row);
+
+  return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
-      <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+      <div className="bg-white w-full max-w-lg p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
         <button
-          onClick={onClose}
-          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+          onClick={() => onClose(false)}
           disabled={isUploading}
+          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
         >
           <X size={20} />
         </button>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">
-          Import Supplier
-        </h2>
+
+        <h2 className="text-lg font-semibold mb-1">Import Suppliers</h2>
         {isSampleFile && <SampleExcelDownloadSupplier />}
-        <div className="mb-6">
-          <label className="block text-gray-700 mb-2">File</label>
+
+        <div className="mb-4">
+          <label className="block text-gray-700 mb-2 font-medium">
+            Select File
+          </label>
           <input
             type="file"
-            accept=".csv, .xlsx"
-            onChange={onFileUpload}
-            className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+            accept=".csv,.xlsx"
+            onChange={handleFileUpload}
+            className="block w-full border rounded-lg px-3 py-2 text-sm"
           />
+          {fileName && (
+            <p className="text-xs text-gray-500 mt-1">📄 {fileName}</p>
+          )}
         </div>
-        <div className="flex justify-between items-center">
-          <div className="text-sm text-gray-600">
-            {parsedData.length > 0 ? (
-              <>
-                Rows to import:{" "}
-                <span className="font-semibold text-blue-600">
-                  {parsedData.length}
-                </span>
-              </>
-            ) : (
-              <span className="text-gray-500">No data to import</span>
-            )}
+
+        {loadingExisting && (
+          <div className="mb-4 text-sm text-blue-600 flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            Loading existing suppliers for duplicate check...
           </div>
+        )}
+
+        {duplicateRows.length > 0 && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertCircle size={16} className="text-red-600" />
+              <span className="text-sm font-medium text-red-800">
+                {duplicateRows.length} duplicate row(s) found
+                {existingSuppliers.length > 0 && " (by name or full match)"}
+              </span>
+            </div>
+            <div className="max-h-24 overflow-y-auto text-xs text-red-700">
+              {duplicateRows.slice(0, 5).map((row, i) => (
+                <div key={i} className="mb-1">
+                  • {displayValue(row.supplierName)}
+                </div>
+              ))}
+              {duplicateRows.length > 5 && (
+                <div>...and {duplicateRows.length - 5} more</div>
+              )}
+            </div>
+            <p className="text-xs text-red-600 mt-2">
+              Duplicate rows are highlighted in red below. They will be skipped
+              during import.
+            </p>
+          </div>
+        )}
+
+        {parsedData.length > 0 && (
+          <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle size={16} className="text-green-600" />
+              <span className="text-sm font-medium text-green-800">
+                {parsedData.length} Total Records
+                {duplicateRows.length > 0 && (
+                  <span className="ml-2 text-red-600">
+                    ({parsedData.length - duplicateRows.length} unique)
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="max-h-36 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-green-100">
+                  <tr>
+                    <th className="p-1 text-left">#</th>
+                    <th className="p-1 text-left">Supplier Name</th>
+                    <th className="p-1 text-left">Address</th>
+                    <th className="p-1 text-left">Reg. Date</th>
+                    <th className="p-1 text-left">Expiry Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsedData.slice(0, 5).map((row, i) => {
+                    const duplicate = isDuplicateRow(row);
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-t ${duplicate ? "bg-red-100 text-red-800 font-medium" : ""}`}
+                      >
+                        <td className="p-1 text-gray-500">{i + 1}</td>
+                        <td className="p-1">
+                          {displayValue(row.supplierName) || "—"}
+                        </td>
+                        <td className="p-1">
+                          {displayValue(row.address) || "—"}
+                        </td>
+                        <td className="p-1">
+                          {formatDateToReadable(row.siteRegistrationDate) ||
+                            "—"}
+                        </td>
+                        <td className="p-1">
+                          {formatDateToReadable(
+                            row.siteRegistrationExpiryDate,
+                          ) || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {parsedData.length > 5 && (
+                <p className="text-xs text-gray-500 text-center mt-1">
+                  ...and {parsedData.length - 5} more rows
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {parseErrors.length > 0 && (
+          <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-h-28 overflow-y-auto">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle size={14} className="text-yellow-600" />
+              <span className="text-xs font-medium text-yellow-800">
+                {parseErrors.length} rows skipped
+              </span>
+            </div>
+            {parseErrors.slice(0, 5).map((err, i) => (
+              <p key={i} className="text-xs text-yellow-700">
+                {err}
+              </p>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end mt-4">
           <div className="flex gap-3">
             <button
-              onClick={onClose}
-              className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+              onClick={() => onClose(false)}
               disabled={isUploading}
+              className="px-5 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
             <button
-              onClick={onImport}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-              disabled={isUploading || parsedData.length === 0}
+              onClick={handleImport}
+              disabled={
+                isUploading || parsedData.length === 0 || loadingExisting
+              }
+              className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              {isUploading ? "Uploading…" : "Upload"}
+              {isUploading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                  Importing…
+                </>
+              ) : (
+                `Import`
+              )}
             </button>
           </div>
         </div>
@@ -387,7 +794,9 @@ const ImportModal = ({
     </div>,
     document.body,
   );
+};
 
+// View Modal
 const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
   show &&
   ReactDOM.createPortal(
@@ -409,14 +818,6 @@ const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
             </label>
             <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
               {displayValue(form.name)}
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-600">
-              Address
-            </label>
-            <p className="border px-3 py-2 rounded-lg bg-gray-100">
-              {displayValue(form.address)}
             </p>
           </div>
           <div>
@@ -444,6 +845,17 @@ const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
             </p>
           </div>
         </div>
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-gray-600">
+            Address
+          </label>
+          <textarea
+            readOnly
+            value={displayValue(form.address)}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-100 resize-none"
+            rows={3}
+          />
+        </div>
         <div className="mt-6 flex justify-end">
           <button
             onClick={onClose}
@@ -457,6 +869,7 @@ const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
     document.body,
   );
 
+// Edit Modal
 const EditModal = ({
   show,
   onClose,
@@ -478,91 +891,87 @@ const EditModal = ({
         <h2 className="text-xl font-semibold text-gray-800 mb-4">
           Edit Supplier
         </h2>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit(e);
-          }}
-          className="grid grid-cols-1 md:grid-cols-2 gap-4"
-        >
-          <div>
-            <label className="block text-sm font-medium">Supplier Name</label>
-            <input
-              type="text"
-              value={form.name || ""}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="w-full border px-3 py-2 rounded-lg border-gray-300"
-              required
-            />
+        <form onSubmit={onSubmit}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium">Supplier Name</label>
+              <input
+                type="text"
+                value={form.name || ""}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">
+                Site Registration Date
+              </label>
+              <DatePicker
+                selected={
+                  form.siteRegistrationDate
+                    ? new Date(form.siteRegistrationDate)
+                    : null
+                }
+                onChange={(date) =>
+                  setForm({
+                    ...form,
+                    siteRegistrationDate: date ? date.toISOString() : "",
+                  })
+                }
+                dateFormat="yyyy-MM-dd"
+                placeholderText="Select registration date"
+                className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">
+                Site Registration Expiry Date
+              </label>
+              <DatePicker
+                selected={
+                  form.siteRegistrationExpiryDate
+                    ? new Date(form.siteRegistrationExpiryDate)
+                    : null
+                }
+                onChange={(date) =>
+                  setForm({
+                    ...form,
+                    siteRegistrationExpiryDate: date ? date.toISOString() : "",
+                  })
+                }
+                dateFormat="yyyy-MM-dd"
+                placeholderText="Select expiry date"
+                className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">Status</label>
+              <select
+                value={form.enabled}
+                onChange={(e) =>
+                  setForm({ ...form, enabled: e.target.value === "true" })
+                }
+                className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
+              >
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </div>
           </div>
-          <div>
+          <div className="mt-4">
             <label className="block text-sm font-medium">Address</label>
-            <input
-              type="text"
+            <textarea
               value={form.address || ""}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
-              className="w-full border px-3 py-2 rounded-lg border-gray-300"
+              className="w-full border px-3 py-2 rounded-lg border-gray-300 resize-none"
+              rows={3}
               required
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium">
-              Site Registration Date
-            </label>
-            <DatePicker
-              selected={
-                form.siteRegistrationDate
-                  ? new Date(form.siteRegistrationDate)
-                  : null
-              }
-              onChange={(date) =>
-                setForm({
-                  ...form,
-                  siteRegistrationDate: date ? date.toISOString() : "",
-                })
-              }
-              dateFormat="yyyy-MM-dd"
-              placeholderText="Select registration date"
-              className="w-full border px-3 py-2 rounded-lg border-gray-300"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium">
-              Site Registration Expiry Date
-            </label>
-            <DatePicker
-              selected={
-                form.siteRegistrationExpiryDate
-                  ? new Date(form.siteRegistrationExpiryDate)
-                  : null
-              }
-              onChange={(date) =>
-                setForm({
-                  ...form,
-                  siteRegistrationExpiryDate: date ? date.toISOString() : "",
-                })
-              }
-              dateFormat="yyyy-MM-dd"
-              placeholderText="Select expiry date"
-              className="w-full border px-3 py-2 rounded-lg border-gray-300"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium">Status</label>
-            <select
-              value={form.enabled}
-              onChange={(e) =>
-                setForm({ ...form, enabled: e.target.value === "true" })
-              }
-              className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
-            >
-              <option value="true">Enabled</option>
-              <option value="false">Disabled</option>
-            </select>
-          </div>
-          <div className="md:col-span-2 mt-4 flex justify-end gap-3">
+          <div className="mt-6 flex justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -583,11 +992,11 @@ const EditModal = ({
     document.body,
   );
 
+// Main Supplier Component
 const Supplier = () => {
   const navigate = useNavigate();
   const inputRef = useRef(null);
 
-  // State
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -598,8 +1007,6 @@ const Supplier = () => {
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const [parsedData, setParsedData] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
   const [form, setForm] = useState({
     name: "",
     address: "",
@@ -607,37 +1014,28 @@ const Supplier = () => {
     siteRegistrationExpiryDate: "",
     enabled: "",
   });
-  const [importWarnings, setImportWarnings] = useState([]);
   const [searchTimeout, setSearchTimeout] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  // Fetch suppliers with pagination - FIXED VERSION
+  // Fetch suppliers
   useEffect(() => {
     const fetchSuppliers = async () => {
       try {
         setLoading(true);
-
-        // Build query parameters
         const params = {
           page: currentPage,
           limit: SUPPLIERS_PER_PAGE,
         };
-
-        // Add search parameter if provided
         if (search && search.trim() !== "") {
           params.search = search.trim();
         }
 
         const response = await axios.get(`${backendUrl}/api/suppliers`, {
           params: params,
-          headers: {
-            "Content-Type": "application/json",
-          },
-          timeout: 10000, // 10 second timeout
+          timeout: 10000,
         });
 
-        // Handle different response structures
         if (response.data) {
-          // Check for success flag or direct data
           if (response.data.success || response.data.ok) {
             const data = response.data.data || response.data.suppliers || [];
             const total = response.data.total || response.data.count || 0;
@@ -651,13 +1049,11 @@ const Supplier = () => {
             setTotalPages(totalPages);
             setError(null);
           } else if (Array.isArray(response.data)) {
-            // If response is directly an array
             setSuppliers(response.data);
             setTotalSuppliers(response.data.length);
             setTotalPages(Math.ceil(response.data.length / SUPPLIERS_PER_PAGE));
             setError(null);
           } else {
-            // If no success flag but has data
             setSuppliers(response.data.suppliers || []);
             setTotalSuppliers(response.data.total || 0);
             setTotalPages(response.data.totalPages || 1);
@@ -668,15 +1064,7 @@ const Supplier = () => {
         }
       } catch (err) {
         console.error("Error fetching suppliers:", err);
-
-        // Detailed error handling
         if (err.response) {
-          // Server responded with error status
-          console.error(
-            "Response error:",
-            err.response.status,
-            err.response.data,
-          );
           setError(
             `Server error: ${err.response.status} - ${err.response.data?.message || "Unknown error"}`,
           );
@@ -685,18 +1073,12 @@ const Supplier = () => {
             `Failed to fetch suppliers: ${err.response.status}`,
           );
         } else if (err.request) {
-          // Request was made but no response
-          console.error("No response received:", err.request);
           setError("No response from server. Check backend connection.");
           showToast("error", "Cannot connect to server. Please try again.");
         } else {
-          // Something else happened
-          console.error("Request setup error:", err.message);
           setError(`Request error: ${err.message}`);
           showToast("error", `Failed to fetch suppliers: ${err.message}`);
         }
-
-        // Set empty data on error
         setSuppliers([]);
         setTotalSuppliers(0);
         setTotalPages(1);
@@ -706,30 +1088,18 @@ const Supplier = () => {
     };
 
     fetchSuppliers();
-  }, [currentPage, search, activeTab]); // Added activeTab to dependencies
+  }, [currentPage, search, activeTab, refreshKey]);
 
-  // Add debounced search effect
+  // Debounced search
   useEffect(() => {
-    // Clear previous timeout
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
-    }
-
-    // Set new timeout for search
+    if (searchTimeout) clearTimeout(searchTimeout);
     const timeout = setTimeout(() => {
       if (search !== "") {
-        setCurrentPage(1); // Reset to first page when searching
+        setCurrentPage(1);
       }
-    }, 500); // 500ms delay for search
-
+    }, 500);
     setSearchTimeout(timeout);
-
-    // Cleanup
-    return () => {
-      if (searchTimeout) {
-        clearTimeout(searchTimeout);
-      }
-    };
+    return () => clearTimeout(timeout);
   }, [search]);
 
   // Reset page when tab changes
@@ -737,7 +1107,9 @@ const Supplier = () => {
     setCurrentPage(1);
   }, [activeTab]);
 
-  // Filter suppliers based on active tab
+  const hasEnabled = useMemo(() => suppliers.some((s) => s.enabled), [suppliers]);
+  const hasDisabled = useMemo(() => suppliers.some((s) => !s.enabled), [suppliers]);
+
   const filteredSuppliers = useMemo(() => {
     return suppliers.filter((s) => {
       const matchesTab =
@@ -748,10 +1120,8 @@ const Supplier = () => {
     });
   }, [suppliers, activeTab]);
 
-  // Handlers
   const handleSearchChange = (e) => {
-    const value = e.target.value;
-    setSearch(value);
+    setSearch(e.target.value);
   };
 
   const toggleSelect = useCallback((supplier) => {
@@ -791,35 +1161,25 @@ const Supplier = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const token = localStorage.getItem("token");
-        const idsToDelete = selected.map((s) => s.id); // make sure this matches _id if needed
-
+        const idsToDelete = selected.map((s) => s.id);
         const res = await axios.delete(`${backendUrl}/api/suppliers`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
           data: { ids: idsToDelete },
         });
 
         if (res.status === 200 || res.status === 204) {
           showToast("success", "Suppliers deleted successfully");
-
-          // Update local state
           setSuppliers((prev) =>
             prev.filter((s) => !idsToDelete.includes(s._id)),
           );
-
           setTotalSuppliers((prev) => prev - selected.length);
           setSelected([]);
         }
       } catch (err) {
         console.error("Delete error:", err.response?.data || err.message);
-
-        if (err.response) {
-          showToast("error", err.response.data.message);
-        } else {
-          showToast("error", "Failed to delete suppliers.");
-        }
+        showToast(
+          "error",
+          err.response?.data?.message || "Failed to delete suppliers.",
+        );
       }
     }
   };
@@ -834,214 +1194,23 @@ const Supplier = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const token = localStorage.getItem("token");
-
         const res = await axios.delete(
           `${backendUrl}/api/suppliers/${supplier._id}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
         );
-
         if (res.status === 200 || res.status === 204) {
           showToast(
             "success",
             res.data?.message || "Supplier deleted successfully",
           );
-
-          // Update local state
           setSuppliers((prev) => prev.filter((s) => s._id !== supplier._id));
-
           setTotalSuppliers((prev) => prev - 1);
         }
       } catch (err) {
-        if (err.response) {
-          showToast("error", err.response.data.message);
-        } else {
-          showToast("error", "Failed to delete supplier");
-        }
-      }
-    }
-  };
-
-  // Rest of the handlers remain the same...
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array", cellDates: true });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        const rawData = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-          raw: false,
-        });
-
-        let headerRowIndex = -1;
-        for (let i = 0; i < rawData.length; i++) {
-          const firstCell =
-            rawData[i] && rawData[i][0] ? rawData[i][0].toString().trim() : "";
-          if (firstCell.toLowerCase() === "supplier name") {
-            headerRowIndex = i;
-            break;
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          showToast("error", "Could not find header row with 'Supplier Name'");
-          return;
-        }
-
-        const dataRows = rawData.slice(headerRowIndex + 1);
-
-        const parsedData = dataRows
-          .map((row, index) => {
-            try {
-              if (!row || !Array.isArray(row) || row.length === 0) {
-                return null;
-              }
-
-              const supplierName = (row[0] || "").toString().trim();
-              const address = (row[1] || "").toString().trim();
-              const siteRegistrationDateStr = (row[2] || "").toString().trim();
-              const siteRegistrationExpiryDateStr = (row[3] || "")
-                .toString()
-                .trim();
-
-              if (!supplierName || supplierName.trim() === "") {
-                return null;
-              }
-
-              const dataObj = {
-                supplierName: supplierName.toLowerCase(),
-                address: address.toLowerCase(),
-              };
-
-              const parseDateValue = (dateStr) => {
-                if (!dateStr || dateStr.trim() === "") {
-                  return null;
-                }
-
-                if (!isNaN(dateStr)) {
-                  const serialDate = parseFloat(dateStr);
-                  const date = parseExcelDate(serialDate);
-                  if (date && !isNaN(date.getTime())) {
-                    return date.toISOString();
-                  }
-                }
-
-                if (dateStr.includes("/")) {
-                  const parts = dateStr.split("/");
-                  if (parts.length === 3) {
-                    const day = parseInt(parts[0], 10);
-                    const month = parseInt(parts[1], 10) - 1;
-                    const year = parseInt(parts[2], 10);
-                    const fullYear = year < 100 ? 2000 + year : year;
-                    const date = new Date(fullYear, month, day);
-                    if (!isNaN(date.getTime())) {
-                      return date.toISOString();
-                    }
-                  }
-                }
-
-                const date = new Date(dateStr);
-                if (!isNaN(date.getTime())) {
-                  return date.toISOString();
-                }
-
-                return null;
-              };
-
-              if (
-                siteRegistrationDateStr &&
-                siteRegistrationDateStr.trim() !== ""
-              ) {
-                const parsedDate = parseDateValue(siteRegistrationDateStr);
-                if (parsedDate) {
-                  dataObj.siteRegistrationDate = parsedDate;
-                }
-              }
-
-              if (
-                siteRegistrationExpiryDateStr &&
-                siteRegistrationExpiryDateStr.trim() !== ""
-              ) {
-                const parsedDate = parseDateValue(
-                  siteRegistrationExpiryDateStr,
-                );
-                if (parsedDate) {
-                  dataObj.siteRegistrationExpiryDate = parsedDate;
-                }
-              }
-
-              return dataObj;
-            } catch (err) {
-              console.error(`Error parsing row ${index}:`, err);
-              return null;
-            }
-          })
-          .filter((item) => item !== null);
-
-        const validData = parsedData.filter(
-          (item) => item.supplierName && item.supplierName.trim() !== "",
-        );
-
-        if (validData.length === 0) {
-          showToast(
-            "warning",
-            "No valid data found in the Excel file. Please check the format.",
-          );
-        }
-
-        setParsedData(validData);
-      } catch (error) {
-        console.error("Error processing file:", error);
-        showToast("error", "Error processing file. Please check the format.");
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  const handleImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "No valid data to import");
-      return;
-    }
-
-    setIsUploading(true);
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/suppliers/import`,
-        parsedData,
-      );
-      if (res.status === 200 || res.status === 201) {
         showToast(
-          "success",
-          res.data.message || "Suppliers imported successfully!",
+          "error",
+          err.response?.data?.message || "Failed to delete supplier",
         );
-
-        // Refresh suppliers
-        setCurrentPage(1); // Go to first page to see new data
-        setSearch(""); // Clear search
-
-        setParsedData([]);
-        setIsOpen(null);
       }
-    } catch (err) {
-      const message =
-        err.response?.data?.message || "Failed to import suppliers.";
-      showToast("error", message);
-    } finally {
-      setIsUploading(false);
     }
   };
 
@@ -1050,39 +1219,22 @@ const Supplier = () => {
     if (!selectedSupplier) return;
 
     try {
-      const token = localStorage.getItem("token");
-
-      const res = await axios.put(
-        `${backendUrl}/api/suppliers/${id}`,
-        {
-          enabled: !selectedSupplier.enabled,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
+      const res = await axios.put(`${backendUrl}/api/suppliers/${id}`, {
+        enabled: !selectedSupplier.enabled,
+      });
 
       if (res.status === 200) {
-        // Update local state
-        setSuppliers((prev) =>
-          prev.map((s) =>
-            s._id === id ? { ...s, enabled: res.data.enabled } : s,
-          ),
-        );
-
         showToast(
           "success",
-          `Supplier ${res.data.enabled ? "enabled" : "disabled"} successfully`,
+          `Supplier ${res.data.supplier.enabled ? "enabled" : "disabled"} successfully`,
         );
+        setRefreshKey((prev) => prev + 1);
       }
     } catch (err) {
-      if (err.response) {
-        showToast("error", err.response.data.message);
-      } else {
-        showToast("error", "Failed to update supplier status.");
-      }
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to update supplier status.",
+      );
     }
   };
 
@@ -1098,8 +1250,6 @@ const Supplier = () => {
     e.preventDefault();
 
     try {
-      const token = localStorage.getItem("token");
-
       const updateData = {
         ...form,
         name: toLowerCase(form.name),
@@ -1109,28 +1259,18 @@ const Supplier = () => {
       const res = await axios.put(
         `${backendUrl}/api/suppliers/${form._id}`,
         updateData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
       );
 
       if (res.status === 200) {
         showToast("success", "Supplier updated successfully");
         setIsOpen(null);
-
-        // Update local state
-        setSuppliers((prev) =>
-          prev.map((s) => (s._id === form._id ? { ...s, ...updateData } : s)),
-        );
+        setRefreshKey((prev) => prev + 1);
       }
     } catch (err) {
-      if (err.response) {
-        showToast("error", err.response.data.message);
-      } else {
-        showToast("error", "Failed to update supplier.");
-      }
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to update supplier.",
+      );
     }
   };
 
@@ -1145,7 +1285,6 @@ const Supplier = () => {
             onClick={() => {
               setError(null);
               setLoading(true);
-              // Trigger refetch
               setCurrentPage(1);
             }}
             className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
@@ -1170,6 +1309,8 @@ const Supplier = () => {
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           totalSuppliers={totalSuppliers}
+          hasEnabled={hasEnabled}
+          hasDisabled={hasDisabled}
         />
 
         {totalSuppliers > 0 && (
@@ -1197,8 +1338,7 @@ const Supplier = () => {
           <p className="text-sm text-blue-700">
             Searching for: <span className="font-semibold">"{search}"</span>
             <span className="ml-4">
-              Found: <span className="font-bold">{totalSuppliers}</span>{" "}
-              supplier(s)
+              Found: <span className="font-bold">{totalSuppliers}</span> supplier(s)
             </span>
           </p>
         </div>
@@ -1207,8 +1347,7 @@ const Supplier = () => {
       {search && totalSuppliers === 0 && suppliers.length === 0 && (
         <div className="mb-4 p-3 bg-yellow-50 rounded-lg">
           <p className="text-sm text-yellow-700">
-            No suppliers found for:{" "}
-            <span className="font-semibold">"{search}"</span>
+            No suppliers found for: <span className="font-semibold">"{search}"</span>
             <span className="ml-4">
               <button
                 onClick={() => setSearch("")}
@@ -1243,14 +1382,10 @@ const Supplier = () => {
 
       <ImportModal
         show={isOpen === "import"}
-        onClose={() => {
+        onClose={(shouldRefresh) => {
           setIsOpen(null);
-          setImportWarnings([]);
+          if (shouldRefresh) setRefreshKey((prev) => prev + 1);
         }}
-        isUploading={isUploading}
-        onFileUpload={handleFileUpload}
-        onImport={handleImport}
-        parsedData={parsedData}
         isSampleFile={isSampleFile}
       />
       <ViewModal

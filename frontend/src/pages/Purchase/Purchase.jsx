@@ -14,6 +14,8 @@ import {
   Eye,
   Search,
   Package,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import PurchaseSampleExcelDownload from "../../excels/PurchaseSampleExcelDownload";
@@ -69,8 +71,6 @@ function Purchase() {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [showImportModal, setShowImportModal] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [parsedData, setParsedData] = useState([]);
   const [form, setForm] = useState(initialFormState);
   const [loading, setLoading] = useState(true);
   const [types, setTypes] = useState([]);
@@ -179,402 +179,6 @@ function Purchase() {
     setShowImportModal(true);
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = async (evt) => {
-      try {
-        setIsUploading(true);
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-
-        // Get all sheet data
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-          raw: false,
-        });
-
-        if (jsonData.length === 0) {
-          showToast("warning", "Excel file is empty");
-          setIsUploading(false);
-          return;
-        }
-
-        // Find header row by looking for common headers
-        let headerRowIndex = -1;
-        let headers = [];
-
-        for (let i = 0; i < Math.min(10, jsonData.length); i++) {
-          const row = jsonData[i];
-          if (!Array.isArray(row)) continue;
-
-          const rowText = row.join(" ").toLowerCase();
-          const hasInvoice = rowText.includes("invoice");
-          const hasProduct = rowText.includes("product");
-          const hasSupplier = rowText.includes("supplier");
-
-          if (
-            (hasInvoice && hasProduct) ||
-            (hasInvoice && hasSupplier) ||
-            (hasProduct && hasSupplier)
-          ) {
-            headerRowIndex = i;
-            headers = row.map((h) => h?.toString().trim() || "");
-            break;
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          // Use first row as headers
-          headerRowIndex = 0;
-          headers = jsonData[0].map((h) => h?.toString().trim() || "");
-        }
-
-        // Create a mapping of column index to normalized header name
-        const headerMap = {};
-        headers.forEach((header, index) => {
-          if (!header) return;
-          const normalized = header.toLowerCase().trim();
-
-          // Map various header names to standard field names
-          if (
-            normalized.includes("invoice no") ||
-            normalized.includes("invoice number")
-          ) {
-            headerMap.invoiceNumber = index;
-          } else if (normalized.includes("invoice date")) {
-            headerMap.invoiceDate = index;
-          } else if (
-            normalized.includes("delivery") &&
-            (normalized.includes("no") || normalized.includes("number"))
-          ) {
-            headerMap.deliveryNumber = index;
-          } else if (normalized.includes("received date")) {
-            headerMap.receivedDate = index;
-          } else if (
-            normalized.includes("product name") ||
-            normalized.includes("product")
-          ) {
-            headerMap.productName = index;
-          } else if (
-            normalized.includes("supplier name") ||
-            normalized.includes("supplier")
-          ) {
-            headerMap.supplierName = index;
-          } else if (
-            normalized.includes("expiry date") ||
-            normalized.includes("expiry")
-          ) {
-            headerMap.expiryDate = index;
-          } else if (
-            normalized.includes("quantity") ||
-            normalized.includes("qty")
-          ) {
-            headerMap.quantityPerBoxStrip = index;
-          } else if (normalized.includes("fob")) {
-            headerMap.fob = index;
-          } else if (normalized.includes("cif")) {
-            headerMap.cif = index;
-          } else if (normalized.includes("lc")) {
-            headerMap.lc = index;
-          } else if (
-            normalized.includes("remarks") ||
-            normalized.includes("note")
-          ) {
-            headerMap.remarks = index;
-          }
-        });
-
-        // Create product map for looking up FOB, CIF, LC values
-        const productMap = new Map();
-        productOptions.forEach((product) => {
-          if (product.productName) {
-            const key = product.productName.toLowerCase().trim();
-            const firstBatch =
-              product.batches && product.batches.length > 0
-                ? product.batches[0]
-                : {};
-
-            productMap.set(key, {
-              lc: firstBatch.lc || product.lc || 0,
-              fob: firstBatch.fob || product.fob || 0,
-              cif: firstBatch.cif || product.cif || 0,
-              type: product.type || "",
-            });
-          }
-        });
-
-        // Object to group by invoice number and supplier
-        const invoiceGroups = {};
-
-        // Process data rows and group by invoice number + supplier
-        for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
-          const row = jsonData[i];
-          if (
-            !Array.isArray(row) ||
-            row.every((cell) => !cell || cell.toString().trim() === "")
-          ) {
-            continue;
-          }
-
-          const getValue = (field) => {
-            const index = headerMap[field];
-            return index !== undefined && row[index] !== undefined
-              ? row[index]
-              : "";
-          };
-
-          const parseDate = (value) => {
-            if (!value) return null;
-
-            // Handle Excel date numbers
-            if (typeof value === "number") {
-              try {
-                const excelEpoch = new Date(1899, 11, 30);
-                const date = new Date(excelEpoch.getTime() + value * 86400000);
-                return date.toISOString().split("T")[0];
-              } catch (e) {
-                return null;
-              }
-            }
-
-            // Handle string dates
-            const str = value.toString().trim();
-            if (!str) return null;
-
-            // Try common date formats
-            const formats = [
-              "YYYY-MM-DD",
-              "DD/MM/YYYY",
-              "MM/DD/YYYY",
-              "YYYY/MM/DD",
-              "DD-MM-YYYY",
-              "MM-DD-YYYY",
-            ];
-
-            for (const format of formats) {
-              try {
-                const parsed = dayjs(str, format);
-                if (parsed.isValid()) {
-                  return parsed.format("YYYY-MM-DD");
-                }
-              } catch (e) {
-                // Continue to next format
-              }
-            }
-
-            return null;
-          };
-
-          const parseNumber = (value) => {
-            if (!value && value !== 0) return 0;
-            if (typeof value === "number") return value;
-
-            const str = value.toString().trim();
-            if (!str || str.toLowerCase() === "n/a") return 0;
-
-            // Remove non-numeric characters except decimal point and minus
-            const cleaned = str.replace(/[^\d.-]/g, "");
-            if (cleaned === "") return 0;
-
-            const num = parseFloat(cleaned);
-            return isNaN(num) ? 0 : num;
-          };
-
-          // Get values from Excel
-          let invoiceNumber = getValue("invoiceNumber")?.toString().trim();
-          let invoiceDate = parseDate(getValue("invoiceDate"));
-          let deliveryNumber = getValue("deliveryNumber")?.toString().trim();
-          const receivedDate = parseDate(getValue("receivedDate"));
-          const productName = getValue("productName")?.toString().trim();
-          let supplierName = getValue("supplierName")?.toString().trim();
-          const expiryDate = parseDate(getValue("expiryDate"));
-          const quantityPerBoxStrip = parseNumber(
-            getValue("quantityPerBoxStrip"),
-          );
-          let fob = parseNumber(getValue("fob"));
-          let cif = parseNumber(getValue("cif"));
-          let lc = parseNumber(getValue("lc"));
-          const remarks = getValue("remarks")?.toString().trim() || "";
-
-          // Skip only if product name is missing (essential field)
-          if (!productName) {
-            continue;
-          }
-
-          // If FOB, CIF, or LC is 0, try to fetch from product database
-          if (fob === 0 || cif === 0 || lc === 0) {
-            const productKey = productName.toLowerCase().trim();
-            const productInfo = productMap.get(productKey);
-
-            if (productInfo) {
-              if (fob === 0) fob = productInfo.fob;
-              if (cif === 0) cif = productInfo.cif;
-              if (lc === 0) lc = productInfo.lc;
-            }
-          }
-
-          // Handle missing supplier name
-          if (!supplierName) {
-            supplierName = "Not Provided";
-          }
-
-          // Generate invoice number if missing
-          if (!invoiceNumber) {
-            // Create a unique key for supplier without invoice
-            const supplierKey = supplierName;
-            if (!invoiceGroups[`NO_INVOICE_${supplierKey}`]) {
-              // Generate invoice number for this supplier
-              const lastInvoiceNumber = Object.keys(invoiceGroups).filter(
-                (key) => key.startsWith(`INC_${supplierKey}`),
-              ).length;
-
-              invoiceNumber = `INC${String(lastInvoiceNumber + 1).padStart(
-                5,
-                "0",
-              )}`;
-            } else {
-              // Use existing generated invoice number for this supplier
-              invoiceNumber =
-                invoiceGroups[`NO_INVOICE_${supplierKey}`].invoiceNumber;
-            }
-          }
-
-          if (!deliveryNumber) {
-            deliveryNumber = invoiceNumber;
-          }
-
-          if (!invoiceDate) {
-            invoiceDate = dayjs().format("YYYY-MM-DD");
-          }
-
-          // Calculate amount
-          const amount = quantityPerBoxStrip * lc;
-
-          // Get product type from product database
-          const productKey = productName.toLowerCase().trim();
-          const productInfo = productMap.get(productKey);
-
-          // Create a unique key for grouping: invoiceNumber + supplierName
-          const groupKey = `${invoiceNumber}_${supplierName}`;
-
-          // Initialize invoice group if not exists
-          if (!invoiceGroups[groupKey]) {
-            invoiceGroups[groupKey] = {
-              invoiceNumber,
-              invoiceDate: invoiceDate || dayjs().format("YYYY-MM-DD"),
-              deliveryNumber: deliveryNumber || invoiceNumber,
-              receivedDate:
-                receivedDate || invoiceDate || dayjs().format("YYYY-MM-DD"),
-              supplierName,
-              remarks,
-              products: [],
-            };
-          }
-
-          // Add product to the invoice group
-          invoiceGroups[groupKey].products.push({
-            productName,
-            expiryDate,
-            quantityPerBoxStrip,
-            fob,
-            cif,
-            lc,
-            lcNumber: lc,
-            remarks,
-            type: productInfo?.type || "",
-            amount,
-          });
-        }
-
-        // Convert grouped data to array
-        const groupedData = Object.values(invoiceGroups);
-        setParsedData(groupedData);
-
-        if (groupedData.length === 0) {
-          showToast(
-            "warning",
-            "No valid data found in the file. Please check the format.",
-          );
-        } else {
-          const totalProducts = groupedData.reduce(
-            (sum, invoice) => sum + invoice.products.length,
-            0,
-          );
-        }
-      } catch (error) {
-        console.error("Error reading Excel file:", error);
-        showToast("error", `Failed to process the file: ${error.message}`);
-      } finally {
-        setIsUploading(false);
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  const parseNumber = (numStr) => {
-    if (!numStr && numStr !== 0) return 0;
-    if (typeof numStr === "number") return numStr;
-
-    // Handle string representations
-    const str = numStr.toString().trim();
-    if (str === "" || str.toLowerCase() === "n/a") return 0;
-
-    // Remove non-numeric characters except decimal point and minus sign
-    const cleaned = str.replace(/[^\d.-]/g, "");
-    const num = parseFloat(cleaned);
-    return isNaN(num) ? 0 : num;
-  };
-
-  // Handle purchase import
-  const handlePurchaseImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
-    }
-
-    // Validation before import
-    if (!validateSuppliersAndProducts()) {
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/purchase/import`,
-        parsedData,
-      );
-
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Purchase Inventory imported successfully!",
-        );
-        setShowImportModal(false);
-        setParsedData([]);
-        fetchPurchaseDetails();
-      }
-    } catch (err) {
-      handleAxiosError(err, showToast);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleAddNewPurchase = () => {
-    if (!validateSuppliersAndProducts()) {
-      return;
-    }
-    navigate("/purchaselayout/purchase/new");
-  };
-
   // Helper function to capitalize first letter
   const capitalizeFirstLetter = (string) => {
     if (!string) return "--";
@@ -663,7 +267,6 @@ function Purchase() {
     }
   };
 
-  // In fetchPurchaseDetails function, add more detailed logging:
   const fetchPurchaseDetails = async () => {
     try {
       setLoading(true);
@@ -689,7 +292,6 @@ function Purchase() {
       const typeSet = new Set();
       if (Array.isArray(purchaseArray) && purchaseArray.length > 0) {
         purchaseArray.forEach((purchase, purchaseIndex) => {
-          // Check if purchase has products array
           if (purchase.products && Array.isArray(purchase.products)) {
             purchase.products.forEach((product, productIndex) => {
               const type = product.productType;
@@ -835,13 +437,13 @@ function Purchase() {
 
     if (confirmDelete.isConfirmed) {
       try {
-        const token = localStorage.getItem("token"); // ✅ Get token
+        const token = localStorage.getItem("token");
 
         const res = await axios.delete(
           `${backendUrl}/api/purchase/${purchase._id}`,
           {
             headers: {
-              Authorization: `Bearer ${token}`, // ✅ Added token header
+              Authorization: `Bearer ${token}`,
             },
           },
         );
@@ -855,7 +457,6 @@ function Purchase() {
         }
       } catch (error) {
         console.error("Delete error:", error);
-
         showToast(
           "error",
           error.response?.data?.message || "Failed to delete purchase.",
@@ -874,15 +475,15 @@ function Purchase() {
 
     if (confirm.isConfirmed) {
       try {
-        const token = localStorage.getItem("token"); // ✅ Get token
+        const token = localStorage.getItem("token");
 
         const selectedIds = selected.map((item) => item.id);
 
         const res = await axios.delete(`${backendUrl}/api/purchase`, {
           headers: {
-            Authorization: `Bearer ${token}`, // ✅ Added header
+            Authorization: `Bearer ${token}`,
           },
-          data: { ids: selectedIds }, // Body for DELETE
+          data: { ids: selectedIds },
         });
 
         if (res.status === 200) {
@@ -895,7 +496,6 @@ function Purchase() {
         }
       } catch (error) {
         console.error("Delete error:", error);
-
         showToast(
           "error",
           error.response?.data?.message ||
@@ -907,49 +507,12 @@ function Purchase() {
     }
   };
 
-  const deleteSelectedPurchases = async () => {
-    try {
-      const token = localStorage.getItem("token"); // ✅ Get token
-
-      const selectedIds = selected.map((item) => item.id);
-
-      if (!selectedIds || selectedIds.length === 0) {
-        alert("No purchases selected");
-        return;
-      }
-
-      const response = await fetch(`${backendUrl}/api/purchase`, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, // ✅ Added header
-        },
-        body: JSON.stringify({ ids: selectedIds }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to delete purchases");
-      }
-
-      alert(data.message);
-
-      fetchPurchaseDetails();
-      setSelected([]);
-    } catch (error) {
-      console.error("Delete error:", error);
-      alert(`Failed to delete purchases: ${error.message}`);
-    }
-  };
-
   // Form handlers
   const enhancedHandleChange = useCallback((e) => {
     const { name, value } = e.target;
     setForm((prev) => {
       let processedValue = value;
 
-      // Handle numeric fields
       const numericFields = ["quantityPerBoxStrip", "fob", "cif", "amount"];
       const integerFields = ["quantityPerBoxStrip"];
 
@@ -1021,7 +584,7 @@ function Purchase() {
     e.preventDefault();
 
     try {
-      const token = localStorage.getItem("token"); // ✅ get token
+      const token = localStorage.getItem("token");
 
       const updateData = {
         invoiceNumber: form.invoiceNumber,
@@ -1040,7 +603,7 @@ function Purchase() {
         updateData,
         {
           headers: {
-            Authorization: `Bearer ${token}`, // ✅ added token header
+            Authorization: `Bearer ${token}`,
           },
         },
       );
@@ -1053,7 +616,6 @@ function Purchase() {
       }
     } catch (err) {
       console.error("Update error:", err);
-
       showToast(
         "error",
         err.response?.data?.message || "Failed to update purchase.",
@@ -1231,16 +793,527 @@ function Purchase() {
     return filtered;
   }, [selectedPurchaseProduct, selectedTab, searchTerm]);
 
+  // ========== ENHANCED IMPORT MODAL (like Customer) ==========
+  const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
+    const [parsedData, setParsedData] = useState([]);
+    const [isUploading, setIsUploading] = useState(false);
+    const [parseErrors, setParseErrors] = useState([]);
+    const [fileName, setFileName] = useState("");
+    const [existingInvoices, setExistingInvoices] = useState([]);
+    const [duplicateRows, setDuplicateRows] = useState([]);
+    const [loadingExisting, setLoadingExisting] = useState(false);
+
+    // Normalise an invoice group for duplicate comparison (invoiceNumber + supplierName)
+    const getRowKey = (group) => {
+      return `${group.invoiceNumber || ""}||${group.supplierName || ""}`
+        .toLowerCase()
+        .trim();
+    };
+
+    // Fetch existing invoices for duplicate check
+    useEffect(() => {
+      if (isOpen) {
+        fetchExistingInvoices();
+      }
+    }, [isOpen]);
+
+    const fetchExistingInvoices = async () => {
+      setLoadingExisting(true);
+      try {
+        const res = await axios.get(`${backendUrl}/api/purchase/invoice`);
+        if (Array.isArray(res.data)) {
+          setExistingInvoices(res.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch existing invoices", error);
+        showToast(
+          "error",
+          "Could not load existing invoices for duplicate check",
+        );
+      } finally {
+        setLoadingExisting(false);
+      }
+    };
+
+    // Compute duplicates whenever parsedData or existingInvoices changes
+    useEffect(() => {
+      if (!parsedData.length) {
+        setDuplicateRows([]);
+        return;
+      }
+
+      const duplicateIndices = new Set();
+
+      // 1. Intra‑file duplicates (same invoice+supplier)
+      const keyCount = new Map();
+      parsedData.forEach((group, idx) => {
+        const key = getRowKey(group);
+        keyCount.set(key, (keyCount.get(key) || 0) + 1);
+      });
+      parsedData.forEach((group, idx) => {
+        const key = getRowKey(group);
+        if (keyCount.get(key) > 1) duplicateIndices.add(idx);
+      });
+
+      // 2. Database duplicates (invoice already exists)
+      if (existingInvoices.length > 0) {
+        const existingKeys = new Set(
+          existingInvoices.map((inv) =>
+            `${inv.invoiceNumber}||${inv.supplierName}`.toLowerCase().trim(),
+          ),
+        );
+        parsedData.forEach((group, idx) => {
+          const key = getRowKey(group);
+          if (existingKeys.has(key)) duplicateIndices.add(idx);
+        });
+      }
+
+      const dupes = parsedData.filter((_, idx) => duplicateIndices.has(idx));
+      setDuplicateRows(dupes);
+    }, [parsedData, existingInvoices]);
+
+    const handleFileUpload = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      setFileName(file.name);
+      setParseErrors([]);
+      setParsedData([]);
+      setDuplicateRows([]);
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, {
+            type: "array",
+            cellDates: true,
+            cellNF: false,
+            cellText: false,
+          });
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            defval: "",
+            blankrows: true,
+            raw: true,
+          });
+
+          if (!rows.length) {
+            showToast("warning", "Excel file is empty");
+            return;
+          }
+
+          // Find header row (looking for invoice, supplier, product)
+          let headerRowIndex = -1;
+          for (let i = 0; i < Math.min(rows.length, 15); i++) {
+            const row = rows[i] || [];
+            const rowText = row.join(" ").toLowerCase();
+            if (
+              rowText.includes("invoice") &&
+              rowText.includes("supplier") &&
+              rowText.includes("product")
+            ) {
+              headerRowIndex = i;
+              break;
+            }
+          }
+
+          if (headerRowIndex === -1) {
+            showToast(
+              "error",
+              "Could not find header row containing 'Invoice', 'Supplier', and 'Product'",
+            );
+            return;
+          }
+
+          const headers = rows[headerRowIndex].map(
+            (h) => h?.toString().trim() || "",
+          );
+          const dataRows = rows.slice(headerRowIndex + 1);
+
+          const getValue = (obj, keys) => {
+            for (const key of keys) {
+              for (const k in obj) {
+                if (
+                  k.toLowerCase().trim() === key.toLowerCase().trim() &&
+                  obj[k]?.toString().trim() !== ""
+                ) {
+                  return obj[k];
+                }
+              }
+            }
+            return "";
+          };
+
+          const rowErrors = [];
+          const validRows = [];
+
+          // Helper to parse date
+          const parseDate = (val) => {
+            if (!val) return "";
+            if (val instanceof Date) return val.toISOString().split("T")[0];
+            if (typeof val === "number") {
+              const excelEpoch = new Date(1900, 0, 0);
+              const date = new Date(
+                excelEpoch.getTime() + (val - 1) * 86400000,
+              );
+              return date.toISOString().split("T")[0];
+            }
+            const str = val.toString().trim();
+            const d = new Date(str);
+            return isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
+          };
+
+          // Helper to parse number
+          const parseNumber = (val) => {
+            if (!val && val !== 0) return 0;
+            if (typeof val === "number") return val;
+            const str = val.toString().trim().replace(/[$,]/g, "");
+            const num = parseFloat(str);
+            return isNaN(num) ? 0 : num;
+          };
+
+          dataRows.forEach((row, idx) => {
+            const obj = {};
+            headers.forEach((h, i) => {
+              if (h) obj[h] = row[i] !== undefined ? row[i] : "";
+            });
+
+            if (!Object.values(obj).some((v) => v?.toString().trim() !== ""))
+              return;
+
+            const invoiceNumber =
+              getValue(obj, ["Invoice Number", "Invoice No", "Invoice"])
+                ?.toString()
+                .trim() || "";
+            const supplierName =
+              getValue(obj, ["Supplier Name", "Supplier"])?.toString().trim() ||
+              "";
+            const productName =
+              getValue(obj, ["Product Name", "Product"])?.toString().trim() ||
+              "";
+            const quantity = parseNumber(
+              getValue(obj, ["Quantity Per Box/Strip", "Quantity", "Qty"]),
+            );
+            const lc = parseNumber(getValue(obj, ["LC (USD)", "LC", "Lc"]));
+            const fob = parseNumber(getValue(obj, ["FOB (USD)", "FOB", "Fob"]));
+            const cif = parseNumber(getValue(obj, ["CIF (USD)", "CIF", "Cif"]));
+            const invoiceDate = parseDate(getValue(obj, ["Invoice Date"]));
+            const deliveryNumber =
+              getValue(obj, ["Delivery Number", "Delivery No"])
+                ?.toString()
+                .trim() || invoiceNumber;
+            const receivedDate =
+              parseDate(getValue(obj, ["Received Date"])) || invoiceDate;
+            const expiryDate = parseDate(getValue(obj, ["Expiry Date"]));
+            const remarks =
+              getValue(obj, ["Remarks", "Note"])?.toString().trim() || "";
+
+            if (!productName) {
+              rowErrors.push(
+                `Row ${headerRowIndex + idx + 2}: Missing product name — skipped`,
+              );
+              return;
+            }
+
+            // Use invoiceNumber + supplierName as group key; if missing, generate a temporary key
+            const groupKey = `${invoiceNumber}_${supplierName}`;
+            if (!validRows[groupKey]) {
+              validRows[groupKey] = {
+                invoiceNumber: invoiceNumber || `TEMP_${Date.now()}`,
+                invoiceDate,
+                deliveryNumber,
+                receivedDate,
+                supplierName: supplierName || "Unknown",
+                remarks,
+                products: [],
+              };
+            }
+
+            validRows[groupKey].products.push({
+              productName,
+              expiryDate,
+              quantityPerBoxStrip: quantity,
+              fob,
+              cif,
+              lc,
+              amount: quantity * lc,
+            });
+          });
+
+          const groupedData = Object.values(validRows);
+          if (groupedData.length === 0) {
+            showToast("warning", "No valid invoice records found.");
+            return;
+          }
+
+          // Calculate totals for each group
+          groupedData.forEach((group) => {
+            group.totalAmount = group.products.reduce(
+              (sum, p) => sum + (p.amount || 0),
+              0,
+            );
+            group.productCount = group.products.length;
+          });
+
+          setParsedData(groupedData);
+          setParseErrors(rowErrors);
+          if (rowErrors.length) {
+            showToast(
+              "warning",
+              `${groupedData.length} valid rows, ${rowErrors.length} skipped`,
+            );
+          }
+        } catch (err) {
+          console.error("Parse error:", err);
+          showToast("error", "Failed to parse file: " + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    };
+
+    const handleImport = async () => {
+      if (!parsedData.length) {
+        showToast("warning", "Upload a valid file first");
+        return;
+      }
+
+      const uniqueData = parsedData.filter(
+        (row) => !duplicateRows.includes(row),
+      );
+      if (uniqueData.length === 0) {
+        showToast("warning", "No unique records to import");
+        return;
+      }
+
+      setIsUploading(true);
+      try {
+        const res = await axios.post(
+          `${backendUrl}/api/purchase/import`,
+          uniqueData,
+          {
+            headers: { "Content-Type": "application/json" },
+            timeout: 60000,
+          },
+        );
+        if (res.status === 200) {
+          showToast(
+            "success",
+            res.data.message ||
+              `Imported ${uniqueData.length} invoices successfully`,
+          );
+          onClose(true);
+        } else {
+          showToast("info", res.data.message);
+          onClose(true);
+        }
+      } catch (err) {
+        console.error("Import error:", err);
+        let msg = "Import failed";
+        if (err.response?.data?.message) msg = err.response.data.message;
+        else if (err.request) msg = "No response from server. Check network.";
+        else msg = err.message || "Unknown error";
+        showToast("error", msg);
+      } finally {
+        setIsUploading(false);
+      }
+    };
+
+    if (!isOpen) return null;
+
+    const isDuplicateRow = (row) => duplicateRows.includes(row);
+
+    return ReactDOM.createPortal(
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+        <div className="bg-white w-full max-w-lg p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+          <button
+            onClick={() => onClose(false)}
+            disabled={isUploading}
+            className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+
+          <h2 className="text-lg font-semibold mb-1">
+            Import Purchase Invoices
+          </h2>
+          {isSampleFile && <PurchaseSampleExcelDownload />}
+
+          <div className="mb-4">
+            <label className="block text-gray-700 mb-2 font-medium">
+              Select File
+            </label>
+            <input
+              type="file"
+              accept=".csv,.xlsx"
+              onChange={handleFileUpload}
+              className="block w-full border rounded-lg px-3 py-2 text-sm"
+            />
+            {fileName && (
+              <p className="text-xs text-gray-500 mt-1">📄 {fileName}</p>
+            )}
+          </div>
+
+          {loadingExisting && (
+            <div className="mb-4 text-sm text-blue-600 flex items-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              Loading existing invoices for duplicate check...
+            </div>
+          )}
+
+          {duplicateRows.length > 0 && (
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle size={16} className="text-red-600" />
+                <span className="text-sm font-medium text-red-800">
+                  {duplicateRows.length} duplicate invoice(s) found
+                </span>
+              </div>
+              <div className="max-h-24 overflow-y-auto text-xs text-red-700">
+                {duplicateRows.slice(0, 5).map((row, i) => (
+                  <div key={i} className="mb-1">
+                    • {row.invoiceNumber} ({row.supplierName}) -{" "}
+                    {row.productCount} products
+                  </div>
+                ))}
+                {duplicateRows.length > 5 && (
+                  <div>...and {duplicateRows.length - 5} more</div>
+                )}
+              </div>
+              <p className="text-xs text-red-600 mt-2">
+                Duplicate invoices are highlighted below. They will be skipped
+                during import.
+              </p>
+            </div>
+          )}
+
+          {parsedData.length > 0 && (
+            <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle size={16} className="text-green-600" />
+                <span className="text-sm font-medium text-green-800">
+                  {parsedData.length} Total Invoices
+                  {duplicateRows.length > 0 && (
+                    <span className="ml-2 text-red-600">
+                      ({parsedData.length - duplicateRows.length} unique)
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div className="max-h-36 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-green-100">
+                    <tr>
+                      <th className="p-1 text-left">#</th>
+                      <th className="p-1 text-left">Invoice</th>
+                      <th className="p-1 text-left">Supplier</th>
+                      <th className="p-1 text-left">Products</th>
+                      <th className="p-1 text-left">Total ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsedData.slice(0, 5).map((row, i) => {
+                      const duplicate = isDuplicateRow(row);
+                      return (
+                        <tr
+                          key={i}
+                          className={`border-t ${duplicate ? "bg-red-100 text-red-800 font-medium" : ""}`}
+                        >
+                          <td className="p-1 text-gray-500">{i + 1}</td>
+                          <td className="p-1">{row.invoiceNumber || "—"}</td>
+                          <td className="p-1">{row.supplierName || "—"}</td>
+                          <td className="p-1">{row.productCount || 0}</td>
+                          <td className="p-1">
+                            {row.totalAmount?.toFixed(2) || "0.00"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {parsedData.length > 5 && (
+                  <p className="text-xs text-gray-500 text-center mt-1">
+                    ...and {parsedData.length - 5} more invoices
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {parseErrors.length > 0 && (
+            <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-h-28 overflow-y-auto">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertCircle size={14} className="text-yellow-600" />
+                <span className="text-xs font-medium text-yellow-800">
+                  {parseErrors.length} rows skipped
+                </span>
+              </div>
+              {parseErrors.slice(0, 5).map((err, i) => (
+                <p key={i} className="text-xs text-yellow-700">
+                  {err}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end mt-4">
+            <div className="flex gap-3">
+              <button
+                onClick={() => onClose(false)}
+                disabled={isUploading}
+                className="px-5 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleImport}
+                disabled={
+                  isUploading || parsedData.length === 0 || loadingExisting
+                }
+                className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isUploading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                    Importing…
+                  </>
+                ) : (
+                  "Import"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  };
+  // ============================================================
+
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
   return (
     <div className="p-6">
+      <ImportModal
+        isOpen={showImportModal}
+        onClose={(shouldRefresh) => {
+          setShowImportModal(false);
+          if (shouldRefresh) fetchPurchaseDetails();
+        }}
+        isSampleFile={isSampleFile}
+      />
+
       <div className="container">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
           <div className="flex gap-3 items-center">
             <button
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={handleAddNewPurchase}
+              onClick={() => {
+                if (validateSuppliersAndProducts()) {
+                  navigate("/purchaselayout/purchase/new");
+                }
+              }}
             >
               <ShoppingCart size={18} /> Add New Purchase
             </button>
@@ -1262,7 +1335,6 @@ function Purchase() {
             )}
           </div>
 
-          {/* RIGHT SIDE: TOTAL + DOWNLOAD + SEARCH */}
           {purchases && purchases.length > 0 && (
             <div className="flex items-center gap-6 flex-wrap justify-end">
               <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
@@ -1282,7 +1354,6 @@ function Purchase() {
                 />
               )}
 
-              {/* SEARCH BOX */}
               <div className="relative w-full md:w-72">
                 <Search
                   className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -1424,7 +1495,6 @@ function Purchase() {
             </tbody>
           </table>
 
-          {/* Enhanced Pagination Controls */}
           {filteredPurchases.length > PURCHASES_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
               <div className="flex items-center gap-2">
@@ -1587,14 +1657,12 @@ function Purchase() {
                         >
                           {/* Product Header with Name and View Button */}
                           <div className="flex justify-between items-center mb-2">
-                            {/* Product Name on Left */}
                             <div className="flex-1">
                               <h4 className="text-lg font-semibold text-gray-800 capitalize">
                                 {product.productName || `Product ${index + 1}`}
                               </h4>
                             </div>
 
-                            {/* View/Hide Button on Right */}
                             <button
                               className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer text-sm"
                               onClick={() => toggleProductView(index)}
@@ -2466,97 +2534,6 @@ function Purchase() {
                   >
                     Update Product
                   </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )}
-
-        {showImportModal &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 flex justify-center items-center z-50">
-              {/* Background Overlay */}
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => !isUploading && setShowImportModal(false)}
-              />
-
-              {/* Modal Content */}
-              <div
-                className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Close Button */}
-                <button
-                  onClick={() => !isUploading && setShowImportModal(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                  disabled={isUploading}
-                >
-                  <X size={20} />
-                </button>
-
-                {/* Header */}
-                <h2 className="text-lg font-semibold mb-4">Import Purchase</h2>
-                {isSampleFile && <PurchaseSampleExcelDownload />}
-
-                {/* File Input */}
-                <div className="mb-6">
-                  <label className="block text-gray-700 mb-2">
-                    Select File
-                  </label>
-                  <input
-                    type="file"
-                    accept=".csv, .xlsx, .xls"
-                    onChange={handleFileUpload}
-                    className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
-                    onClick={(e) => e.stopPropagation()}
-                    disabled={isUploading}
-                  />
-                  <p className="text-sm text-gray-500 mt-1">
-                    Supported formats: Excel (.xlsx, .xls) or CSV
-                  </p>
-                </div>
-
-                {/* Row Count Display */}
-                <div className="flex justify-between items-center mb-6">
-                  <div className="text-gray-700">
-                    {parsedData.length > 0 ? (
-                      <>
-                        Rows to import:{" "}
-                        <span className="font-semibold text-blue-600">
-                          {parsedData.length}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-gray-500">No data to import</span>
-                    )}
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setShowImportModal(false)}
-                      disabled={isUploading}
-                      className={`px-5 py-2 rounded-lg cursor-pointer ${
-                        isUploading
-                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                          : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                      }`}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handlePurchaseImport}
-                      disabled={isUploading || parsedData.length === 0}
-                      className={`px-5 py-2 rounded-lg cursor-pointer ${
-                        isUploading || parsedData.length === 0
-                          ? "bg-blue-400 text-white cursor-not-allowed"
-                          : "bg-blue-600 hover:bg-blue-700 text-white"
-                      }`}
-                    >
-                      {isUploading
-                        ? "Uploading…"
-                        : `Upload (${parsedData.length})`}
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>,
