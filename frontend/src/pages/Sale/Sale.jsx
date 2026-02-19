@@ -54,7 +54,6 @@ import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-
 //suraj
 const getAuthHeaders = () => {
   const token = localStorage.getItem("token");
@@ -611,74 +610,59 @@ const ImportSalesModal = ({
     showToast("info", "Import cancelled");
   }, [clearPolling]);
 
-  // Parse Excel date function
+  // ── parseExcelDate ────────────────────────────────────────────────────────
   const parseExcelDate = useCallback((value) => {
     if (value === null || value === undefined || value === "") {
       return new Date().toISOString().split("T")[0];
     }
-
     try {
       if (value instanceof Date && !isNaN(value)) {
         return value.toISOString().split("T")[0];
       }
-
       if (typeof value === "number") {
         const excelEpoch = new Date(1899, 11, 30);
         const date = new Date(excelEpoch.getTime() + (value - 1) * 86400000);
         return date.toISOString().split("T")[0];
       }
-
       if (typeof value === "string") {
         const str = value.trim();
-
-        const ddmmyyyyPattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-        const ddmmyyyyMatch = str.match(ddmmyyyyPattern);
-
-        if (ddmmyyyyMatch) {
-          const day = parseInt(ddmmyyyyMatch[1], 10);
-          const month = parseInt(ddmmyyyyMatch[2], 10) - 1;
-          const year = parseInt(ddmmyyyyMatch[3], 10);
-          const date = new Date(year, month, day);
-          if (!isNaN(date.getTime())) {
-            return date.toISOString().split("T")[0];
-          }
+        const ddmmyyyy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (ddmmyyyy) {
+          const d = new Date(
+            parseInt(ddmmyyyy[3]),
+            parseInt(ddmmyyyy[2]) - 1,
+            parseInt(ddmmyyyy[1]),
+          );
+          if (!isNaN(d)) return d.toISOString().split("T")[0];
         }
-
-        const yyyymmddPattern = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
-        const yyyymmddMatch = str.match(yyyymmddPattern);
-
-        if (yyyymmddMatch) {
-          const year = parseInt(yyyymmddMatch[1], 10);
-          const month = parseInt(yyyymmddMatch[2], 10) - 1;
-          const day = parseInt(yyyymmddMatch[3], 10);
-          const date = new Date(year, month, day);
-          if (!isNaN(date.getTime())) {
-            return date.toISOString().split("T")[0];
-          }
+        const yyyymmdd = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        if (yyyymmdd) {
+          const d = new Date(
+            parseInt(yyyymmdd[1]),
+            parseInt(yyyymmdd[2]) - 1,
+            parseInt(yyyymmdd[3]),
+          );
+          if (!isNaN(d)) return d.toISOString().split("T")[0];
         }
-
         const parsed = new Date(str);
-        if (!isNaN(parsed.getTime())) {
-          return parsed.toISOString().split("T")[0];
-        }
+        if (!isNaN(parsed)) return parsed.toISOString().split("T")[0];
       }
-
       return new Date().toISOString().split("T")[0];
     } catch {
       return new Date().toISOString().split("T")[0];
     }
   }, []);
 
+  // ── parseExcelQuantity ────────────────────────────────────────────────────
   const parseExcelQuantity = useCallback((value) => {
     if (value === null || value === undefined || value === "") return 0;
-
     try {
       if (typeof value === "number") return Math.max(0, value);
-
-      const str = String(value).trim();
-      const cleaned = str.replace(/,/g, "").replace(/[^\d.-]/g, "");
+      const cleaned = String(value)
+        .trim()
+        .replace(/,/g, "")
+        .replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
-
       if (isNaN(num) || !isFinite(num)) return 0;
       return Math.max(0, num);
     } catch {
@@ -686,16 +670,16 @@ const ImportSalesModal = ({
     }
   }, []);
 
+  // ── parseExcelAmount ──────────────────────────────────────────────────────
   const parseExcelAmount = useCallback((value) => {
     if (value === null || value === undefined || value === "") return 0;
-
     try {
       if (typeof value === "number") return Math.max(0, value);
-
-      const str = String(value).trim();
-      const cleaned = str.replace(/[$,\s]/g, "").replace(/[^\d.-]/g, "");
+      const cleaned = String(value)
+        .trim()
+        .replace(/[$,\s]/g, "")
+        .replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
-
       if (isNaN(num) || !isFinite(num)) return 0;
       return Math.max(0, num);
     } catch {
@@ -703,369 +687,373 @@ const ImportSalesModal = ({
     }
   }, []);
 
-// Main Excel parsing function - FIXED for your specific format with headers
-// Main Excel parsing function - FIXED for your specific format with headers
-const parseExcelFile = useCallback(
-  async (file) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onload = (evt) => {
-        try {
-          const data = new Uint8Array(evt.target.result);
-          const workbook = XLSX.read(data, {
-            type: "array",
-            cellDates: true,
-            cellNF: false,
-            cellText: true,
-          });
-
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-
-          // Convert to array of arrays (raw values)
-          const rows = XLSX.utils.sheet_to_json(worksheet, {
-            header: 1,
-            defval: "",
-            raw: true,
-          });
-
-          console.log("RAW EXCEL DATA - Full rows:", rows);
-          console.log("Number of rows:", rows.length);
-
-          // Keywords that must be present in a valid header row (case‑insensitive)
-          const requiredHeaderKeywords = [
-            "invoice",
-            "product name",
-            "sales qty",
-          ];
-
-          // Helper: check if a row could be a header
-          const isHeaderRow = (row) => {
-            if (!Array.isArray(row) || row.length === 0) return false;
-            const rowString = row
-              .map((cell) => String(cell || "").toLowerCase().trim())
-              .join(" ");
-            // All required keywords must appear somewhere in the row
-            return requiredHeaderKeywords.every((kw) =>
-              rowString.includes(kw.toLowerCase())
-            );
-          };
-
-          // Find the index of the header row
-          let headerIndex = -1;
-          for (let i = 0; i < rows.length; i++) {
-            if (isHeaderRow(rows[i])) {
-              headerIndex = i;
-              break;
-            }
-          }
-
-          if (headerIndex === -1) {
-            reject(
-              new Error(
-                "Could not find header row. Ensure the file contains a row with column names like 'Invoice #', 'Product Name', 'Sales Qty'."
-              )
-            );
-            return;
-          }
-
-          const headerRow = rows[headerIndex];
-          console.log("Detected header row at index", headerIndex, ":", headerRow);
-
-          // Map column headers to indices
-          const headerMap = {};
-          if (headerRow && Array.isArray(headerRow)) {
-            headerRow.forEach((header, index) => {
-              if (header && typeof header === "string") {
-                const headerLower = header.toLowerCase().trim();
-                headerMap[headerLower] = index;
-                console.log(`Header "${header}" at column ${index}`);
-              }
+  const parseExcelFile = useCallback(
+    async (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const data = new Uint8Array(evt.target.result);
+            const workbook = XLSX.read(data, {
+              type: "array",
+              cellDates: true,
+              cellNF: false,
+              cellText: false,
             });
-          }
 
-          console.log("Header map:", headerMap);
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
 
-          // Define column indices based on your known header structure
-          const columnIndices = {
-            recordingDate:
-              headerMap["recording date"] !== undefined
-                ? headerMap["recording date"]
-                : 0,
-            invoiceNumber:
-              headerMap["invoice #"] !== undefined
-                ? headerMap["invoice #"]
-                : headerMap["invoice"] !== undefined
-                ? headerMap["invoice"]
-                : 1,
-            invoiceDate:
-              headerMap["invoice date"] !== undefined
-                ? headerMap["invoice date"]
-                : 2,
-            mrName:
-              headerMap["mr name"] !== undefined ? headerMap["mr name"] : 3,
-            customerCode:
-              headerMap["customer code"] !== undefined
-                ? headerMap["customer code"]
-                : 4,
-            productName:
-              headerMap["product name"] !== undefined
-                ? headerMap["product name"]
-                : 5,
-            salesQty:
-              headerMap["sales qty"] !== undefined ? headerMap["sales qty"] : 6,
-            bonusQty:
-              headerMap["bonus qty"] !== undefined ? headerMap["bonus qty"] : 7,
-            sellingPrice:
-              headerMap["selling price"] !== undefined
-                ? headerMap["selling price"]
-                : 8,
-            discount:
-              headerMap["discount"] !== undefined ? headerMap["discount"] : 9,
-            creditDays:
-              headerMap["credit days"] !== undefined
-                ? headerMap["credit days"]
-                : 10,
-            paidAmount:
-              headerMap["paid amount"] !== undefined
-                ? headerMap["paid amount"]
-                : 11,
-            paymentStatus:
-              headerMap["payment status"] !== undefined
-                ? headerMap["payment status"]
-                : 12,
-            remarks:
-              headerMap["remarks"] !== undefined ? headerMap["remarks"] : 13,
-          };
+            // Convert all rows to an array of arrays
+            const rows = XLSX.utils.sheet_to_json(worksheet, {
+              header: 1,
+              defval: "",
+              raw: true,
+            });
 
-          console.log("Using column indices:", columnIndices);
+            console.log("RAW EXCEL DATA - Total rows in sheet:", rows.length);
+            console.log("First 5 rows:", rows.slice(0, 5));
 
-          // Data rows start after the header row
-          const dataRows = rows.slice(headerIndex + 1);
-          console.log(`Processing ${dataRows.length} data rows`);
-
-          const groupedInvoices = {};
-          const validationErrors = [];
-          let validRowCount = 0;
-          let emptyRowCount = 0;
-
-          for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex++) {
-            const row = dataRows[rowIndex];
-            const excelRowNumber = headerIndex + 2 + rowIndex; // correct row number for user feedback
-
-            // Skip completely empty rows
-            if (
-              !row ||
-              !Array.isArray(row) ||
-              row.length === 0 ||
-              row.every(
-                (cell) =>
-                  cell === null ||
-                  cell === undefined ||
-                  String(cell).trim() === ""
-              )
-            ) {
-              console.log(`Row ${excelRowNumber} is empty, skipping`);
-              emptyRowCount++;
-              continue;
-            }
-
-            console.log(`\n--- Processing row ${excelRowNumber} ---`);
-            console.log("Raw row data:", row);
-
-            const getValue = (index) => {
-              if (index === -1 || index >= row.length) return "";
-              const value = row[index];
-              if (value === null || value === undefined) return "";
-              const strValue = String(value).trim();
-              console.log(
-                `  Col ${index}: "${strValue}" (original: ${value}, type: ${typeof value})`
-              );
-              return strValue;
+            // ----- Find the header row -----
+            const isHeaderRow = (row) => {
+              if (!Array.isArray(row) || row.length === 0) return false;
+              const rowStr = row
+                .map((c) =>
+                  String(c ?? "")
+                    .toLowerCase()
+                    .trim(),
+                )
+                .join(" ");
+              return rowStr.includes("invoice");
             };
 
-            const invoiceNumber = getValue(columnIndices.invoiceNumber);
-            const invoiceDate = getValue(columnIndices.invoiceDate);
-            const recordingDate =
-              getValue(columnIndices.recordingDate) || invoiceDate;
-            const mrName = getValue(columnIndices.mrName);
-            const customerCode = getValue(columnIndices.customerCode);
-            const productName = getValue(columnIndices.productName);
+            let headerIndex = -1;
+            for (let i = 0; i < Math.min(rows.length, 20); i++) {
+              if (isHeaderRow(rows[i])) {
+                headerIndex = i;
+                break;
+              }
+            }
 
-            const salesQty = parseExcelQuantity(
-              getValue(columnIndices.salesQty)
-            );
-            const bonusQty = parseExcelQuantity(
-              getValue(columnIndices.bonusQty)
-            );
-            const sellingPrice = parseExcelAmount(
-              getValue(columnIndices.sellingPrice)
-            );
-            const discount = parseExcelAmount(getValue(columnIndices.discount));
-            const creditDays = parseExcelAmount(
-              getValue(columnIndices.creditDays)
-            );
-            const paidAmount = parseExcelAmount(
-              getValue(columnIndices.paidAmount)
-            );
-            const paymentStatus = getValue(columnIndices.paymentStatus);
-            const remarks = getValue(columnIndices.remarks);
+            if (headerIndex === -1) {
+              reject(
+                new Error(
+                  "Could not find header row. Make sure your file has a row containing 'Invoice #' or 'Invoice'.",
+                ),
+              );
+              return;
+            }
 
-            console.log(`Parsed values for row ${excelRowNumber}:`, {
-              invoiceNumber,
-              invoiceDate,
-              recordingDate,
-              mrName,
-              customerCode,
-              productName,
-              salesQty,
-              bonusQty,
-              sellingPrice,
-              discount,
-              creditDays,
-              paidAmount,
-              paymentStatus,
-              remarks,
+            const headerRow = rows[headerIndex];
+            const allDataRows = rows.slice(headerIndex + 1);
+            console.log(`All data rows (raw) count: ${allDataRows.length}`);
+            console.log("First 5 raw data rows:", allDataRows.slice(0, 5));
+
+            // Filter out completely empty rows (all cells are empty strings, null, or undefined)
+            const dataRows = allDataRows.filter((row, idx) => {
+              const hasContent =
+                Array.isArray(row) &&
+                row.some(
+                  (cell) =>
+                    cell !== null &&
+                    cell !== undefined &&
+                    String(cell).trim() !== "",
+                );
+              // Log the first few empty rows to see why they are considered empty
+              if (!hasContent && idx < 10) {
+                console.log(`Row ${idx} considered empty:`, row);
+              }
+              return hasContent;
             });
 
-            const rowErrors = [];
+            console.log(
+              `Header found at row ${headerIndex + 1}. ` +
+                `Data rows available: ${dataRows.length} (total rows after header: ${allDataRows.length})`,
+            );
 
-            if (!invoiceNumber || invoiceNumber === "") {
-              rowErrors.push("Invoice number is required");
-            }
-
-            if (!productName || productName === "") {
-              rowErrors.push("Product name is required");
-            }
-
-            if (salesQty <= 0 && bonusQty <= 0) {
-              rowErrors.push("Total quantity must be greater than 0");
-            }
-
-            if (rowErrors.length > 0) {
-              console.log(
-                `Row ${excelRowNumber} validation errors:`,
-                rowErrors
+            if (dataRows.length === 0) {
+              reject(
+                new Error(
+                  `No data rows found. Your file has a header at row ${
+                    headerIndex + 1
+                  } but all rows below it are empty according to our check.\n` +
+                    `Here are the first 3 raw data rows for inspection:\n${JSON.stringify(allDataRows.slice(0, 3), null, 2)}`,
+                ),
               );
-              validationErrors.push({
-                row: excelRowNumber,
-                invoiceNumber: invoiceNumber || "N/A",
-                productName: productName || "N/A",
-                mrName: mrName || "Unknown",
-                error: rowErrors.join("; "),
-                type: "validation",
+              return;
+            }
+
+            // ----- Flexible column mapping (unchanged) -----
+            const headerMap = {};
+            headerRow.forEach((cell, idx) => {
+              if (cell !== null && cell !== undefined) {
+                const key = String(cell).toLowerCase().trim();
+                if (key) headerMap[key] = idx;
+              }
+            });
+
+            const findCol = (aliases) => {
+              for (const alias of aliases) {
+                if (headerMap[alias] !== undefined) return headerMap[alias];
+              }
+              for (const alias of aliases) {
+                const found = Object.keys(headerMap).find((k) =>
+                  k.includes(alias),
+                );
+                if (found !== undefined) return headerMap[found];
+              }
+              return -1;
+            };
+
+            const col = {
+              recordingDate: findCol([
+                "recording date",
+                "recording_date",
+                "rec date",
+              ]),
+              invoiceNumber: findCol([
+                "invoice #",
+                "invoice#",
+                "invoice no",
+                "invoice number",
+                "invoice_number",
+                "invoice",
+              ]),
+              invoiceDate: findCol([
+                "invoice date",
+                "invoice_date",
+                "inv date",
+              ]),
+              mrName: findCol([
+                "mr name",
+                "mr_name",
+                "mr",
+                "medical rep",
+                "medical rep name",
+                "medrep",
+              ]),
+              customerCode: findCol([
+                "customer code",
+                "customer_code",
+                "cust code",
+                "cust_code",
+                "customer id",
+              ]),
+              productName: findCol([
+                "product name",
+                "product_name",
+                "item name",
+                "item_name",
+                "product",
+              ]),
+              salesQty: findCol([
+                "sales qty",
+                "sales_qty",
+                "salesqty",
+                "sale qty",
+                "sale_qty",
+                "qty",
+                "quantity",
+                "sales quantity",
+              ]),
+              bonusQty: findCol([
+                "bonus qty",
+                "bonus_qty",
+                "bonusqty",
+                "bonus quantity",
+                "bonus",
+              ]),
+              sellingPrice: findCol([
+                "selling price",
+                "selling_price",
+                "sellingprice",
+                "price",
+                "unit price",
+                "sale price",
+              ]),
+              discount: findCol([
+                "discount",
+                "disc",
+                "disc amount",
+                "discount amount",
+              ]),
+              creditDays: findCol(["credit days", "credit_days", "creditdays"]),
+              paidAmount: findCol([
+                "paid amount",
+                "paid_amount",
+                "paidamount",
+                "paid",
+              ]),
+              paymentStatus: findCol([
+                "payment status",
+                "payment_status",
+                "paymentstatus",
+                "status",
+                "pay status",
+              ]),
+              remarks: findCol([
+                "remarks",
+                "remark",
+                "notes",
+                "note",
+                "comment",
+                "comments",
+              ]),
+            };
+
+            const getVal = (row, index) => {
+              if (index === -1 || index === undefined || index >= row.length)
+                return "";
+              const v = row[index];
+              if (v === null || v === undefined) return "";
+              if (v instanceof Date)
+                return isNaN(v.getTime()) ? "" : v.toISOString().split("T")[0];
+              return String(v).trim();
+            };
+
+            const groupedInvoices = {};
+            const validationErrors = [];
+            let validRowCount = 0;
+
+            for (let ri = 0; ri < dataRows.length; ri++) {
+              const row = dataRows[ri];
+              const excelRow = headerIndex + 2 + ri; // original Excel row number
+
+              const invoiceNumber = getVal(row, col.invoiceNumber);
+              const invoiceDate = getVal(row, col.invoiceDate);
+              const recordingDate =
+                getVal(row, col.recordingDate) || invoiceDate;
+              const mrName = getVal(row, col.mrName);
+              const customerCode = getVal(row, col.customerCode);
+              const productName = getVal(row, col.productName);
+              const paymentStatus = getVal(row, col.paymentStatus);
+              const remarks = getVal(row, col.remarks);
+
+              const salesQty = parseExcelQuantity(getVal(row, col.salesQty));
+              const bonusQty = parseExcelQuantity(getVal(row, col.bonusQty));
+              const sellingPrice = parseExcelAmount(
+                getVal(row, col.sellingPrice),
+              );
+              const discount = parseExcelAmount(getVal(row, col.discount));
+              const creditDays = parseExcelAmount(getVal(row, col.creditDays));
+              const paidAmount = parseExcelAmount(getVal(row, col.paidAmount));
+
+              const rowErrors = [];
+              if (!invoiceNumber) rowErrors.push("Invoice number is required");
+              if (!productName) rowErrors.push("Product name is required");
+              if (salesQty < 0 || bonusQty < 0)
+                rowErrors.push("Quantities cannot be negative");
+              if (salesQty === 0 && bonusQty === 0)
+                rowErrors.push("Sales Qty or Bonus Qty must be greater than 0");
+
+              if (rowErrors.length > 0) {
+                validationErrors.push({
+                  row: excelRow,
+                  invoiceNumber: invoiceNumber || "N/A",
+                  productName: productName || "N/A",
+                  mrName: mrName || "Unknown",
+                  error: rowErrors.join("; "),
+                  type: "validation",
+                });
+                continue;
+              }
+
+              validRowCount++;
+
+              const netSellingAmount = sellingPrice * salesQty - discount;
+
+              if (!groupedInvoices[invoiceNumber]) {
+                groupedInvoices[invoiceNumber] = {
+                  recordingDate: parseExcelDate(recordingDate),
+                  invoiceNumber,
+                  invoiceDate: parseExcelDate(invoiceDate),
+                  mrName: mrName || "Unknown",
+                  customerName: "Unknown",
+                  customerCode: customerCode || "",
+                  customerId: "",
+                  creditDays: creditDays || 0,
+                  paidAmount: paidAmount || 0,
+                  products: [],
+                  totalAmount: 0,
+                  dueAmount: 0,
+                  paymentStatus: paymentStatus || "Credit",
+                  remark: remarks || "",
+                  isMrSaleImport: importSaleType === "mr",
+                };
+              }
+
+              groupedInvoices[invoiceNumber].products.push({
+                productName,
+                salesQty,
+                bonusQty,
+                totalQty: salesQty + bonusQty,
+                sellingPrice,
+                amount: netSellingAmount,
+                discount,
+                netSellingAmount,
+                averageUnitPrice:
+                  salesQty + bonusQty > 0
+                    ? netSellingAmount / (salesQty + bonusQty)
+                    : 0,
+                lc: 0,
+                profitLoss: 0,
+                isProductAccept: true,
+                remark: "",
               });
-              continue;
+
+              groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
             }
 
-            validRowCount++;
+            console.log(
+              `Parsing summary — data rows: ${dataRows.length}, ` +
+                `valid: ${validRowCount}, errors: ${validationErrors.length}`,
+            );
 
-            // Calculate net amount
-            const amount = sellingPrice * salesQty;
-            const netSellingAmount = amount - discount;
+            const validInvoices = Object.values(groupedInvoices).filter(
+              (inv) => inv.products && inv.products.length > 0,
+            );
 
-            if (!groupedInvoices[invoiceNumber]) {
-              groupedInvoices[invoiceNumber] = {
-                recordingDate: parseExcelDate(recordingDate),
-                invoiceNumber,
-                invoiceDate: parseExcelDate(invoiceDate),
-                mrName: mrName || "Unknown",
-                customerName: "Unknown",
-                customerCode: customerCode || "",
-                customerId: "",
-                creditDays: creditDays || 0,
-                paidAmount: paidAmount || 0,
-                products: [],
-                totalAmount: 0,
-                dueAmount: 0,
-                paymentStatus: paymentStatus || "Credit",
-                remark: remarks || "",
-              };
-              console.log(`Created new invoice group: ${invoiceNumber}`);
-            }
-
-            groupedInvoices[invoiceNumber].products.push({
-              productName,
-              salesQty,
-              bonusQty,
-              totalQty: salesQty + bonusQty,
-              sellingPrice,
-              amount: netSellingAmount,
-              discount,
-              netSellingAmount,
-              averageUnitPrice:
-                salesQty + bonusQty > 0
-                  ? netSellingAmount / (salesQty + bonusQty)
-                  : 0,
-              lc: 0,
-              profitLoss: 0,
-              isProductAccept: true,
-              remark: "",
+            validInvoices.forEach((inv) => {
+              inv.dueAmount = Math.max(
+                0,
+                inv.totalAmount - (inv.paidAmount || 0),
+              );
             });
 
-            groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
-          }
+            console.log(`Final result: ${validInvoices.length} valid invoices`);
 
-          console.log("\n=== PARSING SUMMARY ===");
-          console.log(`Total rows processed: ${rows.length}`);
-          console.log(`Data rows: ${dataRows.length}`);
-          console.log(`Empty rows skipped: ${emptyRowCount}`);
-          console.log(`Valid rows: ${validRowCount}`);
-          console.log(`Validation errors: ${validationErrors.length}`);
-          console.log("Grouped invoices:", Object.keys(groupedInvoices));
-
-          const validInvoices = Object.values(groupedInvoices).filter(
-            (inv) => inv.products && inv.products.length > 0
-          );
-
-          validInvoices.forEach((inv) => {
-            inv.dueAmount = Math.max(
-              0,
-              inv.totalAmount - (inv.paidAmount || 0)
-            );
-          });
-
-          console.log(`\nFinal result: ${validInvoices.length} valid invoices`);
-
-          if (validInvoices.length === 0) {
-            if (validationErrors.length > 0) {
-              const errorSummary = validationErrors
-                .slice(0, 3)
-                .map((err) => `Row ${err.row}: ${err.error}`)
-                .join("; ");
-
-              reject(
-                new Error(
-                  `No valid invoices found. ${validationErrors.length} validation errors. First errors: ${errorSummary}`
-                )
-              );
-            } else {
-              reject(
-                new Error(
-                  "No valid invoices found in the file. Please check that your Excel file has data rows after the header."
-                )
-              );
+            if (validInvoices.length === 0) {
+              let errorMsg = "No valid invoices found. ";
+              if (dataRows.length === 0) {
+                errorMsg += `Your file has no data rows below the header (row ${
+                  headerIndex + 1
+                }). Please add invoice data.`;
+              } else if (validationErrors.length > 0) {
+                errorMsg +=
+                  `${validationErrors.length} row(s) had validation errors. ` +
+                  validationErrors
+                    .slice(0, 3)
+                    .map((e) => `Row ${e.row}: ${e.error}`)
+                    .join(" | ");
+              } else {
+                errorMsg += "No data rows found after the header row.";
+              }
+              reject(new Error(errorMsg));
+              return;
             }
-            return;
+
+            resolve({ validInvoices, validationErrors });
+          } catch (error) {
+            console.error("Error parsing Excel:", error);
+            reject(error);
           }
-
-          resolve({ validInvoices, validationErrors });
-        } catch (error) {
-          console.error("Error parsing Excel:", error);
-          reject(error);
-        }
-      };
-
-      reader.onerror = () => {
-        reject(new Error("Failed to read file"));
-      };
-
-      reader.readAsArrayBuffer(file);
-    });
-  },
-  [parseExcelDate, parseExcelQuantity, parseExcelAmount]
-);
+        };
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsArrayBuffer(file);
+      });
+    },
+    [parseExcelDate, parseExcelQuantity, parseExcelAmount, importSaleType],
+  );
 
   // Handle file upload
   const handleFileUpload = useCallback(
@@ -1137,7 +1125,6 @@ const parseExcelFile = useCallback(
     [importSaleType, resetModal, parseExcelFile],
   );
 
-  // Validate MRs before import
   const validateMRsBeforeImport = useCallback(async (invoices) => {
     try {
       setIsValidatingMR(true);
@@ -1150,11 +1137,7 @@ const parseExcelFile = useCallback(
         if (invoice.mrName && invoice.mrName.trim()) {
           const mrName = invoice.mrName.trim();
           mrNames.add(mrName);
-
-          if (!mrToInvoices.has(mrName)) {
-            mrToInvoices.set(mrName, []);
-          }
-
+          if (!mrToInvoices.has(mrName)) mrToInvoices.set(mrName, []);
           mrToInvoices.get(mrName).push({
             invoiceNumber: invoice.invoiceNumber,
             customerName: invoice.customerName,
@@ -1248,7 +1231,6 @@ const parseExcelFile = useCallback(
     } catch (error) {
       console.error("Stock validation error:", error);
       setIsValidatingStock(false);
-
       return {
         stockIssues: [],
         totalInvoices: invoices.length,
@@ -1279,7 +1261,6 @@ const parseExcelFile = useCallback(
     }
 
     const mrValResult = await validateMRsBeforeImport(parsedData);
-
     if (mrValResult.mrIssues && mrValResult.mrIssues.length > 0) {
       setMrValidationResult(mrValResult);
       setShowMRValidation(true);
@@ -1287,13 +1268,12 @@ const parseExcelFile = useCallback(
     }
 
     const svResult = await validateStockBeforeImport(parsedData);
-
     if (svResult.stockIssues?.length > 0) {
       const insufficientStockIssues = svResult.stockIssues.filter(
-        (issue) => issue.productExists && issue.insufficient,
+        (i) => i.productExists && i.insufficient,
       );
       const missingProductIssues = svResult.stockIssues.filter(
-        (issue) => !issue.productExists,
+        (i) => !i.productExists,
       );
 
       if (insufficientStockIssues.length > 0) {
@@ -1338,14 +1318,11 @@ const parseExcelFile = useCallback(
   const handleProceedWithMRIssues = useCallback(async () => {
     const confirmProceed = await confirmDialog({
       title: "Proceed with Invalid MRs",
-      text: `${
-        mrValidationResult?.summary?.invalidMRs || 0
-      } MRs are not registered. These will be saved as provided. Do you want to proceed?`,
+      text: `${mrValidationResult?.summary?.invalidMRs || 0} MRs are not registered. These will be saved as provided. Do you want to proceed?`,
       icon: "warning",
       confirmButtonText: "Yes, Proceed Anyway",
       cancelButtonText: "Cancel",
     });
-
     if (confirmProceed.isConfirmed) {
       setShowMRValidation(false);
       await handleProductImport(parsedData);
@@ -1357,7 +1334,6 @@ const parseExcelFile = useCallback(
       showToast("error", "Stock validation data not available");
       return;
     }
-
     if (stockValidationResult.summary?.hasInsufficientStock) {
       showToast(
         "error",
@@ -1368,14 +1344,11 @@ const parseExcelFile = useCallback(
 
     const confirmProceed = await confirmDialog({
       title: "Proceed with Missing Products",
-      text: `${
-        stockValidationResult.summary?.missingProducts || 0
-      } products are not in inventory. These will be created during import. Do you want to proceed?`,
+      text: `${stockValidationResult.summary?.missingProducts || 0} products are not in inventory. These will be created during import. Do you want to proceed?`,
       icon: "warning",
       confirmButtonText: "Yes, Create Products",
       cancelButtonText: "Cancel",
     });
-
     if (confirmProceed.isConfirmed) {
       setShowStockValidation(false);
       await handleProductImport(parsedData);
@@ -1472,7 +1445,6 @@ const parseExcelFile = useCallback(
                         `${backendUrl}/api/sales/import/failed/${newSessionId}`,
                         getAuthHeaders(),
                       );
-
                       if (failedResponse.data.success) {
                         const failedInvoicesData =
                           failedResponse.data.data.failedInvoices || [];
@@ -1487,7 +1459,6 @@ const parseExcelFile = useCallback(
                         fetchError,
                       );
                     }
-
                     showToast(
                       "warning",
                       `Import completed with ${progress.successful} successful and ${progress.failed} failed invoices`,
@@ -1497,7 +1468,6 @@ const parseExcelFile = useCallback(
                       "success",
                       `Successfully imported ${progress.successful} invoices`,
                     );
-
                     if (onImportSuccess) {
                       onImportSuccess();
                       setTimeout(
@@ -1533,7 +1503,6 @@ const parseExcelFile = useCallback(
             err.response?.data?.message || err.message || "Import failed";
           setImportStep("Import failed");
           showToast("error", message);
-
           if (err.response?.data?.failedInvoices) {
             setFailedInvoices(err.response.data.failedInvoices);
             setShowFailedInvoices(true);
@@ -1559,9 +1528,7 @@ const parseExcelFile = useCallback(
   useEffect(() => {
     return () => {
       clearPolling();
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [clearPolling]);
 
@@ -1591,20 +1558,12 @@ const parseExcelFile = useCallback(
                   resetParsedData();
                 }}
                 disabled={isImporting || isValidatingStock || isValidatingMR}
-                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                  importSaleType === "normal"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-50 text-gray-600 hover:bg-gray-100"
-                }`}
+                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "normal" ? "bg-indigo-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
               >
                 <Package size={16} />
                 Normal Sale
                 <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${
-                    importSaleType === "normal"
-                      ? "bg-indigo-500 text-white"
-                      : "bg-gray-200 text-gray-600"
-                  }`}
+                  className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "normal" ? "bg-indigo-500 text-white" : "bg-gray-200 text-gray-600"}`}
                 >
                   Warehouse Stock
                 </span>
@@ -1615,20 +1574,12 @@ const parseExcelFile = useCallback(
                   resetParsedData();
                 }}
                 disabled={isImporting || isValidatingStock || isValidatingMR}
-                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                  importSaleType === "mr"
-                    ? "bg-green-600 text-white"
-                    : "bg-gray-50 text-gray-600 hover:bg-gray-100"
-                }`}
+                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "mr" ? "bg-green-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
               >
                 <User size={16} />
                 MR Sale
                 <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${
-                    importSaleType === "mr"
-                      ? "bg-green-500 text-white"
-                      : "bg-gray-200 text-gray-600"
-                  }`}
+                  className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "mr" ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"}`}
                 >
                   MR Hand Stock
                 </span>
@@ -1638,11 +1589,7 @@ const parseExcelFile = useCallback(
 
           {!isImporting && (
             <div
-              className={`mb-5 p-3 rounded-lg text-sm ${
-                importSaleType === "normal"
-                  ? "bg-indigo-50 text-indigo-800 border border-indigo-200"
-                  : "bg-green-50 text-green-800 border border-green-200"
-              }`}
+              className={`mb-5 p-3 rounded-lg text-sm ${importSaleType === "normal" ? "bg-indigo-50 text-indigo-800 border border-indigo-200" : "bg-green-50 text-green-800 border border-green-200"}`}
             >
               {importSaleType === "normal" ? (
                 <p>
@@ -1734,29 +1681,17 @@ const parseExcelFile = useCallback(
 
           {showParsedSection && parsedData.length > 0 && (
             <div
-              className={`mb-6 border rounded-lg p-4 ${
-                importSaleType === "mr"
-                  ? "bg-green-50 border-green-200"
-                  : "bg-indigo-50 border-indigo-200"
-              }`}
+              className={`mb-6 border rounded-lg p-4 ${importSaleType === "mr" ? "bg-green-50 border-green-200" : "bg-indigo-50 border-indigo-200"}`}
             >
               <div className="flex justify-between items-start">
                 <div>
                   <h3
-                    className={`font-medium ${
-                      importSaleType === "mr"
-                        ? "text-green-800"
-                        : "text-indigo-800"
-                    }`}
+                    className={`font-medium ${importSaleType === "mr" ? "text-green-800" : "text-indigo-800"}`}
                   >
                     File Successfully Parsed
                   </h3>
                   <p
-                    className={`text-sm ${
-                      importSaleType === "mr"
-                        ? "text-green-700"
-                        : "text-indigo-700"
-                    }`}
+                    className={`text-sm ${importSaleType === "mr" ? "text-green-700" : "text-indigo-700"}`}
                   >
                     Found {parsedData.length} valid invoices ready for import
                   </p>
@@ -1766,17 +1701,13 @@ const parseExcelFile = useCallback(
                     </p>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={resetParsedData}
-                    className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 border border-gray-300 rounded-lg cursor-pointer"
-                    disabled={
-                      isImporting || isValidatingStock || isValidatingMR
-                    }
-                  >
-                    Clear
-                  </button>
-                </div>
+                <button
+                  onClick={resetParsedData}
+                  className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 border border-gray-300 rounded-lg cursor-pointer"
+                  disabled={isImporting || isValidatingStock || isValidatingMR}
+                >
+                  Clear
+                </button>
               </div>
 
               <div className="grid grid-cols-3 gap-2 mt-3">
@@ -1934,11 +1865,7 @@ const parseExcelFile = useCallback(
               <div className="mb-6">
                 <button
                   onClick={handleImportData}
-                  className={`w-full py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer text-white ${
-                    importSaleType === "mr"
-                      ? "bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800"
-                      : "bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800"
-                  }`}
+                  className={`w-full py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer text-white ${importSaleType === "mr" ? "bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800" : "bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800"}`}
                   disabled={isImporting || isValidatingStock || isValidatingMR}
                 >
                   Start {importSaleType === "mr" ? "MR Sale" : "Normal Sale"}{" "}
@@ -2001,7 +1928,7 @@ const parseExcelFile = useCallback(
   );
 };
 
-//suraj 
+//suraj
 
 const ProductDetailsModal = ({
   isOpen,
@@ -2021,7 +1948,6 @@ const ProductDetailsModal = ({
         const discount = Number(product.discount) || 0;
         const netAmount = Number(product.netSellingAmount) || 0;
         const lc = Number(product.lc) || 0;
-
         const profitLoss = netAmount - totalQty * lc;
 
         acc.totalSalesQty += salesQty;
@@ -2030,7 +1956,6 @@ const ProductDetailsModal = ({
         acc.totalDiscount += discount;
         acc.totalNetAmount += netAmount;
         acc.totalProfitLoss += profitLoss;
-
         return acc;
       },
       {
@@ -2055,11 +1980,9 @@ const ProductDetailsModal = ({
         >
           <X size={20} />
         </button>
-
         <h2 className="text-xl font-semibold text-gray-800 mb-6">
           {title} ({products?.length || 0} items)
         </h2>
-
         {!products || products.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             No products found
@@ -2069,42 +1992,28 @@ const ProductDetailsModal = ({
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-gray-100">
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-left">
-                    Product Name
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Sales Qty
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Bonus Qty
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Total Qty
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Selling Price
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Amount ($)
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Discount ($)
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Net Amount ($)
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Avg. Price
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    LC ($)
-                  </th>
-                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
-                    Profit / Loss ($)
-                  </th>
+                  {[
+                    "Product Name",
+                    "Sales Qty",
+                    "Bonus Qty",
+                    "Total Qty",
+                    "Selling Price",
+                    "Amount ($)",
+                    "Discount ($)",
+                    "Net Amount ($)",
+                    "Avg. Price",
+                    "LC ($)",
+                    "Profit / Loss ($)",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="p-3 text-sm font-medium text-gray-700 border-b text-left"
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-
               <tbody>
                 {products.map((product, index) => {
                   const salesQty = Number(product.salesQty) || 0;
@@ -2114,7 +2023,6 @@ const ProductDetailsModal = ({
                   const lc = Number(product.lc) || 0;
                   const avgUnitPrice = totalQty > 0 ? netAmount / totalQty : 0;
                   const profitLoss = netAmount - totalQty * lc;
-
                   return (
                     <tr
                       key={`product-${index}`}
@@ -2148,9 +2056,7 @@ const ProductDetailsModal = ({
                       <td className="p-3 text-center">${lc.toFixed(2)}</td>
                       <td className="p-3 text-center">
                         <span
-                          className={`font-medium ${
-                            profitLoss >= 0 ? "text-green-600" : "text-red-600"
-                          }`}
+                          className={`font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
                         >
                           ${profitLoss.toFixed(2)}
                         </span>
@@ -2158,7 +2064,6 @@ const ProductDetailsModal = ({
                     </tr>
                   );
                 })}
-
                 <tr className="bg-gray-50 font-medium">
                   <td className="p-3 text-left">Total</td>
                   <td className="p-3 text-center">{totals.totalSalesQty}</td>
@@ -2180,11 +2085,11 @@ const ProductDetailsModal = ({
                   <td className="p-3 text-center">-</td>
                   <td className="p-3 text-center">
                     <span
-                      className={`${
+                      className={
                         totals.totalProfitLoss >= 0
                           ? "text-green-600"
                           : "text-red-600"
-                      }`}
+                      }
                     >
                       ${totals.totalProfitLoss.toFixed(2)}
                     </span>
@@ -2194,7 +2099,6 @@ const ProductDetailsModal = ({
             </table>
           </div>
         )}
-
         <div className="mt-6 pt-4 border-t border-gray-300 flex justify-end">
           <button
             onClick={onClose}
@@ -2209,7 +2113,6 @@ const ProductDetailsModal = ({
   );
 };
 
-// ===================== MAIN SALES COMPONENT (Optimized) =====================
 const Sales = () => {
   const navigate = useNavigate();
   const [sales, setSales] = useState([]);
@@ -2256,13 +2159,11 @@ const Sales = () => {
 
   const SALES_PER_PAGE = 9;
 
-  // Function to fetch products list
   const fetchProductsList = useCallback(async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/products`, {
         timeout: 5000,
       });
-
       if (response.data && Array.isArray(response.data)) {
         setProductsList(response.data);
       } else if (
@@ -2278,7 +2179,6 @@ const Sales = () => {
     }
   }, []);
 
-  // Function to check if purchase inventories exist
   const checkPurchaseInventories = useCallback(async () => {
     try {
       setCheckingPurchaseInventories(true);
@@ -2293,12 +2193,10 @@ const Sales = () => {
     }
   }, []);
 
-  // Re-check purchase inventories when needed
   const recheckPurchaseInventories = useCallback(() => {
     setShouldCheckPurchase(true);
   }, []);
 
-  // Modified useEffect to check purchase inventories
   useEffect(() => {
     if (shouldCheckPurchase) {
       checkPurchaseInventories();
@@ -2306,57 +2204,43 @@ const Sales = () => {
     }
   }, [shouldCheckPurchase, checkPurchaseInventories]);
 
-  // Also check when component mounts
   useEffect(() => {
     checkPurchaseInventories();
     fetchProductsList();
   }, [checkPurchaseInventories, fetchProductsList]);
 
-  // Listen for custom event when purchase inventory is added
   useEffect(() => {
-    const handlePurchaseInventoryAdded = () => {
-      recheckPurchaseInventories();
-    };
-
+    const handlePurchaseInventoryAdded = () => recheckPurchaseInventories();
     window.addEventListener(
       "purchase-inventory-added",
       handlePurchaseInventoryAdded,
     );
-
-    return () => {
+    return () =>
       window.removeEventListener(
         "purchase-inventory-added",
         handlePurchaseInventoryAdded,
       );
-    };
   }, [recheckPurchaseInventories]);
 
-  // Listen for inventory update events
   useEffect(() => {
     const handleInventoryUpdated = () => {
       fetchSaleSummaries();
       fetchProductsList();
     };
-
     window.addEventListener("inventory-updated", handleInventoryUpdated);
-
-    return () => {
+    return () =>
       window.removeEventListener("inventory-updated", handleInventoryUpdated);
-    };
   }, [fetchProductsList]);
 
   const processSalesData = useCallback((data) => {
     const salesData = data.summaries || data.data || data;
-
     if (!Array.isArray(salesData)) {
       setSales([]);
       return;
     }
-
-    const sortedData = salesData.sort((a, b) => {
-      return new Date(b.invoiceDate) - new Date(a.invoiceDate);
-    });
-
+    const sortedData = salesData.sort(
+      (a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate),
+    );
     setSales(sortedData);
   }, []);
 
@@ -2364,12 +2248,8 @@ const Sales = () => {
     try {
       setLoadingData(true);
       const res = await fetch(`${backendUrl}/api/sales/all`, {
-        headers: {
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-        },
+        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
       });
-
       if (res.ok) {
         const data = await res.json();
         processSalesData(data);
@@ -2401,38 +2281,22 @@ const Sales = () => {
           fetchMRList(),
           fetchCustomerList(),
         ]);
-
-        // Handle MR list
         if (mrs && mrs.success && Array.isArray(mrs.data)) {
           const mrNames = mrs.data
             .map((mr) => {
-              if (typeof mr === "string") {
-                return mr.trim();
-              }
-
+              if (typeof mr === "string") return mr.trim();
               if (mr && typeof mr === "object") {
-                if (mr.medicalRepName) {
-                  return mr.medicalRepName.trim();
-                }
-                if (mr.name) {
-                  return mr.name.trim();
-                }
-                if (mr.fullName) {
-                  return mr.fullName.trim();
-                }
-                return null;
+                if (mr.medicalRepName) return mr.medicalRepName.trim();
+                if (mr.name) return mr.name.trim();
+                if (mr.fullName) return mr.fullName.trim();
               }
-
               return null;
             })
             .filter(Boolean);
-
           setMrList(mrNames);
         } else {
           setMrList([]);
         }
-
-        // Handle customer list
         if (customers && customers.success && Array.isArray(customers.data)) {
           setCustomerList(customers.data);
         } else {
@@ -2443,49 +2307,38 @@ const Sales = () => {
         setCustomerList([]);
       }
     };
-
     fetchDropdownData();
   }, []);
 
   const handleDeleteSelected = useCallback(async () => {
     if (selected.length === 0) return;
-
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete ${selected.length} sales?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirm.isConfirmed) {
       try {
         const token = localStorage.getItem("token");
-
         const ids = selected
           .map((s) => s.id)
           .filter((id) => id && typeof id === "string");
-
         if (ids.length === 0) {
           showToast("error", "No valid sale IDs to delete");
           return;
         }
-
-        // ✅ Use POST to a dedicated batch-delete endpoint to avoid route conflicts
         const res = await axios.post(
           `${backendUrl}/api/sales/batch-delete`,
           { ids },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
+          { headers: { Authorization: `Bearer ${token}` } },
         );
-
         if (res.status === 200) {
           showToast("success", `${ids.length} sale(s) deleted successfully`);
           fetchSaleSummaries();
           setSelected([]);
         }
       } catch (error) {
-        console.error("Error deleting selected sales:", error);
         const errorMessage =
           error.response?.data?.error ||
           error.response?.data?.message ||
@@ -2511,80 +2364,41 @@ const Sales = () => {
 
   const allFields = useMemo(
     () => [
-      {
-        id: "invoiceNumber",
-        name: "Invoice No",
-        dbName: "invoiceNumber",
-      },
-      {
-        id: "invoiceDate",
-        name: "Invoice Date",
-        dbName: "invoiceDate",
-      },
-      {
-        id: "productCount",
-        name: "Products",
-        dbName: "products",
-      },
+      { id: "invoiceNumber", name: "Invoice No", dbName: "invoiceNumber" },
+      { id: "invoiceDate", name: "Invoice Date", dbName: "invoiceDate" },
+      { id: "productCount", name: "Products", dbName: "products" },
       { id: "mrName", name: "MR Name", dbName: "mrName" },
-      {
-        id: "customerName",
-        name: "Customer Name",
-        dbName: "customerName",
-      },
-      {
-        id: "totalAmount",
-        name: "Total Amount ($)",
-        dbName: "totalAmount",
-      },
-      {
-        id: "paymentStatus",
-        name: "Payment Status",
-        dbName: "paymentStatus",
-      },
-      {
-        id: "actions",
-        name: "Actions",
-        dbName: "actions",
-      },
+      { id: "customerName", name: "Customer Name", dbName: "customerName" },
+      { id: "totalAmount", name: "Total Amount ($)", dbName: "totalAmount" },
+      { id: "paymentStatus", name: "Payment Status", dbName: "paymentStatus" },
+      { id: "actions", name: "Actions", dbName: "actions" },
     ],
     [],
   );
 
-  // Dynamic payment status tabs based on sales data
   const paymentStatusTabs = useMemo(() => {
     if (!Array.isArray(sales) || sales.length === 0) return ["All"];
-
     const uniqueStatuses = [
       ...new Set(
         sales
           .map((sale) => sale.paymentStatus)
-          .filter((status) => status && status.trim() !== "")
-          .map((status) => status.trim()),
+          .filter((s) => s && s.trim() !== "")
+          .map((s) => s.trim()),
       ),
     ].sort();
-
     return ["All", ...uniqueStatuses];
   }, [sales]);
 
   const filteredSales = useMemo(() => {
     if (!Array.isArray(sales)) return [];
-
     const lowerSearch = searchTerm.trim().toLowerCase();
     const selectedTabLower = selectedTab.toLowerCase();
-
     return sales.filter((sale) => {
       const paymentStatus = (sale.paymentStatus || "").toLowerCase();
-
-      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
+      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus)
         return false;
-      }
-
       if (!lowerSearch) return true;
-
-      const fields = [sale.invoiceNumber, sale.customerName, sale.mrName];
-
-      return fields.some((f) =>
+      return [sale.invoiceNumber, sale.customerName, sale.mrName].some((f) =>
         (f ?? "").toString().toLowerCase().includes(lowerSearch),
       );
     });
@@ -2595,54 +2409,40 @@ const Sales = () => {
     return filteredSales.slice(start, start + SALES_PER_PAGE);
   }, [filteredSales, currentPage]);
 
-  const totalPages = useMemo(() => {
-    return Math.ceil(filteredSales.length / SALES_PER_PAGE);
-  }, [filteredSales.length]);
-
-  const visiblePages = useMemo(() => {
-    return getVisiblePages(currentPage, totalPages);
-  }, [currentPage, totalPages]);
+  const totalPages = useMemo(
+    () => Math.ceil(filteredSales.length / SALES_PER_PAGE),
+    [filteredSales.length],
+  );
+  const visiblePages = useMemo(
+    () => getVisiblePages(currentPage, totalPages),
+    [currentPage, totalPages],
+  );
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, selectedTab]);
 
   const getFieldValue = useCallback((sale, dbName) => {
-    if (dbName === "products") {
-      return sale.products?.length || 0;
-    }
-
-    if (["invoiceDate", "dueDate", "deliveryDate"].includes(dbName)) {
+    if (dbName === "products") return sale.products?.length || 0;
+    if (["invoiceDate", "dueDate", "deliveryDate"].includes(dbName))
       return formatDateToReadable(sale[dbName]) || "--";
-    }
-
-    if (dbName === "totalAmount") {
+    if (dbName === "totalAmount")
       return `$${(sale.totalAmount || 0).toLocaleString()}`;
-    }
-
-    const value = sale[dbName];
-    return value ?? "--";
+    return sale[dbName] ?? "--";
   }, []);
 
   const toggleSelect = useCallback((sale) => {
     setSelected((prev) => {
       const exists = prev.some((c) => c.id === sale._id);
-      if (exists) {
-        return prev.filter((c) => c.id !== sale._id);
-      } else {
-        return [...prev, { id: sale._id }];
-      }
+      return exists
+        ? prev.filter((c) => c.id !== sale._id)
+        : [...prev, { id: sale._id }];
     });
   }, []);
 
   const toggleSelectAll = useCallback(
     (checked) => {
-      if (checked) {
-        const allSelected = currentSales.map((s) => ({ id: s._id }));
-        setSelected(allSelected);
-      } else {
-        setSelected([]);
-      }
+      setSelected(checked ? currentSales.map((s) => ({ id: s._id })) : []);
     },
     [currentSales],
   );
@@ -2678,7 +2478,6 @@ const Sales = () => {
   const deleteSale = useCallback(
     async (sale) => {
       if (!sale._id) return;
-
       const confirmDelete = await confirmDialog({
         title: "Delete",
         text: `Are you sure you want to delete ${sale.invoiceNumber}?`,
@@ -2686,21 +2485,13 @@ const Sales = () => {
         confirmButtonText: "Yes, delete",
         cancelButtonText: "Cancel",
       });
-
       if (confirmDelete.isConfirmed) {
         try {
-          // ✅ Get token from localStorage
           const token = localStorage.getItem("token");
-
           const res = await axios.delete(
             `${backendUrl}/api/sales/${sale._id}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            },
+            { headers: { Authorization: `Bearer ${token}` } },
           );
-
           if (res.status === 200) {
             showToast(
               "success",
@@ -2709,11 +2500,10 @@ const Sales = () => {
             fetchSaleSummaries();
           }
         } catch (error) {
-          console.error("Error deleting selected sales:", error);
           const errorMessage =
             error.response?.data?.error ||
             error.response?.data?.message ||
-            "Failed to delete selected sales";
+            "Failed to delete sale";
           showToast("error", errorMessage);
         }
       }
@@ -2729,8 +2519,7 @@ const Sales = () => {
         netAmount: 0,
         totalProfitLoss: 0,
       };
-
-    const totals = products.reduce(
+    return products.reduce(
       (acc, product) => {
         acc.totalAmount += parseFloat(product.amount || 0);
         acc.totalDiscount += parseFloat(product.discount || 0);
@@ -2740,17 +2529,13 @@ const Sales = () => {
       },
       { totalAmount: 0, totalDiscount: 0, netAmount: 0, totalProfitLoss: 0 },
     );
-
-    return totals;
   }, []);
 
   const handleUpdateSale = useCallback(
     async (e) => {
       e.preventDefault();
-
       try {
         const totals = calculateProductTotals(form.products);
-
         const updatedForm = {
           ...form,
           totalAmount: totals.totalAmount,
@@ -2758,20 +2543,12 @@ const Sales = () => {
             totals.netAmount - parseFloat(form.paidAmount || 0)
           ).toFixed(2),
         };
-
-        // ✅ Get token
         const token = localStorage.getItem("token");
-
         const res = await axios.put(
           `${backendUrl}/api/sales/${form._id}`,
           updatedForm,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
+          { headers: { Authorization: `Bearer ${token}` } },
         );
-
         if (res.status === 200) {
           showToast("success", "Sales record updated successfully");
           setIsEditModalOpen(false);
@@ -2779,11 +2556,10 @@ const Sales = () => {
           fetchSaleSummaries();
         }
       } catch (err) {
-        console.error("Error deleting selected sales:", err);
         const errorMessage =
           err.response?.data?.err ||
           err.response?.data?.message ||
-          "Failed to delete selected sales";
+          "Failed to update sale";
         showToast("error", errorMessage);
       }
     },
@@ -2795,9 +2571,10 @@ const Sales = () => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const formTotals = useMemo(() => {
-    return calculateProductTotals(form.products);
-  }, [form.products, calculateProductTotals]);
+  const formTotals = useMemo(
+    () => calculateProductTotals(form.products),
+    [form.products, calculateProductTotals],
+  );
 
   const handleImportSuccess = useCallback(() => {
     setTimeout(() => {
@@ -2809,34 +2586,26 @@ const Sales = () => {
   const showMRCustomerWarning = useMemo(() => {
     const hasMRs = mrList && mrList.length > 0;
     const hasCustomers = customerList && customerList.length > 0;
-
     return !hasMRs && !hasCustomers;
   }, [mrList, customerList]);
 
-  // Combine all conditions for disabling buttons
-  const shouldDisableButtons = useMemo(() => {
-    return (
+  const shouldDisableButtons = useMemo(
+    () =>
       checkingPurchaseInventories ||
       !hasPurchaseInventories ||
-      showMRCustomerWarning
-    );
-  }, [
-    checkingPurchaseInventories,
-    hasPurchaseInventories,
-    showMRCustomerWarning,
-  ]);
+      showMRCustomerWarning,
+    [
+      checkingPurchaseInventories,
+      hasPurchaseInventories,
+      showMRCustomerWarning,
+    ],
+  );
 
-  // Get appropriate button title
   const getButtonTitle = useCallback(() => {
-    if (checkingPurchaseInventories) {
-      return "Checking purchase inventories...";
-    }
-    if (!hasPurchaseInventories) {
+    if (checkingPurchaseInventories) return "Checking purchase inventories...";
+    if (!hasPurchaseInventories)
       return "First purchase the entry enter then sale";
-    }
-    if (showMRCustomerWarning) {
-      return "Please add MR and Customer data first";
-    }
+    if (showMRCustomerWarning) return "Please add MR and Customer data first";
     return "Create new sale";
   }, [
     checkingPurchaseInventories,
@@ -2875,11 +2644,9 @@ const Sales = () => {
               >
                 <X size={20} />
               </button>
-
               <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
                 <Edit size={20} /> Edit Sales Record
               </h2>
-
               <form onSubmit={handleUpdateSale} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
@@ -2904,7 +2671,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Invoice Number
@@ -2917,7 +2683,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Calendar size={14} className="inline mr-1" />
@@ -2940,7 +2705,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <User size={14} className="inline mr-1" />
@@ -2960,7 +2724,6 @@ const Sales = () => {
                       ))}
                     </select>
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <User size={14} className="inline mr-1" />
@@ -2974,7 +2737,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Customer Code
@@ -3003,7 +2765,6 @@ const Sales = () => {
                       View All Products
                     </button>
                   </div>
-
                   {form.products && form.products.length > 0 ? (
                     <div className="space-y-3">
                       {form.products.map((product, index) => (
@@ -3011,17 +2772,13 @@ const Sales = () => {
                           key={index}
                           className="border border-gray-200 rounded-lg p-3"
                         >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-medium text-gray-800">
-                                {product.productName || `Product ${index + 1}`}
-                              </h4>
-                              <div className="text-sm text-gray-600 mt-1">
-                                Qty: {product.salesQty || 0} | Bonus:{" "}
-                                {product.bonusQty || 0} | Price: $
-                                {(product.sellingPrice || 0).toFixed(2)}
-                              </div>
-                            </div>
+                          <h4 className="font-medium text-gray-800">
+                            {product.productName || `Product ${index + 1}`}
+                          </h4>
+                          <div className="text-sm text-gray-600 mt-1">
+                            Qty: {product.salesQty || 0} | Bonus:{" "}
+                            {product.bonusQty || 0} | Price: $
+                            {(product.sellingPrice || 0).toFixed(2)}
                           </div>
                         </div>
                       ))}
@@ -3034,40 +2791,29 @@ const Sales = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Total Amount
-                    </label>
-                    <div className="text-lg font-semibold text-gray-800">
-                      ${formTotals.totalAmount.toFixed(2)}
+                  {[
+                    ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
+                    [
+                      "Total Discount",
+                      `$${formTotals.totalDiscount.toFixed(2)}`,
+                    ],
+                    ["Net Amount", `$${formTotals.netAmount.toFixed(2)}`],
+                  ].map(([label, val]) => (
+                    <div key={label}>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        {label}
+                      </label>
+                      <div className="text-lg font-semibold text-gray-800">
+                        {val}
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Total Discount
-                    </label>
-                    <div className="text-lg font-semibold text-gray-800">
-                      ${formTotals.totalDiscount.toFixed(2)}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Net Amount
-                    </label>
-                    <div className="text-lg font-semibold text-gray-800">
-                      ${formTotals.netAmount.toFixed(2)}
-                    </div>
-                  </div>
+                  ))}
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Profit/Loss
                     </label>
                     <div
-                      className={`text-lg font-semibold ${
-                        formTotals.totalProfitLoss >= 0
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
+                      className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
                     >
                       ${formTotals.totalProfitLoss.toFixed(2)}
                     </div>
@@ -3088,7 +2834,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Calendar size={14} className="inline mr-1" />
@@ -3107,7 +2852,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <DollarSign size={14} className="inline mr-1" />
@@ -3122,7 +2866,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <DollarSign size={14} className="inline mr-1" />
@@ -3135,7 +2878,6 @@ const Sales = () => {
                       disabled
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <CreditCard size={14} className="inline mr-1" />
@@ -3155,7 +2897,6 @@ const Sales = () => {
                       ))}
                     </select>
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Truck size={14} className="inline mr-1" />
@@ -3227,67 +2968,28 @@ const Sales = () => {
               >
                 <X size={20} />
               </button>
-
               <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
                 <Eye size={20} /> View Sales Record
               </h2>
-
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Recording Date
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {formatDateToReadable(form.recordingDate) || "-"}
+                {[
+                  ["Recording Date", formatDateToReadable(form.recordingDate)],
+                  ["Invoice Number", form.invoiceNumber],
+                  ["Invoice Date", formatDateToReadable(form.invoiceDate)],
+                  ["MR Name", form.mrName],
+                  ["Customer Name", form.customerName],
+                  ["Customer Code", form.customerCode],
+                ].map(([label, val]) => (
+                  <div key={label} className="bg-gray-50 p-3 rounded-lg">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      {label}
+                    </label>
+                    <div className="text-sm font-medium text-gray-800">
+                      {val || "-"}
+                    </div>
                   </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Invoice Number
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {form.invoiceNumber || "-"}
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Invoice Date
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {formatDateToReadable(form.invoiceDate) || "-"}
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    MR Name
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {form.mrName || "-"}
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Customer Name
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {form.customerName || "-"}
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Customer Code
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {form.customerCode || "-"}
-                  </div>
-                </div>
+                ))}
               </div>
-
               <div className="border border-gray-200 rounded-lg p-4 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-medium text-gray-700">
@@ -3304,7 +3006,6 @@ const Sales = () => {
                     View Details
                   </button>
                 </div>
-
                 {form.products && form.products.length > 0 ? (
                   <div className="space-y-3">
                     {form.products.slice(0, 3).map((product, index) => (
@@ -3312,17 +3013,13 @@ const Sales = () => {
                         key={index}
                         className="border border-gray-200 rounded-lg p-3"
                       >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h4 className="font-medium text-gray-800">
-                              {product.productName || `Product ${index + 1}`}
-                            </h4>
-                            <div className="text-sm text-gray-600 mt-1">
-                              Quantity: {product.salesQty || 0} | Bonus:{" "}
-                              {product.bonusQty || 0} | Price: $
-                              {(product.sellingPrice || 0).toFixed(2)}
-                            </div>
-                          </div>
+                        <h4 className="font-medium text-gray-800">
+                          {product.productName || `Product ${index + 1}`}
+                        </h4>
+                        <div className="text-sm text-gray-600 mt-1">
+                          Quantity: {product.salesQty || 0} | Bonus:{" "}
+                          {product.bonusQty || 0} | Price: $
+                          {(product.sellingPrice || 0).toFixed(2)}
                         </div>
                       </div>
                     ))}
@@ -3338,114 +3035,60 @@ const Sales = () => {
                   </div>
                 )}
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4 mb-6">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Total Amount
-                  </label>
-                  <div className="text-lg font-semibold text-gray-800">
-                    ${formTotals.totalAmount.toFixed(2)}
+                {[
+                  ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
+                  ["Total Discount", `$${formTotals.totalDiscount.toFixed(2)}`],
+                  ["Net Amount", `$${formTotals.netAmount.toFixed(2)}`],
+                ].map(([label, val]) => (
+                  <div key={label}>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      {label}
+                    </label>
+                    <div className="text-lg font-semibold text-gray-800">
+                      {val}
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Total Discount
-                  </label>
-                  <div className="text-lg font-semibold text-gray-800">
-                    ${formTotals.totalDiscount.toFixed(2)}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Net Amount
-                  </label>
-                  <div className="text-lg font-semibold text-gray-800">
-                    ${formTotals.netAmount.toFixed(2)}
-                  </div>
-                </div>
+                ))}
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">
                     Profit/Loss
                   </label>
                   <div
-                    className={`text-lg font-semibold ${
-                      formTotals.totalProfitLoss >= 0
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
+                    className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
                   >
                     ${formTotals.totalProfitLoss.toFixed(2)}
                   </div>
                 </div>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Credit Days
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {form.creditDays || 0} days
+                {[
+                  ["Credit Days", `${form.creditDays || 0} days`],
+                  ["Due Date", formatDateToReadable(form.dueDate)],
+                  ["Paid Amount", `$${(form.paidAmount || 0).toFixed(2)}`],
+                  ["Due Amount", `$${(form.dueAmount || 0).toFixed(2)}`],
+                  ["Delivery Date", formatDateToReadable(form.deliveryDate)],
+                ].map(([label, val]) => (
+                  <div key={label} className="bg-gray-50 p-3 rounded-lg">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      {label}
+                    </label>
+                    <div className="text-sm font-medium text-gray-800">
+                      {val || "-"}
+                    </div>
                   </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Due Date
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {formatDateToReadable(form.dueDate) || "-"}
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Paid Amount
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    ${(form.paidAmount || 0).toFixed(2)}
-                  </div>
-                </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Due Amount
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    ${(form.dueAmount || 0).toFixed(2)}
-                  </div>
-                </div>
-
+                ))}
                 <div className="bg-gray-50 p-3 rounded-lg">
                   <label className="block text-xs font-medium text-gray-500 mb-1">
                     Payment Status
                   </label>
                   <div
-                    className={`text-sm font-medium ${
-                      form.paymentStatus === "Paid"
-                        ? "text-green-600"
-                        : form.paymentStatus === "Credit"
-                          ? "text-yellow-600"
-                          : form.paymentStatus === "Partial"
-                            ? "text-blue-600"
-                            : "text-gray-600"
-                    }`}
+                    className={`text-sm font-medium ${form.paymentStatus === "Paid" ? "text-green-600" : form.paymentStatus === "Credit" ? "text-yellow-600" : form.paymentStatus === "Partial" ? "text-blue-600" : "text-gray-600"}`}
                   >
                     {form.paymentStatus || "-"}
                   </div>
                 </div>
-
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Delivery Date
-                  </label>
-                  <div className="text-sm font-medium text-gray-800">
-                    {formatDateToReadable(form.deliveryDate) || "-"}
-                  </div>
-                </div>
               </div>
-
               <div className="border border-gray-200 rounded-lg p-4 mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Remarks
@@ -3454,7 +3097,6 @@ const Sales = () => {
                   {form.remark || "No remarks provided"}
                 </div>
               </div>
-
               <div className="flex justify-end pt-4 border-t border-gray-200">
                 <button
                   type="button"
@@ -3481,7 +3123,6 @@ const Sales = () => {
             >
               <UserPlus size={18} /> Add New Sales
             </button>
-
             <button
               onClick={() => setShowImportModal(true)}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -3490,7 +3131,6 @@ const Sales = () => {
             >
               <Upload size={18} /> Import Sales
             </button>
-
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
@@ -3511,7 +3151,6 @@ const Sales = () => {
           )}
         </div>
 
-        {/* Purchase Inventories Warning */}
         {!checkingPurchaseInventories && !hasPurchaseInventories && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start gap-3">
@@ -3538,7 +3177,6 @@ const Sales = () => {
           </div>
         )}
 
-        {/* MR/Customer Warning - Only show if purchase inventories exist */}
         {!checkingPurchaseInventories &&
           hasPurchaseInventories &&
           showMRCustomerWarning && (
@@ -3568,7 +3206,6 @@ const Sales = () => {
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
               <div className="flex gap-4 flex-wrap">
-                {/* Dynamic tabs based on payment statuses in sales data */}
                 {paymentStatusTabs.map((tab) => (
                   <button
                     key={`tab-${tab}`}
@@ -3577,11 +3214,7 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-                      selectedTab === tab
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                    }`}
+                    className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
                   >
                     {tab}
                   </button>
@@ -3591,7 +3224,6 @@ const Sales = () => {
           ) : (
             <div></div>
           )}
-
           {sales.length > 0 && (
             <div className="flex items-center gap-8 flex-wrap">
               <p className="text-lg font-semibold text-gray-700">
@@ -3600,7 +3232,6 @@ const Sales = () => {
                   {filteredSales.length}
                 </span>
               </p>
-
               <div className="relative w-full md:w-72">
                 <Search
                   className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
@@ -3622,7 +3253,6 @@ const Sales = () => {
           )}
         </div>
 
-        {/* Main Table */}
         <div className="overflow-x-auto shadow-lg rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -3688,9 +3318,7 @@ const Sales = () => {
                 currentSales.map((sale, index) => (
                   <tr
                     key={`sale-${sale._id || index}`}
-                    className={`hover:bg-gray-50 transition-colors ${
-                      index < currentSales.length - 1 ? "border-b" : ""
-                    }`}
+                    className={`hover:bg-gray-50 transition-colors ${index < currentSales.length - 1 ? "border-b" : ""}`}
                   >
                     {allFields
                       .filter((item) => tableColumns.includes(item.id))
@@ -3750,15 +3378,7 @@ const Sales = () => {
                             </div>
                           ) : item.id === "paymentStatus" ? (
                             <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                sale.paymentStatus === "Paid"
-                                  ? "bg-green-100 text-green-800"
-                                  : sale.paymentStatus === "Credit"
-                                    ? "bg-yellow-100 text-yellow-800"
-                                    : sale.paymentStatus === "Partial"
-                                      ? "bg-blue-100 text-blue-800"
-                                      : "bg-gray-100 text-gray-800"
-                              }`}
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${sale.paymentStatus === "Paid" ? "bg-green-100 text-green-800" : sale.paymentStatus === "Credit" ? "bg-yellow-100 text-yellow-800" : sale.paymentStatus === "Partial" ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
                             >
                               {getFieldValue(sale, item.dbName)}
                             </span>
@@ -3777,60 +3397,53 @@ const Sales = () => {
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
               <div className="flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => {
+                  onClick={() =>
                     setCurrentPage((prev) => {
-                      const prevPage = Math.max(prev - 1, 1);
+                      const p = Math.max(prev - 1, 1);
                       window.scrollTo({ top: 0, behavior: "smooth" });
-                      return prevPage;
-                    });
-                  }}
+                      return p;
+                    })
+                  }
                   disabled={currentPage === 1}
                   className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1 transition-colors"
                 >
                   ← Prev
                 </button>
-
                 {visiblePages.map((page, idx) =>
                   page === "..." ? (
                     <span
-                      key={`sales-ellipsis-${idx}`}
+                      key={`ellipsis-${idx}`}
                       className="px-3 py-1 text-gray-500 select-none"
                     >
                       ...
                     </span>
                   ) : (
                     <button
-                      key={`sales-page-${page}`}
+                      key={`page-${page}`}
                       onClick={() => {
                         setCurrentPage(page);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                        currentPage === page
-                          ? "bg-indigo-600 text-white"
-                          : "bg-gray-200 hover:bg-gray-300"
-                      }`}
+                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
                     >
                       {page}
                     </button>
                   ),
                 )}
-
                 <button
-                  onClick={() => {
+                  onClick={() =>
                     setCurrentPage((prev) => {
-                      const nextPage = Math.min(prev + 1, totalPages);
+                      const p = Math.min(prev + 1, totalPages);
                       window.scrollTo({ top: 0, behavior: "smooth" });
-                      return nextPage;
-                    });
-                  }}
+                      return p;
+                    })
+                  }
                   disabled={currentPage === totalPages}
                   className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1 transition-colors"
                 >
                   Next →
                 </button>
               </div>
-
               <div className="text-sm text-gray-600">
                 Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
                 {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)}{" "}

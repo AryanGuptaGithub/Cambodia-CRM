@@ -251,16 +251,11 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
 
   try {
     const { ids } = req.body;
-    console.log('Bulk delete request body:', req.body);
-    console.log('Received IDs:', ids);
-
     if (!Array.isArray(ids) || ids.length === 0) {
       throw new Error("No IDs provided");
     }
 
     const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
-    console.log('Valid IDs:', validIds);
-
     if (validIds.length === 0) throw new Error("No valid IDs");
 
     const adjustments = await StockAdjustment.find({ _id: { $in: validIds } }).session(session);

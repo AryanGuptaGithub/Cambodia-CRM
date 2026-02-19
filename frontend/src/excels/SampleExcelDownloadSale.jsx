@@ -1,228 +1,124 @@
 import React from "react";
-import ExcelJS from "exceljs";
-import { useInitialSaleData } from "../pages/Sale/IntialLoading";
-import {
-  fetchMRList,
-  fetchCustomerList,
-} from "../pages/ProductManager/common/fetchDropdown";
+import * as XLSX from "xlsx-js-style";
+import { Download } from "lucide-react";
 
-const SampleExcelDownloadSale = ({ data = [] }) => {
-  const { statuses = [], productNames = [], loading } =
-    useInitialSaleData();
+const SampleExcelDownloadSale = ({ importSaleType = "normal" }) => {
+  const handleDownload = () => {
+    const headers = [
+      "Recording Date", "Invoice #", "Invoice Date", "MR Name",
+      "Customer Code", "Product Name", "Sales Qty", "Bonus Qty",
+      "Selling Price", "Discount", "Credit Days", "Paid Amount",
+      "Payment Status", "Remarks",
+    ];
 
-  const [mrList, setMrList] = React.useState([]);
-  const [customerList, setCustomerList] = React.useState([]);
-  const [mrLoading, setMrLoading] = React.useState(false);
-  const [customerLoading, setCustomerLoading] = React.useState(false);
+    const numCols = headers.length;
 
-  // ===== Fetch MR list =====
-  const fetchMRData = async () => {
-    try {
-      setMrLoading(true);
-      const res = await fetchMRList();
-      if (res?.success) setMrList(res.data || []);
-    } catch (err) {
-      console.error("MR fetch error:", err);
-    } finally {
-      setMrLoading(false);
+    // Dynamic subtitle based on tab
+    const subtitle =
+      importSaleType === "mr" ? "MR Sale Summary List" : "Normal Sale Summary List";
+
+    // Dynamic filename
+    const fileName =
+      importSaleType === "mr"
+        ? "mrSaleSummary_template.xlsx"
+        : "normalSaleSummary_template.xlsx";
+
+    const wb = XLSX.utils.book_new();
+
+    const sheetData = [
+      ["HEALTHCARE SOUTH EAST ASIA", ...Array(numCols - 1).fill("")],
+      [subtitle,                      ...Array(numCols - 1).fill("")],
+      Array(numCols).fill(""),
+      headers,
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+    // Merge title and subtitle across all columns
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } },
+    ];
+
+    const thinBorder = {
+      top:    { style: "thin", color: { rgb: "AAAAAA" } },
+      bottom: { style: "thin", color: { rgb: "AAAAAA" } },
+      left:   { style: "thin", color: { rgb: "AAAAAA" } },
+      right:  { style: "thin", color: { rgb: "AAAAAA" } },
+    };
+
+    const grayFill = { patternType: "solid", fgColor: { rgb: "D9D9D9" } };
+
+    const titleStyle = {
+      font:      { name: "Arial", bold: true, sz: 14 },
+      alignment: { horizontal: "center", vertical: "center" },
+      fill:      grayFill,
+      border:    thinBorder,
+    };
+
+    const subtitleStyle = {
+      font:      { name: "Arial", bold: true, sz: 12 },
+      alignment: { horizontal: "center", vertical: "center" },
+      fill:      grayFill,
+      border:    thinBorder,
+    };
+
+    const headerStyle = {
+      font:      { name: "Arial", bold: true, sz: 11 },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      fill:      grayFill,
+      border:    thinBorder,
+    };
+
+    for (let c = 0; c < numCols; c++) {
+      const r0 = XLSX.utils.encode_cell({ r: 0, c });
+      const r1 = XLSX.utils.encode_cell({ r: 1, c });
+      const r3 = XLSX.utils.encode_cell({ r: 3, c });
+
+      if (!ws[r0]) ws[r0] = { t: "s", v: "" };
+      if (!ws[r1]) ws[r1] = { t: "s", v: "" };
+
+      ws[r0].s = titleStyle;
+      ws[r1].s = subtitleStyle;
+      if (ws[r3]) ws[r3].s = headerStyle;
     }
+
+    ws["!cols"] = [
+      { wch: 18 }, // Recording Date
+      { wch: 16 }, // Invoice #
+      { wch: 16 }, // Invoice Date
+      { wch: 20 }, // MR Name
+      { wch: 18 }, // Customer Code
+      { wch: 26 }, // Product Name
+      { wch: 14 }, // Sales Qty
+      { wch: 14 }, // Bonus Qty
+      { wch: 16 }, // Selling Price
+      { wch: 14 }, // Discount
+      { wch: 14 }, // Credit Days
+      { wch: 16 }, // Paid Amount
+      { wch: 18 }, // Payment Status
+      { wch: 24 }, // Remarks
+    ];
+
+    ws["!rows"] = [
+      { hpt: 28 }, // Company name row
+      { hpt: 22 }, // Subtitle row
+      { hpt: 6  }, // Empty spacer
+      { hpt: 24 }, // Header row
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Sale Summary");
+    XLSX.writeFile(wb, fileName);
   };
-
-  // ===== Fetch Customer list =====
-  const fetchCustomerData = async () => {
-    try {
-      setCustomerLoading(true);
-      const res = await fetchCustomerList();
-      if (res?.success) setCustomerList(res.data || []);
-    } catch (err) {
-      console.error("Customer fetch error:", err);
-    } finally {
-      setCustomerLoading(false);
-    }
-  };
-
-  React.useEffect(() => {
-    fetchMRData();
-    fetchCustomerData();
-  }, []);
-
-  const generateExcel = async () => {
-    if (loading || mrLoading || customerLoading) return;
-
-    try {
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet("Sale Summary");
-
-      // ===== Titles =====
-      worksheet.mergeCells("A1:N1");
-      worksheet.getCell("A1").value = "HEALTHCARE SOUTH EAST ASIA";
-      worksheet.getCell("A1").font = { bold: true, size: 16 };
-      worksheet.getCell("A1").alignment = {
-        vertical: "middle",
-        horizontal: "center",
-      };
-
-      worksheet.mergeCells("A2:N2");
-      worksheet.getCell("A2").value = "Sale Summary List";
-      worksheet.getCell("A2").font = { bold: true, size: 14 };
-      worksheet.getCell("A2").alignment = {
-        vertical: "middle",
-        horizontal: "center",
-      };
-
-      // ===== Columns (Customer Code) =====
-      worksheet.columns = [
-        { key: "recordingDate", width: 15 },
-        { key: "invoiceNumber", width: 15 },
-        { key: "invoiceDate", width: 15 },
-        { key: "mrName", width: 20 },
-        { key: "customerCode", width: 22 }, // ✅ CUSTOMER CODE
-        { key: "productName", width: 25 },
-        { key: "salesQty", width: 12 },
-        { key: "bonusQty", width: 12 },
-        { key: "sellingPrice", width: 18 },
-        { key: "discount", width: 15 },
-        { key: "creditDays", width: 12 },
-        { key: "paidAmount", width: 15 },
-        { key: "paymentStatus", width: 15 },
-        { key: "remark", width: 25 },
-      ];
-
-      // ===== Header Row =====
-      const headerRow = worksheet.getRow(3);
-      headerRow.values = [
-        "Recording Date",
-        "Invoice #",
-        "Invoice Date",
-        "MR Name",
-        "Customer Code", // ✅
-        "Product Name",
-        "Sales Qty",
-        "Bonus Qty",
-        "Selling Price",
-        "Discount",
-        "Credit Days",
-        "Paid Amount",
-        "Payment Status",
-        "Remarks",
-      ];
-      headerRow.font = { bold: true };
-      headerRow.alignment = {
-        vertical: "middle",
-        horizontal: "center",
-      };
-
-      // ===== Date format =====
-      ["recordingDate", "invoiceDate"].forEach((key) => {
-        worksheet.getColumn(key).numFmt = "dd/mm/yyyy";
-      });
-
-      // ===== Data Rows =====
-      data.forEach((item) => {
-        worksheet.addRow({
-          recordingDate: item.recordingDate
-            ? new Date(item.recordingDate)
-            : null,
-          invoiceNumber: item.invoiceNumber || "",
-          invoiceDate: item.invoiceDate
-            ? new Date(item.invoiceDate)
-            : null,
-          mrName: item.mrName || "",
-          customerCode: item.customerCode || "", // ✅
-          productName: item.productName || "",
-          salesQty: item.salesQty || 0,
-          bonusQty: item.bonusQty || 0,
-          sellingPrice: item.sellingPrice || 0,
-          discount: item.discount || 0,
-          creditDays: item.creditDays || 0,
-          paidAmount: item.paidAmount || 0,
-          paymentStatus: item.paymentStatus || "",
-          remark: item.remark || "",
-        });
-      });
-
-      // ===== Dropdown Sheet =====
-      const dropdownSheet = workbook.addWorksheet("DropdownValues");
-      dropdownSheet.state = "veryHidden";
-
-      const paymentStatusList = statuses
-        .map((s) => (typeof s === "string" ? s : s.type))
-        .filter(Boolean);
-
-      const productList = [
-        ...new Set(
-          productNames.map((p) =>
-            typeof p === "string" ? p : p.name
-          )
-        ),
-      ];
-
-      const mrNames = mrList
-        .map((m) => m.name || m.staffName || "")
-        .filter(Boolean);
-
-      const customerCodes = customerList
-        .map((c) => c.customerCode || c.code || "")
-        .filter(Boolean);
-
-      paymentStatusList.forEach((v, i) => (dropdownSheet.getCell(`A${i + 1}`).value = v));
-      productList.forEach((v, i) => (dropdownSheet.getCell(`B${i + 1}`).value = v));
-      mrNames.forEach((v, i) => (dropdownSheet.getCell(`C${i + 1}`).value = v));
-      customerCodes.forEach((v, i) => (dropdownSheet.getCell(`D${i + 1}`).value = v));
-
-      // ===== Apply dropdowns =====
-      for (let i = 4; i <= 1000; i++) {
-        worksheet.getCell(`D${i}`).dataValidation = {
-          type: "list",
-          allowBlank: true,
-          formulae: [`=DropdownValues!$C$1:$C$${mrNames.length}`],
-        };
-
-        worksheet.getCell(`E${i}`).dataValidation = {
-          type: "list",
-          allowBlank: true,
-          formulae: [`=DropdownValues!$D$1:$D$${customerCodes.length}`],
-        };
-
-        worksheet.getCell(`F${i}`).dataValidation = {
-          type: "list",
-          allowBlank: true,
-          formulae: [`=DropdownValues!$B$1:$B$${productList.length}`],
-        };
-
-        worksheet.getCell(`M${i}`).dataValidation = {
-          type: "list",
-          allowBlank: true,
-          formulae: [`=DropdownValues!$A$1:$A$${paymentStatusList.length}`],
-        };
-      }
-
-      // ===== Export =====
-      const buffer = await workbook.xlsx.writeBuffer();
-      const blob = new Blob([buffer], {
-        type:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "saleSummary.xlsx";
-      link.click();
-    } catch (err) {
-      console.error("Excel error:", err);
-      alert("Failed to generate Excel");
-    }
-  };
-
-  if (loading || mrLoading || customerLoading)
-    return <p>Loading sample data...</p>;
 
   return (
     <button
-      onClick={generateExcel}
-      className="text-blue-600 hover:underline text-sm"
+      type="button"
+      onClick={handleDownload}
+      className="mt-3 flex items-center gap-2 text-sm text-green-700 hover:text-green-900 underline cursor-pointer"
     >
-      Download Sales Summary Sample Excel
+      <Download size={14} />
+      Download Sample Excel Template
     </button>
   );
 };
