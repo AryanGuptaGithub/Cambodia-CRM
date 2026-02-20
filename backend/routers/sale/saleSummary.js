@@ -20,14 +20,11 @@ let isImportInProgress = false;
 // ==========================================
 class LockManager {
   constructor() {
-    // key -> array of pending resolvers (FIFO queue)
-    // If the key exists in the map, the lock IS held.
-    // The array contains waiters that will be woken in order.
     this.locks = new Map();
   }
 
   async acquire(keys) {
-    const sorted = [...new Set(keys)].sort(); // dedup + sort for deadlock prevention
+    const sorted = [...new Set(keys)].sort();
     const acquired = [];
     try {
       for (const key of sorted) {
@@ -42,18 +39,15 @@ class LockManager {
   }
 
   release(keys) {
-    // Release in reverse order (doesn't matter for correctness but conventional)
     for (const key of [...keys].reverse()) this._releaseOne(key);
   }
 
   _acquireOne(key) {
     return new Promise((resolve) => {
       if (!this.locks.has(key)) {
-        // Lock is free — mark as held with an empty waiter queue
         this.locks.set(key, []);
-        resolve(); // caller gets the lock immediately
+        resolve();
       } else {
-        // Lock is held — enqueue this waiter
         this.locks.get(key).push(resolve);
       }
     });
@@ -61,16 +55,12 @@ class LockManager {
 
   _releaseOne(key) {
     const queue = this.locks.get(key);
-    if (!queue) return; // already released (shouldn't happen)
-
+    if (!queue) return;
     if (queue.length === 0) {
-      // No waiters — lock is now free
       this.locks.delete(key);
     } else {
-      // Hand the lock to the next waiter
       const next = queue.shift();
-      next(); // wakes up the next _acquireOne promise
-      // Keep the entry in the map (lock is still held by the new owner)
+      next();
     }
   }
 }
@@ -101,7 +91,6 @@ const normalizeProductName = (name) => {
   return name.toLowerCase().trim();
 };
 
-// ─── PARALLEL BATCH PROCESSOR ─────────────────────────────────────────────────
 const processBatch = async (items, fn, batchSize = 10) => {
   const results = [];
   for (let i = 0; i < items.length; i += batchSize) {
@@ -112,7 +101,6 @@ const processBatch = async (items, fn, batchSize = 10) => {
   return results;
 };
 
-// ─── shouldMergeInvoices ───────────────────────────────────────────────────────
 const shouldMergeInvoices = (existingInvoice, newInvoiceData) => {
   if (existingInvoice.invoiceNumber !== newInvoiceData.invoiceNumber)
     return { shouldMerge: false, isExactDuplicate: false };
@@ -185,7 +173,6 @@ const shouldMergeInvoices = (existingInvoice, newInvoiceData) => {
   return { shouldMerge: true, isExactDuplicate: false };
 };
 
-// ─── FLEXIBLE PRODUCT LOOKUPS ─────────────────────────────────────────────────
 const findStockItemFlexible = async (productName, session = null) => {
   try {
     const normalizedName = normalizeProductName(productName);
@@ -335,7 +322,6 @@ const getCustomerByCode = async (customerCode, session = null) => {
   }
 };
 
-// ─── OPTIMIZED STOCK VALIDATION ───────────────────────────────────────────────
 const calculateProductStock = async (productName, requiredQty = 0) => {
   try {
     const stockItem = await findStockItemFlexible(productName);
@@ -408,7 +394,6 @@ const calculateProductStock = async (productName, requiredQty = 0) => {
   }
 };
 
-// ─── OPTIMIZED STOCK VALIDATION FOR IMPORT ────────────────────────────────────
 const validateStockForImport = async (invoices) => {
   try {
     const productStockMap = new Map();
@@ -541,7 +526,6 @@ const validateStockForImport = async (invoices) => {
   }
 };
 
-// ─── MR VALIDATION ────────────────────────────────────────────────────────────
 const validateMR = async (mrName, session = null) => {
   try {
     if (!mrName || mrName.trim() === "")
@@ -585,7 +569,6 @@ const validateMR = async (mrName, session = null) => {
   }
 };
 
-// ─── MR STOCK HELPERS ─────────────────────────────────────────────────────────
 const checkMRStock = async (
   mrId,
   mrName,
@@ -954,7 +937,6 @@ const restoreStockToMRHand = async (
   }
 };
 
-// ─── UPDATE MR CASHES ─────────────────────────────────────────────────────────
 const updateMRCashes = async (
   mrName,
   amount,
@@ -1013,32 +995,17 @@ const updateMRCashes = async (
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CORE: PROCESS SINGLE INVOICE (with locking)
-//
-// FIX SUMMARY:
-//  1. Lock keys are built BEFORE any async DB calls (no validateMR in lock phase)
-//     by relying on the pre-resolved mrValidationCache passed in.
-//  2. For import MR sales, productToMrMap is built from _mrDistribution correctly.
-//  3. isMRSale determination is unified and clear.
-//  4. checkMRStock now takes mrId directly (not mrName) to avoid double-lookup.
-// ─────────────────────────────────────────────────────────────────────────────
 const processSingleInvoiceWithMRDistribution = async (
   invoiceData,
   index,
   skipDuplicates = true,
   bypassStockCheck = false,
   isImport = false,
-  mrValidationCache = new Map(), // pre-validated MR name -> { success, mrData }
+  mrValidationCache = new Map(),
 ) => {
-  // ── Determine if this is an MR sale import ──────────────────────────────
-  // For import flow: isMrSaleImport flag on invoice controls MR stock deduction.
-  // For manual create: isImport=false and products carry mrId directly.
   const isImportMRSale = isImport && invoiceData.isMrSaleImport === true;
 
-  // ── Build product-to-MR map from _mrDistribution ─────────────────────
-  // _mrDistribution: Map<mrName, { products: [...], mrName }>
-  const productToMrMap = new Map(); // productName (lowercased) -> mrName
+  const productToMrMap = new Map();
   if (invoiceData._mrDistribution && invoiceData._mrDistribution.size > 0) {
     for (const [mrName, mrData] of invoiceData._mrDistribution.entries()) {
       for (const prod of mrData.products || []) {
@@ -1048,8 +1015,6 @@ const processSingleInvoiceWithMRDistribution = async (
     }
   }
 
-  // If it's an MR sale import and no _mrDistribution was set (should not happen
-  // after the grouping step, but as fallback), assign invoice.mrName to all products.
   if (isImportMRSale && productToMrMap.size === 0 && invoiceData.mrName) {
     for (const prod of invoiceData.products || []) {
       const key = prod.productName?.trim().toLowerCase();
@@ -1057,15 +1022,12 @@ const processSingleInvoiceWithMRDistribution = async (
     }
   }
 
-  // ── Resolve MR IDs from cache (no extra DB calls here) ───────────────
-  // mrValidationCache was populated before batching — reuse it.
   const getMrIdFromCache = (mrName) => {
     if (!mrName) return null;
     const cached = mrValidationCache.get(mrName.trim());
     return cached?.success ? cached.mrData?.mrId : null;
   };
 
-  // ── Build lock keys synchronously (no DB calls) ───────────────────────
   const lockKeys = [];
   for (const product of invoiceData.products || []) {
     const productName = product.productName?.trim();
@@ -1082,7 +1044,6 @@ const processSingleInvoiceWithMRDistribution = async (
       if (mrId) {
         lockKeys.push(`mr:${mrId.toString()}:${productName.toLowerCase()}`);
       } else {
-        // MR not in cache / invalid — still lock by name to be safe
         lockKeys.push(
           `mr:name:${assignedMrName.toLowerCase()}:${productName.toLowerCase()}`,
         );
@@ -1092,7 +1053,6 @@ const processSingleInvoiceWithMRDistribution = async (
     }
   }
 
-  // ── Acquire all locks ─────────────────────────────────────────────────
   const acquiredLocks = await lockManager.acquire(lockKeys);
 
   const session = await mongoose.startSession();
@@ -1102,7 +1062,6 @@ const processSingleInvoiceWithMRDistribution = async (
     if (!invoiceData.invoiceNumber?.trim())
       throw new Error("Invoice number is required");
 
-    // ── Duplicate check ────────────────────────────────────────────────
     const existingInvoice = await SaleSummary.findOne({
       invoiceNumber: invoiceData.invoiceNumber.trim(),
     }).session(session);
@@ -1154,7 +1113,6 @@ const processSingleInvoiceWithMRDistribution = async (
       }
     }
 
-    // ── Resolve customer ───────────────────────────────────────────────
     let customerName = invoiceData.customerName || "Unknown";
     let customerId = invoiceData.customerId || null;
     let customerCode = invoiceData.customerCode || "";
@@ -1168,7 +1126,6 @@ const processSingleInvoiceWithMRDistribution = async (
       }
     }
 
-    // ── Process products ───────────────────────────────────────────────
     const processedProducts = [];
     let totalAmount = 0;
     let totalProfitLoss = 0;
@@ -1189,7 +1146,6 @@ const processSingleInvoiceWithMRDistribution = async (
       const discount = fixPrecision(parseFloat(product.discount) || 0);
       const netSellingAmount = fixPrecision(amount - discount);
 
-      // ── Determine whether to use MR stock or warehouse stock ────────
       const assignedMrName = productToMrMap.get(productName.toLowerCase());
       const shouldUseMRStock =
         isImportMRSale &&
@@ -1201,9 +1157,6 @@ const processSingleInvoiceWithMRDistribution = async (
       let productMrId = null;
 
       if (shouldUseMRStock) {
-        // ── MR stock path ──────────────────────────────────────────────
-
-        // Get MR validation result from cache (already validated before batching)
         const mrValidation = mrValidationCache.get(assignedMrName.trim());
         if (!mrValidation || !mrValidation.success) {
           throw new Error(
@@ -1212,7 +1165,6 @@ const processSingleInvoiceWithMRDistribution = async (
         }
         productMrId = mrValidation.mrData.mrId;
 
-        // Check MR stock
         const mrStockCheck = await checkMRStock(
           productMrId,
           assignedMrName,
@@ -1258,9 +1210,8 @@ const processSingleInvoiceWithMRDistribution = async (
 
         profitLoss = fixPrecision((sellingPrice - lc) * salesQty);
 
-        // Track MR cash distribution for Cash payment
         const paymentStatus = mapPaymentStatus(invoiceData.paymentStatus);
-        if (paymentStatus === "Cash") {
+        if (paymentStatus === "Cash" || paymentStatus === "Paid") {
           mrCashDistribution.set(
             assignedMrName,
             fixPrecision(
@@ -1269,8 +1220,6 @@ const processSingleInvoiceWithMRDistribution = async (
           );
         }
       } else {
-        // ── Warehouse stock path ───────────────────────────────────────
-
         const stockItem = await findStockItemFlexible(productName, session);
 
         if (!stockItem) {
@@ -1317,9 +1266,8 @@ const processSingleInvoiceWithMRDistribution = async (
           }
         }
 
-        // Track MR cash for the invoice's primary MR
         const paymentStatus = mapPaymentStatus(invoiceData.paymentStatus);
-        if (paymentStatus === "Cash") {
+        if (paymentStatus === "Cash" || paymentStatus === "Paid") {
           const mrForCash = invoiceData.mrName?.trim() || "Unknown";
           mrCashDistribution.set(
             mrForCash,
@@ -1360,16 +1308,15 @@ const processSingleInvoiceWithMRDistribution = async (
     if (processedProducts.length === 0)
       throw new Error("No valid products found in invoice");
 
-    // ── Payment amounts ────────────────────────────────────────────────
     const paymentStatus = mapPaymentStatus(invoiceData.paymentStatus);
     let paidAmount = 0;
-    if (paymentStatus === "Cash") paidAmount = totalAmount;
+    if (paymentStatus === "Cash" || paymentStatus === "Paid")
+      paidAmount = totalAmount;
     else if (paymentStatus === "Partial Paid")
       paidAmount = fixPrecision(parseFloat(invoiceData.paidAmount) || 0);
 
     const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount));
 
-    // ── Primary MR for the sale record ────────────────────────────────
     let primaryMR = invoiceData.mrName?.trim() || "No MR Name Provided";
     if (invoiceData._mrDistribution && invoiceData._mrDistribution.size > 0) {
       primaryMR = Array.from(invoiceData._mrDistribution.keys())[0];
@@ -1409,20 +1356,37 @@ const processSingleInvoiceWithMRDistribution = async (
 
     await saleRecord.save({ session });
 
-    // ── Update MR Cash ─────────────────────────────────────────────────
     const mrCashUpdates = {};
-    if (paidAmount > 0 && paymentStatus === "Cash") {
-      for (const [mrName, mrAmount] of mrCashDistribution) {
-        if (mrName && mrName.trim() && mrAmount > 0) {
+    if (paidAmount > 0) {
+      if (paymentStatus === "Cash" || paymentStatus === "Paid") {
+        for (const [mrName, mrAmount] of mrCashDistribution) {
+          if (mrName && mrName.trim() && mrAmount > 0) {
+            const mrCashUpdate = await updateMRCashes(
+              mrName.trim(),
+              mrAmount,
+              invoiceData.invoiceNumber,
+              invoiceData.invoiceDate || new Date(),
+              session,
+              false,
+            );
+            if (mrCashUpdate.success) mrCashUpdates[mrName] = mrAmount;
+          }
+        }
+      } else if (paymentStatus === "Partial Paid") {
+        if (
+          primaryMR &&
+          primaryMR.trim() &&
+          primaryMR.toLowerCase() !== "unknown"
+        ) {
           const mrCashUpdate = await updateMRCashes(
-            mrName.trim(),
-            mrAmount,
+            primaryMR.trim(),
+            paidAmount,
             invoiceData.invoiceNumber,
             invoiceData.invoiceDate || new Date(),
             session,
             false,
           );
-          if (mrCashUpdate.success) mrCashUpdates[mrName] = mrAmount;
+          if (mrCashUpdate.success) mrCashUpdates[primaryMR] = paidAmount;
         }
       }
     }
@@ -1461,9 +1425,6 @@ const processSingleInvoiceWithMRDistribution = async (
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OPTIMIZED: processImportWithStockDeduction
-// ─────────────────────────────────────────────────────────────────────────────
 const BATCH_SIZE = 15;
 
 const processImportWithStockDeduction = async (
@@ -1487,11 +1448,9 @@ const processImportWithStockDeduction = async (
   progress.lastUpdated = Date.now();
 
   try {
-    // ── Step 1: Group invoices (dedup products within same invoice number) ──
     const groupedInvoices = new Map();
     const preValidationErrors = [];
 
-    // ── Pre-validate ALL unique MRs in one parallel batch ────────────────
     const uniqueMRNames = new Set();
     for (const invoice of invoices) {
       if (
@@ -1503,7 +1462,6 @@ const processImportWithStockDeduction = async (
       }
     }
 
-    // mrValidationCache: mrName -> { success, exists, mrData, message }
     const mrValidationCache = new Map();
     if (uniqueMRNames.size > 0) {
       const mrValidationBatch = await Promise.allSettled(
@@ -1518,7 +1476,6 @@ const processImportWithStockDeduction = async (
         }
       });
     }
-    // Also add "unknown" so it never errors
     mrValidationCache.set("unknown", {
       success: true,
       exists: true,
@@ -1526,7 +1483,6 @@ const processImportWithStockDeduction = async (
       mrData: { mrName: "unknown", mrId: null },
     });
 
-    // ── Group invoices, validate MRs, build _mrDistribution ──────────────
     for (let i = 0; i < invoices.length; i++) {
       const invoice = invoices[i];
       const invoiceNumber = invoice.invoiceNumber?.trim();
@@ -1542,29 +1498,9 @@ const processImportWithStockDeduction = async (
         continue;
       }
 
-      // FIX: For MR sale imports, warn but DO NOT block — the frontend already
-      // warned the user via MR validation and they chose to proceed.
-      // Invalid MR invoices will be saved with the MR name as-is (no stock deduction
-      // from MR hand, they fall back to warehouse path OR fail at deduction).
-      // If you want to BLOCK invalid MRs, re-enable the block below.
-      /*
-      if (invoice.isMrSaleImport && invoice.mrName && invoice.mrName.toLowerCase() !== "unknown") {
-        const mrResult = mrValidationCache.get(invoice.mrName.trim());
-        if (mrResult && !mrResult.success) {
-          preValidationErrors.push({
-            row: i + 2, invoiceNumber, mrName: invoice.mrName,
-            message: `MR not found: ${mrResult.message}`, type: "mr_validation_error",
-          });
-          failed++;
-          continue;
-        }
-      }
-      */
-
       if (!groupedInvoices.has(invoiceNumber)) {
         const mrName = invoice.mrName?.trim() || "No MR Name Provided";
 
-        // Build initial _mrDistribution
         const mrDistribution = new Map();
         if (invoice.products && invoice.products.length > 0) {
           mrDistribution.set(mrName, {
@@ -1628,7 +1564,6 @@ const processImportWithStockDeduction = async (
     progress.totalInvoices = groupedInvoices.size;
     progress.lastUpdated = Date.now();
 
-    // ── Step 2: PARALLEL BATCH PROCESSING ────────────────────────────────
     const invoiceEntries = Array.from(groupedInvoices.values());
     let processedCount = 0;
 
@@ -1642,8 +1577,8 @@ const processImportWithStockDeduction = async (
             groupedInvoice._rowIndex,
             skipDuplicates,
             bypassStockCheck,
-            true, // isImport = true
-            mrValidationCache, // pass the pre-validated cache
+            true,
+            mrValidationCache,
           ),
         ),
       );
@@ -1717,7 +1652,6 @@ const processImportWithStockDeduction = async (
   }
 };
 
-// ─── mergeInvoiceProducts ─────────────────────────────────────────────────────
 const mergeInvoiceProducts = async (
   existingInvoice,
   newInvoiceData,
@@ -1812,11 +1746,19 @@ const mergeInvoiceProducts = async (
 
       totalAmount = fixPrecision(totalAmount + netSellingAmount);
       totalProfitLoss = fixPrecision(totalProfitLoss + profitLoss);
-      if (paymentStatus === "Cash")
+      if (
+        paymentStatus === "Cash" ||
+        paymentStatus === "Paid" ||
+        paymentStatus === "Partial Paid"
+      )
         newPaidAmount = fixPrecision(newPaidAmount + netSellingAmount);
     }
 
-    if (paymentStatus === "Cash")
+    if (
+      paymentStatus === "Cash" ||
+      paymentStatus === "Paid" ||
+      paymentStatus === "Partial Paid"
+    )
       paidAmount = fixPrecision(paidAmount + newPaidAmount);
     const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount));
 
@@ -1853,9 +1795,6 @@ const mergeInvoiceProducts = async (
   }
 };
 
-// ==========================================
-// SESSION CLEANUP
-// ==========================================
 const cleanupStaleImportSessions = () => {
   const now = Date.now();
   const STALE_THRESHOLD = 24 * 60 * 60 * 1000;
@@ -1959,13 +1898,11 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
       },
     });
   } catch (error) {
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to synchronize MR Cash",
-        error: error.message,
-      });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to synchronize MR Cash",
+      error: error.message,
+    });
   }
 });
 
@@ -1991,13 +1928,11 @@ router.get("/mrcash/summary", async (req, res) => {
       },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch MR Cash summary",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch MR Cash summary",
+      error: error.message,
+    });
   }
 });
 
@@ -2014,13 +1949,11 @@ router.post("/check-stock", async (req, res) => {
     const result = await calculateProductStock(productName, totalQty);
     res.json(result);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to check stock",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to check stock",
+      error: error.message,
+    });
   }
 });
 
@@ -2034,13 +1967,11 @@ router.post("/validate-import-stock", async (req, res) => {
     const validationResult = await validateStockForImport(invoices);
     res.json({ success: true, validationResult });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to validate import stock",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to validate import stock",
+      error: error.message,
+    });
   }
 });
 
@@ -2071,13 +2002,11 @@ router.get("/debug/stock/:productName", async (req, res) => {
       lastUpdated: stockItem.updatedAt,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to debug stock",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to debug stock",
+      error: error.message,
+    });
   }
 });
 
@@ -2140,13 +2069,11 @@ router.post("/validate-mr", async (req, res) => {
           : "All MRs valid",
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Validation failed",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Validation failed",
+      error: error.message,
+    });
   }
 });
 
@@ -2237,13 +2164,11 @@ router.post("/validate-import-mrs", async (req, res) => {
       },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to validate MRs",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to validate MRs",
+      error: error.message,
+    });
   }
 });
 
@@ -2256,9 +2181,6 @@ router.get("/debug/customer/:code", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN IMPORT ROUTE
-// ─────────────────────────────────────────────────────────────────────────────
 router.post("/import-with-stock-deduction", async (req, res) => {
   let sessionId = null;
   try {
@@ -2277,13 +2199,11 @@ router.post("/import-with-stock-deduction", async (req, res) => {
         .json({ success: false, message: "No invoices provided" });
 
     if (isImportInProgress) {
-      return res
-        .status(429)
-        .json({
-          success: false,
-          message: "Another import in progress",
-          retryAfter: 30,
-        });
+      return res.status(429).json({
+        success: false,
+        message: "Another import in progress",
+        retryAfter: 30,
+      });
     }
 
     isImportInProgress = true;
@@ -2371,14 +2291,12 @@ router.get("/products/check/:productName", async (req, res) => {
       req.params.productName,
     ).trim();
     if (!decodedProductName)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Product name is required",
-          exists: false,
-          product: null,
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Product name is required",
+        exists: false,
+        product: null,
+      });
     let product = await findProductRecordFlexible(decodedProductName);
     if (!product) product = await findStockItemFlexible(decodedProductName);
     res.json({
@@ -2387,20 +2305,14 @@ router.get("/products/check/:productName", async (req, res) => {
       product: product ? { name: product.productName, id: product._id } : null,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        exists: false,
-        message: error.message,
-        product: null,
-      });
+    res.status(500).json({
+      success: false,
+      exists: false,
+      message: error.message,
+      product: null,
+    });
   }
 });
-
-// ==========================================
-// STANDARD CRUD ROUTES (unchanged logic)
-// ==========================================
 
 router.get("/", async (req, res) => {
   try {
@@ -2578,12 +2490,10 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     await SaleSummary.findByIdAndDelete(id).session(session);
     await session.commitTransaction();
     session.endSession();
-    res
-      .status(200)
-      .json({
-        message: "Sales record deleted successfully and stock restored.",
-        deletedSale: saleToDelete,
-      });
+    res.status(200).json({
+      message: "Sales record deleted successfully and stock restored.",
+      deletedSale: saleToDelete,
+    });
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
@@ -2825,7 +2735,6 @@ router.post("/create", async (req, res) => {
     let totalProfitLoss = 0;
     const stockDeductionResults = [];
 
-    // Validate stock first
     for (const p of data.products || []) {
       const salesQty = fixPrecision(Number(p.salesQty) || 0);
       const bonusQty = fixPrecision(Number(p.bonusQty) || 0);
@@ -2865,7 +2774,6 @@ router.post("/create", async (req, res) => {
       }
     }
 
-    // Deduct stock and build products
     for (const p of data.products || []) {
       const salesQty = fixPrecision(Number(p.salesQty) || 0);
       const bonusQty = fixPrecision(Number(p.bonusQty) || 0);
@@ -3000,7 +2908,14 @@ router.post("/create", async (req, res) => {
       { session },
     );
 
-    if (paidAmount > 0 && mrName) {
+    // Update MR Cash for Cash, Paid, or Partial Paid
+    if (
+      paidAmount > 0 &&
+      mrName &&
+      (paymentStatus === "Cash" ||
+        paymentStatus === "Paid" ||
+        paymentStatus === "Partial Paid")
+    ) {
       await updateMRCashes(
         mrName,
         paidAmount,
@@ -3057,13 +2972,11 @@ router.get("/mr-stock/mrs-with-stock", async (req, res) => {
     });
     res.json({ success: true, data: mrsWithStock, count: mrsWithStock.length });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch MRs with stock",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch MRs with stock",
+      error: error.message,
+    });
   }
 });
 
@@ -3084,13 +2997,11 @@ router.get("/mr-stock/products/:mrId", async (req, res) => {
       count: availableProducts.length,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch MR products",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch MR products",
+      error: error.message,
+    });
   }
 });
 
@@ -3126,13 +3037,11 @@ router.get("/mr-stock/:mrId/:productName", async (req, res) => {
       mrName: mrStock.mrName,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch MR product stock",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch MR product stock",
+      error: error.message,
+    });
   }
 });
 
@@ -3172,13 +3081,11 @@ router.get("/profit-loss-summary", async (req, res) => {
             },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch profit/loss summary",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch profit/loss summary",
+      error: error.message,
+    });
   }
 });
 
@@ -3244,16 +3151,14 @@ router.get("/credit-sale-not-received", async (req, res) => {
       count: formattedSales.length,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Server error while fetching credit sales",
-        error: error.message,
-        data: [],
-        totalAmount: 0,
-        count: 0,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching credit sales",
+      error: error.message,
+      data: [],
+      totalAmount: 0,
+      count: 0,
+    });
   }
 });
 
@@ -3351,12 +3256,10 @@ router.post("/mrcash/fix-duplicates", async (req, res) => {
     );
     const mrCash = await MRCash.findOne({ mrName: /Yav Phanda/i });
     if (!mrCash)
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "MR Cash record for Yav Phanda not found",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "MR Cash record for Yav Phanda not found",
+      });
 
     const oldCash = mrCash.currentCash;
     mrCash.currentCash = fixPrecision(oldCash - totalExcess);
@@ -3375,13 +3278,11 @@ router.post("/mrcash/fix-duplicates", async (req, res) => {
       },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fix MR Cash duplicates",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fix MR Cash duplicates",
+      error: error.message,
+    });
   }
 });
 

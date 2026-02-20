@@ -830,15 +830,7 @@ const StockAdjustment = () => {
                       placeholder="Enter box quantity"
                       required
                     />
-                    {formData.product && formData.boxQuantity > 0 && (
-                      <div className="mt-2 text-sm text-gray-600">
-                        Total pieces:{" "}
-                        {calculateTotalPieces(formData.boxQuantity)}
-                        {formData.adjustmentType === "remove"
-                          ? " (will be removed)"
-                          : " (will be added)"}
-                      </div>
-                    )}
+             
                   </div>
                 </div>
 

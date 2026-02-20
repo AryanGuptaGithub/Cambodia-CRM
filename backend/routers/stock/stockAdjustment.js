@@ -2,349 +2,28 @@ import express from "express";
 import mongoose from "mongoose";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
-import Product from "../../models/projectManger/product.js";
+import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
+import Product from "../../models/projectManger/product.js";
 
 const router = express.Router();
 
-// ─── Helper: get collections ──────────────────────────────────────────────────
-const getCollections = () => ({
-  stockTransferToMrs: mongoose.connection.db.collection("stocktransfertomrs"),
-  stockInMrHands: mongoose.connection.db.collection("stockinmrhands"),
-});
-
-// ─── Helper: find Staff by name ───────────────────────────────────────────────
-const findStaffByName = async (mrName, session = null) => {
-  const Staff = mongoose.connection.db.collection("staffs");
-  const query = { medicalRepName: { $regex: new RegExp(`^${mrName.trim()}$`, "i") } };
-  return session
-    ? Staff.findOne(query, { session })
-    : Staff.findOne(query);
+// ==================== Helper: Fix precision ====================
+const fixPrecision = (num) => {
+  if (typeof num !== "number") return num;
+  return Math.round(num * 100) / 100;
 };
 
-// ─── Helper: find MR stock record by mrId ─────────────────────────────────────
-const findMRStock = async (mrId, session = null) => {
-  const { stockInMrHands } = getCollections();
-  const filter = { mrId: new mongoose.Types.ObjectId(mrId) };
-  return session
-    ? stockInMrHands.findOne(filter, { session })
-    : stockInMrHands.findOne(filter);
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CORE FIX: upsertProductsIntoMRHand
-//
-// This function is the missing piece. After a transfer is saved to
-// stocktransfertomrs, this is called to actually write the products
-// into stockinmrhands.productsInHand.
-//
-// Logic:
-//  - If the MR stock record doesn't exist → create it with all products
-//  - If it exists → for each product:
-//      * If the product is already in productsInHand → increment quantity
-//      * If not → push a new product entry
-// ─────────────────────────────────────────────────────────────────────────────
-const upsertProductsIntoMRHand = async (mrId, mrName, items, session) => {
-  const { stockInMrHands } = getCollections();
-  const mrObjectId = new mongoose.Types.ObjectId(mrId);
-
-  // Fetch current MR stock record
-  const existing = await stockInMrHands.findOne({ mrId: mrObjectId }, { session });
-
-  if (!existing) {
-    // ── Create new MR stock record with all products ──────────────────────
-    const productsInHand = items
-      .filter((item) => item.boxQuantity > 0)
-      .map((item) => ({
-        _id: new mongoose.Types.ObjectId(),
-        productId: item.productId ? new mongoose.Types.ObjectId(item.productId) : null,
-        productName: item.productName.trim(),
-        quantity: Number(item.boxQuantity) || 0,
-        lc: Number(item.lc) || 0,
-        lastUpdated: new Date(),
-      }));
-
-    await stockInMrHands.insertOne(
-      {
-        mrId: mrObjectId,
-        mrName: mrName.trim(),
-        productsInHand,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      { session }
-    );
-  } else {
-    // ── MR stock record exists — merge products one by one ───────────────
-    for (const item of items) {
-      if (!item.boxQuantity || item.boxQuantity <= 0) continue;
-
-      const productName = item.productName.trim();
-      const addQty = Number(item.boxQuantity) || 0;
-      const lc = Number(item.lc) || 0;
-
-      // Check if this product already exists in productsInHand
-      const productIndex = (existing.productsInHand || []).findIndex(
-        (p) => p.productName?.toLowerCase().trim() === productName.toLowerCase()
-      );
-
-      if (productIndex >= 0) {
-        // Product exists → increment its quantity
-        await stockInMrHands.updateOne(
-          {
-            mrId: mrObjectId,
-            "productsInHand.productName": existing.productsInHand[productIndex].productName,
-          },
-          {
-            $inc: { "productsInHand.$.quantity": addQty },
-            $set: {
-              "productsInHand.$.lastUpdated": new Date(),
-              // Update lc only if the new lc is non-zero
-              ...(lc > 0 ? { "productsInHand.$.lc": lc } : {}),
-              updatedAt: new Date(),
-            },
-          },
-          { session }
-        );
-      } else {
-        // Product doesn't exist → push new entry
-        await stockInMrHands.updateOne(
-          { mrId: mrObjectId },
-          {
-            $push: {
-              productsInHand: {
-                _id: new mongoose.Types.ObjectId(),
-                productId: item.productId ? new mongoose.Types.ObjectId(item.productId) : null,
-                productName,
-                quantity: addQty,
-                lc,
-                lastUpdated: new Date(),
-              },
-            },
-            $set: { updatedAt: new Date() },
-          },
-          { session }
-        );
-      }
-    }
-  }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// REVERSE: removeProductsFromMRHand
-//
-// Used when a transfer is deleted or updated — reverts the quantities.
-// ─────────────────────────────────────────────────────────────────────────────
-const removeProductsFromMRHand = async (mrId, items, session) => {
-  const { stockInMrHands } = getCollections();
-  const mrObjectId = new mongoose.Types.ObjectId(mrId);
-
-  const existing = await stockInMrHands.findOne({ mrId: mrObjectId }, { session });
-  if (!existing) return; // nothing to revert
-
-  for (const item of items) {
-    if (!item.boxQuantity || item.boxQuantity <= 0) continue;
-
-    const productName = item.productName.trim();
-    const removeQty = Number(item.boxQuantity) || 0;
-
-    const productEntry = (existing.productsInHand || []).find(
-      (p) => p.productName?.toLowerCase().trim() === productName.toLowerCase()
-    );
-
-    if (!productEntry) continue;
-
-    const newQty = Math.max(0, (productEntry.quantity || 0) - removeQty);
-
-    if (newQty === 0) {
-      // Remove the product entirely from the array
-      await stockInMrHands.updateOne(
-        { mrId: mrObjectId },
-        {
-          $pull: { productsInHand: { productName: productEntry.productName } },
-          $set: { updatedAt: new Date() },
-        },
-        { session }
-      );
-    } else {
-      // Just reduce the quantity
-      await stockInMrHands.updateOne(
-        {
-          mrId: mrObjectId,
-          "productsInHand.productName": productEntry.productName,
-        },
-        {
-          $set: {
-            "productsInHand.$.quantity": newQty,
-            "productsInHand.$.lastUpdated": new Date(),
-            updatedAt: new Date(),
-          },
-        },
-        { session }
-      );
-    }
-  }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: deduct from ReportInHand (warehouse) when sending stock to MR
-// ─────────────────────────────────────────────────────────────────────────────
-const deductFromWarehouse = async (items, invoiceNo, session) => {
-  const ReportInHand = mongoose.connection.db.collection("reportinhands");
-
-  for (const item of items) {
-    if (!item.boxQuantity || item.boxQuantity <= 0) continue;
-
-    const productName = item.productName.trim();
-    const qty = Number(item.boxQuantity) || 0;
-
-    const warehouseItem = await ReportInHand.findOne(
-      { productName: { $regex: new RegExp(`^${productName}$`, "i") } },
-      { session }
-    );
-
-    if (!warehouseItem) {
-      console.warn(`⚠️ Product "${productName}" not found in warehouse (ReportInHand)`);
-      continue;
-    }
-
-    // Push a removal batch entry
-    await ReportInHand.updateOne(
-      { _id: warehouseItem._id },
-      {
-        $push: {
-          batches: {
-            _id: new mongoose.Types.ObjectId(),
-            boxes: qty,
-            lc: item.lc || 0,
-            fob: item.lc || 0,
-            cif: item.lc || 0,
-            amount: qty * (item.lc || 0),
-            date: new Date(),
-            adjustmentType: "remove",
-            batchNumber: `MR-TRANSFER-${invoiceNo}-${Date.now()}`,
-          },
-        },
-      },
-      { session }
-    );
-  }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: restore to ReportInHand (warehouse) when transfer is deleted or
-// when MR returns stock back to main
-// ─────────────────────────────────────────────────────────────────────────────
-const restoreToWarehouse = async (items, invoiceNo, session) => {
-  const ReportInHand = mongoose.connection.db.collection("reportinhands");
-
-  for (const item of items) {
-    if (!item.boxQuantity || item.boxQuantity <= 0) continue;
-
-    const productName = item.productName.trim();
-    const qty = Number(item.boxQuantity) || 0;
-    const lc = Number(item.lc) || 0;
-
-    const warehouseItem = await ReportInHand.findOne(
-      { productName: { $regex: new RegExp(`^${productName}$`, "i") } },
-      { session }
-    );
-
-    if (warehouseItem) {
-      await ReportInHand.updateOne(
-        { _id: warehouseItem._id },
-        {
-          $push: {
-            batches: {
-              _id: new mongoose.Types.ObjectId(),
-              boxes: qty,
-              lc,
-              fob: lc,
-              cif: lc,
-              amount: qty * lc,
-              date: new Date(),
-              adjustmentType: "batch",
-              batchNumber: `RESTORE-${invoiceNo}-${Date.now()}`,
-            },
-          },
-        },
-        { session }
-      );
-    } else {
-      // Product doesn't exist in warehouse — create it
-      await ReportInHand.insertOne(
-        {
-          productName,
-          supplierName: "System",
-          type: "System",
-          batches: [
-            {
-              _id: new mongoose.Types.ObjectId(),
-              boxes: qty,
-              lc,
-              fob: lc,
-              cif: lc,
-              amount: qty * lc,
-              date: new Date(),
-              adjustmentType: "batch",
-              batchNumber: `RESTORE-${invoiceNo}-${Date.now()}`,
-            },
-          ],
-          status: "In Stock",
-          minStockLevel: 10,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        { session }
-      );
-    }
-  }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: generate next invoice number
-// ─────────────────────────────────────────────────────────────────────────────
-const generateInvoiceNo = async () => {
-  const { stockTransferToMrs } = getCollections();
-  const lastDoc = await stockTransferToMrs.findOne({}, { sort: { createdAt: -1 } });
-
-  if (!lastDoc || !lastDoc.invoiceNo) return "ST-0001";
-
-  const match = lastDoc.invoiceNo.match(/ST-(\d+)/);
-  if (!match) return "ST-0001";
-
-  const nextNum = parseInt(match[1], 10) + 1;
-  return `ST-${String(nextNum).padStart(4, "0")}`;
-};
-
-// ==========================================
-// ROUTES
-// ==========================================
-
-// ── GET ALL TRANSFERS ─────────────────────────────────────────────────────────
-router.get("/", async (req, res) => {
+// ==================== GET /in-stock ====================
+// Returns all products with their current stock (boxes) from ReportInHand
+router.get("/in-stock", protect, allowAdminOnly, async (req, res) => {
   try {
-    const { stockTransferToMrs } = getCollections();
-    const transfers = await stockTransferToMrs
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+    const { name } = req.query;
 
-    res.json({ success: true, data: transfers, count: transfers.length });
-  } catch (error) {
-    console.error("Error fetching transfers:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch transfers", error: error.message });
-  }
-});
-// ==================== GET PRODUCTS WITH IN‑STOCK INFO ====================
-router.get("/in-stock", async (req, res) => {
-  try {
-    const { name } = req.query; // optional name filter
-
-    // Fetch all stock data from ReportInHand (only needed fields)
+    // Fetch all stock data from ReportInHand
     const stockList = await ReportInHand.find({}, "productName totalBoxes").lean();
     const stockMap = new Map(
-      stockList.map(item => [item.productName.toLowerCase(), item.totalBoxes])
+      stockList.map(item => [item.productName.toLowerCase(), item.totalBoxes || 0])
     );
 
     // Build product query (filter by name if provided)
@@ -358,7 +37,6 @@ router.get("/in-stock", async (req, res) => {
     // Combine and format
     const productsWithStock = products.map((product) => {
       const boxes = stockMap.get(product.productName.toLowerCase()) || 0;
-
       return {
         ...product,
         productName: product.productName
@@ -366,11 +44,11 @@ router.get("/in-stock", async (req, res) => {
           .map(word => word.charAt(0).toUpperCase() + word.slice(1))
           .join(" "),
         type: product.type
-          .split(" ")
+          ?.split(" ")
           .map(word => word.charAt(0).toUpperCase() + word.slice(1))
           .join(" "),
         supplierName: product.supplierName
-          .split(" ")
+          ?.split(" ")
           .map(word => word.charAt(0).toUpperCase() + word.slice(1))
           .join(" "),
         inStock: {
@@ -381,174 +59,193 @@ router.get("/in-stock", async (req, res) => {
     });
 
     res.status(200).json(productsWithStock);
-  } catch (err) {
-    console.error("Error fetching products with stock:", err);
-    res.status(500).json({ message: "Failed to fetch products with stock information." });
+  } catch (error) {
+    console.error("Error fetching products with stock:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch products with stock information." 
+    });
   }
 });
 
-// ── GET SINGLE TRANSFER ───────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+// ==================== GET all adjustments ====================
+router.get("/", protect, allowAdminOnly, async (req, res) => {
   try {
-    const { stockTransferToMrs } = getCollections();
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    const adjustments = await StockAdjustment.find()
+      .populate("productId", "productName qtyPerCarton")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({ 
+      success: true, 
+      data: adjustments,
+      count: adjustments.length 
+    });
+  } catch (error) {
+    console.error("Error fetching adjustments:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch adjustments" 
+    });
+  }
+});
+
+// ==================== GET single adjustment ====================
+router.get("/:id", protect, allowAdminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, message: "Invalid ID" });
     }
 
-    const transfer = await stockTransferToMrs.findOne({
-      _id: new mongoose.Types.ObjectId(req.params.id),
-    });
+    const adjustment = await StockAdjustment.findById(id)
+      .populate("productId", "productName qtyPerCarton")
+      .lean();
 
-    if (!transfer) {
-      return res.status(404).json({ success: false, message: "Transfer not found" });
+    if (!adjustment) {
+      return res.status(404).json({ success: false, message: "Adjustment not found" });
     }
 
-    res.json({ success: true, data: transfer });
+    res.json({ success: true, data: adjustment });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch transfer", error: error.message });
+    console.error("Error fetching adjustment:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch adjustment" });
   }
 });
 
-// ── GET MR HAND STOCK ─────────────────────────────────────────────────────────
-router.get("/mr-stock/:mrId", async (req, res) => {
-  try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.mrId)) {
-      return res.status(400).json({ success: false, message: "Invalid MR ID" });
-    }
-
-    const mrStock = await findMRStock(req.params.mrId);
-
-    if (!mrStock) {
-      return res.json({ success: true, data: { productsInHand: [] }, mrName: null });
-    }
-
-    res.json({ success: true, data: mrStock, mrName: mrStock.mrName });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch MR stock", error: error.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CREATE TRANSFER (send stock from warehouse → MR hand)
-//
-// THE MAIN FIX IS HERE: after saving to stocktransfertomrs, we now call
-// upsertProductsIntoMRHand() to write the products into stockinmrhands.
-// ─────────────────────────────────────────────────────────────────────────────
+// ==================== CREATE adjustment ====================
 router.post("/", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const {
-      transferType = "send",
-      stockTransferToMr,
-      stockTransferFromMrToMain,
-      items,
-      date,
-      remarks,
-    } = req.body;
+    const { productId, boxQuantity, totalQuantity, adjustmentType, remarks } = req.body;
 
-    // ── Validation ─────────────────────────────────────────────────────────
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      throw new Error("Items are required");
+    // Validation
+    if (!productId || !boxQuantity || !adjustmentType) {
+      throw new Error("Missing required fields: productId, boxQuantity, adjustmentType");
+    }
+    if (boxQuantity <= 0) {
+      throw new Error("Box quantity must be positive");
+    }
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      throw new Error("Invalid product ID");
     }
 
-    const validItems = items.filter(
-      (item) => item.productName && item.boxQuantity > 0
-    );
-    if (validItems.length === 0) {
-      throw new Error("At least one item with valid quantity is required");
+    // Find product to get qtyPerCarton (optional, but used for pieces)
+    const product = await Product.findById(productId).session(session);
+    if (!product) {
+      throw new Error("Product not found");
     }
 
-    const { stockTransferToMrs } = getCollections();
+    // Find the warehouse stock record (ReportInHand)
+    let reportItem = await ReportInHand.findOne({ 
+      productName: { $regex: new RegExp(`^${product.productName}$`, "i") } 
+    }).session(session);
 
-    const invoiceNo = await generateInvoiceNo();
-    const transferDate = date || new Date().toISOString().split("T")[0];
-
-    let targetMrId = null;
-    let targetMrName = null;
-
-    if (transferType === "send" && stockTransferToMr) {
-      // ── Find MR from Staff collection ─────────────────────────────────
-      const staff = await findStaffByName(stockTransferToMr, session);
-      if (!staff) {
-        throw new Error(`MR "${stockTransferToMr}" not found in Staff system`);
+    // If product doesn't exist in ReportInHand, create it (for "add" adjustments)
+    if (!reportItem) {
+      if (adjustmentType === "remove") {
+        throw new Error(`Cannot remove stock: Product "${product.productName}" not found in warehouse.`);
       }
-      targetMrId = staff._id;
-      targetMrName = staff.medicalRepName;
+      // Create new stock record with zero stock, then we'll add the adjustment
+      reportItem = new ReportInHand({
+        productName: product.productName,
+        supplierName: "System",
+        type: "System",
+        batches: [],
+        status: "Out of Stock",
+        minStockLevel: 10,
+      });
     }
 
-    // ── Calculate total cost ───────────────────────────────────────────
-    const totalTransferCost = validItems.reduce((sum, item) => {
-      return sum + (Number(item.boxQuantity) || 0) * (Number(item.lc) || 0);
-    }, 0);
+    // Update the warehouse stock
+    const currentStock = fixPrecision(Number(reportItem.totalBoxes) || 0);
+    const adjustmentQty = fixPrecision(Number(boxQuantity));
+    let newStock;
 
-    // ── Build transfer document ────────────────────────────────────────
-    const transferDoc = {
-      invoiceNo,
-      date: transferDate,
-      transferType,
-      stockTransferToMr: stockTransferToMr || "",
-      stockTransferFromMrToMain: stockTransferFromMrToMain || "",
-      items: validItems.map((item) => ({
+    if (adjustmentType === "add") {
+      newStock = fixPrecision(currentStock + adjustmentQty);
+      // Push a batch entry for the addition
+      reportItem.batches.push({
         _id: new mongoose.Types.ObjectId(),
-        productId: item.productId ? new mongoose.Types.ObjectId(item.productId) : null,
-        productName: item.productName.trim(),
-        boxQuantity: Number(item.boxQuantity) || 0,
-        lc: Number(item.lc) || 0,
-        productCost: (Number(item.boxQuantity) || 0) * (Number(item.lc) || 0),
-      })),
-      remarks: remarks || "",
-      totalTransferCost,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    // ── Save to stocktransfertomrs ─────────────────────────────────────
-    const result = await stockTransferToMrs.insertOne(transferDoc, { session });
-
-    // ── THE FIX: Update stockinmrhands ────────────────────────────────
-    if (transferType === "send" && targetMrId) {
-      // Deduct from warehouse
-      await deductFromWarehouse(validItems, invoiceNo, session);
-
-      // Write products into MR hand stock
-      await upsertProductsIntoMRHand(
-        targetMrId,
-        targetMrName,
-        validItems,
-        session
-      );
-    } else if (transferType === "return" && stockTransferFromMrToMain) {
-      // MR returning stock back to warehouse
-      const staff = await findStaffByName(stockTransferFromMrToMain, session);
-      if (staff) {
-        await removeProductsFromMRHand(staff._id, validItems, session);
-        await restoreToWarehouse(validItems, invoiceNo, session);
+        boxes: adjustmentQty,
+        lc: 0, // You may want to set a default LC or get it from product
+        fob: 0,
+        cif: 0,
+        amount: 0,
+        date: new Date(),
+        adjustmentType: "batch",
+        batchNumber: `ADJ-ADD-${Date.now()}`,
+      });
+    } else if (adjustmentType === "remove") {
+      if (currentStock < adjustmentQty) {
+        throw new Error(`Insufficient stock. Available: ${currentStock}, Requested: ${adjustmentQty}`);
       }
+      newStock = fixPrecision(currentStock - adjustmentQty);
+      // Push a removal batch entry
+      reportItem.batches.push({
+        _id: new mongoose.Types.ObjectId(),
+        boxes: adjustmentQty,
+        lc: 0,
+        fob: 0,
+        cif: 0,
+        amount: 0,
+        date: new Date(),
+        adjustmentType: "remove",
+        batchNumber: `ADJ-REMOVE-${Date.now()}`,
+      });
+    } else {
+      throw new Error("Invalid adjustment type");
     }
+
+    // Update totalBoxes and status
+    reportItem.totalBoxes = newStock;
+    reportItem.status = newStock <= 0 
+      ? "Out of Stock" 
+      : newStock < (reportItem.minStockLevel || 10) 
+        ? "Low Stock" 
+        : "In Stock";
+    reportItem.updatedAt = new Date();
+
+    await reportItem.save({ session });
+
+    // Create the adjustment record
+    const adjustment = new StockAdjustment({
+      productId,
+      boxQuantity: adjustmentQty,
+      totalQuantity: adjustmentType === "add" ? adjustmentQty * (product.qtyPerCarton || 1) : -adjustmentQty * (product.qtyPerCarton || 1),
+      adjustmentType,
+      remarks,
+      createdBy: req.user._id, // assuming your auth middleware sets req.user
+    });
+
+    await adjustment.save({ session });
 
     await session.commitTransaction();
     session.endSession();
 
+    // Populate product details for response
+    const populated = await StockAdjustment.findById(adjustment._id)
+      .populate("productId", "productName qtyPerCarton");
+
     res.status(201).json({
       success: true,
-      message: `Stock transfer ${invoiceNo} created successfully`,
-      data: { ...transferDoc, _id: result.insertedId },
+      message: "Stock adjustment created successfully",
+      data: populated,
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Error creating stock transfer:", error);
-    res.status(500).json({ success: false, message: error.message || "Failed to create transfer" });
+    console.error("Error creating adjustment:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || "Failed to create adjustment" 
+    });
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UPDATE TRANSFER
-//
-// Reverses the old transfer's effect on stockinmrhands, then applies new.
-// ─────────────────────────────────────────────────────────────────────────────
+// ==================== UPDATE adjustment ====================
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -556,102 +253,156 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      throw new Error("Invalid transfer ID");
+      throw new Error("Invalid adjustment ID");
     }
 
-    const { stockTransferToMrs } = getCollections();
-
-    // ── Fetch the existing transfer ────────────────────────────────────
-    const existing = await stockTransferToMrs.findOne(
-      { _id: new mongoose.Types.ObjectId(id) },
-      { session }
-    );
-    if (!existing) throw new Error("Transfer not found");
-
-    const {
-      transferType = existing.transferType,
-      stockTransferToMr = existing.stockTransferToMr,
-      items,
-      date,
-      remarks,
-    } = req.body;
-
-    const validNewItems = (items || []).filter(
-      (item) => item.productName && item.boxQuantity > 0
-    );
-
-    // ── Reverse the OLD transfer effect ────────────────────────────────
-    if (existing.transferType === "send" && existing.stockTransferToMr) {
-      const oldStaff = await findStaffByName(existing.stockTransferToMr, session);
-      if (oldStaff) {
-        await removeProductsFromMRHand(oldStaff._id, existing.items, session);
-        await restoreToWarehouse(existing.items, existing.invoiceNo, session);
-      }
-    } else if (existing.transferType === "return" && existing.stockTransferFromMrToMain) {
-      const oldStaff = await findStaffByName(existing.stockTransferFromMrToMain, session);
-      if (oldStaff) {
-        await upsertProductsIntoMRHand(oldStaff._id, oldStaff.medicalRepName, existing.items, session);
-        await deductFromWarehouse(existing.items, existing.invoiceNo, session);
-      }
+    const existing = await StockAdjustment.findById(id).session(session);
+    if (!existing) {
+      throw new Error("Adjustment not found");
     }
 
-    // ── Apply the NEW transfer effect ──────────────────────────────────
-    let targetMrId = null;
-    let targetMrName = null;
+    const { productId, boxQuantity, totalQuantity, adjustmentType, remarks } = req.body;
 
-    if (transferType === "send" && stockTransferToMr) {
-      const newStaff = await findStaffByName(stockTransferToMr, session);
-      if (!newStaff) throw new Error(`MR "${stockTransferToMr}" not found`);
-      targetMrId = newStaff._id;
-      targetMrName = newStaff.medicalRepName;
-
-      await deductFromWarehouse(validNewItems, existing.invoiceNo, session);
-      await upsertProductsIntoMRHand(targetMrId, targetMrName, validNewItems, session);
+    // Validation
+    if (!productId || !boxQuantity || !adjustmentType) {
+      throw new Error("Missing required fields");
+    }
+    if (boxQuantity <= 0) {
+      throw new Error("Box quantity must be positive");
+    }
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      throw new Error("Invalid product ID");
     }
 
-    const totalTransferCost = validNewItems.reduce((sum, item) => {
-      return sum + (Number(item.boxQuantity) || 0) * (Number(item.lc) || 0);
-    }, 0);
+    // Find product
+    const product = await Product.findById(productId).session(session);
+    if (!product) {
+      throw new Error("Product not found");
+    }
 
-    // ── Save updated transfer ──────────────────────────────────────────
-    const updateData = {
-      transferType,
-      stockTransferToMr: stockTransferToMr || existing.stockTransferToMr,
-      items: validNewItems.map((item) => ({
+    // Find warehouse stock
+    let reportItem = await ReportInHand.findOne({ 
+      productName: { $regex: new RegExp(`^${product.productName}$`, "i") } 
+    }).session(session);
+    if (!reportItem) {
+      throw new Error(`Product "${product.productName}" not found in warehouse. Cannot update adjustment.`);
+    }
+
+    // Revert the previous adjustment effect
+    const oldQty = existing.boxQuantity;
+    const oldType = existing.adjustmentType;
+    const currentStockBeforeRevert = fixPrecision(Number(reportItem.totalBoxes) || 0);
+
+    if (oldType === "add") {
+      // Remove the previously added stock
+      reportItem.totalBoxes = fixPrecision(currentStockBeforeRevert - oldQty);
+      // Optionally, you might want to remove the corresponding batch entry.
+      // For simplicity, we'll just adjust totalBoxes and push a reversal batch.
+      reportItem.batches.push({
         _id: new mongoose.Types.ObjectId(),
-        productId: item.productId ? new mongoose.Types.ObjectId(item.productId) : null,
-        productName: item.productName.trim(),
-        boxQuantity: Number(item.boxQuantity) || 0,
-        lc: Number(item.lc) || 0,
-        productCost: (Number(item.boxQuantity) || 0) * (Number(item.lc) || 0),
-      })),
-      date: date || existing.date,
-      remarks: remarks !== undefined ? remarks : existing.remarks,
-      totalTransferCost,
-      updatedAt: new Date(),
-    };
+        boxes: oldQty,
+        adjustmentType: "remove",
+        batchNumber: `ADJ-REVERT-${Date.now()}`,
+        date: new Date(),
+        lc: 0,
+        fob: 0,
+        cif: 0,
+        amount: 0,
+      });
+    } else if (oldType === "remove") {
+      // Add back the previously removed stock
+      reportItem.totalBoxes = fixPrecision(currentStockBeforeRevert + oldQty);
+      reportItem.batches.push({
+        _id: new mongoose.Types.ObjectId(),
+        boxes: oldQty,
+        adjustmentType: "batch",
+        batchNumber: `ADJ-REVERT-${Date.now()}`,
+        date: new Date(),
+        lc: 0,
+        fob: 0,
+        cif: 0,
+        amount: 0,
+      });
+    }
 
-    await stockTransferToMrs.updateOne(
-      { _id: new mongoose.Types.ObjectId(id) },
-      { $set: updateData },
-      { session }
-    );
+    // Now apply the new adjustment
+    const newQty = fixPrecision(Number(boxQuantity));
+    const currentStockAfterRevert = fixPrecision(Number(reportItem.totalBoxes) || 0);
+
+    if (adjustmentType === "add") {
+      reportItem.totalBoxes = fixPrecision(currentStockAfterRevert + newQty);
+      reportItem.batches.push({
+        _id: new mongoose.Types.ObjectId(),
+        boxes: newQty,
+        adjustmentType: "batch",
+        batchNumber: `ADJ-ADD-${Date.now()}`,
+        date: new Date(),
+        lc: 0,
+        fob: 0,
+        cif: 0,
+        amount: 0,
+      });
+    } else if (adjustmentType === "remove") {
+      if (currentStockAfterRevert < newQty) {
+        throw new Error(`Insufficient stock after revert. Available: ${currentStockAfterRevert}, Requested: ${newQty}`);
+      }
+      reportItem.totalBoxes = fixPrecision(currentStockAfterRevert - newQty);
+      reportItem.batches.push({
+        _id: new mongoose.Types.ObjectId(),
+        boxes: newQty,
+        adjustmentType: "remove",
+        batchNumber: `ADJ-REMOVE-${Date.now()}`,
+        date: new Date(),
+        lc: 0,
+        fob: 0,
+        cif: 0,
+        amount: 0,
+      });
+    } else {
+      throw new Error("Invalid adjustment type");
+    }
+
+    // Update status
+    reportItem.status = reportItem.totalBoxes <= 0 
+      ? "Out of Stock" 
+      : reportItem.totalBoxes < (reportItem.minStockLevel || 10) 
+        ? "Low Stock" 
+        : "In Stock";
+    reportItem.updatedAt = new Date();
+    await reportItem.save({ session });
+
+    // Update adjustment record
+    existing.productId = productId;
+    existing.boxQuantity = newQty;
+    existing.totalQuantity = adjustmentType === "add" 
+      ? newQty * (product.qtyPerCarton || 1) 
+      : -newQty * (product.qtyPerCarton || 1);
+    existing.adjustmentType = adjustmentType;
+    existing.remarks = remarks || "";
+    existing.updatedAt = new Date();
+
+    await existing.save({ session });
 
     await session.commitTransaction();
     session.endSession();
 
-    res.json({ success: true, message: "Transfer updated successfully", data: { ...existing, ...updateData } });
+    const populated = await StockAdjustment.findById(existing._id)
+      .populate("productId", "productName qtyPerCarton");
+
+    res.json({
+      success: true,
+      message: "Adjustment updated successfully",
+      data: populated,
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Error updating transfer:", error);
-    res.status(500).json({ success: false, message: error.message || "Failed to update transfer" });
+    console.error("Error updating adjustment:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DELETE TRANSFER — reverts stockinmrhands and restores warehouse stock
-// ─────────────────────────────────────────────────────────────────────────────
+// ==================== DELETE single adjustment ====================
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -659,177 +410,174 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      throw new Error("Invalid transfer ID");
+      throw new Error("Invalid adjustment ID");
     }
 
-    const { stockTransferToMrs } = getCollections();
-
-    const transfer = await stockTransferToMrs.findOne(
-      { _id: new mongoose.Types.ObjectId(id) },
-      { session }
-    );
-    if (!transfer) throw new Error("Transfer not found");
-
-    // ── Reverse the transfer effect ────────────────────────────────────
-    if (transfer.transferType === "send" && transfer.stockTransferToMr) {
-      const staff = await findStaffByName(transfer.stockTransferToMr, session);
-      if (staff) {
-        await removeProductsFromMRHand(staff._id, transfer.items, session);
-      }
-      await restoreToWarehouse(transfer.items, transfer.invoiceNo, session);
-    } else if (transfer.transferType === "return" && transfer.stockTransferFromMrToMain) {
-      const staff = await findStaffByName(transfer.stockTransferFromMrToMain, session);
-      if (staff) {
-        await upsertProductsIntoMRHand(staff._id, staff.medicalRepName, transfer.items, session);
-      }
-      await deductFromWarehouse(transfer.items, transfer.invoiceNo, session);
+    const adjustment = await StockAdjustment.findById(id).session(session);
+    if (!adjustment) {
+      throw new Error("Adjustment not found");
     }
 
-    await stockTransferToMrs.deleteOne(
-      { _id: new mongoose.Types.ObjectId(id) },
-      { session }
-    );
+    // Revert stock effect
+    const product = await Product.findById(adjustment.productId).session(session);
+    if (!product) {
+      throw new Error("Associated product not found");
+    }
+
+    const reportItem = await ReportInHand.findOne({ 
+      productName: { $regex: new RegExp(`^${product.productName}$`, "i") } 
+    }).session(session);
+
+    if (reportItem) {
+      const currentStock = fixPrecision(Number(reportItem.totalBoxes) || 0);
+      if (adjustment.adjustmentType === "add") {
+        // Remove the added stock
+        reportItem.totalBoxes = fixPrecision(currentStock - adjustment.boxQuantity);
+        reportItem.batches.push({
+          _id: new mongoose.Types.ObjectId(),
+          boxes: adjustment.boxQuantity,
+          adjustmentType: "remove",
+          batchNumber: `ADJ-DELETE-${Date.now()}`,
+          date: new Date(),
+          lc: 0,
+          fob: 0,
+          cif: 0,
+          amount: 0,
+        });
+      } else if (adjustment.adjustmentType === "remove") {
+        // Add back the removed stock
+        reportItem.totalBoxes = fixPrecision(currentStock + adjustment.boxQuantity);
+        reportItem.batches.push({
+          _id: new mongoose.Types.ObjectId(),
+          boxes: adjustment.boxQuantity,
+          adjustmentType: "batch",
+          batchNumber: `ADJ-DELETE-${Date.now()}`,
+          date: new Date(),
+          lc: 0,
+          fob: 0,
+          cif: 0,
+          amount: 0,
+        });
+      }
+
+      reportItem.status = reportItem.totalBoxes <= 0 
+        ? "Out of Stock" 
+        : reportItem.totalBoxes < (reportItem.minStockLevel || 10) 
+          ? "Low Stock" 
+          : "In Stock";
+      reportItem.updatedAt = new Date();
+      await reportItem.save({ session });
+    }
+
+    await StockAdjustment.findByIdAndDelete(id).session(session);
 
     await session.commitTransaction();
     session.endSession();
 
-    res.json({ success: true, message: `Transfer ${transfer.invoiceNo} deleted and stock reverted` });
+    res.json({ 
+      success: true, 
+      message: "Adjustment deleted and stock reverted" 
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Error deleting transfer:", error);
-    res.status(500).json({ success: false, message: error.message || "Failed to delete transfer" });
+    console.error("Error deleting adjustment:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ONE-TIME MIGRATION ROUTE
-//
-// Call POST /api/stock-transfer/migrate/backfill-mr-hands ONCE to fix all
-// existing transfers that never wrote into stockinmrhands.
-//
-// Safe to call multiple times — it checks existing quantities first.
-// ─────────────────────────────────────────────────────────────────────────────
-router.post("/migrate/backfill-mr-hands", protect, allowAdminOnly, async (req, res) => {
+// ==================== BULK DELETE ====================
+router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { stockTransferToMrs, stockInMrHands } = getCollections();
-
-    // Fetch all "send" transfers sorted oldest first
-    const transfers = await stockTransferToMrs
-      .find({ transferType: "send" })
-      .sort({ createdAt: 1 })
-      .toArray();
-
-    if (transfers.length === 0) {
-      await session.commitTransaction();
-      session.endSession();
-      return res.json({ success: true, message: "No transfers to migrate", processed: 0 });
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      throw new Error("No adjustment IDs provided");
     }
 
-    // Clear ALL existing stockinmrhands records so we start fresh
-    await stockInMrHands.deleteMany({}, { session });
+    // Validate each ID
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      throw new Error("No valid adjustment IDs");
+    }
 
-    let processed = 0;
-    let failed = 0;
-    const errors = [];
+    // Fetch all adjustments to revert stock
+    const adjustments = await StockAdjustment.find({ _id: { $in: validIds } }).session(session);
 
-    for (const transfer of transfers) {
-      try {
-        if (!transfer.stockTransferToMr || !transfer.items?.length) continue;
+    // Group by product to efficiently revert stock
+    const productAdjustments = new Map(); // productId -> { adds: [], removes: [] }
 
-        const staff = await findStaffByName(transfer.stockTransferToMr, session);
-        if (!staff) {
-          errors.push(`MR "${transfer.stockTransferToMr}" not found (transfer ${transfer.invoiceNo})`);
-          failed++;
-          continue;
-        }
-
-        // For each send transfer, add the products into MR hand
-        await upsertProductsIntoMRHand(staff._id, staff.medicalRepName, transfer.items, session);
-        processed++;
-      } catch (err) {
-        errors.push(`Transfer ${transfer.invoiceNo}: ${err.message}`);
-        failed++;
+    for (const adj of adjustments) {
+      const productId = adj.productId.toString();
+      if (!productAdjustments.has(productId)) {
+        productAdjustments.set(productId, { adds: [], removes: [] });
+      }
+      if (adj.adjustmentType === "add") {
+        productAdjustments.get(productId).adds.push(adj.boxQuantity);
+      } else {
+        productAdjustments.get(productId).removes.push(adj.boxQuantity);
       }
     }
 
-    // Also process "return" transfers to subtract back
-    const returnTransfers = await stockTransferToMrs
-      .find({ transferType: "return" })
-      .sort({ createdAt: 1 })
-      .toArray();
+    // Revert each product's stock
+    for (const [productId, data] of productAdjustments) {
+      const product = await Product.findById(productId).session(session);
+      if (!product) continue;
 
-    for (const transfer of returnTransfers) {
-      try {
-        if (!transfer.stockTransferFromMrToMain || !transfer.items?.length) continue;
+      const reportItem = await ReportInHand.findOne({ 
+        productName: { $regex: new RegExp(`^${product.productName}$`, "i") } 
+      }).session(session);
 
-        const staff = await findStaffByName(transfer.stockTransferFromMrToMain, session);
-        if (!staff) continue;
+      if (reportItem) {
+        const currentStock = fixPrecision(Number(reportItem.totalBoxes) || 0);
+        const totalAdd = data.adds.reduce((sum, q) => sum + q, 0);
+        const totalRemove = data.removes.reduce((sum, q) => sum + q, 0);
 
-        await removeProductsFromMRHand(staff._id, transfer.items, session);
-      } catch (err) {
-        errors.push(`Return transfer ${transfer.invoiceNo}: ${err.message}`);
+        // Net effect: adds increased stock, removes decreased stock
+        // To revert, we do the opposite: subtract adds, add removes
+        const newStock = fixPrecision(currentStock - totalAdd + totalRemove);
+        reportItem.totalBoxes = newStock;
+
+        reportItem.batches.push({
+          _id: new mongoose.Types.ObjectId(),
+          boxes: Math.abs(totalAdd - totalRemove),
+          adjustmentType: "batch",
+          batchNumber: `BULK-DELETE-${Date.now()}`,
+          date: new Date(),
+          lc: 0,
+          fob: 0,
+          cif: 0,
+          amount: 0,
+        });
+
+        reportItem.status = newStock <= 0 
+          ? "Out of Stock" 
+          : newStock < (reportItem.minStockLevel || 10) 
+            ? "Low Stock" 
+            : "In Stock";
+        reportItem.updatedAt = new Date();
+        await reportItem.save({ session });
       }
     }
+
+    // Delete all adjustments
+    const result = await StockAdjustment.deleteMany({ _id: { $in: validIds } }).session(session);
 
     await session.commitTransaction();
     session.endSession();
 
     res.json({
       success: true,
-      message: `Migration complete: ${processed} send transfers processed, ${failed} failed`,
-      processed,
-      failed,
-      errors,
+      message: `${result.deletedCount} adjustment(s) deleted and stock reverted`,
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Migration error:", error);
+    console.error("Bulk delete error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
-// ==================== GET PRODUCT STOCK FOR ADJUSTMENTS ====================
-router.get("/stock/products", protect, allowAdminOnly, async (req, res) => {
-  try {
-    // Fetch all products to get qtyPerCarton
-    const products = await Product.find({}, "productName qtyPerCarton").lean();
-    const productMap = new Map(products.map(p => [p.productName.toLowerCase(), p]));
-
-    // Fetch all warehouse stock from ReportInHand
-    const reportItems = await ReportInHand.find({}, "productName batches totalBoxes").lean();
-
-    const result = [];
-
-    for (const item of reportItems) {
-      const productName = item.productName;
-      const product = productMap.get(productName.toLowerCase());
-      if (!product) continue; // product not found in Product collection
-
-      const totalBoxes = item.totalBoxes || 0;
-      const qtyPerCarton = product.qtyPerCarton || 1;
-      const totalPieces = totalBoxes * qtyPerCarton;
-
-      result.push({
-        productId: product._id,
-        productName: productName, // keep as is
-        totalBoxes,
-        totalPieces,
-        qtyPerCarton,
-      });
-    }
-
-    res.status(200).json({ success: true, data: result });
-  } catch (error) {
-    console.error("Error fetching product stock:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch product stock" });
-  }
-});
-
-
 
 export default router;
