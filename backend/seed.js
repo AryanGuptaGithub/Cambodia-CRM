@@ -15,6 +15,8 @@ import ProductPackingType from "./models/projectManger/ProductPackingType.js";
 import AllowanceType from "./models/Hrm/AllowanceType.js";
 import MRCash from "./models/accounts/MRCash.js";
 import Staff from "./models/staffMember/staff.js";
+// 👇 ADD THIS IMPORT
+import StockAdjustment from "./models/stock/stockAdjustment.js";
 
 dotenv.config();
 
@@ -88,12 +90,6 @@ async function seedTransactionTypes() {
   await TransactionType.insertMany(transactionTypes);
 }
 
-// seedCambodia.js
-
-// Assumes you already imported mongoose models:
-// const Province = require("./models/Province");
-// const Zone = require("./models/Zone");
-
 function slugify(text) {
   return text.toLowerCase().trim().replace(/\s+/g, "_");
 }
@@ -122,10 +118,6 @@ async function seedProvinces() {
     { name: "Ratanakiri", code: "ratanakiri" },
     { name: "Siem Reap", code: "siem_reap" },
     { name: "Sihanoukville", code: "sihanoukville" },
-    // { name: "Stung Treng", code: "stung_treng" },
-    // { name: "Svay Rieng", code: "svay_rieng" },
-    // { name: "Takeo", code: "takeo" },
-    // { name: "Tbong Khmum", code: "tbong_khmum" },
   ];
   await Province.insertMany(provinces);
 }
@@ -134,14 +126,12 @@ async function seedZones() {
   try {
     await Zone.deleteMany({});
 
-    // Load all provinces
     const provinces = await Province.find({});
     const provinceMap = {};
     provinces.forEach((p) => {
       provinceMap[p.name.trim().toLowerCase()] = p._id;
     });
 
-    // Complete list of zones (districts) for all provinces in Cambodia
     const zones = [
       // Phnom Penh (14 districts)
       { name: "Chamkar Mon", province: "phnom penh" },
@@ -353,50 +343,12 @@ async function seedZones() {
       { name: "Prey Nob", province: "sihanoukville" },
       { name: "Stueng Hav", province: "sihanoukville" },
       { name: "Kampong Seila", province: "sihanoukville" },
-
-      // Stung Treng (5 districts) - UNCOMMENTED
-      // { name: "Sesan", province: "stung treng" },
-      // { name: "Siem Bouk", province: "stung treng" },
-      // { name: "Siem Pang", province: "stung treng" },
-      // { name: "Stueng Traeng", province: "stung treng" },
-      // { name: "Thala Barivat", province: "stung treng" },
-
-      // Svay Rieng (7 districts) - UNCOMMENTED
-      // { name: "Chantrea", province: "svay rieng" },
-      // { name: "Kampong Rou", province: "svay rieng" },
-      // { name: "Rumduol", province: "svay rieng" },
-      // { name: "Romeas Haek", province: "svay rieng" },
-      // { name: "Svay Chrum", province: "svay rieng" },
-      // { name: "Svay Rieng", province: "svay rieng" },
-      // { name: "Svay Teab", province: "svay rieng" },
-
-      // // Takeo (10 districts) - UNCOMMENTED
-      // { name: "Angkor Borei", province: "takeo" },
-      // { name: "Bati", province: "takeo" },
-      // { name: "Bourei Cholsar", province: "takeo" },
-      // { name: "Kiri Vong", province: "takeo" },
-      // { name: "Kaoh Andaet", province: "takeo" },
-      // { name: "Prey Kabbas", province: "takeo" },
-      // { name: "Samraong", province: "takeo" },
-      // { name: "Doun Kaev", province: "takeo" },
-      // { name: "Tram Kak", province: "takeo" },
-      // { name: "Treang", province: "takeo" },
-
-      // // Tbong Khmum (6 districts) - UNCOMMENTED
-      // { name: "Dambae", province: "tbong khmum" },
-      // { name: "Krouch Chhmar", province: "tbong khmum" },
-      // { name: "Memot", province: "tbong khmum" },
-      // { name: "Ou Reang Ov", province: "tbong khmum" },
-      // { name: "Ponhea Kraek", province: "tbong khmum" },
-      // { name: "Tboung Khmum", province: "tbong khmum" },
     ];
 
-    // Track which provinces have zones defined
     const provincesWithZones = new Set(
       zones.map((z) => z.province.trim().toLowerCase())
     );
 
-    // Add province name as zone for provinces without specific districts
     provinces.forEach((province) => {
       const provinceKey = province.name.trim().toLowerCase();
       if (!provincesWithZones.has(provinceKey)) {
@@ -407,7 +359,6 @@ async function seedZones() {
       }
     });
 
-    // Attach provinceId with validation
     const formattedZones = zones.map((z) => {
       const provinceKey = z.province.trim().toLowerCase();
       const provinceId = provinceMap[provinceKey];
@@ -431,7 +382,6 @@ async function seedZones() {
   }
 }
 
-
 async function seedSaleTypes() {
   await SaleType.deleteMany({});
   const saleTypes = [
@@ -439,7 +389,6 @@ async function seedSaleTypes() {
     { type: "Cash Sales", sequenceNumber: 2 },
     { type: "Credit Sales", sequenceNumber: 3 },
   ];
-
   await SaleType.insertMany(saleTypes);
 }
 
@@ -467,13 +416,11 @@ async function seedOrderStatuses() {
       description: "Items have been successfully delivered",
     },
   ];
-
   await OrderStatus.insertMany(orderStatuses);
 }
 
 async function seedBusinessTypes() {
   await BusinessType.deleteMany({});
-
   const businessTypes = [
     { name: "Pharmacy", code: "PHARMACY" },
     { name: "Cabinet", code: "CABINET" },
@@ -488,14 +435,12 @@ async function seedBusinessTypes() {
     { name: "Other", code: "OTHER" },
     { name: "NGO", code: "NGO" },
   ];
-
   await BusinessType.insertMany(businessTypes);
 }
 
 async function seedProductTypes() {
   try {
     await ProductType.deleteMany({});
-
     const productTypes = [
       { name: "Tab", code: "tab" },
       { name: "Cap", code: "cap" },
@@ -503,7 +448,6 @@ async function seedProductTypes() {
       { name: "Injection", code: "injection" },
       { name: "Eye Drop", code: "eye_drop" },
     ];
-
     await ProductType.insertMany(productTypes);
   } catch (error) {
     console.error("❌ Error seeding product types:", error);
@@ -513,7 +457,6 @@ async function seedProductTypes() {
 async function seedProductPackingTypes() {
   try {
     await ProductPackingType.deleteMany({});
-
     const packingTypes = [
       { name: "10x10", code: "10x10" },
       { name: "3x10", code: "3x10" },
@@ -526,7 +469,6 @@ async function seedProductPackingTypes() {
       { name: "1x5", code: "1x5" },
       { name: "1 Vial", code: "1_vial" },
     ];
-
     await ProductPackingType.insertMany(packingTypes);
   } catch (error) {
     console.error("❌ Error seeding product packing types:", error);
@@ -536,7 +478,6 @@ async function seedProductPackingTypes() {
 async function seedAllowanceTypes() {
   try {
     await AllowanceType.deleteMany({});
-
     const allowanceTypes = [
       { name: "House Rent Allowance", code: "house_rent_allowance" },
       { name: "Dearness Allowance", code: "dearness_allowance" },
@@ -549,7 +490,6 @@ async function seedAllowanceTypes() {
       { name: "Incentive", code: "incentive" },
       { name: "Other", code: "other" },
     ];
-
     await AllowanceType.insertMany(allowanceTypes);
   } catch (error) {
     console.error("❌ Error seeding allowance types:", error);
@@ -581,7 +521,6 @@ async function seedHTabs() {
       category: "main",
       reportType: "Hide/Show Tabs",
     },
-
     {
       tabId: "products",
       name: "Product Manager",
@@ -1435,18 +1374,6 @@ async function seedHTabs() {
       category: "hrm",
       reportType: "Hide/Show Tabs",
     },
-    // {
-    //   tabId: "hrm_settings",
-    //   name: "HRM Settings",
-    //   description: "HRM system settings",
-    //   path: "/hrmlayout/hrmsetting",
-    //   icon: "Settings",
-    //   parentTabId: "hrm",
-    //   level: 1,
-    //   sequence: 6,
-    //   category: "hrm",
-    //   reportType: "Hide/Show Tabs",
-    // },
   ];
 
   await HTab.insertMany(sampleTabs);
@@ -1499,6 +1426,31 @@ async function seedMRCash() {
   }
 }
 
+// 👇 NEW SEED FUNCTION FOR STOCK ADJUSTMENT
+async function seedStockAdjustment() {
+  try {
+    // Optional: remove if you want to keep existing records
+    await StockAdjustment.deleteMany({});
+
+    const adjustmentData = {
+      _id: new mongoose.Types.ObjectId("6997e760f0d79390f344868c"), // 👈 ADD THIS
+      productId: new mongoose.Types.ObjectId("699560c62dfafd5ece0d1e54"),
+      boxQuantity: 220,
+      totalQuantity: 220,
+      adjustmentType: "add",
+      remarks: "test",
+      createdAt: new Date("2026-02-20T04:47:28.742Z"),
+      updatedAt: new Date("2026-02-20T04:47:28.742Z"),
+      // __v is automatically added by Mongoose, do not include it
+    };
+
+    await StockAdjustment.create(adjustmentData);
+    console.log("✅ Stock adjustment seeded successfully.");
+  } catch (error) {
+    console.error("❌ Error seeding stock adjustment:", error.message);
+  }
+}
+
 // Run all seeders in order
 async function runSeeders() {
   await connectDB();
@@ -1518,6 +1470,7 @@ async function runSeeders() {
     await seedAllowanceTypes();
     await seedHTabs();
     await seedMRCash();
+    await seedStockAdjustment();
   } catch (error) {
     console.error("\n❌ Seeding error:", error);
   } finally {

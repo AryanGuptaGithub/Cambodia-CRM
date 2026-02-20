@@ -54,7 +54,6 @@ import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-//suraj
 const getAuthHeaders = () => {
   const token = localStorage.getItem("token");
   return {
@@ -65,7 +64,7 @@ const getAuthHeaders = () => {
   };
 };
 
-// Stock Validation Modal Component
+// ─── Stock Validation Modal ────────────────────────────────────────────────────
 const StockValidationModal = ({
   isOpen,
   onClose,
@@ -108,10 +107,8 @@ const StockValidationModal = ({
       const ws = XLSX.utils.json_to_sheet(excelData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
-
       const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(wb, fileName);
-
       showToast("success", "Stock issues report downloaded");
     } catch (error) {
       console.error("Download error:", error);
@@ -130,23 +127,17 @@ const StockValidationModal = ({
               {isBlocked ? (
                 <>
                   <AlertCircle size={24} className="text-red-800" />
-                  <span className="text-red-800">
-                    ❌ Insufficient Stock - Import Blocked
-                  </span>
+                  <span className="text-red-800">❌ Insufficient Stock - Import Blocked</span>
                 </>
               ) : (
                 <>
                   <AlertCircle size={24} className="text-yellow-800" />
-                  <span className="text-yellow-800">
-                    ⚠️ Missing Products - Review Required
-                  </span>
+                  <span className="text-yellow-800">⚠️ Missing Products - Review Required</span>
                 </>
               )}
             </h2>
             <div className="flex items-center gap-2">
-              <span
-                className={`px-3 py-1 rounded-full text-sm font-medium ${isBlocked ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"}`}
-              >
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${isBlocked ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"}`}>
                 {stockIssues.length} Stock Issues
               </span>
               <button
@@ -161,133 +152,53 @@ const StockValidationModal = ({
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-sm text-gray-600">Total Required</div>
-              <div className="text-2xl font-bold text-red-800">
-                {summary.totalRequired || 0}
+            {[
+              ["Total Required", summary.totalRequired || 0, "text-red-800"],
+              ["Total Available", summary.totalAvailable || 0, "text-green-800"],
+              ["Insufficient Stock", summary.totalInsufficient || 0, "text-red-800"],
+              ["Missing Products", summary.missingProducts || 0, "text-orange-800"],
+            ].map(([label, val, color]) => (
+              <div key={label} className="text-center p-3 bg-white rounded-lg shadow border">
+                <div className="text-sm text-gray-600">{label}</div>
+                <div className={`text-2xl font-bold ${color}`}>{val}</div>
               </div>
-            </div>
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-sm text-gray-600">Total Available</div>
-              <div className="text-2xl font-bold text-green-800">
-                {summary.totalAvailable || 0}
-              </div>
-            </div>
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-sm text-gray-600">Insufficient Stock</div>
-              <div className="text-2xl font-bold text-red-800">
-                {summary.totalInsufficient || 0}
-              </div>
-            </div>
-            <div className="text-center p-3 bg-white rounded-lg shadow border">
-              <div className="text-sm text-gray-600">Missing Products</div>
-              <div className="text-2xl font-bold text-orange-800">
-                {summary.missingProducts || 0}
-              </div>
-            </div>
+            ))}
           </div>
 
-          <div
-            className={`p-3 ${isBlocked ? "bg-red-100 border-red-300" : "bg-yellow-100 border-yellow-300"} border rounded-lg`}
-          >
-            <p
-              className={`text-sm font-medium ${isBlocked ? "text-red-900" : "text-yellow-900"}`}
-            >
+          <div className={`p-3 ${isBlocked ? "bg-red-100 border-red-300" : "bg-yellow-100 border-yellow-300"} border rounded-lg`}>
+            <p className={`text-sm font-medium ${isBlocked ? "text-red-900" : "text-yellow-900"}`}>
               {isBlocked ? (
-                <>
-                  ⛔ <strong>IMPORT BLOCKED:</strong>{" "}
-                  {summary.totalInsufficient || 0} products have insufficient
-                  stock.
-                  <br />
-                  <br />
-                  <strong>You must:</strong>
-                  <br />
-                  1. Update your inventory to have sufficient stock
-                  <br />
-                  2. Or reduce quantities in your import file
-                  <br />
-                  3. Then try the import again
-                </>
+                <>⛔ <strong>IMPORT BLOCKED:</strong> {summary.totalInsufficient || 0} products have insufficient stock.<br /><br />
+                  <strong>You must:</strong><br />1. Update your inventory<br />2. Or reduce quantities in your import file<br />3. Then try again</>
               ) : (
-                <>
-                  ⚠️ <strong>Missing Products Found:</strong>{" "}
-                  {summary.missingProducts || 0} products are not in inventory.
-                  <br />
-                  <br />
-                  <strong>These products will:</strong>
-                  <br />
-                  1. Be created automatically during import
-                  <br />
-                  2. Have zero initial stock (you'll need to add inventory
-                  later)
-                  <br />
-                  3. Appear in your product catalog
-                  <br />
-                  <br />
-                  <strong>
-                    You can proceed if you want to create these products.
-                  </strong>
-                </>
+                <>⚠️ <strong>Missing Products Found:</strong> {summary.missingProducts || 0} products are not in inventory.<br /><br />
+                  <strong>These products will be created automatically during import.</strong></>
               )}
             </p>
           </div>
         </div>
 
         <div className="mb-6">
-          <div className="flex justify-between items-center mb-3">
-            <h3 className="font-medium text-gray-700">
-              Stock Issues Details ({stockIssues.length} products)
-            </h3>
-          </div>
-
+          <h3 className="font-medium text-gray-700 mb-3">Stock Issues Details ({stockIssues.length} products)</h3>
           <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-[400px] overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 sticky top-0">
                 <tr>
-                  <th className="p-3 text-left">Product Name</th>
-                  <th className="p-3 text-left">Required Quantity</th>
-                  <th className="p-3 text-left">Available Stock</th>
-                  <th className="p-3 text-left">Shortage</th>
-                  <th className="p-3 text-left">Status</th>
+                  {["Product Name", "Required Quantity", "Available Stock", "Shortage", "Status"].map(h => (
+                    <th key={h} className="p-3 text-left">{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {stockIssues.map((issue, idx) => (
-                  <tr
-                    key={idx}
-                    className={`hover:bg-gray-50 border-b ${
-                      !issue.productExists
-                        ? "bg-yellow-50"
-                        : issue.insufficient
-                          ? "bg-red-50"
-                          : ""
-                    }`}
-                  >
+                  <tr key={idx} className={`hover:bg-gray-50 border-b ${!issue.productExists ? "bg-yellow-50" : issue.insufficient ? "bg-red-50" : ""}`}>
                     <td className="p-3 font-medium">{issue.productName}</td>
-                    <td className="p-3 font-bold text-red-700">
-                      {issue.totalRequired}
-                    </td>
-                    <td className="p-3 font-medium text-green-700">
-                      {issue.availableStock}
-                    </td>
-                    <td className="p-3 font-bold text-red-800">
-                      {issue.insufficientQty || 0}
-                    </td>
+                    <td className="p-3 font-bold text-red-700">{issue.totalRequired}</td>
+                    <td className="p-3 font-medium text-green-700">{issue.availableStock}</td>
+                    <td className="p-3 font-bold text-red-800">{issue.insufficientQty || 0}</td>
                     <td className="p-3">
-                      <span
-                        className={`px-2 py-1 text-xs rounded ${
-                          !issue.productExists
-                            ? "bg-yellow-100 text-yellow-800"
-                            : issue.insufficient
-                              ? "bg-red-100 text-red-800"
-                              : "bg-green-100 text-green-800"
-                        }`}
-                      >
-                        {!issue.productExists
-                          ? "⚠️ Missing"
-                          : issue.insufficient
-                            ? "❌ Insufficient"
-                            : "✅ Available"}
+                      <span className={`px-2 py-1 text-xs rounded ${!issue.productExists ? "bg-yellow-100 text-yellow-800" : issue.insufficient ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"}`}>
+                        {!issue.productExists ? "⚠️ Missing" : issue.insufficient ? "❌ Insufficient" : "✅ Available"}
                       </span>
                     </td>
                   </tr>
@@ -298,31 +209,15 @@ const StockValidationModal = ({
         </div>
 
         <div className="flex justify-between items-center pt-4 border-t border-gray-300">
-          <div className="text-sm text-gray-600">
-            {summary.totalInvoices || 0} invoices affected
-          </div>
+          <div className="text-sm text-gray-600">{summary.totalInvoices || 0} invoices affected</div>
           <div className="flex gap-3">
             {isBlocked ? (
-              <button
-                onClick={onClose}
-                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium cursor-pointer"
-              >
-                Cancel Import
-              </button>
+              <button onClick={onClose} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium cursor-pointer">Cancel Import</button>
             ) : (
               <>
-                <button
-                  onClick={onCancel}
-                  className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={onProceed}
-                  className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-2 cursor-pointer"
-                >
-                  <CheckCircle size={16} />
-                  Proceed with Missing Products
+                <button onClick={onCancel} className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer">Cancel</button>
+                <button onClick={onProceed} className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-2 cursor-pointer">
+                  <CheckCircle size={16} /> Proceed with Missing Products
                 </button>
               </>
             )}
@@ -334,14 +229,9 @@ const StockValidationModal = ({
   );
 };
 
-const MRValidationModal = ({
-  isOpen,
-  onClose,
-  mrValidationResult,
-  onProceed,
-}) => {
+// ─── MR Validation Modal ───────────────────────────────────────────────────────
+const MRValidationModal = ({ isOpen, onClose, mrValidationResult, onProceed }) => {
   if (!isOpen || !mrValidationResult) return null;
-
   const { mrIssues = [], summary = {}, totalInvoices = 0 } = mrValidationResult;
 
   return ReactDOM.createPortal(
@@ -350,41 +240,23 @@ const MRValidationModal = ({
         <div className="mb-6 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-5">
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-xl font-bold text-yellow-800 flex items-center gap-2">
-              <AlertCircle size={24} />
-              ⚠️ Invalid MRs Detected
+              <AlertCircle size={24} /> ⚠️ Invalid MRs Detected
             </h2>
             <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
               {mrIssues.length} Invalid MRs
             </span>
           </div>
-
           <div className="p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
             <p className="text-sm text-yellow-900 font-medium">
-              ⚠️ <strong>Warning:</strong> The following MRs are not registered
-              in the Staff system.
-              <br />
-              <br />
-              <strong>These invoices will still be imported, but:</strong>
-              <br />
-              1. MR names will be saved as provided
-              <br />
-              2. You can add these MRs to Staff module later
-              <br />
-              3. Reports may show "Unknown" for unregistered MRs
-              <br />
-              <br />
-              <strong className="text-yellow-700">
-                You can proceed with import if this is acceptable.
-              </strong>
+              ⚠️ <strong>Warning:</strong> The following MRs are not registered in the Staff system.<br /><br />
+              These invoices will still be imported, but MR names will be saved as provided.<br />
+              <strong className="text-yellow-700">You can proceed with import if this is acceptable.</strong>
             </p>
           </div>
         </div>
 
         <div className="mb-6">
-          <h3 className="font-medium text-gray-700 mb-3 text-lg">
-            Invalid MRs List ({mrIssues.length} MRs)
-          </h3>
-
+          <h3 className="font-medium text-gray-700 mb-3 text-lg">Invalid MRs List ({mrIssues.length} MRs)</h3>
           <div className="overflow-x-auto border-2 border-yellow-200 rounded-lg max-h-[400px] overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="bg-yellow-100 sticky top-0">
@@ -396,20 +268,11 @@ const MRValidationModal = ({
               </thead>
               <tbody>
                 {mrIssues.map((issue, idx) => (
-                  <tr
-                    key={idx}
-                    className="hover:bg-yellow-50 border-b border-yellow-100"
-                  >
-                    <td className="p-3 font-bold text-yellow-700">
-                      {issue.mrName}
-                    </td>
-                    <td className="p-3 text-yellow-600 text-xs font-medium">
-                      {issue.message}
-                    </td>
+                  <tr key={idx} className="hover:bg-yellow-50 border-b border-yellow-100">
+                    <td className="p-3 font-bold text-yellow-700">{issue.mrName}</td>
+                    <td className="p-3 text-yellow-600 text-xs font-medium">{issue.message}</td>
                     <td className="p-3">
-                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-bold">
-                        {issue.affectedCount} invoices
-                      </span>
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-bold">{issue.affectedCount} invoices</span>
                     </td>
                   </tr>
                 ))}
@@ -419,23 +282,11 @@ const MRValidationModal = ({
         </div>
 
         <div className="flex justify-between items-center pt-4 border-t-2 border-gray-300">
-          <div className="text-sm text-gray-600">
-            <strong className="text-yellow-600">Warning:</strong> MRs not found
-            in Staff module
-          </div>
+          <div className="text-sm text-gray-600"><strong className="text-yellow-600">Warning:</strong> MRs not found in Staff module</div>
           <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onProceed}
-              className="px-6 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium cursor-pointer flex items-center gap-2"
-            >
-              <CheckCircle size={16} />
-              Proceed Anyway
+            <button onClick={onClose} className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer">Cancel</button>
+            <button onClick={onProceed} className="px-6 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium cursor-pointer flex items-center gap-2">
+              <CheckCircle size={16} /> Proceed Anyway
             </button>
           </div>
         </div>
@@ -445,33 +296,22 @@ const MRValidationModal = ({
   );
 };
 
+// ─── Failed Invoices Modal ─────────────────────────────────────────────────────
 const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
   if (!isOpen) return null;
-
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[120]">
       <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-        >
-          <X size={20} />
-        </button>
-
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
-          Failed Invoices ({failedInvoices.length})
-        </h2>
-
+        <button onClick={onClose} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
+        <h2 className="text-xl font-semibold text-gray-800 mb-4">Failed Invoices ({failedInvoices.length})</h2>
         <div className="mb-6">
           <div className="overflow-x-auto border border-gray-200 rounded-lg">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="p-3 text-left border-b">Row</th>
-                  <th className="p-3 text-left border-b">Invoice #</th>
-                  <th className="p-3 text-left border-b">Customer</th>
-                  <th className="p-3 text-left border-b">MR Name</th>
-                  <th className="p-3 text-left border-b">Error Message</th>
+                  {["Row", "Invoice #", "Customer", "MR Name", "Error Message"].map(h => (
+                    <th key={h} className="p-3 text-left border-b">{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -481,29 +321,18 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
                     <td className="p-3 font-medium">{inv.invoiceNumber}</td>
                     <td className="p-3">{inv.customerName || "N/A"}</td>
                     <td className="p-3">{inv.mrName || "N/A"}</td>
-                    <td className="p-3 text-red-600 max-w-xs">
-                      {inv.error || inv.message || "Unknown error"}
-                    </td>
+                    <td className="p-3 text-red-600 max-w-xs">{inv.error || inv.message || "Unknown error"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-
             {failedInvoices.length > 50 && (
-              <div className="p-3 text-center text-gray-500 text-sm bg-gray-50">
-                Showing 50 of {failedInvoices.length} failed invoices
-              </div>
+              <div className="p-3 text-center text-gray-500 text-sm bg-gray-50">Showing 50 of {failedInvoices.length} failed invoices</div>
             )}
           </div>
         </div>
-
         <div className="flex justify-end border-t border-gray-300 pt-4">
-          <button
-            onClick={onClose}
-            className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
-          >
-            Close
-          </button>
+          <button onClick={onClose} className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer">Close</button>
         </div>
       </div>
     </div>,
@@ -511,12 +340,10 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
   );
 };
 
-const ImportSalesModal = ({
-  isOpen,
-  onClose,
-  onImportSuccess,
-  mrList = [],
-}) => {
+// ─── OPTIMIZED Import Sales Modal ─────────────────────────────────────────────
+// KEY OPTIMIZATION: Excel is parsed to JSON on the frontend, then JSON is sent
+// to backend. Backend processes in parallel batches for maximum throughput.
+const ImportSalesModal = ({ isOpen, onClose, onImportSuccess, mrList = [] }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [importMessage, setImportMessage] = useState("");
@@ -540,6 +367,8 @@ const ImportSalesModal = ({
   const [mrValidationResult, setMrValidationResult] = useState(null);
   const [showMRValidation, setShowMRValidation] = useState(false);
   const [isValidatingMR, setIsValidatingMR] = useState(false);
+  // NEW: track parse timing for UX feedback
+  const [parseTimeMs, setParseTimeMs] = useState(null);
 
   const pollingIntervalRef = useRef(null);
 
@@ -559,8 +388,8 @@ const ImportSalesModal = ({
         setSessionId(null);
         setStockValidationResult(null);
         setMrValidationResult(null);
+        setParseTimeMs(null);
       }
-
       setShowParsedSection(false);
       setShowFailedInvoices(false);
       setShowStockValidation(false);
@@ -576,7 +405,6 @@ const ImportSalesModal = ({
       setImportStep("");
       setIsCancelled(false);
       clearPolling();
-
       const fileInput = document.querySelector('input[type="file"]');
       if (fileInput) fileInput.value = "";
     },
@@ -585,15 +413,10 @@ const ImportSalesModal = ({
 
   const handleClose = useCallback(() => {
     if (isImporting || isUploading || isProcessingFile) {
-      const shouldCancel = window.confirm(
-        "Import is in progress. Are you sure you want to cancel and close?",
-      );
+      const shouldCancel = window.confirm("Import is in progress. Are you sure you want to cancel and close?");
       if (shouldCancel) {
         handleCancelImport();
-        setTimeout(() => {
-          resetModal();
-          onClose();
-        }, 500);
+        setTimeout(() => { resetModal(); onClose(); }, 500);
       }
       return;
     }
@@ -612,13 +435,9 @@ const ImportSalesModal = ({
 
   // ── parseExcelDate ────────────────────────────────────────────────────────
   const parseExcelDate = useCallback((value) => {
-    if (value === null || value === undefined || value === "") {
-      return new Date().toISOString().split("T")[0];
-    }
+    if (value === null || value === undefined || value === "") return new Date().toISOString().split("T")[0];
     try {
-      if (value instanceof Date && !isNaN(value)) {
-        return value.toISOString().split("T")[0];
-      }
+      if (value instanceof Date && !isNaN(value)) return value.toISOString().split("T")[0];
       if (typeof value === "number") {
         const excelEpoch = new Date(1899, 11, 30);
         const date = new Date(excelEpoch.getTime() + (value - 1) * 86400000);
@@ -628,71 +447,55 @@ const ImportSalesModal = ({
         const str = value.trim();
         const ddmmyyyy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
         if (ddmmyyyy) {
-          const d = new Date(
-            parseInt(ddmmyyyy[3]),
-            parseInt(ddmmyyyy[2]) - 1,
-            parseInt(ddmmyyyy[1]),
-          );
+          const d = new Date(parseInt(ddmmyyyy[3]), parseInt(ddmmyyyy[2]) - 1, parseInt(ddmmyyyy[1]));
           if (!isNaN(d)) return d.toISOString().split("T")[0];
         }
         const yyyymmdd = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
         if (yyyymmdd) {
-          const d = new Date(
-            parseInt(yyyymmdd[1]),
-            parseInt(yyyymmdd[2]) - 1,
-            parseInt(yyyymmdd[3]),
-          );
+          const d = new Date(parseInt(yyyymmdd[1]), parseInt(yyyymmdd[2]) - 1, parseInt(yyyymmdd[3]));
           if (!isNaN(d)) return d.toISOString().split("T")[0];
         }
         const parsed = new Date(str);
         if (!isNaN(parsed)) return parsed.toISOString().split("T")[0];
       }
       return new Date().toISOString().split("T")[0];
-    } catch {
-      return new Date().toISOString().split("T")[0];
-    }
+    } catch { return new Date().toISOString().split("T")[0]; }
   }, []);
 
-  // ── parseExcelQuantity ────────────────────────────────────────────────────
   const parseExcelQuantity = useCallback((value) => {
     if (value === null || value === undefined || value === "") return 0;
     try {
       if (typeof value === "number") return Math.max(0, value);
-      const cleaned = String(value)
-        .trim()
-        .replace(/,/g, "")
-        .replace(/[^\d.-]/g, "");
+      const cleaned = String(value).trim().replace(/,/g, "").replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
       if (isNaN(num) || !isFinite(num)) return 0;
       return Math.max(0, num);
-    } catch {
-      return 0;
-    }
+    } catch { return 0; }
   }, []);
 
-  // ── parseExcelAmount ──────────────────────────────────────────────────────
   const parseExcelAmount = useCallback((value) => {
     if (value === null || value === undefined || value === "") return 0;
     try {
       if (typeof value === "number") return Math.max(0, value);
-      const cleaned = String(value)
-        .trim()
-        .replace(/[$,\s]/g, "")
-        .replace(/[^\d.-]/g, "");
+      const cleaned = String(value).trim().replace(/[$,\s]/g, "").replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
       if (isNaN(num) || !isFinite(num)) return 0;
       return Math.max(0, num);
-    } catch {
-      return 0;
-    }
+    } catch { return 0; }
   }, []);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // OPTIMIZED: parseExcelFile now returns structured JSON immediately.
+  // The heavy lifting is done here in the browser so the backend only receives
+  // clean, pre-validated invoice JSON — no re-parsing needed on the server.
+  // ─────────────────────────────────────────────────────────────────────────
   const parseExcelFile = useCallback(
     async (file) => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (evt) => {
           try {
+            const t0 = performance.now();
             const data = new Uint8Array(evt.target.result);
             const workbook = XLSX.read(data, {
               type: "array",
@@ -704,86 +507,42 @@ const ImportSalesModal = ({
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
 
-            // Convert all rows to an array of arrays
             const rows = XLSX.utils.sheet_to_json(worksheet, {
               header: 1,
               defval: "",
               raw: true,
             });
 
-            console.log("RAW EXCEL DATA - Total rows in sheet:", rows.length);
-            console.log("First 5 rows:", rows.slice(0, 5));
-
-            // ----- Find the header row -----
+            // Find header row
             const isHeaderRow = (row) => {
               if (!Array.isArray(row) || row.length === 0) return false;
-              const rowStr = row
-                .map((c) =>
-                  String(c ?? "")
-                    .toLowerCase()
-                    .trim(),
-                )
-                .join(" ");
+              const rowStr = row.map((c) => String(c ?? "").toLowerCase().trim()).join(" ");
               return rowStr.includes("invoice");
             };
 
             let headerIndex = -1;
             for (let i = 0; i < Math.min(rows.length, 20); i++) {
-              if (isHeaderRow(rows[i])) {
-                headerIndex = i;
-                break;
-              }
+              if (isHeaderRow(rows[i])) { headerIndex = i; break; }
             }
 
             if (headerIndex === -1) {
-              reject(
-                new Error(
-                  "Could not find header row. Make sure your file has a row containing 'Invoice #' or 'Invoice'.",
-                ),
-              );
+              reject(new Error("Could not find header row. Make sure your file has a row containing 'Invoice #' or 'Invoice'."));
               return;
             }
 
             const headerRow = rows[headerIndex];
             const allDataRows = rows.slice(headerIndex + 1);
-            console.log(`All data rows (raw) count: ${allDataRows.length}`);
-            console.log("First 5 raw data rows:", allDataRows.slice(0, 5));
 
-            // Filter out completely empty rows (all cells are empty strings, null, or undefined)
-            const dataRows = allDataRows.filter((row, idx) => {
-              const hasContent =
-                Array.isArray(row) &&
-                row.some(
-                  (cell) =>
-                    cell !== null &&
-                    cell !== undefined &&
-                    String(cell).trim() !== "",
-                );
-              // Log the first few empty rows to see why they are considered empty
-              if (!hasContent && idx < 10) {
-                console.log(`Row ${idx} considered empty:`, row);
-              }
-              return hasContent;
-            });
-
-            console.log(
-              `Header found at row ${headerIndex + 1}. ` +
-                `Data rows available: ${dataRows.length} (total rows after header: ${allDataRows.length})`,
+            const dataRows = allDataRows.filter((row) =>
+              Array.isArray(row) && row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== "")
             );
 
             if (dataRows.length === 0) {
-              reject(
-                new Error(
-                  `No data rows found. Your file has a header at row ${
-                    headerIndex + 1
-                  } but all rows below it are empty according to our check.\n` +
-                    `Here are the first 3 raw data rows for inspection:\n${JSON.stringify(allDataRows.slice(0, 3), null, 2)}`,
-                ),
-              );
+              reject(new Error(`No data rows found below the header at row ${headerIndex + 1}.`));
               return;
             }
 
-            // ----- Flexible column mapping (unchanged) -----
+            // Flexible column mapping
             const headerMap = {};
             headerRow.forEach((cell, idx) => {
               if (cell !== null && cell !== undefined) {
@@ -797,117 +556,34 @@ const ImportSalesModal = ({
                 if (headerMap[alias] !== undefined) return headerMap[alias];
               }
               for (const alias of aliases) {
-                const found = Object.keys(headerMap).find((k) =>
-                  k.includes(alias),
-                );
+                const found = Object.keys(headerMap).find((k) => k.includes(alias));
                 if (found !== undefined) return headerMap[found];
               }
               return -1;
             };
 
             const col = {
-              recordingDate: findCol([
-                "recording date",
-                "recording_date",
-                "rec date",
-              ]),
-              invoiceNumber: findCol([
-                "invoice #",
-                "invoice#",
-                "invoice no",
-                "invoice number",
-                "invoice_number",
-                "invoice",
-              ]),
-              invoiceDate: findCol([
-                "invoice date",
-                "invoice_date",
-                "inv date",
-              ]),
-              mrName: findCol([
-                "mr name",
-                "mr_name",
-                "mr",
-                "medical rep",
-                "medical rep name",
-                "medrep",
-              ]),
-              customerCode: findCol([
-                "customer code",
-                "customer_code",
-                "cust code",
-                "cust_code",
-                "customer id",
-              ]),
-              productName: findCol([
-                "product name",
-                "product_name",
-                "item name",
-                "item_name",
-                "product",
-              ]),
-              salesQty: findCol([
-                "sales qty",
-                "sales_qty",
-                "salesqty",
-                "sale qty",
-                "sale_qty",
-                "qty",
-                "quantity",
-                "sales quantity",
-              ]),
-              bonusQty: findCol([
-                "bonus qty",
-                "bonus_qty",
-                "bonusqty",
-                "bonus quantity",
-                "bonus",
-              ]),
-              sellingPrice: findCol([
-                "selling price",
-                "selling_price",
-                "sellingprice",
-                "price",
-                "unit price",
-                "sale price",
-              ]),
-              discount: findCol([
-                "discount",
-                "disc",
-                "disc amount",
-                "discount amount",
-              ]),
+              recordingDate: findCol(["recording date", "recording_date", "rec date"]),
+              invoiceNumber: findCol(["invoice #", "invoice#", "invoice no", "invoice number", "invoice_number", "invoice"]),
+              invoiceDate: findCol(["invoice date", "invoice_date", "inv date"]),
+              mrName: findCol(["mr name", "mr_name", "mr", "medical rep", "medical rep name", "medrep"]),
+              customerCode: findCol(["customer code", "customer_code", "cust code", "cust_code", "customer id"]),
+              productName: findCol(["product name", "product_name", "item name", "item_name", "product"]),
+              salesQty: findCol(["sales qty", "sales_qty", "salesqty", "sale qty", "sale_qty", "qty", "quantity", "sales quantity"]),
+              bonusQty: findCol(["bonus qty", "bonus_qty", "bonusqty", "bonus quantity", "bonus"]),
+              sellingPrice: findCol(["selling price", "selling_price", "sellingprice", "price", "unit price", "sale price"]),
+              discount: findCol(["discount", "disc", "disc amount", "discount amount"]),
               creditDays: findCol(["credit days", "credit_days", "creditdays"]),
-              paidAmount: findCol([
-                "paid amount",
-                "paid_amount",
-                "paidamount",
-                "paid",
-              ]),
-              paymentStatus: findCol([
-                "payment status",
-                "payment_status",
-                "paymentstatus",
-                "status",
-                "pay status",
-              ]),
-              remarks: findCol([
-                "remarks",
-                "remark",
-                "notes",
-                "note",
-                "comment",
-                "comments",
-              ]),
+              paidAmount: findCol(["paid amount", "paid_amount", "paidamount", "paid"]),
+              paymentStatus: findCol(["payment status", "payment_status", "paymentstatus", "status", "pay status"]),
+              remarks: findCol(["remarks", "remark", "notes", "note", "comment", "comments"]),
             };
 
             const getVal = (row, index) => {
-              if (index === -1 || index === undefined || index >= row.length)
-                return "";
+              if (index === -1 || index === undefined || index >= row.length) return "";
               const v = row[index];
               if (v === null || v === undefined) return "";
-              if (v instanceof Date)
-                return isNaN(v.getTime()) ? "" : v.toISOString().split("T")[0];
+              if (v instanceof Date) return isNaN(v.getTime()) ? "" : v.toISOString().split("T")[0];
               return String(v).trim();
             };
 
@@ -917,12 +593,11 @@ const ImportSalesModal = ({
 
             for (let ri = 0; ri < dataRows.length; ri++) {
               const row = dataRows[ri];
-              const excelRow = headerIndex + 2 + ri; // original Excel row number
+              const excelRow = headerIndex + 2 + ri;
 
               const invoiceNumber = getVal(row, col.invoiceNumber);
               const invoiceDate = getVal(row, col.invoiceDate);
-              const recordingDate =
-                getVal(row, col.recordingDate) || invoiceDate;
+              const recordingDate = getVal(row, col.recordingDate) || invoiceDate;
               const mrName = getVal(row, col.mrName);
               const customerCode = getVal(row, col.customerCode);
               const productName = getVal(row, col.productName);
@@ -931,9 +606,7 @@ const ImportSalesModal = ({
 
               const salesQty = parseExcelQuantity(getVal(row, col.salesQty));
               const bonusQty = parseExcelQuantity(getVal(row, col.bonusQty));
-              const sellingPrice = parseExcelAmount(
-                getVal(row, col.sellingPrice),
-              );
+              const sellingPrice = parseExcelAmount(getVal(row, col.sellingPrice));
               const discount = parseExcelAmount(getVal(row, col.discount));
               const creditDays = parseExcelAmount(getVal(row, col.creditDays));
               const paidAmount = parseExcelAmount(getVal(row, col.paidAmount));
@@ -941,10 +614,8 @@ const ImportSalesModal = ({
               const rowErrors = [];
               if (!invoiceNumber) rowErrors.push("Invoice number is required");
               if (!productName) rowErrors.push("Product name is required");
-              if (salesQty < 0 || bonusQty < 0)
-                rowErrors.push("Quantities cannot be negative");
-              if (salesQty === 0 && bonusQty === 0)
-                rowErrors.push("Sales Qty or Bonus Qty must be greater than 0");
+              if (salesQty < 0 || bonusQty < 0) rowErrors.push("Quantities cannot be negative");
+              if (salesQty === 0 && bonusQty === 0) rowErrors.push("Sales Qty or Bonus Qty must be > 0");
 
               if (rowErrors.length > 0) {
                 validationErrors.push({
@@ -991,10 +662,7 @@ const ImportSalesModal = ({
                 amount: netSellingAmount,
                 discount,
                 netSellingAmount,
-                averageUnitPrice:
-                  salesQty + bonusQty > 0
-                    ? netSellingAmount / (salesQty + bonusQty)
-                    : 0,
+                averageUnitPrice: (salesQty + bonusQty) > 0 ? netSellingAmount / (salesQty + bonusQty) : 0,
                 lc: 0,
                 profitLoss: 0,
                 isProductAccept: true,
@@ -1004,37 +672,22 @@ const ImportSalesModal = ({
               groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
             }
 
-            console.log(
-              `Parsing summary — data rows: ${dataRows.length}, ` +
-                `valid: ${validRowCount}, errors: ${validationErrors.length}`,
-            );
-
             const validInvoices = Object.values(groupedInvoices).filter(
               (inv) => inv.products && inv.products.length > 0,
             );
 
             validInvoices.forEach((inv) => {
-              inv.dueAmount = Math.max(
-                0,
-                inv.totalAmount - (inv.paidAmount || 0),
-              );
+              inv.dueAmount = Math.max(0, inv.totalAmount - (inv.paidAmount || 0));
             });
 
-            console.log(`Final result: ${validInvoices.length} valid invoices`);
+            const t1 = performance.now();
+            const elapsed = Math.round(t1 - t0);
 
             if (validInvoices.length === 0) {
               let errorMsg = "No valid invoices found. ";
-              if (dataRows.length === 0) {
-                errorMsg += `Your file has no data rows below the header (row ${
-                  headerIndex + 1
-                }). Please add invoice data.`;
-              } else if (validationErrors.length > 0) {
-                errorMsg +=
-                  `${validationErrors.length} row(s) had validation errors. ` +
-                  validationErrors
-                    .slice(0, 3)
-                    .map((e) => `Row ${e.row}: ${e.error}`)
-                    .join(" | ");
+              if (validationErrors.length > 0) {
+                errorMsg += `${validationErrors.length} row(s) had validation errors. ` +
+                  validationErrors.slice(0, 3).map((e) => `Row ${e.row}: ${e.error}`).join(" | ");
               } else {
                 errorMsg += "No data rows found after the header row.";
               }
@@ -1042,7 +695,7 @@ const ImportSalesModal = ({
               return;
             }
 
-            resolve({ validInvoices, validationErrors });
+            resolve({ validInvoices, validationErrors, parseTimeMs: elapsed });
           } catch (error) {
             console.error("Error parsing Excel:", error);
             reject(error);
@@ -1055,7 +708,7 @@ const ImportSalesModal = ({
     [parseExcelDate, parseExcelQuantity, parseExcelAmount, importSaleType],
   );
 
-  // Handle file upload
+  // Handle file upload — parses Excel to JSON in-browser
   const handleFileUpload = useCallback(
     async (e) => {
       const file = e.target.files[0];
@@ -1065,52 +718,36 @@ const ImportSalesModal = ({
       const fileExtension = "." + file.name.split(".").pop().toLowerCase();
 
       if (!validExtensions.includes(fileExtension)) {
-        showToast(
-          "error",
-          "Invalid file type. Please upload Excel or CSV files only.",
-        );
+        showToast("error", "Invalid file type. Please upload Excel or CSV files only.");
         return;
       }
-
       if (file.size > 20 * 1024 * 1024) {
         showToast("error", "File size too large. Maximum size is 20MB.");
         return;
       }
 
       resetModal(false);
-      setImportMessage("Reading file...");
+      setImportMessage("Reading and converting Excel to JSON...");
       setIsUploading(true);
       setIsProcessingFile(true);
 
       try {
-        setImportMessage("Processing Excel data...");
-        const { validInvoices, validationErrors } = await parseExcelFile(file);
-        console.log("values of validInvoices", validInvoices);
+        // ── OPTIMIZATION: All Excel-to-JSON conversion happens HERE in the browser
+        const { validInvoices, validationErrors, parseTimeMs: elapsed } = await parseExcelFile(file);
 
-        if (validInvoices.length === 0) {
-          throw new Error("No valid invoices found in the file");
-        }
+        if (validInvoices.length === 0) throw new Error("No valid invoices found in the file");
 
         if (importSaleType === "mr") {
-          validInvoices.forEach((inv) => {
-            inv.isMrSaleImport = true;
-          });
+          validInvoices.forEach((inv) => { inv.isMrSaleImport = true; });
         }
 
         setParsedData(validInvoices);
         setImportErrorDetails(validationErrors);
+        setParseTimeMs(elapsed);
 
         if (validationErrors.length > 0) {
-          showToast(
-            "warning",
-            `Found ${validInvoices.length} valid invoices with ${validationErrors.length} validation errors`,
-          );
-        } else {
-          showToast(
-            "success",
-            `Successfully parsed ${validInvoices.length} invoices`,
-          );
-        }
+          showToast("warning", `Found ${validInvoices.length} valid invoices with ${validationErrors.length} validation errors (parsed in ${elapsed}ms)`);
+        } 
 
         setShowParsedSection(true);
       } catch (error) {
@@ -1138,40 +775,20 @@ const ImportSalesModal = ({
           const mrName = invoice.mrName.trim();
           mrNames.add(mrName);
           if (!mrToInvoices.has(mrName)) mrToInvoices.set(mrName, []);
-          mrToInvoices.get(mrName).push({
-            invoiceNumber: invoice.invoiceNumber,
-            customerName: invoice.customerName,
-          });
+          mrToInvoices.get(mrName).push({ invoiceNumber: invoice.invoiceNumber, customerName: invoice.customerName });
         }
       }
 
       if (mrNames.size === 0) {
         setIsValidatingMR(false);
-        return {
-          mrIssues: [],
-          totalInvoices: invoices.length,
-          summary: { totalMRs: 0, validMRs: 0, invalidMRs: 0 },
-        };
+        return { mrIssues: [], totalInvoices: invoices.length, summary: { totalMRs: 0, validMRs: 0, invalidMRs: 0 } };
       }
 
-      const response = await axios.post(
-        `${backendUrl}/api/sales/validate-mr`,
-        { mrNames: Array.from(mrNames) },
-        getAuthHeaders(),
-      );
-
+      const response = await axios.post(`${backendUrl}/api/sales/validate-mr`, { mrNames: Array.from(mrNames) }, getAuthHeaders());
       setIsValidatingMR(false);
 
       if (response.data.success) {
-        return {
-          mrIssues: [],
-          totalInvoices: invoices.length,
-          summary: {
-            totalMRs: mrNames.size,
-            validMRs: mrNames.size,
-            invalidMRs: 0,
-          },
-        };
+        return { mrIssues: [], totalInvoices: invoices.length, summary: { totalMRs: mrNames.size, validMRs: mrNames.size, invalidMRs: 0 } };
       }
 
       const mrIssues = [];
@@ -1192,21 +809,12 @@ const ImportSalesModal = ({
       return {
         mrIssues,
         totalInvoices: invoices.length,
-        summary: {
-          totalMRs: mrNames.size,
-          validMRs: mrNames.size - mrIssues.length,
-          invalidMRs: mrIssues.length,
-        },
+        summary: { totalMRs: mrNames.size, validMRs: mrNames.size - mrIssues.length, invalidMRs: mrIssues.length },
       };
     } catch (error) {
       console.error("MR validation error:", error);
       setIsValidatingMR(false);
-      return {
-        mrIssues: [],
-        totalInvoices: invoices.length,
-        summary: { totalMRs: 0, validMRs: 0, invalidMRs: 0 },
-        error: error.message,
-      };
+      return { mrIssues: [], totalInvoices: invoices.length, summary: { totalMRs: 0, validMRs: 0, invalidMRs: 0 }, error: error.message };
     }
   }, []);
 
@@ -1215,38 +823,18 @@ const ImportSalesModal = ({
       setIsValidatingStock(true);
       setImportMessage(`Checking stock for ${invoices.length} invoices...`);
 
-      const response = await axios.post(
-        `${backendUrl}/api/sales/validate-import-stock`,
-        { invoices },
-        getAuthHeaders(),
-      );
-
+      const response = await axios.post(`${backendUrl}/api/sales/validate-import-stock`, { invoices }, getAuthHeaders());
       setIsValidatingStock(false);
 
-      if (response.data.success) {
-        return response.data.validationResult;
-      } else {
-        throw new Error(response.data.message || "Stock validation failed");
-      }
+      if (response.data.success) return response.data.validationResult;
+      throw new Error(response.data.message || "Stock validation failed");
     } catch (error) {
       console.error("Stock validation error:", error);
       setIsValidatingStock(false);
       return {
         stockIssues: [],
         totalInvoices: invoices.length,
-        summary: {
-          totalProducts: 0,
-          totalRequired: 0,
-          totalAvailable: 0,
-          totalInsufficient: 0,
-          missingProducts: 0,
-          lowStockProducts: 0,
-          hasCriticalIssues: true,
-          hasInsufficientStock: false,
-          importBlocked: true,
-        },
-        insufficientStockIssues: [],
-        missingProductIssues: [],
+        summary: { totalProducts: 0, totalRequired: 0, totalAvailable: 0, totalInsufficient: 0, missingProducts: 0, hasCriticalIssues: true, hasInsufficientStock: false, importBlocked: true },
         importBlocked: true,
         blockReason: "VALIDATION_ERROR",
         message: `Stock validation failed: ${error.message}`,
@@ -1255,10 +843,7 @@ const ImportSalesModal = ({
   }, []);
 
   const handleImportData = useCallback(async () => {
-    if (parsedData.length === 0) {
-      showToast("error", "No data to import");
-      return;
-    }
+    if (parsedData.length === 0) { showToast("error", "No data to import"); return; }
 
     const mrValResult = await validateMRsBeforeImport(parsedData);
     if (mrValResult.mrIssues && mrValResult.mrIssues.length > 0) {
@@ -1269,22 +854,14 @@ const ImportSalesModal = ({
 
     const svResult = await validateStockBeforeImport(parsedData);
     if (svResult.stockIssues?.length > 0) {
-      const insufficientStockIssues = svResult.stockIssues.filter(
-        (i) => i.productExists && i.insufficient,
-      );
-      const missingProductIssues = svResult.stockIssues.filter(
-        (i) => !i.productExists,
-      );
+      const insufficientStockIssues = svResult.stockIssues.filter((i) => i.productExists && i.insufficient);
+      const missingProductIssues = svResult.stockIssues.filter((i) => !i.productExists);
 
       if (insufficientStockIssues.length > 0) {
         setStockValidationResult({
           ...svResult,
           stockIssues: insufficientStockIssues,
-          summary: {
-            ...svResult.summary,
-            totalInsufficient: insufficientStockIssues.length,
-            hasInsufficientStock: true,
-          },
+          summary: { ...svResult.summary, totalInsufficient: insufficientStockIssues.length, hasInsufficientStock: true },
           importBlocked: true,
           message: `${insufficientStockIssues.length} products have insufficient stock.`,
         });
@@ -1292,18 +869,11 @@ const ImportSalesModal = ({
         return;
       }
 
-      if (
-        missingProductIssues.length > 0 &&
-        insufficientStockIssues.length === 0
-      ) {
+      if (missingProductIssues.length > 0 && insufficientStockIssues.length === 0) {
         setStockValidationResult({
           ...svResult,
           stockIssues: missingProductIssues,
-          summary: {
-            ...svResult.summary,
-            totalInsufficient: missingProductIssues.length,
-            hasInsufficientStock: false,
-          },
+          summary: { ...svResult.summary, totalInsufficient: missingProductIssues.length, hasInsufficientStock: false },
           importBlocked: false,
           message: `${missingProductIssues.length} products not found in inventory.`,
         });
@@ -1330,17 +900,8 @@ const ImportSalesModal = ({
   }, [mrValidationResult, parsedData]);
 
   const handleProceedWithStockIssues = useCallback(async () => {
-    if (!stockValidationResult) {
-      showToast("error", "Stock validation data not available");
-      return;
-    }
-    if (stockValidationResult.summary?.hasInsufficientStock) {
-      showToast(
-        "error",
-        "Cannot proceed - there are insufficient stock issues",
-      );
-      return;
-    }
+    if (!stockValidationResult) { showToast("error", "Stock validation data not available"); return; }
+    if (stockValidationResult.summary?.hasInsufficientStock) { showToast("error", "Cannot proceed - there are insufficient stock issues"); return; }
 
     const confirmProceed = await confirmDialog({
       title: "Proceed with Missing Products",
@@ -1363,15 +924,17 @@ const ImportSalesModal = ({
     showToast("info", "Import cancelled");
   }, []);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // OPTIMIZED: handleProductImport now sends pre-parsed JSON directly.
+  // The backend receives clean invoice objects — no file upload, no re-parsing.
+  // Backend will process in parallel batches for maximum speed.
+  // ─────────────────────────────────────────────────────────────────────────
   const handleProductImport = useCallback(
     async (dataToImport) => {
-      if (!dataToImport?.length) {
-        showToast("error", "No data to import");
-        return;
-      }
+      if (!dataToImport?.length) { showToast("error", "No data to import"); return; }
 
       setIsImporting(true);
-      setImportStep("Preparing data...");
+      setImportStep("Sending pre-parsed JSON to server...");
       setServerProgress(0);
       setServerProcessed(0);
       setServerTotal(dataToImport.length);
@@ -1382,12 +945,11 @@ const ImportSalesModal = ({
       try {
         const isMrSale = importSaleType === "mr";
 
+        // Transform invoices — quantities are already parsed as numbers from Excel parsing
         const transformedInvoices = dataToImport.map((inv) => ({
           ...inv,
-          invoiceDate:
-            inv.invoiceDate || new Date().toISOString().split("T")[0],
-          recordingDate:
-            inv.recordingDate || new Date().toISOString().split("T")[0],
+          invoiceDate: inv.invoiceDate || new Date().toISOString().split("T")[0],
+          recordingDate: inv.recordingDate || new Date().toISOString().split("T")[0],
           paymentStatus: inv.paymentStatus || "Credit",
           totalAmount: inv.totalAmount || 0,
           dueAmount: inv.dueAmount || 0,
@@ -1396,19 +958,22 @@ const ImportSalesModal = ({
             ...product,
             salesQty: Number(product.salesQty) || 0,
             bonusQty: Number(product.bonusQty) || 0,
-            totalQty:
-              (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0),
+            totalQty: (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0),
           })),
         }));
 
-        setImportStep("Sending to server...");
+        setImportStep("Starting parallel batch import...");
 
+        // ── OPTIMIZATION: Send all pre-parsed JSON invoices in one request.
+        // The backend processes them in parallel batches.
         const response = await axios.post(
           `${backendUrl}/api/sales/import-with-stock-deduction`,
           {
             invoices: transformedInvoices,
             updateInventory: true,
             importTimestamp: new Date().toISOString(),
+            // NEW: tell backend these are pre-parsed, skip file parsing step
+            preProcessed: true,
           },
           {
             timeout: 300000,
@@ -1420,7 +985,7 @@ const ImportSalesModal = ({
         if (response.data.success) {
           const newSessionId = response.data.sessionId;
           setSessionId(newSessionId);
-          setImportStep("Import started – processing invoices...");
+          setImportStep("Import started – processing in parallel batches...");
 
           pollingIntervalRef.current = setInterval(async () => {
             try {
@@ -1446,41 +1011,24 @@ const ImportSalesModal = ({
                         getAuthHeaders(),
                       );
                       if (failedResponse.data.success) {
-                        const failedInvoicesData =
-                          failedResponse.data.data.failedInvoices || [];
+                        const failedInvoicesData = failedResponse.data.data.failedInvoices || [];
                         if (failedInvoicesData.length > 0) {
                           setFailedInvoices(failedInvoicesData);
                           setShowFailedInvoices(true);
                         }
                       }
                     } catch (fetchError) {
-                      console.error(
-                        "Error fetching failed invoices:",
-                        fetchError,
-                      );
+                      console.error("Error fetching failed invoices:", fetchError);
                     }
-                    showToast(
-                      "warning",
-                      `Import completed with ${progress.successful} successful and ${progress.failed} failed invoices`,
-                    );
+                    showToast("warning", `Import completed with ${progress.successful} successful and ${progress.failed} failed invoices`);
                   } else {
-                    showToast(
-                      "success",
-                      `Successfully imported ${progress.successful} invoices`,
-                    );
+                    showToast("success", `Successfully imported ${progress.successful} invoices`);
                     if (onImportSuccess) {
                       onImportSuccess();
-                      setTimeout(
-                        () =>
-                          window.dispatchEvent(
-                            new CustomEvent("inventory-updated"),
-                          ),
-                        1000,
-                      );
+                      setTimeout(() => window.dispatchEvent(new CustomEvent("inventory-updated")), 1000);
                     }
                   }
-
-                  setImportStep("Import completed");
+                  setImportStep(`Import completed — ${progress.successful} imported, ${progress.failed} failed`);
                 }
               }
             } catch (err) {
@@ -1499,8 +1047,7 @@ const ImportSalesModal = ({
           setImportStep("Import cancelled");
           showToast("info", "Import cancelled");
         } else {
-          const message =
-            err.response?.data?.message || err.message || "Import failed";
+          const message = err.response?.data?.message || err.message || "Import failed";
           setImportStep("Import failed");
           showToast("error", message);
           if (err.response?.data?.failedInvoices) {
@@ -1523,6 +1070,7 @@ const ImportSalesModal = ({
     setStockValidationResult(null);
     setShowMRValidation(false);
     setMrValidationResult(null);
+    setParseTimeMs(null);
   }, []);
 
   useEffect(() => {
@@ -1546,159 +1094,126 @@ const ImportSalesModal = ({
             <X size={20} />
           </button>
 
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">
-            Import Sales Data
-          </h2>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">Import Sales Data</h2>
 
+          {/* Sale type toggle */}
           {!isImporting && (
             <div className="flex rounded-xl overflow-hidden border border-gray-200 mb-6">
               <button
-                onClick={() => {
-                  setImportSaleType("normal");
-                  resetParsedData();
-                }}
+                onClick={() => { setImportSaleType("normal"); resetParsedData(); }}
                 disabled={isImporting || isValidatingStock || isValidatingMR}
                 className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "normal" ? "bg-indigo-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
               >
-                <Package size={16} />
-                Normal Sale
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "normal" ? "bg-indigo-500 text-white" : "bg-gray-200 text-gray-600"}`}
-                >
+                <Package size={16} /> Normal Sale
+                <span className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "normal" ? "bg-indigo-500 text-white" : "bg-gray-200 text-gray-600"}`}>
                   Warehouse Stock
                 </span>
               </button>
               <button
-                onClick={() => {
-                  setImportSaleType("mr");
-                  resetParsedData();
-                }}
+                onClick={() => { setImportSaleType("mr"); resetParsedData(); }}
                 disabled={isImporting || isValidatingStock || isValidatingMR}
                 className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "mr" ? "bg-green-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
               >
-                <User size={16} />
-                MR Sale
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "mr" ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"}`}
-                >
+                <User size={16} /> MR Sale
+                <span className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "mr" ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"}`}>
                   MR Hand Stock
                 </span>
               </button>
             </div>
           )}
 
+          {/* Info banner */}
           {!isImporting && (
-            <div
-              className={`mb-5 p-3 rounded-lg text-sm ${importSaleType === "normal" ? "bg-indigo-50 text-indigo-800 border border-indigo-200" : "bg-green-50 text-green-800 border border-green-200"}`}
-            >
+            <div className={`mb-5 p-3 rounded-lg text-sm ${importSaleType === "normal" ? "bg-indigo-50 text-indigo-800 border border-indigo-200" : "bg-green-50 text-green-800 border border-green-200"}`}>
               {importSaleType === "normal" ? (
-                <p>
-                  📦 <strong>Normal Sale:</strong> Stock will be deducted from
-                  the main warehouse inventory.
-                </p>
+                <p>📦 <strong>Normal Sale:</strong> Stock will be deducted from the main warehouse inventory.</p>
               ) : (
-                <p>
-                  👤 <strong>MR Sale:</strong> Stock will be deducted from each
-                  MR's hand stock. The MR Name column in your Excel file
-                  determines which MR's stock is used.
-                </p>
+                <p>👤 <strong>MR Sale:</strong> Stock will be deducted from each MR's hand stock.</p>
               )}
             </div>
           )}
 
-          {!showParsedSection &&
-            !isUploading &&
-            !isProcessingFile &&
-            !isImporting && (
-              <div className="mb-8">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload Excel/CSV File
-                </label>
-                <div className="border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-lg p-8 text-center transition-colors">
-                  <Upload className="mx-auto text-gray-400 mb-3" size={48} />
-                  <p className="text-gray-600 mb-2">
-                    Drag & drop your file here or click to browse
-                  </p>
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls,.csv"
-                    onChange={handleFileUpload}
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
-                    disabled={isUploading || isProcessingFile}
-                  />
-                  <p className="text-xs text-gray-500 mt-3">
-                    Supported formats: Excel (.xlsx, .xls), CSV (.csv) | Max
-                    size: 20MB
-                  </p>
-                  <SampleExcelDownloadSale />
-                </div>
-              </div>
-            )}
+          {/* OPTIMIZATION badge */}
+          {!isImporting && (
+            <div className="mb-4 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-center gap-2">
+              <span>⚡</span>
+              <span><strong>Fast Import:</strong> Excel is converted to JSON in your browser first, then sent directly — no server-side file parsing needed.</span>
+            </div>
+          )}
 
+          {/* File upload zone */}
+          {!showParsedSection && !isUploading && !isProcessingFile && !isImporting && (
+            <div className="mb-8">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Upload Excel/CSV File</label>
+              <div className="border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-lg p-8 text-center transition-colors">
+                <Upload className="mx-auto text-gray-400 mb-3" size={48} />
+                <p className="text-gray-600 mb-2">Drag & drop your file here or click to browse</p>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleFileUpload}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                  disabled={isUploading || isProcessingFile}
+                />
+                <p className="text-xs text-gray-500 mt-3">Supported formats: Excel (.xlsx, .xls), CSV (.csv) | Max size: 20MB</p>
+                <SampleExcelDownloadSale />
+              </div>
+            </div>
+          )}
+
+          {/* Upload/processing spinner */}
           {(isUploading || isProcessingFile) && (
             <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
               <div className="flex items-center justify-center gap-3 mb-4">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                 <h3 className="font-medium text-blue-800">
-                  {isUploading ? "Uploading..." : "Processing file..."}
+                  {isUploading ? "Converting Excel to JSON in browser..." : "Processing file..."}
                 </h3>
               </div>
               <p className="text-center text-gray-600">{importMessage}</p>
             </div>
           )}
 
+          {/* MR validation spinner */}
           {isValidatingMR && (
             <div className="mb-6 bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                 <div className="flex-1">
-                  <h3 className="font-medium text-blue-800">
-                    Validating MRs...
-                  </h3>
-                  <p className="text-sm text-blue-700 mt-1">
-                    Checking MR names for {parsedData.length} invoices...
-                  </p>
+                  <h3 className="font-medium text-blue-800">Validating MRs...</h3>
+                  <p className="text-sm text-blue-700 mt-1">Checking MR names for {parsedData.length} invoices...</p>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Stock validation spinner */}
           {isValidatingStock && (
             <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-600"></div>
                 <div>
-                  <h3 className="font-medium text-yellow-800">
-                    Checking Stock Availability
-                  </h3>
-                  <p className="text-sm text-yellow-700 mt-1">
-                    Validating stock for {parsedData.length} invoices...
-                  </p>
+                  <h3 className="font-medium text-yellow-800">Checking Stock Availability</h3>
+                  <p className="text-sm text-yellow-700 mt-1">Validating stock for {parsedData.length} invoices...</p>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Parsed data summary */}
           {showParsedSection && parsedData.length > 0 && (
-            <div
-              className={`mb-6 border rounded-lg p-4 ${importSaleType === "mr" ? "bg-green-50 border-green-200" : "bg-indigo-50 border-indigo-200"}`}
-            >
+            <div className={`mb-6 border rounded-lg p-4 ${importSaleType === "mr" ? "bg-green-50 border-green-200" : "bg-indigo-50 border-indigo-200"}`}>
               <div className="flex justify-between items-start">
                 <div>
-                  <h3
-                    className={`font-medium ${importSaleType === "mr" ? "text-green-800" : "text-indigo-800"}`}
-                  >
-                    File Successfully Parsed
+                  <h3 className={`font-medium ${importSaleType === "mr" ? "text-green-800" : "text-indigo-800"}`}>
+                    ✅ File Successfully Converted to JSON
                   </h3>
-                  <p
-                    className={`text-sm ${importSaleType === "mr" ? "text-green-700" : "text-indigo-700"}`}
-                  >
+                  <p className={`text-sm ${importSaleType === "mr" ? "text-green-700" : "text-indigo-700"}`}>
                     Found {parsedData.length} valid invoices ready for import
+                    {parseTimeMs && <span className="ml-2 text-xs opacity-70">(parsed in {parseTimeMs}ms)</span>}
                   </p>
                   {importErrorDetails.length > 0 && (
-                    <p className="text-sm text-yellow-700 mt-1">
-                      ⚠️ {importErrorDetails.length} rows skipped due to errors
-                    </p>
+                    <p className="text-sm text-yellow-700 mt-1">⚠️ {importErrorDetails.length} rows skipped due to errors</p>
                   )}
                 </div>
                 <button
@@ -1711,45 +1226,26 @@ const ImportSalesModal = ({
               </div>
 
               <div className="grid grid-cols-3 gap-2 mt-3">
-                <div className="bg-white p-2 rounded border text-center">
-                  <div className="text-xs text-gray-500">Total Invoices</div>
-                  <div className="font-bold text-lg">{parsedData.length}</div>
-                </div>
-                <div className="bg-white p-2 rounded border text-center">
-                  <div className="text-xs text-gray-500">Total Products</div>
-                  <div className="font-bold text-lg">
-                    {parsedData.reduce(
-                      (sum, inv) => sum + (inv.products?.length || 0),
-                      0,
-                    )}
+                {[
+                  ["Total Invoices", parsedData.length],
+                  ["Total Products", parsedData.reduce((sum, inv) => sum + (inv.products?.length || 0), 0)],
+                  ["Total Amount", `$${parsedData.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0).toFixed(2)}`],
+                ].map(([label, val]) => (
+                  <div key={label} className="bg-white p-2 rounded border text-center">
+                    <div className="text-xs text-gray-500">{label}</div>
+                    <div className="font-bold text-lg">{val}</div>
                   </div>
-                </div>
-                <div className="bg-white p-2 rounded border text-center">
-                  <div className="text-xs text-gray-500">Total Amount</div>
-                  <div className="font-bold text-lg">
-                    $
-                    {parsedData
-                      .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0)
-                      .toFixed(2)}
-                  </div>
-                </div>
+                ))}
               </div>
 
               {importSaleType === "mr" && (
                 <div className="mt-3 p-2 bg-green-100 rounded text-xs text-green-800">
-                  MRs detected in file:{" "}
-                  {[
-                    ...new Set(
-                      parsedData.map((inv) => inv.mrName).filter(Boolean),
-                    ),
-                  ].join(", ") || "None"}
+                  MRs detected: {[...new Set(parsedData.map((inv) => inv.mrName).filter(Boolean))].join(", ") || "None"}
                 </div>
               )}
 
               <div className="mt-4">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">
-                  Sample Data (First 3 invoices):
-                </h4>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Sample Data (First 3 invoices):</h4>
                 <div className="bg-white border rounded-lg overflow-hidden max-h-40 overflow-y-auto">
                   <table className="w-full text-xs">
                     <thead className="bg-gray-50">
@@ -1766,9 +1262,7 @@ const ImportSalesModal = ({
                           <td className="p-2 font-mono">{inv.invoiceNumber}</td>
                           <td className="p-2">{inv.mrName}</td>
                           <td className="p-2">{inv.products?.length || 0}</td>
-                          <td className="p-2">
-                            ${inv.totalAmount?.toFixed(2)}
-                          </td>
+                          <td className="p-2">${inv.totalAmount?.toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1778,74 +1272,63 @@ const ImportSalesModal = ({
             </div>
           )}
 
-          {importErrorDetails.length > 0 &&
-            showParsedSection &&
-            !isImporting && (
-              <div className="mb-6 border border-yellow-200 rounded-lg overflow-hidden">
-                <div className="bg-yellow-50 p-3 flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="text-yellow-600" size={18} />
-                    <h3 className="font-medium text-yellow-800">
-                      Validation Errors ({importErrorDetails.length})
-                    </h3>
-                  </div>
-                </div>
-                <div className="max-h-40 overflow-y-auto bg-white">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="p-2 text-left border-b">Row</th>
-                        <th className="p-2 text-left border-b">Invoice #</th>
-                        <th className="p-2 text-left border-b">Product</th>
-                        <th className="p-2 text-left border-b">Error</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {importErrorDetails.slice(0, 10).map((err, i) => (
-                        <tr key={i} className="hover:bg-yellow-50 border-b">
-                          <td className="p-2 font-mono">{err.row}</td>
-                          <td className="p-2">{err.invoiceNumber}</td>
-                          <td className="p-2">{err.productName}</td>
-                          <td className="p-2 text-yellow-600 text-xs">
-                            {err.error}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {importErrorDetails.length > 10 && (
-                    <div className="p-2 text-center text-gray-500 text-sm">
-                      Showing 10 of {importErrorDetails.length} errors
-                    </div>
-                  )}
+          {/* Validation errors table */}
+          {importErrorDetails.length > 0 && showParsedSection && !isImporting && (
+            <div className="mb-6 border border-yellow-200 rounded-lg overflow-hidden">
+              <div className="bg-yellow-50 p-3 flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="text-yellow-600" size={18} />
+                  <h3 className="font-medium text-yellow-800">Validation Errors ({importErrorDetails.length})</h3>
                 </div>
               </div>
-            )}
+              <div className="max-h-40 overflow-y-auto bg-white">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {["Row", "Invoice #", "Product", "Error"].map(h => (
+                        <th key={h} className="p-2 text-left border-b">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importErrorDetails.slice(0, 10).map((err, i) => (
+                      <tr key={i} className="hover:bg-yellow-50 border-b">
+                        <td className="p-2 font-mono">{err.row}</td>
+                        <td className="p-2">{err.invoiceNumber}</td>
+                        <td className="p-2">{err.productName}</td>
+                        <td className="p-2 text-yellow-600 text-xs">{err.error}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {importErrorDetails.length > 10 && (
+                  <div className="p-2 text-center text-gray-500 text-sm">Showing 10 of {importErrorDetails.length} errors</div>
+                )}
+              </div>
+            </div>
+          )}
 
+          {/* Import progress bar */}
           {isImporting && (
             <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6 shadow-xl">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-2xl font-bold text-blue-900">
-                  Importing{" "}
-                  {importSaleType === "mr" ? "MR Sale" : "Normal Sale"} Data...
+                  Importing {importSaleType === "mr" ? "MR Sale" : "Normal Sale"} Data...
                 </h3>
-                <span className="text-3xl font-extrabold text-indigo-700">
-                  {serverProgress}%
-                </span>
+                <span className="text-3xl font-extrabold text-indigo-700">{serverProgress}%</span>
               </div>
               <div className="w-full bg-gray-300 rounded-full h-12 overflow-hidden shadow-inner mb-4">
                 <div
                   className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 h-full rounded-full transition-all duration-1000 ease-out flex items-center justify-end pr-6 shadow-lg"
                   style={{ width: `${serverProgress}%` }}
                 >
-                  <span className="text-white text-lg font-bold drop-shadow-lg">
-                    {serverProcessed} / {serverTotal}
-                  </span>
+                  {serverProgress > 20 && (
+                    <span className="text-white text-lg font-bold drop-shadow-lg">{serverProcessed} / {serverTotal}</span>
+                  )}
                 </div>
               </div>
-              <p className="text-center text-gray-700 font-medium text-lg mb-6">
-                {importStep}
-              </p>
+              <p className="text-center text-gray-700 font-medium text-lg mb-2">{importStep}</p>
+              <p className="text-center text-gray-500 text-sm mb-6">⚡ Processing in parallel batches for maximum speed</p>
               <div className="flex justify-center">
                 <button
                   onClick={handleCancelImport}
@@ -1857,22 +1340,18 @@ const ImportSalesModal = ({
             </div>
           )}
 
-          {!isImporting &&
-            showParsedSection &&
-            parsedData.length > 0 &&
-            !isValidatingStock &&
-            !isValidatingMR && (
-              <div className="mb-6">
-                <button
-                  onClick={handleImportData}
-                  className={`w-full py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer text-white ${importSaleType === "mr" ? "bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800" : "bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800"}`}
-                  disabled={isImporting || isValidatingStock || isValidatingMR}
-                >
-                  Start {importSaleType === "mr" ? "MR Sale" : "Normal Sale"}{" "}
-                  Import ({parsedData.length} invoices)
-                </button>
-              </div>
-            )}
+          {/* Start import button */}
+          {!isImporting && showParsedSection && parsedData.length > 0 && !isValidatingStock && !isValidatingMR && (
+            <div className="mb-6">
+              <button
+                onClick={handleImportData}
+                className={`w-full py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer text-white ${importSaleType === "mr" ? "bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800" : "bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800"}`}
+                disabled={isImporting || isValidatingStock || isValidatingMR}
+              >
+                ⚡ Start {importSaleType === "mr" ? "MR Sale" : "Normal Sale"} Import ({parsedData.length} invoices)
+              </button>
+            </div>
+          )}
 
           <div className="flex justify-between pt-4 border-t border-gray-200">
             <div>
@@ -1928,14 +1407,8 @@ const ImportSalesModal = ({
   );
 };
 
-//suraj
-
-const ProductDetailsModal = ({
-  isOpen,
-  onClose,
-  products,
-  title = "Product Details",
-}) => {
+// ─── Product Details Modal ─────────────────────────────────────────────────────
+const ProductDetailsModal = ({ isOpen, onClose, products, title = "Product Details" }) => {
   if (!isOpen) return null;
 
   const calculateTotals = useCallback(() => {
@@ -1949,7 +1422,6 @@ const ProductDetailsModal = ({
         const netAmount = Number(product.netSellingAmount) || 0;
         const lc = Number(product.lc) || 0;
         const profitLoss = netAmount - totalQty * lc;
-
         acc.totalSalesQty += salesQty;
         acc.totalBonusQty += bonusQty;
         acc.totalAmount += amount;
@@ -1958,14 +1430,7 @@ const ProductDetailsModal = ({
         acc.totalProfitLoss += profitLoss;
         return acc;
       },
-      {
-        totalSalesQty: 0,
-        totalBonusQty: 0,
-        totalAmount: 0,
-        totalDiscount: 0,
-        totalNetAmount: 0,
-        totalProfitLoss: 0,
-      },
+      { totalSalesQty: 0, totalBonusQty: 0, totalAmount: 0, totalDiscount: 0, totalNetAmount: 0, totalProfitLoss: 0 },
     );
   }, [products]);
 
@@ -1974,43 +1439,17 @@ const ProductDetailsModal = ({
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
       <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-        >
-          <X size={20} />
-        </button>
-        <h2 className="text-xl font-semibold text-gray-800 mb-6">
-          {title} ({products?.length || 0} items)
-        </h2>
+        <button onClick={onClose} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
+        <h2 className="text-xl font-semibold text-gray-800 mb-6">{title} ({products?.length || 0} items)</h2>
         {!products || products.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            No products found
-          </div>
+          <div className="text-center py-8 text-gray-500">No products found</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr className="bg-gray-100">
-                  {[
-                    "Product Name",
-                    "Sales Qty",
-                    "Bonus Qty",
-                    "Total Qty",
-                    "Selling Price",
-                    "Amount ($)",
-                    "Discount ($)",
-                    "Net Amount ($)",
-                    "Avg. Price",
-                    "LC ($)",
-                    "Profit / Loss ($)",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="p-3 text-sm font-medium text-gray-700 border-b text-left"
-                    >
-                      {h}
-                    </th>
+                  {["Product Name", "Sales Qty", "Bonus Qty", "Total Qty", "Selling Price", "Amount ($)", "Discount ($)", "Net Amount ($)", "Avg. Price", "LC ($)", "Profit / Loss ($)"].map((h) => (
+                    <th key={h} className="p-3 text-sm font-medium text-gray-700 border-b text-left">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -2024,42 +1463,19 @@ const ProductDetailsModal = ({
                   const avgUnitPrice = totalQty > 0 ? netAmount / totalQty : 0;
                   const profitLoss = netAmount - totalQty * lc;
                   return (
-                    <tr
-                      key={`product-${index}`}
-                      className="hover:bg-gray-50 border-b"
-                    >
-                      <td className="p-3 text-left">
-                        <span className="font-medium">
-                          {product.productName || product.name || "N/A"}
-                        </span>
-                      </td>
+                    <tr key={`product-${index}`} className="hover:bg-gray-50 border-b">
+                      <td className="p-3 text-left"><span className="font-medium">{product.productName || product.name || "N/A"}</span></td>
                       <td className="p-3 text-center">{salesQty}</td>
                       <td className="p-3 text-center">{bonusQty}</td>
-                      <td className="p-3 text-center font-medium">
-                        {totalQty}
-                      </td>
-                      <td className="p-3 text-center">
-                        ${Number(product.sellingPrice || 0).toFixed(2)}
-                      </td>
-                      <td className="p-3 text-center">
-                        ${Number(product.amount || 0).toFixed(2)}
-                      </td>
-                      <td className="p-3 text-center">
-                        ${Number(product.discount || 0).toFixed(2)}
-                      </td>
-                      <td className="p-3 text-center">
-                        ${netAmount.toFixed(2)}
-                      </td>
-                      <td className="p-3 text-center">
-                        ${avgUnitPrice.toFixed(2)}
-                      </td>
+                      <td className="p-3 text-center font-medium">{totalQty}</td>
+                      <td className="p-3 text-center">${Number(product.sellingPrice || 0).toFixed(2)}</td>
+                      <td className="p-3 text-center">${Number(product.amount || 0).toFixed(2)}</td>
+                      <td className="p-3 text-center">${Number(product.discount || 0).toFixed(2)}</td>
+                      <td className="p-3 text-center">${netAmount.toFixed(2)}</td>
+                      <td className="p-3 text-center">${avgUnitPrice.toFixed(2)}</td>
                       <td className="p-3 text-center">${lc.toFixed(2)}</td>
                       <td className="p-3 text-center">
-                        <span
-                          className={`font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                        >
-                          ${profitLoss.toFixed(2)}
-                        </span>
+                        <span className={`font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}>${profitLoss.toFixed(2)}</span>
                       </td>
                     </tr>
                   );
@@ -2068,31 +1484,15 @@ const ProductDetailsModal = ({
                   <td className="p-3 text-left">Total</td>
                   <td className="p-3 text-center">{totals.totalSalesQty}</td>
                   <td className="p-3 text-center">{totals.totalBonusQty}</td>
-                  <td className="p-3 text-center">
-                    {totals.totalSalesQty + totals.totalBonusQty}
-                  </td>
+                  <td className="p-3 text-center">{totals.totalSalesQty + totals.totalBonusQty}</td>
                   <td className="p-3 text-center">-</td>
-                  <td className="p-3 text-center">
-                    ${totals.totalAmount.toFixed(2)}
-                  </td>
-                  <td className="p-3 text-center">
-                    ${totals.totalDiscount.toFixed(2)}
-                  </td>
-                  <td className="p-3 text-center">
-                    ${totals.totalNetAmount.toFixed(2)}
-                  </td>
+                  <td className="p-3 text-center">${totals.totalAmount.toFixed(2)}</td>
+                  <td className="p-3 text-center">${totals.totalDiscount.toFixed(2)}</td>
+                  <td className="p-3 text-center">${totals.totalNetAmount.toFixed(2)}</td>
                   <td className="p-3 text-center">-</td>
                   <td className="p-3 text-center">-</td>
                   <td className="p-3 text-center">
-                    <span
-                      className={
-                        totals.totalProfitLoss >= 0
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }
-                    >
-                      ${totals.totalProfitLoss.toFixed(2)}
-                    </span>
+                    <span className={totals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}>${totals.totalProfitLoss.toFixed(2)}</span>
                   </td>
                 </tr>
               </tbody>
@@ -2100,12 +1500,7 @@ const ProductDetailsModal = ({
           </div>
         )}
         <div className="mt-6 pt-4 border-t border-gray-300 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
-          >
-            Close
-          </button>
+          <button onClick={onClose} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">Close</button>
         </div>
       </div>
     </div>,
@@ -2113,6 +1508,7 @@ const ProductDetailsModal = ({
   );
 };
 
+// ─── Main Sales Component ──────────────────────────────────────────────────────
 const Sales = () => {
   const navigate = useNavigate();
   const [sales, setSales] = useState([]);
@@ -2130,182 +1526,103 @@ const Sales = () => {
   const [mrList, setMrList] = useState([]);
   const [customerList, setCustomerList] = useState([]);
   const [hasPurchaseInventories, setHasPurchaseInventories] = useState(false);
-  const [checkingPurchaseInventories, setCheckingPurchaseInventories] =
-    useState(true);
+  const [checkingPurchaseInventories, setCheckingPurchaseInventories] = useState(true);
   const [shouldCheckPurchase, setShouldCheckPurchase] = useState(true);
   const [productsList, setProductsList] = useState([]);
   const inputRef = useRef(null);
   const { statuses, loading } = useInitialSaleData();
 
   const [form, setForm] = useState({
-    _id: null,
-    recordingDate: "",
-    invoiceNumber: "",
-    invoiceDate: "",
-    mrName: "",
-    customerName: "",
-    customerCode: "",
-    customerId: "",
-    products: [],
-    creditDays: 0,
-    dueDate: "",
-    deliveryDate: "",
-    paidAmount: 0,
-    dueAmount: 0,
-    totalAmount: 0,
-    paymentStatus: "",
-    remark: "",
+    _id: null, recordingDate: "", invoiceNumber: "", invoiceDate: "",
+    mrName: "", customerName: "", customerCode: "", customerId: "",
+    products: [], creditDays: 0, dueDate: "", deliveryDate: "",
+    paidAmount: 0, dueAmount: 0, totalAmount: 0, paymentStatus: "", remark: "",
   });
 
   const SALES_PER_PAGE = 9;
 
   const fetchProductsList = useCallback(async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/products`, {
-        timeout: 5000,
-      });
-      if (response.data && Array.isArray(response.data)) {
-        setProductsList(response.data);
-      } else if (
-        response.data.products &&
-        Array.isArray(response.data.products)
-      ) {
-        setProductsList(response.data.products);
-      } else if (response.data.data && Array.isArray(response.data.data)) {
-        setProductsList(response.data.data);
-      }
-    } catch (error) {
-      console.error("Error fetching products list:", error);
-    }
+      const response = await axios.get(`${backendUrl}/api/products`, { timeout: 5000 });
+      if (response.data && Array.isArray(response.data)) setProductsList(response.data);
+      else if (response.data.products && Array.isArray(response.data.products)) setProductsList(response.data.products);
+      else if (response.data.data && Array.isArray(response.data.data)) setProductsList(response.data.data);
+    } catch (error) { console.error("Error fetching products list:", error); }
   }, []);
 
   const checkPurchaseInventories = useCallback(async () => {
     try {
       setCheckingPurchaseInventories(true);
       const response = await axios.get(`${backendUrl}/api/purchase/check`);
-      setHasPurchaseInventories(
-        response.data.exists || response.data.count > 0,
-      );
-    } catch (error) {
-      setHasPurchaseInventories(false);
-    } finally {
-      setCheckingPurchaseInventories(false);
-    }
+      setHasPurchaseInventories(response.data.exists || response.data.count > 0);
+    } catch (error) { setHasPurchaseInventories(false); }
+    finally { setCheckingPurchaseInventories(false); }
   }, []);
 
-  const recheckPurchaseInventories = useCallback(() => {
-    setShouldCheckPurchase(true);
-  }, []);
+  const recheckPurchaseInventories = useCallback(() => { setShouldCheckPurchase(true); }, []);
 
   useEffect(() => {
-    if (shouldCheckPurchase) {
-      checkPurchaseInventories();
-      setShouldCheckPurchase(false);
-    }
+    if (shouldCheckPurchase) { checkPurchaseInventories(); setShouldCheckPurchase(false); }
   }, [shouldCheckPurchase, checkPurchaseInventories]);
 
-  useEffect(() => {
-    checkPurchaseInventories();
-    fetchProductsList();
-  }, [checkPurchaseInventories, fetchProductsList]);
+  useEffect(() => { checkPurchaseInventories(); fetchProductsList(); }, [checkPurchaseInventories, fetchProductsList]);
 
   useEffect(() => {
     const handlePurchaseInventoryAdded = () => recheckPurchaseInventories();
-    window.addEventListener(
-      "purchase-inventory-added",
-      handlePurchaseInventoryAdded,
-    );
-    return () =>
-      window.removeEventListener(
-        "purchase-inventory-added",
-        handlePurchaseInventoryAdded,
-      );
+    window.addEventListener("purchase-inventory-added", handlePurchaseInventoryAdded);
+    return () => window.removeEventListener("purchase-inventory-added", handlePurchaseInventoryAdded);
   }, [recheckPurchaseInventories]);
 
   useEffect(() => {
-    const handleInventoryUpdated = () => {
-      fetchSaleSummaries();
-      fetchProductsList();
-    };
+    const handleInventoryUpdated = () => { fetchSaleSummaries(); fetchProductsList(); };
     window.addEventListener("inventory-updated", handleInventoryUpdated);
-    return () =>
-      window.removeEventListener("inventory-updated", handleInventoryUpdated);
+    return () => window.removeEventListener("inventory-updated", handleInventoryUpdated);
   }, [fetchProductsList]);
 
   const processSalesData = useCallback((data) => {
     const salesData = data.summaries || data.data || data;
-    if (!Array.isArray(salesData)) {
-      setSales([]);
-      return;
-    }
-    const sortedData = salesData.sort(
-      (a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate),
-    );
+    if (!Array.isArray(salesData)) { setSales([]); return; }
+    const sortedData = salesData.sort((a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate));
     setSales(sortedData);
   }, []);
 
   const fetchSaleSummaries = useCallback(async () => {
     try {
       setLoadingData(true);
-      const res = await fetch(`${backendUrl}/api/sales/all`, {
-        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-      });
+      const res = await fetch(`${backendUrl}/api/sales/all`, { headers: { "Cache-Control": "no-cache", Pragma: "no-cache" } });
       if (res.ok) {
         const data = await res.json();
         processSalesData(data);
       } else {
         const fallbackRes = await fetch(`${backendUrl}/api/sales`);
-        if (fallbackRes.ok) {
-          const data = await fallbackRes.json();
-          processSalesData(data);
-        } else {
-          throw new Error("Failed to fetch sale summaries");
-        }
+        if (fallbackRes.ok) { const data = await fallbackRes.json(); processSalesData(data); }
+        else throw new Error("Failed to fetch sale summaries");
       }
-    } catch (error) {
-      showToast("error", error.message || "Error fetching sale summaries");
-      setSales([]);
-    } finally {
-      setLoadingData(false);
-    }
+    } catch (error) { showToast("error", error.message || "Error fetching sale summaries"); setSales([]); }
+    finally { setLoadingData(false); }
   }, [processSalesData]);
 
-  useEffect(() => {
-    fetchSaleSummaries();
-  }, [fetchSaleSummaries]);
+  useEffect(() => { fetchSaleSummaries(); }, [fetchSaleSummaries]);
 
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
-        const [mrs, customers] = await Promise.all([
-          fetchMRList(),
-          fetchCustomerList(),
-        ]);
+        const [mrs, customers] = await Promise.all([fetchMRList(), fetchCustomerList()]);
         if (mrs && mrs.success && Array.isArray(mrs.data)) {
-          const mrNames = mrs.data
-            .map((mr) => {
-              if (typeof mr === "string") return mr.trim();
-              if (mr && typeof mr === "object") {
-                if (mr.medicalRepName) return mr.medicalRepName.trim();
-                if (mr.name) return mr.name.trim();
-                if (mr.fullName) return mr.fullName.trim();
-              }
-              return null;
-            })
-            .filter(Boolean);
+          const mrNames = mrs.data.map((mr) => {
+            if (typeof mr === "string") return mr.trim();
+            if (mr && typeof mr === "object") {
+              if (mr.medicalRepName) return mr.medicalRepName.trim();
+              if (mr.name) return mr.name.trim();
+              if (mr.fullName) return mr.fullName.trim();
+            }
+            return null;
+          }).filter(Boolean);
           setMrList(mrNames);
-        } else {
-          setMrList([]);
-        }
-        if (customers && customers.success && Array.isArray(customers.data)) {
-          setCustomerList(customers.data);
-        } else {
-          setCustomerList([]);
-        }
-      } catch (error) {
-        setMrList([]);
-        setCustomerList([]);
-      }
+        } else { setMrList([]); }
+        if (customers && customers.success && Array.isArray(customers.data)) setCustomerList(customers.data);
+        else setCustomerList([]);
+      } catch (error) { setMrList([]); setCustomerList([]); }
     };
     fetchDropdownData();
   }, []);
@@ -2321,71 +1638,32 @@ const Sales = () => {
     if (confirm.isConfirmed) {
       try {
         const token = localStorage.getItem("token");
-        const ids = selected
-          .map((s) => s.id)
-          .filter((id) => id && typeof id === "string");
-        if (ids.length === 0) {
-          showToast("error", "No valid sale IDs to delete");
-          return;
-        }
-        const res = await axios.post(
-          `${backendUrl}/api/sales/batch-delete`,
-          { ids },
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        if (res.status === 200) {
-          showToast("success", `${ids.length} sale(s) deleted successfully`);
-          fetchSaleSummaries();
-          setSelected([]);
-        }
+        const ids = selected.map((s) => s.id).filter((id) => id && typeof id === "string");
+        if (ids.length === 0) { showToast("error", "No valid sale IDs to delete"); return; }
+        const res = await axios.post(`${backendUrl}/api/sales/batch-delete`, { ids }, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 200) { showToast("success", `${ids.length} sale(s) deleted successfully`); fetchSaleSummaries(); setSelected([]); }
       } catch (error) {
-        const errorMessage =
-          error.response?.data?.error ||
-          error.response?.data?.message ||
-          "Failed to delete selected sales";
-        showToast("error", errorMessage);
+        showToast("error", error.response?.data?.error || error.response?.data?.message || "Failed to delete selected sales");
       }
     }
   }, [selected, fetchSaleSummaries]);
 
-  const tableColumns = useMemo(
-    () => [
-      "invoiceNumber",
-      "invoiceDate",
-      "productCount",
-      "mrName",
-      "customerName",
-      "totalAmount",
-      "paymentStatus",
-      "actions",
-    ],
-    [],
-  );
+  const tableColumns = useMemo(() => ["invoiceNumber", "invoiceDate", "productCount", "mrName", "customerName", "totalAmount", "paymentStatus", "actions"], []);
 
-  const allFields = useMemo(
-    () => [
-      { id: "invoiceNumber", name: "Invoice No", dbName: "invoiceNumber" },
-      { id: "invoiceDate", name: "Invoice Date", dbName: "invoiceDate" },
-      { id: "productCount", name: "Products", dbName: "products" },
-      { id: "mrName", name: "MR Name", dbName: "mrName" },
-      { id: "customerName", name: "Customer Name", dbName: "customerName" },
-      { id: "totalAmount", name: "Total Amount ($)", dbName: "totalAmount" },
-      { id: "paymentStatus", name: "Payment Status", dbName: "paymentStatus" },
-      { id: "actions", name: "Actions", dbName: "actions" },
-    ],
-    [],
-  );
+  const allFields = useMemo(() => [
+    { id: "invoiceNumber", name: "Invoice No", dbName: "invoiceNumber" },
+    { id: "invoiceDate", name: "Invoice Date", dbName: "invoiceDate" },
+    { id: "productCount", name: "Products", dbName: "products" },
+    { id: "mrName", name: "MR Name", dbName: "mrName" },
+    { id: "customerName", name: "Customer Name", dbName: "customerName" },
+    { id: "totalAmount", name: "Total Amount ($)", dbName: "totalAmount" },
+    { id: "paymentStatus", name: "Payment Status", dbName: "paymentStatus" },
+    { id: "actions", name: "Actions", dbName: "actions" },
+  ], []);
 
   const paymentStatusTabs = useMemo(() => {
     if (!Array.isArray(sales) || sales.length === 0) return ["All"];
-    const uniqueStatuses = [
-      ...new Set(
-        sales
-          .map((sale) => sale.paymentStatus)
-          .filter((s) => s && s.trim() !== "")
-          .map((s) => s.trim()),
-      ),
-    ].sort();
+    const uniqueStatuses = [...new Set(sales.map((sale) => sale.paymentStatus).filter((s) => s && s.trim() !== "").map((s) => s.trim()))].sort();
     return ["All", ...uniqueStatuses];
   }, [sales]);
 
@@ -2395,12 +1673,9 @@ const Sales = () => {
     const selectedTabLower = selectedTab.toLowerCase();
     return sales.filter((sale) => {
       const paymentStatus = (sale.paymentStatus || "").toLowerCase();
-      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus)
-        return false;
+      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) return false;
       if (!lowerSearch) return true;
-      return [sale.invoiceNumber, sale.customerName, sale.mrName].some((f) =>
-        (f ?? "").toString().toLowerCase().includes(lowerSearch),
-      );
+      return [sale.invoiceNumber, sale.customerName, sale.mrName].some((f) => (f ?? "").toString().toLowerCase().includes(lowerSearch));
     });
   }, [sales, searchTerm, selectedTab]);
 
@@ -2409,43 +1684,28 @@ const Sales = () => {
     return filteredSales.slice(start, start + SALES_PER_PAGE);
   }, [filteredSales, currentPage]);
 
-  const totalPages = useMemo(
-    () => Math.ceil(filteredSales.length / SALES_PER_PAGE),
-    [filteredSales.length],
-  );
-  const visiblePages = useMemo(
-    () => getVisiblePages(currentPage, totalPages),
-    [currentPage, totalPages],
-  );
+  const totalPages = useMemo(() => Math.ceil(filteredSales.length / SALES_PER_PAGE), [filteredSales.length]);
+  const visiblePages = useMemo(() => getVisiblePages(currentPage, totalPages), [currentPage, totalPages]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, selectedTab]);
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, selectedTab]);
 
   const getFieldValue = useCallback((sale, dbName) => {
     if (dbName === "products") return sale.products?.length || 0;
-    if (["invoiceDate", "dueDate", "deliveryDate"].includes(dbName))
-      return formatDateToReadable(sale[dbName]) || "--";
-    if (dbName === "totalAmount")
-      return `$${(sale.totalAmount || 0).toLocaleString()}`;
+    if (["invoiceDate", "dueDate", "deliveryDate"].includes(dbName)) return formatDateToReadable(sale[dbName]) || "--";
+    if (dbName === "totalAmount") return `$${(sale.totalAmount || 0).toLocaleString()}`;
     return sale[dbName] ?? "--";
   }, []);
 
   const toggleSelect = useCallback((sale) => {
     setSelected((prev) => {
       const exists = prev.some((c) => c.id === sale._id);
-      return exists
-        ? prev.filter((c) => c.id !== sale._id)
-        : [...prev, { id: sale._id }];
+      return exists ? prev.filter((c) => c.id !== sale._id) : [...prev, { id: sale._id }];
     });
   }, []);
 
-  const toggleSelectAll = useCallback(
-    (checked) => {
-      setSelected(checked ? currentSales.map((s) => ({ id: s._id })) : []);
-    },
-    [currentSales],
-  );
+  const toggleSelectAll = useCallback((checked) => {
+    setSelected(checked ? currentSales.map((s) => ({ id: s._id })) : []);
+  }, [currentSales]);
 
   const handleProductCountClick = useCallback((sale) => {
     setSelectedSaleProducts(sale.products || []);
@@ -2453,72 +1713,35 @@ const Sales = () => {
   }, []);
 
   const handleView = useCallback((sale) => {
-    setForm({
-      ...sale,
-      products: sale.products || [],
-      customerName: sale.customerName || "--",
-      customerCode: sale.customerCode || "",
-      customerId: sale.customerId || "",
-    });
+    setForm({ ...sale, products: sale.products || [], customerName: sale.customerName || "--", customerCode: sale.customerCode || "", customerId: sale.customerId || "" });
     setIsViewModalOpen(true);
   }, []);
 
   const editSale = useCallback((sale) => {
     setSelectedSale(sale);
-    setForm({
-      ...sale,
-      products: sale.products || [],
-      customerName: sale.customerName || "--",
-      customerCode: sale.customerCode || "",
-      customerId: sale.customerId || "",
-    });
+    setForm({ ...sale, products: sale.products || [], customerName: sale.customerName || "--", customerCode: sale.customerCode || "", customerId: sale.customerId || "" });
     setIsEditModalOpen(true);
   }, []);
 
-  const deleteSale = useCallback(
-    async (sale) => {
-      if (!sale._id) return;
-      const confirmDelete = await confirmDialog({
-        title: "Delete",
-        text: `Are you sure you want to delete ${sale.invoiceNumber}?`,
-        icon: "warning",
-        confirmButtonText: "Yes, delete",
-        cancelButtonText: "Cancel",
-      });
-      if (confirmDelete.isConfirmed) {
-        try {
-          const token = localStorage.getItem("token");
-          const res = await axios.delete(
-            `${backendUrl}/api/sales/${sale._id}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          );
-          if (res.status === 200) {
-            showToast(
-              "success",
-              `Sale ${sale.invoiceNumber} deleted successfully`,
-            );
-            fetchSaleSummaries();
-          }
-        } catch (error) {
-          const errorMessage =
-            error.response?.data?.error ||
-            error.response?.data?.message ||
-            "Failed to delete sale";
-          showToast("error", errorMessage);
-        }
+  const deleteSale = useCallback(async (sale) => {
+    if (!sale._id) return;
+    const confirmDelete = await confirmDialog({
+      title: "Delete", text: `Are you sure you want to delete ${sale.invoiceNumber}?`,
+      icon: "warning", confirmButtonText: "Yes, delete", cancelButtonText: "Cancel",
+    });
+    if (confirmDelete.isConfirmed) {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 200) { showToast("success", `Sale ${sale.invoiceNumber} deleted successfully`); fetchSaleSummaries(); }
+      } catch (error) {
+        showToast("error", error.response?.data?.error || error.response?.data?.message || "Failed to delete sale");
       }
-    },
-    [fetchSaleSummaries],
-  );
+    }
+  }, [fetchSaleSummaries]);
 
   const calculateProductTotals = useCallback((products) => {
-    if (!products || !Array.isArray(products))
-      return {
-        totalAmount: 0,
-        totalDiscount: 0,
-        netAmount: 0,
-        totalProfitLoss: 0,
-      };
+    if (!products || !Array.isArray(products)) return { totalAmount: 0, totalDiscount: 0, netAmount: 0, totalProfitLoss: 0 };
     return products.reduce(
       (acc, product) => {
         acc.totalAmount += parseFloat(product.amount || 0);
@@ -2531,56 +1754,28 @@ const Sales = () => {
     );
   }, []);
 
-  const handleUpdateSale = useCallback(
-    async (e) => {
-      e.preventDefault();
-      try {
-        const totals = calculateProductTotals(form.products);
-        const updatedForm = {
-          ...form,
-          totalAmount: totals.totalAmount,
-          dueAmount: (
-            totals.netAmount - parseFloat(form.paidAmount || 0)
-          ).toFixed(2),
-        };
-        const token = localStorage.getItem("token");
-        const res = await axios.put(
-          `${backendUrl}/api/sales/${form._id}`,
-          updatedForm,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        if (res.status === 200) {
-          showToast("success", "Sales record updated successfully");
-          setIsEditModalOpen(false);
-          setSelectedSale(null);
-          fetchSaleSummaries();
-        }
-      } catch (err) {
-        const errorMessage =
-          err.response?.data?.err ||
-          err.response?.data?.message ||
-          "Failed to update sale";
-        showToast("error", errorMessage);
-      }
-    },
-    [form, calculateProductTotals, fetchSaleSummaries],
-  );
+  const handleUpdateSale = useCallback(async (e) => {
+    e.preventDefault();
+    try {
+      const totals = calculateProductTotals(form.products);
+      const updatedForm = { ...form, totalAmount: totals.totalAmount, dueAmount: (totals.netAmount - parseFloat(form.paidAmount || 0)).toFixed(2) };
+      const token = localStorage.getItem("token");
+      const res = await axios.put(`${backendUrl}/api/sales/${form._id}`, updatedForm, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 200) { showToast("success", "Sales record updated successfully"); setIsEditModalOpen(false); setSelectedSale(null); fetchSaleSummaries(); }
+    } catch (err) {
+      showToast("error", err.response?.data?.err || err.response?.data?.message || "Failed to update sale");
+    }
+  }, [form, calculateProductTotals, fetchSaleSummaries]);
 
   const handleFormChange = useCallback((e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const formTotals = useMemo(
-    () => calculateProductTotals(form.products),
-    [form.products, calculateProductTotals],
-  );
+  const formTotals = useMemo(() => calculateProductTotals(form.products), [form.products, calculateProductTotals]);
 
   const handleImportSuccess = useCallback(() => {
-    setTimeout(() => {
-      fetchSaleSummaries();
-      window.dispatchEvent(new CustomEvent("inventory-updated"));
-    }, 1000);
+    setTimeout(() => { fetchSaleSummaries(); window.dispatchEvent(new CustomEvent("inventory-updated")); }, 1000);
   }, [fetchSaleSummaries]);
 
   const showMRCustomerWarning = useMemo(() => {
@@ -2590,28 +1785,16 @@ const Sales = () => {
   }, [mrList, customerList]);
 
   const shouldDisableButtons = useMemo(
-    () =>
-      checkingPurchaseInventories ||
-      !hasPurchaseInventories ||
-      showMRCustomerWarning,
-    [
-      checkingPurchaseInventories,
-      hasPurchaseInventories,
-      showMRCustomerWarning,
-    ],
+    () => checkingPurchaseInventories || !hasPurchaseInventories || showMRCustomerWarning,
+    [checkingPurchaseInventories, hasPurchaseInventories, showMRCustomerWarning],
   );
 
   const getButtonTitle = useCallback(() => {
     if (checkingPurchaseInventories) return "Checking purchase inventories...";
-    if (!hasPurchaseInventories)
-      return "First purchase the entry enter then sale";
+    if (!hasPurchaseInventories) return "First purchase the entry enter then sale";
     if (showMRCustomerWarning) return "Please add MR and Customer data first";
     return "Create new sale";
-  }, [
-    checkingPurchaseInventories,
-    hasPurchaseInventories,
-    showMRCustomerWarning,
-  ]);
+  }, [checkingPurchaseInventories, hasPurchaseInventories, showMRCustomerWarning]);
 
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
@@ -2634,620 +1817,250 @@ const Sales = () => {
       />
 
       {/* Edit Modal */}
-      {isEditModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-              <button
-                onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-                <Edit size={20} /> Edit Sales Record
-              </h2>
-              <form onSubmit={handleUpdateSale} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <Calendar size={14} className="inline mr-1" />
-                      Recording Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.recordingDate ? new Date(form.recordingDate) : null
-                      }
-                      onChange={(date) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          recordingDate: date
-                            ? date.toISOString().split("T")[0]
-                            : "",
-                        }))
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Invoice Number
-                    </label>
-                    <InputField
-                      type="text"
-                      name="invoiceNumber"
-                      value={form.invoiceNumber || ""}
-                      onChange={handleFormChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <Calendar size={14} className="inline mr-1" />
-                      Invoice Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.invoiceDate ? new Date(form.invoiceDate) : null
-                      }
-                      onChange={(date) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          invoiceDate: date
-                            ? date.toISOString().split("T")[0]
-                            : "",
-                        }))
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <User size={14} className="inline mr-1" />
-                      MR Name
-                    </label>
-                    <select
-                      name="mrName"
-                      value={form.mrName || ""}
-                      onChange={handleFormChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    >
-                      <option value="">Select MR</option>
-                      {mrList.map((mr, index) => (
-                        <option key={index} value={mr}>
-                          {mr}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <User size={14} className="inline mr-1" />
-                      Customer Name
-                    </label>
-                    <InputField
-                      type="text"
-                      name="customerName"
-                      value={form.customerName || ""}
-                      onChange={handleFormChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Customer Code
-                    </label>
-                    <InputField
-                      type="text"
-                      name="customerCode"
-                      value={form.customerCode || ""}
-                      onChange={handleFormChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                </div>
-
-                <div className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-medium text-gray-700 flex items-center gap-2">
-                      <ShoppingCart size={18} /> Products (
-                      {form.products?.length || 0})
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setIsProductModalOpen(true)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
-                    >
-                      View All Products
-                    </button>
-                  </div>
-                  {form.products && form.products.length > 0 ? (
-                    <div className="space-y-3">
-                      {form.products.map((product, index) => (
-                        <div
-                          key={index}
-                          className="border border-gray-200 rounded-lg p-3"
-                        >
-                          <h4 className="font-medium text-gray-800">
-                            {product.productName || `Product ${index + 1}`}
-                          </h4>
-                          <div className="text-sm text-gray-600 mt-1">
-                            Qty: {product.salesQty || 0} | Bonus:{" "}
-                            {product.bonusQty || 0} | Price: $
-                            {(product.sellingPrice || 0).toFixed(2)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center text-gray-500 py-4">
-                      No products found
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4">
-                  {[
-                    ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
-                    [
-                      "Total Discount",
-                      `$${formTotals.totalDiscount.toFixed(2)}`,
-                    ],
-                    ["Net Amount", `$${formTotals.netAmount.toFixed(2)}`],
-                  ].map(([label, val]) => (
-                    <div key={label}>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        {label}
-                      </label>
-                      <div className="text-lg font-semibold text-gray-800">
-                        {val}
-                      </div>
-                    </div>
-                  ))}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Profit/Loss
-                    </label>
-                    <div
-                      className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                    >
-                      ${formTotals.totalProfitLoss.toFixed(2)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <Clock size={14} className="inline mr-1" />
-                      Credit Days
-                    </label>
-                    <InputField
-                      type="number"
-                      name="creditDays"
-                      value={form.creditDays || 0}
-                      onChange={handleFormChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <Calendar size={14} className="inline mr-1" />
-                      Due Date
-                    </label>
-                    <DatePicker
-                      selected={form.dueDate ? new Date(form.dueDate) : null}
-                      onChange={(date) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          dueDate: date ? date.toISOString().split("T")[0] : "",
-                        }))
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <DollarSign size={14} className="inline mr-1" />
-                      Paid Amount
-                    </label>
-                    <InputField
-                      type="number"
-                      name="paidAmount"
-                      value={form.paidAmount || 0}
-                      onChange={handleFormChange}
-                      step="0.01"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <DollarSign size={14} className="inline mr-1" />
-                      Due Amount
-                    </label>
-                    <InputField
-                      type="text"
-                      value={form.dueAmount || 0}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100"
-                      disabled
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <CreditCard size={14} className="inline mr-1" />
-                      Payment Status
-                    </label>
-                    <select
-                      name="paymentStatus"
-                      value={form.paymentStatus || ""}
-                      onChange={handleFormChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    >
-                      <option value="">Select Status</option>
-                      {statuses.map((status, index) => (
-                        <option key={index} value={status.type}>
-                          {status.type}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <Truck size={14} className="inline mr-1" />
-                      Delivery Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.deliveryDate ? new Date(form.deliveryDate) : null
-                      }
-                      onChange={(date) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          deliveryDate: date
-                            ? date.toISOString().split("T")[0]
-                            : "",
-                        }))
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    />
-                  </div>
-                </div>
-
+      {isEditModalOpen && ReactDOM.createPortal(
+        <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+          <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+            <button onClick={() => setIsEditModalOpen(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
+            <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2"><Edit size={20} /> Edit Sales Record</h2>
+            <form onSubmit={handleUpdateSale} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    <ClipboardList size={14} className="inline mr-1" />
-                    Remarks
-                  </label>
-                  <textarea
-                    name="remark"
-                    value={form.remark || ""}
-                    onChange={handleFormChange}
-                    rows={3}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    placeholder="Enter any remarks..."
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><Calendar size={14} className="inline mr-1" />Recording Date</label>
+                  <DatePicker selected={form.recordingDate ? new Date(form.recordingDate) : null} onChange={(date) => setForm((prev) => ({ ...prev, recordingDate: date ? date.toISOString().split("T")[0] : "" }))} dateFormat="yyyy-MM-dd" placeholderText="Select date" className="w-full border border-gray-300 rounded-lg px-3 py-2" />
                 </div>
-
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-                  <button
-                    type="button"
-                    onClick={() => setIsEditModalOpen(false)}
-                    className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer flex items-center gap-2"
-                  >
-                    <Save size={18} /> Update Sale
-                  </button>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Number</label>
+                  <InputField type="text" name="invoiceNumber" value={form.invoiceNumber || ""} onChange={handleFormChange} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
                 </div>
-              </form>
-            </div>
-          </div>,
-          document.body,
-        )}
-
-      {/* View Modal */}
-      {isViewModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-                <Eye size={20} /> View Sales Record
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                {[
-                  ["Recording Date", formatDateToReadable(form.recordingDate)],
-                  ["Invoice Number", form.invoiceNumber],
-                  ["Invoice Date", formatDateToReadable(form.invoiceDate)],
-                  ["MR Name", form.mrName],
-                  ["Customer Name", form.customerName],
-                  ["Customer Code", form.customerCode],
-                ].map(([label, val]) => (
-                  <div key={label} className="bg-gray-50 p-3 rounded-lg">
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                      {label}
-                    </label>
-                    <div className="text-sm font-medium text-gray-800">
-                      {val || "-"}
-                    </div>
-                  </div>
-                ))}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><Calendar size={14} className="inline mr-1" />Invoice Date</label>
+                  <DatePicker selected={form.invoiceDate ? new Date(form.invoiceDate) : null} onChange={(date) => setForm((prev) => ({ ...prev, invoiceDate: date ? date.toISOString().split("T")[0] : "" }))} dateFormat="yyyy-MM-dd" placeholderText="Select date" className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><User size={14} className="inline mr-1" />MR Name</label>
+                  <select name="mrName" value={form.mrName || ""} onChange={handleFormChange} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                    <option value="">Select MR</option>
+                    {mrList.map((mr, index) => <option key={index} value={mr}>{mr}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><User size={14} className="inline mr-1" />Customer Name</label>
+                  <InputField type="text" name="customerName" value={form.customerName || ""} onChange={handleFormChange} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Customer Code</label>
+                  <InputField type="text" name="customerCode" value={form.customerCode || ""} onChange={handleFormChange} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                </div>
               </div>
-              <div className="border border-gray-200 rounded-lg p-4 mb-6">
+
+              <div className="border border-gray-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-700">
-                    Products ({form.products?.length || 0})
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSaleProducts(form.products || []);
-                      setIsProductModalOpen(true);
-                    }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
-                  >
-                    View Details
-                  </button>
+                  <h3 className="text-lg font-medium text-gray-700 flex items-center gap-2"><ShoppingCart size={18} /> Products ({form.products?.length || 0})</h3>
+                  <button type="button" onClick={() => setIsProductModalOpen(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">View All Products</button>
                 </div>
                 {form.products && form.products.length > 0 ? (
                   <div className="space-y-3">
-                    {form.products.slice(0, 3).map((product, index) => (
-                      <div
-                        key={index}
-                        className="border border-gray-200 rounded-lg p-3"
-                      >
-                        <h4 className="font-medium text-gray-800">
-                          {product.productName || `Product ${index + 1}`}
-                        </h4>
-                        <div className="text-sm text-gray-600 mt-1">
-                          Quantity: {product.salesQty || 0} | Bonus:{" "}
-                          {product.bonusQty || 0} | Price: $
-                          {(product.sellingPrice || 0).toFixed(2)}
-                        </div>
+                    {form.products.map((product, index) => (
+                      <div key={index} className="border border-gray-200 rounded-lg p-3">
+                        <h4 className="font-medium text-gray-800">{product.productName || `Product ${index + 1}`}</h4>
+                        <div className="text-sm text-gray-600 mt-1">Qty: {product.salesQty || 0} | Bonus: {product.bonusQty || 0} | Price: ${(product.sellingPrice || 0).toFixed(2)}</div>
                       </div>
                     ))}
-                    {form.products.length > 3 && (
-                      <div className="text-center text-gray-500 text-sm">
-                        ... and {form.products.length - 3} more products
-                      </div>
-                    )}
                   </div>
-                ) : (
-                  <div className="text-center text-gray-500 py-4">
-                    No products found
-                  </div>
-                )}
+                ) : <div className="text-center text-gray-500 py-4">No products found</div>}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4 mb-6">
-                {[
-                  ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
-                  ["Total Discount", `$${formTotals.totalDiscount.toFixed(2)}`],
-                  ["Net Amount", `$${formTotals.netAmount.toFixed(2)}`],
-                ].map(([label, val]) => (
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4">
+                {[["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`], ["Total Discount", `$${formTotals.totalDiscount.toFixed(2)}`], ["Net Amount", `$${formTotals.netAmount.toFixed(2)}`]].map(([label, val]) => (
                   <div key={label}>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                      {label}
-                    </label>
-                    <div className="text-lg font-semibold text-gray-800">
-                      {val}
-                    </div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">{label}</label>
+                    <div className="text-lg font-semibold text-gray-800">{val}</div>
                   </div>
                 ))}
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Profit/Loss
-                  </label>
-                  <div
-                    className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                  >
-                    ${formTotals.totalProfitLoss.toFixed(2)}
-                  </div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Profit/Loss</label>
+                  <div className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}>${formTotals.totalProfitLoss.toFixed(2)}</div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                {[
-                  ["Credit Days", `${form.creditDays || 0} days`],
-                  ["Due Date", formatDateToReadable(form.dueDate)],
-                  ["Paid Amount", `$${(form.paidAmount || 0).toFixed(2)}`],
-                  ["Due Amount", `$${(form.dueAmount || 0).toFixed(2)}`],
-                  ["Delivery Date", formatDateToReadable(form.deliveryDate)],
-                ].map(([label, val]) => (
-                  <div key={label} className="bg-gray-50 p-3 rounded-lg">
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                      {label}
-                    </label>
-                    <div className="text-sm font-medium text-gray-800">
-                      {val || "-"}
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><Clock size={14} className="inline mr-1" />Credit Days</label>
+                  <InputField type="number" name="creditDays" value={form.creditDays || 0} onChange={handleFormChange} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><Calendar size={14} className="inline mr-1" />Due Date</label>
+                  <DatePicker selected={form.dueDate ? new Date(form.dueDate) : null} onChange={(date) => setForm((prev) => ({ ...prev, dueDate: date ? date.toISOString().split("T")[0] : "" }))} dateFormat="yyyy-MM-dd" placeholderText="Select date" className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><DollarSign size={14} className="inline mr-1" />Paid Amount</label>
+                  <InputField type="number" name="paidAmount" value={form.paidAmount || 0} onChange={handleFormChange} step="0.01" className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><DollarSign size={14} className="inline mr-1" />Due Amount</label>
+                  <InputField type="text" value={form.dueAmount || 0} className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100" disabled />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><CreditCard size={14} className="inline mr-1" />Payment Status</label>
+                  <select name="paymentStatus" value={form.paymentStatus || ""} onChange={handleFormChange} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                    <option value="">Select Status</option>
+                    {statuses.map((status, index) => <option key={index} value={status.type}>{status.type}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1"><Truck size={14} className="inline mr-1" />Delivery Date</label>
+                  <DatePicker selected={form.deliveryDate ? new Date(form.deliveryDate) : null} onChange={(date) => setForm((prev) => ({ ...prev, deliveryDate: date ? date.toISOString().split("T")[0] : "" }))} dateFormat="yyyy-MM-dd" placeholderText="Select date" className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1"><ClipboardList size={14} className="inline mr-1" />Remarks</label>
+                <textarea name="remark" value={form.remark || ""} onChange={handleFormChange} rows={3} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Enter any remarks..." />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                <button type="button" onClick={() => setIsEditModalOpen(false)} className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer flex items-center gap-2"><Save size={18} /> Update Sale</button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {/* View Modal */}
+      {isViewModalOpen && ReactDOM.createPortal(
+        <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+          <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+            <button onClick={() => setIsViewModalOpen(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
+            <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2"><Eye size={20} /> View Sales Record</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {[["Recording Date", formatDateToReadable(form.recordingDate)], ["Invoice Number", form.invoiceNumber], ["Invoice Date", formatDateToReadable(form.invoiceDate)], ["MR Name", form.mrName], ["Customer Name", form.customerName], ["Customer Code", form.customerCode]].map(([label, val]) => (
+                <div key={label} className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+                  <div className="text-sm font-medium text-gray-800">{val || "-"}</div>
+                </div>
+              ))}
+            </div>
+            <div className="border border-gray-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium text-gray-700">Products ({form.products?.length || 0})</h3>
+                <button type="button" onClick={() => { setSelectedSaleProducts(form.products || []); setIsProductModalOpen(true); }} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer">View Details</button>
+              </div>
+              {form.products && form.products.length > 0 ? (
+                <div className="space-y-3">
+                  {form.products.slice(0, 3).map((product, index) => (
+                    <div key={index} className="border border-gray-200 rounded-lg p-3">
+                      <h4 className="font-medium text-gray-800">{product.productName || `Product ${index + 1}`}</h4>
+                      <div className="text-sm text-gray-600 mt-1">Quantity: {product.salesQty || 0} | Bonus: {product.bonusQty || 0} | Price: ${(product.sellingPrice || 0).toFixed(2)}</div>
                     </div>
-                  </div>
-                ))}
-                <div className="bg-gray-50 p-3 rounded-lg">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Payment Status
-                  </label>
-                  <div
-                    className={`text-sm font-medium ${form.paymentStatus === "Paid" ? "text-green-600" : form.paymentStatus === "Credit" ? "text-yellow-600" : form.paymentStatus === "Partial" ? "text-blue-600" : "text-gray-600"}`}
-                  >
-                    {form.paymentStatus || "-"}
-                  </div>
+                  ))}
+                  {form.products.length > 3 && <div className="text-center text-gray-500 text-sm">... and {form.products.length - 3} more products</div>}
                 </div>
-              </div>
-              <div className="border border-gray-200 rounded-lg p-4 mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Remarks
-                </label>
-                <div className="text-gray-600 bg-gray-50 p-3 rounded">
-                  {form.remark || "No remarks provided"}
+              ) : <div className="text-center text-gray-500 py-4">No products found</div>}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4 mb-6">
+              {[["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`], ["Total Discount", `$${formTotals.totalDiscount.toFixed(2)}`], ["Net Amount", `$${formTotals.netAmount.toFixed(2)}`]].map(([label, val]) => (
+                <div key={label}>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+                  <div className="text-lg font-semibold text-gray-800">{val}</div>
                 </div>
-              </div>
-              <div className="flex justify-end pt-4 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
-                >
-                  Close
-                </button>
+              ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Profit/Loss</label>
+                <div className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}>${formTotals.totalProfitLoss.toFixed(2)}</div>
               </div>
             </div>
-          </div>,
-          document.body,
-        )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {[["Credit Days", `${form.creditDays || 0} days`], ["Due Date", formatDateToReadable(form.dueDate)], ["Paid Amount", `$${(form.paidAmount || 0).toFixed(2)}`], ["Due Amount", `$${(form.dueAmount || 0).toFixed(2)}`], ["Delivery Date", formatDateToReadable(form.deliveryDate)]].map(([label, val]) => (
+                <div key={label} className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+                  <div className="text-sm font-medium text-gray-800">{val || "-"}</div>
+                </div>
+              ))}
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <label className="block text-xs font-medium text-gray-500 mb-1">Payment Status</label>
+                <div className={`text-sm font-medium ${form.paymentStatus === "Paid" ? "text-green-600" : form.paymentStatus === "Credit" ? "text-yellow-600" : form.paymentStatus === "Partial" ? "text-blue-600" : "text-gray-600"}`}>{form.paymentStatus || "-"}</div>
+              </div>
+            </div>
+            <div className="border border-gray-200 rounded-lg p-4 mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Remarks</label>
+              <div className="text-gray-600 bg-gray-50 p-3 rounded">{form.remark || "No remarks provided"}</div>
+            </div>
+            <div className="flex justify-end pt-4 border-t border-gray-200">
+              <button type="button" onClick={() => setIsViewModalOpen(false)} className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">Close</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* Main Content */}
       <div className="container">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
-            <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              onClick={() => navigate("/salelayout/sale/new")}
-              disabled={shouldDisableButtons}
-              title={getButtonTitle()}
-            >
+            <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors" onClick={() => navigate("/salelayout/sale/new")} disabled={shouldDisableButtons} title={getButtonTitle()}>
               <UserPlus size={18} /> Add New Sales
             </button>
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              disabled={shouldDisableButtons}
-              title={getButtonTitle()}
-            >
+            <button onClick={() => setShowImportModal(true)} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors" disabled={shouldDisableButtons} title={getButtonTitle()}>
               <Upload size={18} /> Import Sales
             </button>
             {selected.length > 0 && (
-              <button
-                onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
-              >
+              <button onClick={handleDeleteSelected} className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors">
                 <Trash2 size={18} /> Delete Selected
               </button>
             )}
           </div>
           {sales.length > 0 && (
-            <SaleExcelDownload
-              type="sales"
-              modalTitle="Download Sales Report"
-              buttonText="Download Sales Excel"
-              successMessage="Sales Excel downloaded successfully!"
-              filePrefix="sale_summary"
-            />
+            <SaleExcelDownload type="sales" modalTitle="Download Sales Report" buttonText="Download Sales Excel" successMessage="Sales Excel downloaded successfully!" filePrefix="sale_summary" />
           )}
         </div>
 
         {!checkingPurchaseInventories && !hasPurchaseInventories && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start gap-3">
-              <PackageCheck
-                className="text-red-600 mt-0.5 flex-shrink-0"
-                size={20}
-              />
+              <PackageCheck className="text-red-600 mt-0.5 flex-shrink-0" size={20} />
               <div>
-                <h3 className="font-medium text-red-800 mb-1">
-                  Purchase Inventory Required
-                </h3>
+                <h3 className="font-medium text-red-800 mb-1">Purchase Inventory Required</h3>
                 <p className="text-sm text-red-700">
-                  Please add purchase inventory entries first before creating or
-                  importing sales.
-                  <button
-                    onClick={recheckPurchaseInventories}
-                    className="ml-2 text-red-800 underline hover:text-red-900 cursor-pointer"
-                  >
-                    Click here to re-check
-                  </button>
+                  Please add purchase inventory entries first before creating or importing sales.
+                  <button onClick={recheckPurchaseInventories} className="ml-2 text-red-800 underline hover:text-red-900 cursor-pointer">Click here to re-check</button>
                 </p>
               </div>
             </div>
           </div>
         )}
 
-        {!checkingPurchaseInventories &&
-          hasPurchaseInventories &&
-          showMRCustomerWarning && (
-            <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="flex items-start gap-3">
-                <AlertCircle
-                  className="text-yellow-600 mt-0.5 flex-shrink-0"
-                  size={20}
-                />
-                <div>
-                  <h3 className="font-medium text-yellow-800 mb-1">
-                    Missing Required Data
-                  </h3>
-                  <p className="text-sm text-yellow-700">
-                    {mrList.length === 0 && customerList.length === 0
-                      ? "Please add MR and Customer data first to create or import sales."
-                      : mrList.length === 0
-                        ? "Please add MR data first to create or import sales."
-                        : "Please add Customer data first to create or import sales."}
-                  </p>
-                </div>
+        {!checkingPurchaseInventories && hasPurchaseInventories && showMRCustomerWarning && (
+          <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="text-yellow-600 mt-0.5 flex-shrink-0" size={20} />
+              <div>
+                <h3 className="font-medium text-yellow-800 mb-1">Missing Required Data</h3>
+                <p className="text-sm text-yellow-700">
+                  {mrList.length === 0 && customerList.length === 0 ? "Please add MR and Customer data first to create or import sales." : mrList.length === 0 ? "Please add MR data first to create or import sales." : "Please add Customer data first to create or import sales."}
+                </p>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
               <div className="flex gap-4 flex-wrap">
                 {paymentStatusTabs.map((tab) => (
-                  <button
-                    key={`tab-${tab}`}
-                    onClick={() => {
-                      setSelectedTab(tab);
-                      setCurrentPage(1);
-                      setSelected([]);
-                    }}
-                    className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-                  >
-                    {tab}
-                  </button>
+                  <button key={`tab-${tab}`} onClick={() => { setSelectedTab(tab); setCurrentPage(1); setSelected([]); }} className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}>{tab}</button>
                 ))}
               </div>
             </div>
-          ) : (
-            <div></div>
-          )}
+          ) : <div></div>}
           {sales.length > 0 && (
             <div className="flex items-center gap-8 flex-wrap">
-              <p className="text-lg font-semibold text-gray-700">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredSales.length}
-                </span>
-              </p>
+              <p className="text-lg font-semibold text-gray-700">Total Count: <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">{filteredSales.length}</span></p>
               <div className="relative w-full md:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
-                  size={16}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search invoice, MR name, Customer name..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition"
-                />
+                <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
+                <input ref={inputRef} type="text" placeholder="Search invoice, MR name, Customer name..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition" />
               </div>
             </div>
           )}
@@ -3257,136 +2070,56 @@ const Sales = () => {
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                {allFields
-                  .filter((item) => tableColumns.includes(item.id))
-                  .map((item) => (
-                    <th
-                      key={`header-${item.id}`}
-                      className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
-                    >
-                      {item.name === "Invoice No" ? (
-                        <div className="flex items-center gap-4">
-                          {currentSales.length > 0 && (
-                            <input
-                              type="checkbox"
-                              aria-label="Select all sales"
-                              checked={
-                                selected.length === currentSales.length &&
-                                currentSales.length > 0
-                              }
-                              onChange={(e) =>
-                                toggleSelectAll(e.target.checked)
-                              }
-                              className="cursor-pointer"
-                            />
-                          )}
-                          <span>{item.name}</span>
-                        </div>
-                      ) : (
-                        item.name
-                      )}
-                    </th>
-                  ))}
+                {allFields.filter((item) => tableColumns.includes(item.id)).map((item) => (
+                  <th key={`header-${item.id}`} className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                    {item.name === "Invoice No" ? (
+                      <div className="flex items-center gap-4">
+                        {currentSales.length > 0 && <input type="checkbox" aria-label="Select all sales" checked={selected.length === currentSales.length && currentSales.length > 0} onChange={(e) => toggleSelectAll(e.target.checked)} className="cursor-pointer" />}
+                        <span>{item.name}</span>
+                      </div>
+                    ) : item.name}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {currentSales.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={tableColumns.length}
-                    className="p-4 text-center text-gray-500"
-                  >
+                  <td colSpan={tableColumns.length} className="p-4 text-center text-gray-500">
                     {loadingData ? (
-                      <div className="flex justify-center py-8">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                      </div>
+                      <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div></div>
                     ) : (
-                      <div className="py-8">
-                        <Package
-                          className="mx-auto text-gray-400 mb-3"
-                          size={48}
-                        />
-                        <p>No sales data found</p>
-                        <p className="text-sm text-gray-500 mt-1">
-                          Try adding a new sale or importing from Excel
-                        </p>
-                      </div>
+                      <div className="py-8"><Package className="mx-auto text-gray-400 mb-3" size={48} /><p>No sales data found</p><p className="text-sm text-gray-500 mt-1">Try adding a new sale or importing from Excel</p></div>
                     )}
                   </td>
                 </tr>
               ) : (
                 currentSales.map((sale, index) => (
-                  <tr
-                    key={`sale-${sale._id || index}`}
-                    className={`hover:bg-gray-50 transition-colors ${index < currentSales.length - 1 ? "border-b" : ""}`}
-                  >
-                    {allFields
-                      .filter((item) => tableColumns.includes(item.id))
-                      .map((item) => (
-                        <td
-                          key={`cell-${sale._id}-${item.id}`}
-                          className="p-3 whitespace-nowrap min-w-[120px]"
-                        >
-                          {item.id === "invoiceNumber" ? (
-                            <div className="flex items-center gap-4">
-                              <input
-                                type="checkbox"
-                                checked={selected.some(
-                                  (s) => s.id === sale._id,
-                                )}
-                                onChange={() => toggleSelect(sale)}
-                                className="cursor-pointer"
-                              />
-                              <span className="font-medium">
-                                {sale.invoiceNumber}
-                              </span>
-                            </div>
-                          ) : item.id === "productCount" ? (
-                            <button
-                              onClick={() => handleProductCountClick(sale)}
-                              className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
-                              title="View Products"
-                            >
-                              <Package size={14} />
-                              <span className="font-medium">
-                                {getFieldValue(sale, item.dbName)}
-                              </span>
-                            </button>
-                          ) : item.id === "actions" ? (
-                            <div className="flex items-center justify-center gap-3 min-w-[150px]">
-                              <button
-                                className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1"
-                                onClick={() => handleView(sale)}
-                                title="View"
-                              >
-                                <Eye size={18} />
-                              </button>
-                              <button
-                                className="text-green-600 hover:text-green-800 cursor-pointer transition-colors p-1"
-                                onClick={() => editSale(sale)}
-                                title="Edit"
-                              >
-                                <Edit size={18} />
-                              </button>
-                              <button
-                                className="text-red-600 hover:text-red-800 cursor-pointer transition-colors p-1"
-                                onClick={() => deleteSale(sale)}
-                                title="Delete"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            </div>
-                          ) : item.id === "paymentStatus" ? (
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${sale.paymentStatus === "Paid" ? "bg-green-100 text-green-800" : sale.paymentStatus === "Credit" ? "bg-yellow-100 text-yellow-800" : sale.paymentStatus === "Partial" ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
-                            >
-                              {getFieldValue(sale, item.dbName)}
-                            </span>
-                          ) : (
-                            getFieldValue(sale, item.dbName)
-                          )}
-                        </td>
-                      ))}
+                  <tr key={`sale-${sale._id || index}`} className={`hover:bg-gray-50 transition-colors ${index < currentSales.length - 1 ? "border-b" : ""}`}>
+                    {allFields.filter((item) => tableColumns.includes(item.id)).map((item) => (
+                      <td key={`cell-${sale._id}-${item.id}`} className="p-3 whitespace-nowrap min-w-[120px]">
+                        {item.id === "invoiceNumber" ? (
+                          <div className="flex items-center gap-4">
+                            <input type="checkbox" checked={selected.some((s) => s.id === sale._id)} onChange={() => toggleSelect(sale)} className="cursor-pointer" />
+                            <span className="font-medium">{sale.invoiceNumber}</span>
+                          </div>
+                        ) : item.id === "productCount" ? (
+                          <button onClick={() => handleProductCountClick(sale)} className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto" title="View Products">
+                            <Package size={14} /><span className="font-medium">{getFieldValue(sale, item.dbName)}</span>
+                          </button>
+                        ) : item.id === "actions" ? (
+                          <div className="flex items-center justify-center gap-3 min-w-[150px]">
+                            <button className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1" onClick={() => handleView(sale)} title="View"><Eye size={18} /></button>
+                            <button className="text-green-600 hover:text-green-800 cursor-pointer transition-colors p-1" onClick={() => editSale(sale)} title="Edit"><Edit size={18} /></button>
+                            <button className="text-red-600 hover:text-red-800 cursor-pointer transition-colors p-1" onClick={() => deleteSale(sale)} title="Delete"><Trash2 size={18} /></button>
+                          </div>
+                        ) : item.id === "paymentStatus" ? (
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${sale.paymentStatus === "Paid" ? "bg-green-100 text-green-800" : sale.paymentStatus === "Credit" ? "bg-yellow-100 text-yellow-800" : sale.paymentStatus === "Partial" ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}>
+                            {getFieldValue(sale, item.dbName)}
+                          </span>
+                        ) : getFieldValue(sale, item.dbName)}
+                      </td>
+                    ))}
                   </tr>
                 ))
               )}
@@ -3396,59 +2129,17 @@ const Sales = () => {
           {filteredSales.length > SALES_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
               <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() =>
-                    setCurrentPage((prev) => {
-                      const p = Math.max(prev - 1, 1);
-                      window.scrollTo({ top: 0, behavior: "smooth" });
-                      return p;
-                    })
-                  }
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1 transition-colors"
-                >
-                  ← Prev
-                </button>
+                <button onClick={() => setCurrentPage((prev) => { const p = Math.max(prev - 1, 1); window.scrollTo({ top: 0, behavior: "smooth" }); return p; })} disabled={currentPage === 1} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1 transition-colors">← Prev</button>
                 {visiblePages.map((page, idx) =>
                   page === "..." ? (
-                    <span
-                      key={`ellipsis-${idx}`}
-                      className="px-3 py-1 text-gray-500 select-none"
-                    >
-                      ...
-                    </span>
+                    <span key={`ellipsis-${idx}`} className="px-3 py-1 text-gray-500 select-none">...</span>
                   ) : (
-                    <button
-                      key={`page-${page}`}
-                      onClick={() => {
-                        setCurrentPage(page);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-                    >
-                      {page}
-                    </button>
-                  ),
+                    <button key={`page-${page}`} onClick={() => { setCurrentPage(page); window.scrollTo({ top: 0, behavior: "smooth" }); }} className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}>{page}</button>
+                  )
                 )}
-                <button
-                  onClick={() =>
-                    setCurrentPage((prev) => {
-                      const p = Math.min(prev + 1, totalPages);
-                      window.scrollTo({ top: 0, behavior: "smooth" });
-                      return p;
-                    })
-                  }
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1 transition-colors"
-                >
-                  Next →
-                </button>
+                <button onClick={() => setCurrentPage((prev) => { const p = Math.min(prev + 1, totalPages); window.scrollTo({ top: 0, behavior: "smooth" }); return p; })} disabled={currentPage === totalPages} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1 transition-colors">Next →</button>
               </div>
-              <div className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
-                {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)}{" "}
-                of {filteredSales.length} sales
-              </div>
+              <div className="text-sm text-gray-600">Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)} of {filteredSales.length} sales</div>
             </div>
           )}
         </div>

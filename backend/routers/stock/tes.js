@@ -2,8 +2,6 @@ import express from "express";
 import mongoose from "mongoose";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
-import Product from "../../models/projectManger/product.js";
-import ReportInHand from "../../models/reports/reportsInHand.js";
 
 const router = express.Router();
 
@@ -334,56 +332,6 @@ router.get("/", async (req, res) => {
   } catch (error) {
     console.error("Error fetching transfers:", error);
     res.status(500).json({ success: false, message: "Failed to fetch transfers", error: error.message });
-  }
-});
-// ==================== GET PRODUCTS WITH IN‑STOCK INFO ====================
-router.get("/in-stock", async (req, res) => {
-  try {
-    const { name } = req.query; // optional name filter
-
-    // Fetch all stock data from ReportInHand (only needed fields)
-    const stockList = await ReportInHand.find({}, "productName totalBoxes").lean();
-    const stockMap = new Map(
-      stockList.map(item => [item.productName.toLowerCase(), item.totalBoxes])
-    );
-
-    // Build product query (filter by name if provided)
-    let productQuery = {};
-    if (name) {
-      productQuery.productName = { $regex: name, $options: "i" };
-    }
-
-    const products = await Product.find(productQuery).lean();
-
-    // Combine and format
-    const productsWithStock = products.map((product) => {
-      const boxes = stockMap.get(product.productName.toLowerCase()) || 0;
-
-      return {
-        ...product,
-        productName: product.productName
-          .split(" ")
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        type: product.type
-          .split(" ")
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        supplierName: product.supplierName
-          .split(" ")
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        inStock: {
-          boxes,
-          status: boxes > 0 ? "In Stock" : "Out of Stock",
-        },
-      };
-    });
-
-    res.status(200).json(productsWithStock);
-  } catch (err) {
-    console.error("Error fetching products with stock:", err);
-    res.status(500).json({ message: "Failed to fetch products with stock information." });
   }
 });
 
@@ -792,44 +740,5 @@ router.post("/migrate/backfill-mr-hands", protect, allowAdminOnly, async (req, r
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
-// ==================== GET PRODUCT STOCK FOR ADJUSTMENTS ====================
-router.get("/stock/products", protect, allowAdminOnly, async (req, res) => {
-  try {
-    // Fetch all products to get qtyPerCarton
-    const products = await Product.find({}, "productName qtyPerCarton").lean();
-    const productMap = new Map(products.map(p => [p.productName.toLowerCase(), p]));
-
-    // Fetch all warehouse stock from ReportInHand
-    const reportItems = await ReportInHand.find({}, "productName batches totalBoxes").lean();
-
-    const result = [];
-
-    for (const item of reportItems) {
-      const productName = item.productName;
-      const product = productMap.get(productName.toLowerCase());
-      if (!product) continue; // product not found in Product collection
-
-      const totalBoxes = item.totalBoxes || 0;
-      const qtyPerCarton = product.qtyPerCarton || 1;
-      const totalPieces = totalBoxes * qtyPerCarton;
-
-      result.push({
-        productId: product._id,
-        productName: productName, // keep as is
-        totalBoxes,
-        totalPieces,
-        qtyPerCarton,
-      });
-    }
-
-    res.status(200).json({ success: true, data: result });
-  } catch (error) {
-    console.error("Error fetching product stock:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch product stock" });
-  }
-});
-
-
 
 export default router;

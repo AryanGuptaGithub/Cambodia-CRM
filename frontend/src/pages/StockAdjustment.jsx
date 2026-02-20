@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Plus, Trash2, Edit, Save, Search, X, Eye } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../utils/toast";
@@ -33,7 +33,7 @@ const CONFIG = {
 const StockAdjustment = () => {
   const [adjustments, setAdjustments] = useState([]);
   const [products, setProducts] = useState([]);
-  const [stockTransfers, setStockTransfers] = useState([]);
+  const [productStock, setProductStock] = useState([]); // stock data from /instock
   const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
@@ -54,22 +54,19 @@ const StockAdjustment = () => {
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-  // Fetch initial data
+  // Fetch all required data on mount
   useEffect(() => {
     fetchAdjustments();
     fetchProductsData();
-    fetchStockTransfers();
+    fetchProductStock();
   }, []);
 
   // Check if products are empty
   useEffect(() => {
-    if (!loading && products.length === 0) {
-      setIsProductsEmpty(true);
-    } else {
-      setIsProductsEmpty(false);
-    }
+    setIsProductsEmpty(!loading && products.length === 0);
   }, [products, loading]);
 
+  // Fetch stock adjustments
   const fetchAdjustments = async () => {
     setLoading(true);
     try {
@@ -90,6 +87,7 @@ const StockAdjustment = () => {
     }
   };
 
+  // Fetch product list
   const fetchProductsData = async () => {
     try {
       const data = await fetchProducts(backendUrl);
@@ -100,72 +98,35 @@ const StockAdjustment = () => {
     }
   };
 
-  const fetchStockTransfers = async () => {
+  // Fetch product stock from /instock
+  const fetchProductStock = async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get(`${backendUrl}/api/stock-transfer`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await axios.get(`${backendUrl}/api/stock-adjustment/in-stock`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-      if (response.data && response.data.success) {
-        setStockTransfers(response.data.data);
-      }
+      // The endpoint returns an array of products with inStock.boxes
+      setProductStock(response.data);
     } catch (error) {
-      console.error("Fetch stock transfers error:", error);
-      // Don't show error toast for stock transfers as it's not critical
+      console.error("Error fetching product stock:", error);
+      showToast("error", "Failed to fetch stock information");
     }
   };
 
-  // Get current stock for a product - SIMPLIFIED VERSION
-  const getCurrentStock = (productId) => {
+  // Create a map for O(1) stock lookup by product ID
+  const productStockMap = useMemo(() => {
+    const map = new Map();
+    productStock.forEach(item => {
+      map.set(item._id, item.inStock?.boxes || 0);
+    });
+    return map;
+  }, [productStock]);
+
+  // Get current stock in boxes from the map
+  const getCurrentStock = useCallback((productId) => {
     if (!productId) return 0;
-
-    const product = products.find((p) => p._id === productId);
-    if (!product) return 0;
-
-    // First get base stock from product batches
-    let baseStock = 0;
-    if (product.batches && product.batches.length > 0) {
-      const totalBoxes = product.batches.reduce((sum, batch) => {
-        return sum + (batch.boxes || 0);
-      }, 0);
-
-      const qtyPerCarton = product.qtyPerCarton || 1;
-      baseStock = totalBoxes * qtyPerCarton;
-    }
-
-    // Adjust for stock transfers
-    if (stockTransfers.length > 0) {
-      stockTransfers.forEach((transfer) => {
-        transfer.items.forEach((item) => {
-          if (item.productId === productId) {
-            const qtyPerCarton = product.qtyPerCarton || 1;
-            const transferredPieces = (item.boxQuantity || 0) * qtyPerCarton;
-
-            if (transfer.transferType === "send") {
-              baseStock -= transferredPieces;
-            } else if (transfer.transferType === "receive") {
-              baseStock += transferredPieces;
-            }
-          }
-        });
-      });
-    }
-
-    // Adjust for stock adjustments
-    const productAdjustments = adjustments.filter(
-      (adj) =>
-        (adj.productId?._id === productId || adj.productId === productId) &&
-        adj._id !== editingAdjustment?._id,
-    );
-
-    const adjustmentSum = productAdjustments.reduce((sum, adj) => {
-      const qtyPerCarton = product?.qtyPerCarton || 1;
-      const pieces = (adj.boxQuantity || 0) * qtyPerCarton;
-      return sum + (adj.adjustmentType === "add" ? pieces : -pieces);
-    }, 0);
-
-    return baseStock + adjustmentSum;
-  };
+    return productStockMap.get(productId) || 0;
+  }, [productStockMap]);
 
   // Memoized filtered adjustments
   const filteredAdjustments = useMemo(() => {
@@ -200,7 +161,6 @@ const StockAdjustment = () => {
     return getVisiblePages(currentPage, totalPages);
   }, [currentPage, totalPages]);
 
-  // Prepare product options for dropdown with current stock
   const productOptions = useMemo(() => {
     if (isProductsEmpty) {
       return [
@@ -215,173 +175,17 @@ const StockAdjustment = () => {
     return [
       { value: "", label: "Select Product" },
       ...products.map((product) => {
-        const stockInfo = getCurrentStock(product._id);
-        const qtyPerCarton = product.qtyPerCarton || 1;
-        const boxes = Math.floor(stockInfo / qtyPerCarton);
-        const pieces = stockInfo % qtyPerCarton;
-
-        let stockDisplay = `${stockInfo} pieces`;
-        if (qtyPerCarton > 1) {
-          if (boxes > 0 && pieces > 0) {
-            stockDisplay = `${boxes} boxes, ${pieces} pieces`;
-          } else if (boxes > 0) {
-            stockDisplay = `${boxes} boxes`;
-          } else {
-            stockDisplay = `${pieces} pieces`;
-          }
-        }
-
         return {
           value: product._id,
-          label: `${product.productName}`,
+          label: product.productName,
           product: product,
         };
       }),
     ];
   }, [products, isProductsEmpty, getCurrentStock]);
 
-  // Selection handlers
-  const handleSelect = (id) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
-    );
-  };
-
-  // Updated handleBulkDelete with confirmation dialog
-  const handleBulkDelete = async () => {
-    if (selectedIds.length === 0) {
-      showToast("error", "Please select at least one adjustment to delete.");
-      return;
-    }
-
-    const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selectedIds.length}</b> stock adjustment(s)?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirm.isConfirmed) {
-      try {
-        setLoading(true);
-
-        // ✅ Get token
-        const token = localStorage.getItem("token");
-
-        const response = await axios.delete(
-          `${backendUrl}/api/stock-adjustment/bulk`,
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            data: { ids: selectedIds },
-          },
-        );
-
-        if (response.data.success) {
-          showToast("success", response.data.message);
-          fetchAdjustments();
-          setSelectedIds([]);
-        } else {
-          showToast("error", response.data.message);
-        }
-      } catch (error) {
-        console.error("❌ Bulk delete error:", error);
-
-        if (error.response) {
-          const errorMsg =
-            error.response.data.message || "Failed to delete adjustments.";
-          showToast("error", errorMsg);
-        } else if (error.request) {
-          showToast("error", "Network error. Please check your connection.");
-        } else {
-          showToast("error", "An error occurred while deleting adjustments.");
-        }
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
-  const handleDelete = async (id, productName = "") => {
-    const confirmDelete = await confirmDialog({
-      title: "Delete Stock Adjustment",
-      text: `Are you sure you want to delete stock adjustment${
-        productName ? ` for <b>${productName}</b>` : ""
-      }?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirmDelete.isConfirmed) {
-      try {
-        // ✅ Get token
-        const token = localStorage.getItem("token");
-
-        await axios.delete(`${backendUrl}/api/stock-adjustment/${id}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        // Update local state immediately
-        setAdjustments((prev) => prev.filter((adj) => adj._id !== id));
-        setSelectedIds((prev) =>
-          prev.filter((selectedId) => selectedId !== id),
-        );
-
-        showToast("success", CONFIG.MESSAGES.DELETE_SUCCESS);
-      } catch (error) {
-        console.error("Delete error:", error);
-        if (error.response) {
-          const errorMsg =
-            error.response.data.message || "Failed to delete adjustment.";
-          showToast("error", errorMsg);
-        } else if (error.request) {
-          showToast("error", "Network error. Please check your connection.");
-        } else {
-          showToast("error", "An error occurred while deleting adjustment.");
-        }
-      }
-    }
-  };
-
-  const handleEdit = (adjustment) => {
-    if (isProductsEmpty) {
-      showToast("error", CONFIG.MESSAGES.NO_PRODUCTS);
-      return;
-    }
-
-    setEditingAdjustment(adjustment);
-    setFormData({
-      product: adjustment.productId?._id || adjustment.productId,
-      boxQuantity: adjustment.boxQuantity || 0,
-      adjustmentType: adjustment.adjustmentType,
-      remarks: adjustment.remarks || "",
-    });
-    setModalVisible(true);
-  };
-
-  // Handle view remarks
-  const handleViewRemarks = (remarks) => {
-    setViewingRemarks(remarks || "No remarks provided");
-    setRemarksModalVisible(true);
-  };
-
   // Get qtyPerCarton for the selected product
-  const getQtyPerCarton = (productId = formData.product) => {
-    if (!productId) return 0;
-    const selectedProduct = products.find((p) => p._id === productId);
-    return selectedProduct?.qtyPerCarton || 1;
-  };
 
-  const calculateTotalPieces = (boxQuantity) => {
-    if (!boxQuantity) return 0;
-    const piecesPerBox = getQtyPerCarton();
-    return boxQuantity * piecesPerBox;
-  };
 
   const handleFormChange = (field, value) => {
     setFormData((prev) => ({
@@ -390,31 +194,17 @@ const StockAdjustment = () => {
     }));
   };
 
-  // Format current stock display
+  // Format current stock display for the modal field
   const formatCurrentStockDisplay = (productId) => {
-    const totalPieces = getCurrentStock(productId);
+    const boxes = getCurrentStock(productId);
+    return boxes > 0 ? `${boxes}` : "0";
+  };
 
-    if (totalPieces === 0) {
-      return "0";
-    }
-
-    const product = products.find((p) => p._id === productId);
-    const qtyPerCarton = product?.qtyPerCarton || 1;
-
-    if (qtyPerCarton > 1) {
-      const boxes = Math.floor(totalPieces / qtyPerCarton);
-      const pieces = totalPieces % qtyPerCarton;
-
-      if (boxes > 0 && pieces > 0) {
-        return `${boxes} boxes, ${pieces} pieces (${totalPieces} total)`;
-      } else if (boxes > 0) {
-        return `${boxes} boxes (${totalPieces} total)`;
-      } else {
-        return `${pieces} pieces (${totalPieces} total)`;
-      }
-    }
-
-    return `${totalPieces}`;
+  // Selection handlers
+  const handleSelect = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
   };
 
   const toggleSelect = (adjustment) => {
@@ -452,6 +242,110 @@ const StockAdjustment = () => {
     }
   };
 
+  // Bulk delete with confirmation
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) {
+      showToast("error", "Please select at least one adjustment to delete.");
+      return;
+    }
+
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selectedIds.length}</b> stock adjustment(s)?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        setLoading(true);
+        const token = localStorage.getItem("token");
+
+        const response = await axios.delete(
+          `${backendUrl}/api/stock-adjustment/bulk`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            data: { ids: selectedIds },
+          },
+        );
+
+        if (response.data.success) {
+          showToast("success", response.data.message);
+          fetchAdjustments();
+          setSelectedIds([]);
+        } else {
+          showToast("error", response.data.message);
+        }
+      } catch (error) {
+        console.error("❌ Bulk delete error:", error);
+        const errorMsg =
+          error.response?.data?.message ||
+          (error.request ? "Network error. Please check your connection." : "An error occurred while deleting adjustments.");
+        showToast("error", errorMsg);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Single delete
+  const handleDelete = async (id, productName = "") => {
+    const confirmDelete = await confirmDialog({
+      title: "Delete Stock Adjustment",
+      text: `Are you sure you want to delete stock adjustment${
+        productName ? ` for <b>${productName}</b>` : ""
+      }?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmDelete.isConfirmed) {
+      try {
+        const token = localStorage.getItem("token");
+
+        await axios.delete(`${backendUrl}/api/stock-adjustment/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        setAdjustments((prev) => prev.filter((adj) => adj._id !== id));
+        setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
+
+        showToast("success", CONFIG.MESSAGES.DELETE_SUCCESS);
+      } catch (error) {
+        console.error("Delete error:", error);
+        const errorMsg =
+          error.response?.data?.message ||
+          (error.request ? "Network error. Please check your connection." : "An error occurred while deleting adjustment.");
+        showToast("error", errorMsg);
+      }
+    }
+  };
+
+  const handleEdit = (adjustment) => {
+    if (isProductsEmpty) {
+      showToast("error", CONFIG.MESSAGES.NO_PRODUCTS);
+      return;
+    }
+
+    setEditingAdjustment(adjustment);
+    setFormData({
+      product: adjustment.productId?._id || adjustment.productId,
+      boxQuantity: adjustment.boxQuantity || 0,
+      adjustmentType: adjustment.adjustmentType,
+      remarks: adjustment.remarks || "",
+    });
+    setModalVisible(true);
+  };
+
+  const handleViewRemarks = (remarks) => {
+    setViewingRemarks(remarks || "No remarks provided");
+    setRemarksModalVisible(true);
+  };
+
   const handleModalCancel = () => {
     setFormData({
       product: "",
@@ -471,7 +365,6 @@ const StockAdjustment = () => {
       return;
     }
 
-    // Basic validation
     if (!formData.product) {
       showToast("error", CONFIG.MESSAGES.SELECT_PRODUCT);
       return;
@@ -502,19 +395,13 @@ const StockAdjustment = () => {
         remarks: formData.remarks,
       };
 
-      // ✅ Get token
       const token = localStorage.getItem("token");
 
       if (editingAdjustment) {
-        // ✅ Update existing adjustment
         const response = await axios.put(
           `${backendUrl}/api/stock-adjustment/${editingAdjustment._id}`,
           adjustmentData,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
+          { headers: { Authorization: `Bearer ${token}` } },
         );
 
         if (response.data.success) {
@@ -528,15 +415,10 @@ const StockAdjustment = () => {
           showToast("success", CONFIG.MESSAGES.UPDATE_SUCCESS);
         }
       } else {
-        // ✅ Create new adjustment
         const response = await axios.post(
           `${backendUrl}/api/stock-adjustment`,
           adjustmentData,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
+          { headers: { Authorization: `Bearer ${token}` } },
         );
 
         if (response.data.success) {
@@ -545,18 +427,15 @@ const StockAdjustment = () => {
         }
       }
 
+      // Refresh stock data after change
+      await fetchProductStock();
       handleModalCancel();
     } catch (error) {
       console.error("Error saving adjustment:", error);
-      if (error.response) {
-        const errorMsg =
-          error.response.data.message || "Failed to save adjustment.";
-        showToast("error", errorMsg);
-      } else if (error.request) {
-        showToast("error", "Network error. Please check your connection.");
-      } else {
-        showToast("error", "An error occurred while saving adjustment.");
-      }
+      const errorMsg =
+        error.response?.data?.message ||
+        (error.request ? "Network error. Please check your connection." : "An error occurred while saving adjustment.");
+      showToast("error", errorMsg);
     }
   };
 
@@ -926,7 +805,7 @@ const StockAdjustment = () => {
                     />
                     {formData.product && (
                       <div className="mt-2 text-xs text-gray-500">
-                        <p>Includes stock transfers and previous adjustments</p>
+                        <p>Stock as per ReportInHand</p>
                       </div>
                     )}
                   </div>
