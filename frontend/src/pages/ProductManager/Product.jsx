@@ -9,6 +9,7 @@ import {
   Search,
   CheckCircle,
   AlertCircle,
+  Download,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -28,8 +29,8 @@ import {
   fetchSuppliers,
   fetchProductPackingType,
 } from "./common/fetchDropdown";
-import { parseExcelDate } from "../../utils/excelUtility";
 import { handleAxiosError } from "../../utils/errorHandler";
+import {parseExcelDateValue} from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -76,6 +77,21 @@ const formatDisplayText = (text) => {
     .join(" ");
 };
 
+/**
+ * Format a date (string or Date) to "DD MMM YYYY" using UTC components.
+ * If input is falsy, returns "--".
+ */
+const formatDateUTC = (dateInput) => {
+  if (!dateInput) return "--";
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return "--";
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${day} ${monthNames[month - 1]} ${year}`;
+};
+
 // ================== ImportModal (for products) ==================
 const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
   const [parsedData, setParsedData] = useState([]);
@@ -86,7 +102,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
   const [duplicateRows, setDuplicateRows] = useState([]);
   const [loadingExisting, setLoadingExisting] = useState(false);
 
-  // Normalise a row for duplicate comparison (key = productName+type+packing+supplierName)
   const getRowKey = (row) => {
     const fields = [
       row.productName || "",
@@ -97,7 +112,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
     return fields.map((f) => f.toString().trim().toLowerCase()).join("||");
   };
 
-  // Fetch existing products for duplicate preview
   useEffect(() => {
     if (isOpen) {
       fetchExistingProducts();
@@ -110,8 +124,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
       const res = await axios.get(`${backendUrl}/api/products/all-for-import`);
       if (Array.isArray(res.data)) {
         setExistingProducts(res.data);
-      } else {
-        console.error("Unexpected response format:", res.data);
       }
     } catch (error) {
       console.error("Failed to fetch existing products", error);
@@ -121,7 +133,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
     }
   };
 
-  // Compute duplicates whenever parsedData or existingProducts changes
   useEffect(() => {
     if (!parsedData.length) {
       setDuplicateRows([]);
@@ -259,16 +270,11 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
             return;
           }
 
-          // Parse date
+          // Parse date using UTC-aware function
           let licenseValidityDate = "";
           const dateVal = obj["drug registration license validity date"];
           if (dateVal) {
-            const parsed = parseExcelDate(dateVal.toString().trim());
-            if (parsed) {
-              licenseValidityDate = parsed.toISOString().split("T")[0];
-            } else {
-              licenseValidityDate = dateVal.toString().trim(); // keep raw, backend will try
-            }
+            licenseValidityDate = parseExcelDateValue(dateVal);
           }
 
           validRows.push({
@@ -317,6 +323,8 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
       return;
     }
 
+    console.log('value of 416', uniqueData);
+
     setIsUploading(true);
     try {
       const res = await axios.post(`${backendUrl}/api/products/import`, uniqueData, {
@@ -327,7 +335,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
         showToast("success", res.data.message || `Imported ${uniqueData.length} records successfully`);
         onClose(true); // true = refresh
       } else {
-        // handle 207 partial success
         showToast("info", res.data.message);
         onClose(true);
       }
@@ -507,10 +514,10 @@ const Product = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [showImportModal, setShowImportModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [types, setTypes] = useState([]);               // ← types for tabs
+  const [types, setTypes] = useState([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [productTypes, setProductTypes] = useState([]); // for dropdown
+  const [productTypes, setProductTypes] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [packingOptions, setPackingOptions] = useState([]);
   const [error, setError] = useState(null);
@@ -536,12 +543,11 @@ const Product = () => {
   };
   const [form, setForm] = useState(initialFormState);
 
-  // ========== FETCH PRODUCT TYPES FOR TABS ==========
   const loadProductTypes = useCallback(async () => {
     try {
       const res = await axios.get(`${backendUrl}/api/products/types`);
       if (res.data.success) {
-        setTypes(res.data.data); // e.g. ["Medicine", "Surgical", ...]
+        setTypes(res.data.data);
       }
     } catch (err) {
       console.error("Error fetching product types:", err);
@@ -552,9 +558,7 @@ const Product = () => {
   useEffect(() => {
     loadProductTypes();
   }, [loadProductTypes]);
-  // ===================================================
 
-  // Fetch dropdown data (for edit/add forms)
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
@@ -591,7 +595,6 @@ const Product = () => {
     fetchDropdownData();
   }, []);
 
-  // Fetch products
   const fetchProducts = async (page = 1, search = searchTerm, type = selectedTab) => {
     setLoading(true);
     try {
@@ -658,7 +661,7 @@ const Product = () => {
     setShowImportModal(false);
     if (shouldRefresh) {
       fetchProducts(1);
-      loadProductTypes(); // 👈 refresh product types to include any new types from import
+      loadProductTypes();
     }
   };
 
@@ -702,7 +705,6 @@ const Product = () => {
         });
         showToast("success", res.data.message || "Products deleted successfully");
         fetchProducts(currentPage);
-        // Optionally refresh types if a product type might be removed (optional)
         loadProductTypes();
       } catch (err) {
         showToast("error", err.response?.data?.message || "Failed to delete products.");
@@ -722,7 +724,6 @@ const Product = () => {
         const res = await axios.delete(`${backendUrl}/api/products/${product._id}`);
         showToast("success", res.data.message || "Product deleted successfully");
         fetchProducts(currentPage);
-        // Optionally refresh types
         loadProductTypes();
       } catch (error) {
         showToast("error", error.response?.data?.message || "Failed to delete product");
@@ -741,12 +742,12 @@ const Product = () => {
         supplierName: form.supplierName.toLowerCase(),
         drugLicense: form.drugLicense.toLowerCase(),
         remarks: form.remarks.toLowerCase(),
+        // Date will be parsed on backend; send as YYYY-MM-DD string
       };
       const res = await axios.put(`${backendUrl}/api/products/${form._id}`, updateData);
       showToast("success", `Product <b>${res.data.productName}</b> updated successfully`);
       closeEditModal();
       fetchProducts(currentPage);
-      // Refresh types in case type was changed (though unlikely to introduce new type)
       loadProductTypes();
     } catch (err) {
       showToast("error", err.response?.data?.message || "Failed to update product.");
@@ -792,6 +793,67 @@ const Product = () => {
 
   const visiblePages = getVisiblePages(currentPage, paginationInfo.totalPages);
 
+  const handleDownloadAll = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${backendUrl}/api/products`);
+      const allProducts = response.data;
+
+      if (!allProducts.length) {
+        showToast("info", "No products to export.");
+        return;
+      }
+
+      const rows = [
+        ["Remarks", "", "", "", "", "", "", "", "", "", "", ""],
+        ["Product List", "", "", "", "", "", "", "", "", "", "", ""],
+        [
+          "Product Name",
+          "Type",
+          "Packing",
+          "Selling Price (USD)",
+          "LC (USD)",
+          "FOB (USD)",
+          "Tax Selling Price (USD)",
+          "Quantity per Box/Strip",
+          "Supplier Name",
+          "Drug Registration License #",
+          "Drug Registration License Validity Date",
+          "Remarks",
+        ],
+      ];
+
+      allProducts.forEach((p) => {
+        rows.push([
+          p.productName || "",
+          p.type || "",
+          p.packing || "",
+          p.sellingPrice ?? 0,
+          p.lc ?? 0,
+          p.fob ?? 0,
+          p.taxSellingPrice ?? 0,
+          p.qtyPerBoxStrip ?? "",
+          p.supplierName || "",
+          p.drugLicense || "",
+          p.licenseValidityDate
+            ? p.licenseValidityDate + " 00:00:00" // already YYYY-MM-DD from backend
+            : "",
+          p.remarks || "",
+        ]);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Products");
+      XLSX.writeFile(wb, "products_export.xlsx");
+    } catch (error) {
+      console.error("Error downloading products:", error);
+      showToast("error", "Failed to download products.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading && currentPage === 1 && !debouncedSearchTerm)
     return <LoadingOverlay text="Loading products..." />;
 
@@ -818,6 +880,15 @@ const Product = () => {
             >
               <Upload size={18} /> Import Product
             </button>
+            {isSampleFile && (
+              <button
+                onClick={handleDownloadAll}
+                disabled={loading}
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+              >
+                <Download size={18} /> Export All
+              </button>
+            )}
             {selected.length > 0 && (
               <button
                 className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
@@ -830,7 +901,6 @@ const Product = () => {
         </div>
 
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-          {/* Tabs: dynamically generated from types */}
           {types.length > 0 ? (
             <div className="flex gap-4 flex-wrap">
               <button
@@ -954,9 +1024,7 @@ const Product = () => {
                     <td className="p-3">{product.supplierName || "--"}</td>
                     <td className="p-3">{product.drugLicense || "--"}</td>
                     <td className="p-3">
-                      {product.licenseValidityDate
-                        ? new Date(product.licenseValidityDate).toLocaleDateString()
-                        : "--"}
+                      {formatDateUTC(product.licenseValidityDate)}
                     </td>
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button
@@ -1060,9 +1128,7 @@ const Product = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-600">License Validity Date</label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.licenseValidityDate
-                        ? new Date(form.licenseValidityDate).toLocaleDateString()
-                        : "N/A"}
+                      {formatDateUTC(form.licenseValidityDate)}
                     </p>
                   </div>
                   <div className="md:col-span-2">
@@ -1159,13 +1225,17 @@ const Product = () => {
                         <DatePicker
                           selected={
                             form.licenseValidityDate
-                              ? new Date(form.licenseValidityDate)
+                              ? (() => {
+                                  // Create UTC noon Date from YYYY-MM-DD string
+                                  const [y, m, d] = form.licenseValidityDate.split('-').map(Number);
+                                  return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+                                })()
                               : null
                           }
                           onChange={(date) =>
                             setForm({
                               ...form,
-                              licenseValidityDate: date ? date.toISOString().split("T")[0] : "",
+                              licenseValidityDate: date ? date.toISOString().split('T')[0] : "",
                             })
                           }
                           dateFormat="yyyy-MM-dd"

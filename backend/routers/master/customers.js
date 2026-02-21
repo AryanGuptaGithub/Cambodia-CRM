@@ -4,6 +4,7 @@ import Province from "../../models/master/Province.js";
 import MedicalRep from "../../models/staffMember/staff.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import XLSX from "xlsx";
 
 const router = express.Router();
 
@@ -535,6 +536,42 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get("/export", async (req, res) => {
+  try {
+    // Fetch all customers (no pagination)
+    const customers = await Customer.find({}).lean();
+
+    // Transform data to match import columns
+    const data = customers.map(cust => ({
+      Date: formatDateForResponse(cust.date),
+      "Medical Representative Name": cust.medicalRepName ? toTitleCase(cust.medicalRepName) : "",
+      "Customer Name in English": cust.name ? toTitleCase(cust.name) : "",
+      "Types of Business": cust.typeOfBusiness ? toTitleCase(cust.typeOfBusiness) : "",
+      "Customer Number": cust.customerNumber || "",
+      "Customer Address": cust.address ? toTitleCase(cust.address) : "",
+      Zone: cust.zone ? toTitleCase(cust.zone) : "",
+      Province: cust.province ? toTitleCase(cust.province) : "",
+      Remark: cust.remark ? toTitleCase(cust.remark) : "",
+    }));
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data, { header: Object.keys(data[0] || {}) });
+    XLSX.utils.book_append_sheet(wb, ws, "Customers");
+
+    // Generate buffer
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    // Set headers and send
+    res.setHeader("Content-Disposition", "attachment; filename=customer_list.xlsx");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(buf);
+  } catch (err) {
+    console.error("Export error:", err);
+    res.status(500).json({ message: "Failed to export customers", ok: false });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
@@ -627,5 +664,8 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
     handleServerError(res, err);
   }
 });
+
+
+
 
 export default router;

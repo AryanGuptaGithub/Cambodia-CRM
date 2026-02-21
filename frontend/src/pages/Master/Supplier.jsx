@@ -9,6 +9,7 @@ import {
   X,
   CheckCircle,
   AlertCircle,
+  Download,
 } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import axios from "axios";
@@ -16,16 +17,17 @@ import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
 import * as XLSX from "xlsx";
 import { formatDateToReadable } from "../../utils/dateUtil";
-import { parseExcelDate } from "../../utils/excelUtility";
 import SampleExcelDownloadSupplier from "../../excels/SampleExcelDownloadSuppiler";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import LoadingOverlay from "../../components/Loading";
+import { parseExcelDateValue } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-const SUPPLIERS_PER_PAGE = 10; // Match backend default
+const isSampleDownloadEnabled = import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
+const SUPPLIERS_PER_PAGE = 10;
 
 // --- Axios Interceptor to automatically attach token ---
 axios.interceptors.request.use(
@@ -39,12 +41,20 @@ axios.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
+
+const formatDateToYYYYMMDD = (date) => {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 function capitalizeFirstLetter(str) {
   if (!str) return "";
   str = str.toString();
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
-// -------------------------------------------------------
 
 // Helper to convert to title case for display
 const toTitleCase = (str) => {
@@ -66,7 +76,15 @@ const toLowerCase = (str) => {
 const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
 // Subcomponents
-const TopBar = ({ onAddNew, onImport, onDeleteSelected, selectedCount }) => (
+const TopBar = ({
+  onAddNew,
+  onImport,
+  onDownloadAll,
+  onDeleteSelected,
+  selectedCount,
+  showSampleDownload,
+  showExportButton,
+}) => (
   <div className="flex justify-between items-center mb-4">
     <div className="flex gap-3">
       <button
@@ -81,6 +99,14 @@ const TopBar = ({ onAddNew, onImport, onDeleteSelected, selectedCount }) => (
       >
         <Upload size={18} /> Import CSV
       </button>
+      {showExportButton && (
+        <button
+          onClick={onDownloadAll}
+          className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+        >
+          <Download size={18} /> Export All
+        </button>
+      )}
       {selectedCount > 0 && (
         <button
           onClick={onDeleteSelected}
@@ -367,7 +393,6 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
   const [duplicateRows, setDuplicateRows] = useState([]);
   const [loadingExisting, setLoadingExisting] = useState(false);
 
-  // Fetch existing suppliers when modal opens
   useEffect(() => {
     if (show) {
       fetchExistingSuppliers();
@@ -384,16 +409,12 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
       }
     } catch (error) {
       console.error("Failed to fetch existing suppliers", error);
-      showToast(
-        "error",
-        "Could not load existing suppliers for duplicate check",
-      );
+      showToast("error", "Could not load existing suppliers for duplicate check");
     } finally {
       setLoadingExisting(false);
     }
   };
 
-  // Generate a unique key for a row (all fields, trimmed + lowercased)
   const getRowKey = (row) => {
     const fields = [
       row.supplierName || "",
@@ -404,7 +425,6 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
     return fields.map((f) => f.toString().trim().toLowerCase()).join("||");
   };
 
-  // Check for duplicates whenever parsedData or existingSuppliers change
   useEffect(() => {
     if (!parsedData.length) {
       setDuplicateRows([]);
@@ -413,9 +433,9 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
 
     const duplicateIndices = new Set();
 
-    // 1. Intra‑file duplicates (full row equality)
+    // Intra-file duplicates (full row equality)
     const keyCount = new Map();
-    parsedData.forEach((row, idx) => {
+    parsedData.forEach((row) => {
       const key = getRowKey(row);
       keyCount.set(key, (keyCount.get(key) || 0) + 1);
     });
@@ -424,7 +444,7 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
       if (keyCount.get(key) > 1) duplicateIndices.add(idx);
     });
 
-    // 2. Database duplicates by supplier name (case‑insensitive)
+    // Database duplicates by supplier name (case-insensitive)
     if (existingSuppliers.length > 0) {
       const existingNames = new Set(
         existingSuppliers
@@ -456,6 +476,7 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
+        // ✅ FIX: Use cellDates: true so XLSX returns real Date objects
         const workbook = XLSX.read(data, { type: "array", cellDates: true });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
@@ -531,24 +552,25 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
           }
 
           const address = String(getValue(obj, ["Address"]) || "").trim();
-          const siteRegistrationDateStr = String(
-            getValue(obj, ["Site Registration Date", "Registration Date"]) ||
-              "",
-          ).trim();
-          const siteRegistrationExpiryDateStr = String(
-            getValue(obj, ["Site Registration Expiry Date", "Expiry Date"]) ||
-              "",
-          ).trim();
+          const siteRegistrationDateRaw = getValue(obj, [
+            "Site Registration Date",
+            "Registration Date",
+          ]);
+          const siteRegistrationExpiryDateRaw = getValue(obj, [
+            "Site Registration Expiry Date",
+            "Expiry Date",
+          ]);
 
           const dataObj = {
             supplierName: supplierName.toLowerCase(),
             address: address.toLowerCase(),
           };
 
-          const parsedRegDate = parseExcelDate(siteRegistrationDateStr);
+          // ✅ FIX: Pass the raw value directly (Date object or string/number)
+          const parsedRegDate = parseExcelDateValue(siteRegistrationDateRaw);
           if (parsedRegDate) dataObj.siteRegistrationDate = parsedRegDate;
 
-          const parsedExpDate = parseExcelDate(siteRegistrationExpiryDateStr);
+          const parsedExpDate = parseExcelDateValue(siteRegistrationExpiryDateRaw);
           if (parsedExpDate) dataObj.siteRegistrationExpiryDate = parsedExpDate;
 
           validRows.push(dataObj);
@@ -581,7 +603,6 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
       return;
     }
 
-    // Filter out duplicate rows
     const uniqueData = parsedData.filter((row) => !duplicateRows.includes(row));
 
     if (uniqueData.length === 0) {
@@ -605,7 +626,7 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
           res.data.message ||
             `Imported ${uniqueData.length} records successfully`,
         );
-        onClose(true); // true = refresh
+        onClose(true);
       }
     } catch (err) {
       console.error("Import error:", err);
@@ -725,13 +746,10 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
                           {displayValue(row.address) || "—"}
                         </td>
                         <td className="p-1">
-                          {formatDateToReadable(row.siteRegistrationDate) ||
-                            "—"}
+                          {formatDateToReadable(row.siteRegistrationDate) || "—"}
                         </td>
                         <td className="p-1">
-                          {formatDateToReadable(
-                            row.siteRegistrationExpiryDate,
-                          ) || "—"}
+                          {formatDateToReadable(row.siteRegistrationExpiryDate) || "—"}
                         </td>
                       </tr>
                     );
@@ -774,9 +792,7 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
             </button>
             <button
               onClick={handleImport}
-              disabled={
-                isUploading || parsedData.length === 0 || loadingExisting
-              }
+              disabled={isUploading || parsedData.length === 0 || loadingExisting}
               className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {isUploading ? (
@@ -1068,10 +1084,7 @@ const Supplier = () => {
           setError(
             `Server error: ${err.response.status} - ${err.response.data?.message || "Unknown error"}`,
           );
-          showToast(
-            "error",
-            `Failed to fetch suppliers: ${err.response.status}`,
-          );
+          showToast("error", `Failed to fetch suppliers: ${err.response.status}`);
         } else if (err.request) {
           setError("No response from server. Check backend connection.");
           showToast("error", "Cannot connect to server. Please try again.");
@@ -1107,8 +1120,14 @@ const Supplier = () => {
     setCurrentPage(1);
   }, [activeTab]);
 
-  const hasEnabled = useMemo(() => suppliers.some((s) => s.enabled), [suppliers]);
-  const hasDisabled = useMemo(() => suppliers.some((s) => !s.enabled), [suppliers]);
+  const hasEnabled = useMemo(
+    () => suppliers.some((s) => s.enabled),
+    [suppliers],
+  );
+  const hasDisabled = useMemo(
+    () => suppliers.some((s) => !s.enabled),
+    [suppliers],
+  );
 
   const filteredSuppliers = useMemo(() => {
     return suppliers.filter((s) => {
@@ -1134,7 +1153,9 @@ const Supplier = () => {
 
   const toggleSelectAll = useCallback(
     (checked) => {
-      setSelected(checked ? filteredSuppliers.map((s) => ({ id: s._id })) : []);
+      setSelected(
+        checked ? filteredSuppliers.map((s) => ({ id: s._id })) : [],
+      );
     },
     [filteredSuppliers],
   );
@@ -1274,6 +1295,26 @@ const Supplier = () => {
     }
   };
 
+  // Download all suppliers as Excel
+  const handleDownloadAll = async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/suppliers/export`, {
+        responseType: "blob",
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "suppliers_export.xlsx");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast("error", "Failed to download supplier list");
+      console.error(err);
+    }
+  };
+
   if (loading && suppliers.length === 0)
     return <LoadingOverlay text="Please wait..." />;
   if (error && suppliers.length === 0)
@@ -1300,8 +1341,11 @@ const Supplier = () => {
       <TopBar
         onAddNew={() => navigate("/masterlayout/supplier/new")}
         onImport={() => setIsOpen("import")}
+        onDownloadAll={handleDownloadAll}
         onDeleteSelected={handleDeleteSelected}
         selectedCount={selected.length}
+        showSampleDownload={isSampleDownloadEnabled}
+        showExportButton={isSampleDownloadEnabled}
       />
 
       <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
@@ -1338,7 +1382,8 @@ const Supplier = () => {
           <p className="text-sm text-blue-700">
             Searching for: <span className="font-semibold">"{search}"</span>
             <span className="ml-4">
-              Found: <span className="font-bold">{totalSuppliers}</span> supplier(s)
+              Found: <span className="font-bold">{totalSuppliers}</span>{" "}
+              supplier(s)
             </span>
           </p>
         </div>
@@ -1347,7 +1392,8 @@ const Supplier = () => {
       {search && totalSuppliers === 0 && suppliers.length === 0 && (
         <div className="mb-4 p-3 bg-yellow-50 rounded-lg">
           <p className="text-sm text-yellow-700">
-            No suppliers found for: <span className="font-semibold">"{search}"</span>
+            No suppliers found for:{" "}
+            <span className="font-semibold">"{search}"</span>
             <span className="ml-4">
               <button
                 onClick={() => setSearch("")}

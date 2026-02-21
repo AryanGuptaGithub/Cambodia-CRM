@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../../utils/toast";
-import { getTodayDate } from "../../utils/dateUtil";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import axios from "axios";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -11,68 +13,50 @@ const AddSupplier = () => {
   const [form, setForm] = useState({
     name: "",
     address: "",
-    siteRegistrationDate: "",
-    siteRegistrationExpiryDate: "",
-    enabled: "enabled",
+    siteRegistrationDate: null,
+    siteRegistrationExpiryDate: null,
+    enabled: true,
   });
 
   const [errors, setErrors] = useState({});
 
-  // ✅ Handle form input and prevent future registration dates (allow today)
-  const handleChange = (e) => {
-    const { name, value } = e.target;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-    if (name === "siteRegistrationDate" && value) {
-      const selectedDate = new Date(value);
-      const today = new Date();
+  /* ===================== DATE FORMATTER (IMPORTANT FIX) ===================== */
+  const formatDateOnly = (date) => {
+    if (!date) return null;
 
-      // normalize both to midnight
-      selectedDate.setHours(0, 0, 0, 0);
-      today.setHours(0, 0, 0, 0);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
 
-      // allow today but not future
-      if (selectedDate.getTime() > today.getTime()) {
-        setErrors((prev) => ({
-          ...prev,
-          [name]: "Future dates are not allowed for registration date",
-        }));
-        return;
-      }
-    }
-
-    // update form
-    setForm((prev) => ({ ...prev, [name]: value }));
-    setErrors((prev) => ({ ...prev, [name]: "" }));
+    return `${year}-${month}-${day}`; // YYYY-MM-DD
   };
 
-  // ✅ Validate all fields before submission
+  /* ===================== VALIDATION ===================== */
   const validate = () => {
     const newErrors = {};
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
-    if (!form.name) newErrors.name = "Name is required";
-    if (!form.address) newErrors.address = "Address is required";
+    if (!form.name?.trim()) newErrors.name = "Name is required";
+    if (!form.address?.trim()) newErrors.address = "Address is required";
 
-    // Site Registration Date validation (allow today)
     if (!form.siteRegistrationDate) {
       newErrors.siteRegistrationDate = "Registration date is required";
     } else {
-      const registrationDate = new Date(form.siteRegistrationDate);
-      registrationDate.setHours(0, 0, 0, 0);
-
-      if (registrationDate.getTime() > today.getTime()) {
+      const regDate = new Date(form.siteRegistrationDate);
+      regDate.setHours(0, 0, 0, 0);
+      if (regDate.getTime() > today.getTime()) {
         newErrors.siteRegistrationDate =
           "Future dates are not allowed for registration date";
       }
     }
 
-    // Site Registration Expiry Date validation (can be future)
     if (!form.siteRegistrationExpiryDate) {
       newErrors.siteRegistrationExpiryDate = "Expiry date is required";
     } else if (
       form.siteRegistrationDate &&
-      new Date(form.siteRegistrationExpiryDate) <
+      new Date(form.siteRegistrationExpiryDate) <=
         new Date(form.siteRegistrationDate)
     ) {
       newErrors.siteRegistrationExpiryDate =
@@ -83,120 +67,189 @@ const AddSupplier = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // ✅ Submit form data
+  /* ===================== SUBMIT ===================== */
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
     try {
-      const res = await fetch(`${backendUrl}/api/suppliers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
+      const payload = {
+        name: form.name.trim().toLowerCase(),
+        address: form.address.trim().toLowerCase(),
+        siteRegistrationDate: formatDateOnly(form.siteRegistrationDate),
+        siteRegistrationExpiryDate: formatDateOnly(
+          form.siteRegistrationExpiryDate
+        ),
+        enabled: form.enabled,
+      };
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to add supplier");
+      const res = await axios.post(`${backendUrl}/api/suppliers`, payload);
 
-      showToast("success", data.message || "Supplier added successfully");
+      showToast("success", res.data.message || "Supplier added successfully");
       navigate("/masterlayout/supplier");
     } catch (err) {
-      showToast("error", err.message);
+      showToast(
+        "error",
+        err.response?.data?.message || err.message || "Failed to add supplier"
+      );
     }
   };
 
-  // ✅ Reusable input field component
-  const renderInput = (
-    label,
-    name,
-    type = "text",
-    placeholder = "",
-    required = false,
-    disabled = false
-  ) => (
-    <div>
-      <label className="text-sm font-medium text-gray-700">{label}</label>
-      <input
-        type={type}
-        name={name}
-        value={form[name]}
-        onChange={handleChange}
-        placeholder={placeholder}
-        className={`w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-          errors[name] ? "border-red-500" : "border-gray-300"
-        }`}
-        disabled={disabled}
-        autoComplete="off"
-        max={name === "siteRegistrationDate" ? getTodayDate() : undefined}
-      />
-      {errors[name] && (
-        <p className="text-red-500 text-sm mt-1">{errors[name]}</p>
-      )}
-    </div>
-  );
-
+  /* ===================== UI ===================== */
   return (
     <div className="max-w-3xl mx-auto p-8 bg-white rounded-2xl shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">Add Supplier</h2>
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderInput("Name", "name", "text", "Enter name", true)}
-            {renderInput("Address", "address", "text", "Enter address", true)}
 
-            {/* Site Registration Date - allow today, not future */}
-            {renderInput(
-              "Site Registration Date",
-              "siteRegistrationDate",
-              "date",
-              "",
-              true
-            )}
-
-            {/* Site Registration Expiry Date - future allowed */}
-            {renderInput(
-              "Site Registration Expiry Date",
-              "siteRegistrationExpiryDate",
-              "date",
-              "",
-              true
+          {/* Name */}
+          <div>
+            <label className="text-sm font-medium text-gray-700">
+              Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, name: e.target.value }));
+                setErrors((prev) => ({ ...prev, name: "" }));
+              }}
+              className={`mt-1 w-full border rounded-md px-3 py-2 ${
+                errors.name ? "border-red-500" : "border-gray-300"
+              }`}
+            />
+            {errors.name && (
+              <p className="text-red-500 text-sm mt-1">{errors.name}</p>
             )}
           </div>
 
-          {/* Status Dropdown */}
+          {/* Address */}
+          <div>
+            <label className="text-sm font-medium text-gray-700">
+              Address <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={form.address}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, address: e.target.value }));
+                setErrors((prev) => ({ ...prev, address: "" }));
+              }}
+              className={`mt-1 w-full border rounded-md px-3 py-2 ${
+                errors.address ? "border-red-500" : "border-gray-300"
+              }`}
+            />
+            {errors.address && (
+              <p className="text-red-500 text-sm mt-1">{errors.address}</p>
+            )}
+          </div>
+
+          {/* Registration Date */}
+          <div>
+            <label className="text-sm font-medium text-gray-700">
+              Site Registration Date <span className="text-red-500">*</span>
+            </label>
+            <DatePicker
+              selected={form.siteRegistrationDate}
+              onChange={(date) => {
+                setForm((prev) => ({ ...prev, siteRegistrationDate: date }));
+                setErrors((prev) => ({ ...prev, siteRegistrationDate: "" }));
+              }}
+              maxDate={today}
+              dateFormat="yyyy-MM-dd"
+              className={`mt-1 w-full border rounded-md px-3 py-2 ${
+                errors.siteRegistrationDate
+                  ? "border-red-500"
+                  : "border-gray-300"
+              }`}
+              showYearDropdown
+              showMonthDropdown
+              dropdownMode="select"
+            />
+            {errors.siteRegistrationDate && (
+              <p className="text-red-500 text-sm mt-1">
+                {errors.siteRegistrationDate}
+              </p>
+            )}
+          </div>
+
+          {/* Expiry Date */}
+          <div>
+            <label className="text-sm font-medium text-gray-700">
+              Site Registration Expiry Date <span className="text-red-500">*</span>
+            </label>
+            <DatePicker
+              selected={form.siteRegistrationExpiryDate}
+              onChange={(date) => {
+                setForm((prev) => ({
+                  ...prev,
+                  siteRegistrationExpiryDate: date,
+                }));
+                setErrors((prev) => ({
+                  ...prev,
+                  siteRegistrationExpiryDate: "",
+                }));
+              }}
+              minDate={
+                form.siteRegistrationDate
+                  ? new Date(
+                      form.siteRegistrationDate.getTime() + 86400000
+                    )
+                  : null
+              }
+              dateFormat="yyyy-MM-dd"
+              className={`mt-1 w-full border rounded-md px-3 py-2 ${
+                errors.siteRegistrationExpiryDate
+                  ? "border-red-500"
+                  : "border-gray-300"
+              }`}
+              showYearDropdown
+              showMonthDropdown
+              dropdownMode="select"
+            />
+            {errors.siteRegistrationExpiryDate && (
+              <p className="text-red-500 text-sm mt-1">
+                {errors.siteRegistrationExpiryDate}
+              </p>
+            )}
+          </div>
+
+          {/* Status */}
           <div>
             <label className="text-sm font-medium text-gray-700">Status</label>
             <select
-              name="enabled"
               value={form.enabled}
-              onChange={handleChange}
-              className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  enabled: e.target.value === "true",
+                }))
+              }
+              className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2"
             >
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
             </select>
-            {errors.enabled && (
-              <p className="text-red-500 text-sm mt-1">{errors.enabled}</p>
-            )}
           </div>
 
           {/* Buttons */}
-          <div className="md:col-span-2 flex justify-end gap-4 mt-8">
+          <div className="md:col-span-2 flex justify-end gap-4 mt-4">
             <button
               type="submit"
-              className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow cursor-pointer transition-colors"
+              className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg"
             >
               Add Supplier
             </button>
             <button
               type="button"
               onClick={() => navigate("/masterlayout/supplier")}
-              className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg cursor-pointer transition-colors"
+              className="bg-gray-300 hover:bg-gray-400 px-6 py-2 rounded-lg"
             >
               Cancel
             </button>
           </div>
+
         </div>
       </form>
     </div>

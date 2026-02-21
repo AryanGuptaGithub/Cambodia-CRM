@@ -15,6 +15,7 @@ import {
   Search,
   CheckCircle,
   AlertCircle,
+  Download,               // <-- NEW ICON
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -29,6 +30,7 @@ import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustome
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import LoadingOverlay from "../../components/Loading";
+import {parseExcelDateValue} from "../../utils/dateUtil";
 
 import {
   fetchProvinces as fetchProvincesAPI,
@@ -39,6 +41,7 @@ import {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
+const isSampleDownloadFile = import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true"; // <-- NEW ENV
 const customersPerPage = 10;
 
 // --- Axios Interceptor Setup ---
@@ -61,7 +64,7 @@ axios.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       // Token expired or invalid – clear token and redirect to login
       localStorage.removeItem("token");
-      window.location.href = "/login"; // Adjust to your login route
+      window.location.href = "/login";
     }
     return Promise.reject(error);
   }
@@ -93,105 +96,6 @@ const excelSerialToDateString = (serial) => {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-};
-
-const parseExcelDateValue = (dateValue) => {
-  if (!dateValue && dateValue !== 0 && dateValue !== "") {
-    return formatDateToYYYYMMDD(new Date());
-  }
-  if (dateValue instanceof Date) {
-    const excelEpoch = new Date(1899, 11, 30);
-    const diff = dateValue - excelEpoch;
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const adjustedDays = days >= 60 ? days + 1 : days;
-    const excelZero = new Date(1899, 11, 31);
-    const reconstructedDate = new Date(
-      excelZero.getTime() + (adjustedDays - 1) * 86400000,
-    );
-    const year = reconstructedDate.getFullYear();
-    const month = String(reconstructedDate.getMonth() + 1).padStart(2, "0");
-    const day = String(reconstructedDate.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-  if (typeof dateValue === "number") {
-    return excelSerialToDateString(dateValue);
-  }
-  if (typeof dateValue === "string") {
-    const trimmed = dateValue.trim();
-    if (!trimmed) return "";
-
-    const asNumber = parseFloat(trimmed);
-    if (!isNaN(asNumber)) {
-      return excelSerialToDateString(asNumber);
-    }
-
-    const usFormatMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-    if (usFormatMatch) {
-      let month = parseInt(usFormatMatch[1], 10);
-      let day = parseInt(usFormatMatch[2], 10);
-      let year = parseInt(usFormatMatch[3], 10);
-      if (year < 100) year += 2000;
-      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    }
-
-    const dateFormats = [
-      /^(\d{1,2})[-/\s]([A-Za-z]{3,})[-/\s](\d{2,4})$/i,
-      /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/,
-      /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/,
-    ];
-    for (const format of dateFormats) {
-      const match = trimmed.match(format);
-      if (match) {
-        try {
-          let year, month, day;
-          if (format === dateFormats[0]) {
-            day = parseInt(match[1], 10);
-            const monthStr = match[2].toLowerCase().substring(0, 3);
-            year = parseInt(match[3], 10);
-            if (year < 100) year += 2000;
-            const monthMap = {
-              jan: 1,
-              feb: 2,
-              mar: 3,
-              apr: 4,
-              may: 5,
-              jun: 6,
-              jul: 7,
-              aug: 8,
-              sep: 9,
-              oct: 10,
-              nov: 11,
-              dec: 12,
-            };
-            month = monthMap[monthStr];
-            if (month === undefined) continue;
-          } else if (format === dateFormats[1]) {
-            year = parseInt(match[1], 10);
-            month = parseInt(match[2], 10);
-            day = parseInt(match[3], 10);
-          } else {
-            day = parseInt(match[1], 10);
-            month = parseInt(match[2], 10);
-            year = parseInt(match[3], 10);
-            if (year < 100) year += 2000;
-          }
-          return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-        } catch (e) {
-          console.warn("Failed to parse date string:", trimmed, e);
-        }
-      }
-    }
-
-    try {
-      const date = new Date(trimmed);
-      if (!isNaN(date.getTime())) {
-        return formatDateToYYYYMMDD(date);
-      }
-    } catch (e) {
-      console.warn("JavaScript Date constructor failed for:", trimmed);
-    }
-  }
-  return formatDateToYYYYMMDD(new Date());
 };
 
 const formatDateForDisplay = (dateString) => {
@@ -1150,6 +1054,27 @@ const Customer = () => {
     setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
   };
 
+  // NEW: Download all customers as Excel
+  const handleDownloadAll = async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/customers/export`, {
+        responseType: "blob",
+      });
+      // Create a download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "customer_list.xlsx");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast("error", "Failed to download customer list");
+      console.error(err);
+    }
+  };
+
   const provinceOptions = useMemo(
     () =>
       provinces.map((p) => ({
@@ -1217,6 +1142,15 @@ const Customer = () => {
             >
               <Upload size={18} /> Import Customer
             </button>
+            {/* NEW DOWNLOAD BUTTON – only shown when env var is true */}
+            {isSampleDownloadFile && (
+              <button
+                onClick={handleDownloadAll}
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              >
+                <Download size={18} /> Download All Customers
+              </button>
+            )}
             {selected.length > 0 && (
               <button
                 className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
