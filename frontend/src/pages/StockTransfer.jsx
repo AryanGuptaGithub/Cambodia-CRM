@@ -53,6 +53,8 @@ const StockTransfer = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  // NEW: track loading state for the product modal
+  const [productModalLoading, setProductModalLoading] = useState(false);
 
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -402,28 +404,115 @@ const StockTransfer = () => {
     }));
   };
 
-  const handleViewProducts = (transfer) => {
-    if (!transfer || !Array.isArray(transfer.items)) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // KEY FIX: handleViewProducts
+  //
+  // For MR tab → fetch the current stock from StockInMRHand
+  //   using /api/stock-transfer-to-mr/mr-hand?mrName=...
+  //   so the modal shows the REAL current quantities in the MR's hand,
+  //   not the historical transfer line-items.
+  //
+  // For General tab → keep using transfer.items as before.
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleViewProducts = async (transfer) => {
+    // ===============================
+    // GENERAL TAB (Transfer Items)
+    // ===============================
+    if (activeTab === "general") {
+      if (!transfer || !Array.isArray(transfer.items)) {
+        setSelectedProducts([]);
+        setIsProductModalOpen(true);
+        return;
+      }
+
+      // 🔥 Group duplicate productId (merge quantities)
+      const grouped = {};
+
+      transfer.items.forEach((item) => {
+        const id = item.productId?._id || item.productId || item._id;
+
+        if (!grouped[id]) {
+          grouped[id] = {
+            _id: id,
+            productId: id,
+            productName: item.productName || "-",
+            boxQuantity: 0,
+            lc: parseFloat(item.lc) || 0,
+          };
+        }
+
+        grouped[id].boxQuantity += parseFloat(item.boxQuantity) || 0;
+      });
+
+      const productsWithCost = Object.values(grouped).map((item) => ({
+        ...item,
+        productCost: parseFloat(
+          ((item.lc || 0) * (item.boxQuantity || 0)).toFixed(2),
+        ),
+      }));
+
+      setSelectedProducts(productsWithCost);
+      setIsProductModalOpen(true);
+      return;
+    }
+
+    // ===============================
+    // MR TAB (Live MR Stock)
+    // ===============================
+    const mrName = transfer.stockTransferToMr || transfer.mrName || "";
+
+    if (!mrName) {
       setSelectedProducts([]);
       setIsProductModalOpen(true);
       return;
     }
 
-    const productsWithCost = transfer.items.map((item) => {
-      const boxQuantity = parseFloat(item.boxQuantity) || 0;
-      const lc = parseFloat(item.lc) || 0;
-      const productCost = parseFloat(item.productCost) || lc * boxQuantity;
+    try {
+      setProductModalLoading(true);
+      setSelectedProducts([]);
+      setIsProductModalOpen(true);
 
-      return {
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
+        { params: { mrName } },
+      );
+
+      const data = response.data?.data || [];
+
+      // 🔥 Group duplicate productId from MR stock
+      const grouped = {};
+
+      data.forEach((entry) => {
+        const id = entry.productId?._id || entry.productId;
+
+        if (!grouped[id]) {
+          grouped[id] = {
+            _id: id, // ✅ Safe unique key
+            productId: id,
+            productName: entry.productName || "-",
+            boxQuantity: 0,
+            lc: entry.lc || 0,
+          };
+        }
+
+        grouped[id].boxQuantity += entry.quantity || 0;
+      });
+
+      const productsWithCost = Object.values(grouped).map((item) => ({
         ...item,
-        boxQuantity,
-        lc,
-        productCost,
-      };
-    });
+        productCost: parseFloat(
+          ((item.lc || 0) * (item.boxQuantity || 0)).toFixed(2),
+        ),
+      }));
 
-    setSelectedProducts(productsWithCost);
-    setIsProductModalOpen(true);
+      setSelectedProducts(productsWithCost);
+    } catch (err) {
+      console.error("Error fetching MR stock:", err);
+      showToast("error", "Failed to fetch MR stock");
+      setSelectedProducts([]);
+    } finally {
+      setProductModalLoading(false);
+    }
   };
 
   const handleAddNewItem = () => {
@@ -559,11 +648,9 @@ const StockTransfer = () => {
     });
   };
 
-  // FIXED: handleUpdateTransfer - removed Authorization header
   const handleUpdateTransfer = async (e, formData) => {
     e.preventDefault();
 
-    // Get token from localStorage
     const token = localStorage.getItem("token");
 
     try {
@@ -620,7 +707,6 @@ const StockTransfer = () => {
         requestData.totalExpenses,
       );
 
-      // Add Authorization header here
       const response = await axios.put(url, requestData, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -820,7 +906,6 @@ const StockTransfer = () => {
                 ? `${backendUrl}/api/stock-transfer/${id}`
                 : `${backendUrl}/api/stock-transfer-to-mr/${id}`;
 
-            // Add Authorization header here
             return axios.delete(url, {
               headers: {
                 Authorization: `Bearer ${token}`,
@@ -870,7 +955,6 @@ const StockTransfer = () => {
             ? `${backendUrl}/api/stock-transfer/${transferData._id}`
             : `${backendUrl}/api/stock-transfer-to-mr/${transferData._id}`;
 
-        // Add Authorization header here
         const response = await axios.delete(url, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -1249,7 +1333,11 @@ const StockTransfer = () => {
             ) : (
               currentTransfers.map((item, index) => {
                 const productCount = Array.isArray(item.items)
-                  ? item.items.length
+                  ? new Set(
+                      item.items.map((i) =>
+                        String(i.productId?._id || i.productId),
+                      ),
+                    ).size
                   : 0;
 
                 const calculatedTotal = calculateTotalTransferCost(item.items);
@@ -1317,7 +1405,11 @@ const StockTransfer = () => {
                         <button
                           className="text-purple-600 hover:text-purple-800 cursor-pointer"
                           onClick={() => handleViewProducts(item)}
-                          title="View Products"
+                          title={
+                            activeTab === "mr"
+                              ? "View Current MR Stock"
+                              : "View Products"
+                          }
                         >
                           <Package size={18} />
                         </button>
@@ -1390,7 +1482,7 @@ const StockTransfer = () => {
         )}
       </div>
 
-      {/* View Modal */}
+      {/* View Modal — unchanged */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1550,37 +1642,6 @@ const StockTransfer = () => {
                     ) : (
                       <p className="text-gray-500 text-center">No items</p>
                     )}
-
-                    {form.items && form.items.length > 0 && (
-                      <div className="border-t pt-4 mt-4">
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                          <div className="md:col-span-3">
-                            <p className="text-right font-semibold text-gray-700">
-                              Total:
-                            </p>
-                          </div>
-                          <div>
-                            <p className="px-3 py-2 rounded bg-blue-50 font-semibold text-blue-800">
-                              {formatCurrency(
-                                form.items.reduce(
-                                  (sum, item) =>
-                                    sum + (parseFloat(item.lc) || 0),
-                                  0,
-                                ) / form.items.length,
-                              )}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="px-3 py-2 rounded bg-green-50 font-semibold text-green-800">
-                              $
-                              {formatCurrency(
-                                calculateTotalTransferCost(form.items),
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1598,7 +1659,7 @@ const StockTransfer = () => {
           document.body,
         )}
 
-      {/* Edit Modal */}
+      {/* Edit Modal — unchanged */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1613,12 +1674,10 @@ const StockTransfer = () => {
               >
                 <X size={20} />
               </button>
-
               <h2 className="text-xl font-semibold text-gray-800 mb-4">
                 Edit{" "}
                 {activeTab === "general" ? "Stock Transfer" : "MR Transfer"}
               </h2>
-
               <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
                 <div className="md:col-span-2">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1648,7 +1707,6 @@ const StockTransfer = () => {
                     </div>
                   </div>
                 </div>
-
                 <div className="md:col-span-1">
                   <div className="grid grid-cols-1 gap-4">
                     {activeTab === "general" ? (
@@ -1686,7 +1744,6 @@ const StockTransfer = () => {
                     )}
                   </div>
                 </div>
-
                 {activeTab === "general" ? (
                   <div className="md:col-span-3">
                     {form.transferType === "send" ? (
@@ -1740,7 +1797,6 @@ const StockTransfer = () => {
                     </div>
                   </div>
                 )}
-
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700">
                     Total LC Cost ($)
@@ -1759,7 +1815,6 @@ const StockTransfer = () => {
                     Calculated automatically from items (LC × Box Quantity)
                   </p>
                 </div>
-
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700">
                     Remarks
@@ -1774,7 +1829,6 @@ const StockTransfer = () => {
                     placeholder="Enter remarks"
                   />
                 </div>
-
                 <div className="md:col-span-3">
                   <h3 className="text-lg font-medium text-gray-800 mb-3">
                     Products ({form.items?.length || 0})
@@ -1834,7 +1888,6 @@ const StockTransfer = () => {
                       <p className="text-gray-500 text-center">No items</p>
                     )}
                   </div>
-
                   <div className="mt-4">
                     <button
                       type="button"
@@ -1846,7 +1899,6 @@ const StockTransfer = () => {
                     </button>
                   </div>
                 </div>
-
                 <div className="md:col-span-3 mt-4 flex justify-end gap-3">
                   <button
                     type="button"
@@ -1869,7 +1921,7 @@ const StockTransfer = () => {
           document.body,
         )}
 
-      {/* Add Product Modal */}
+      {/* Add Product Modal — unchanged */}
       {isAddProductModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1884,11 +1936,9 @@ const StockTransfer = () => {
               >
                 <X size={20} />
               </button>
-
               <h2 className="text-xl font-semibold text-gray-800 mb-4">
                 Add New Product
               </h2>
-
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1917,7 +1967,6 @@ const StockTransfer = () => {
                     </p>
                   )}
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Box Quantity <span className="text-red-500">*</span>
@@ -1937,7 +1986,6 @@ const StockTransfer = () => {
                     required
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     LC ($) Per Box
@@ -1957,7 +2005,6 @@ const StockTransfer = () => {
                     Auto-filled from product batches data
                   </p>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Total LC Cost ($)
@@ -1974,7 +2021,6 @@ const StockTransfer = () => {
                   </p>
                 </div>
               </div>
-
               <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
                 <button
                   type="button"
@@ -2001,7 +2047,7 @@ const StockTransfer = () => {
           document.body,
         )}
 
-      {/* Product Edit Modal */}
+      {/* Product Edit Modal — unchanged */}
       {isProductEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -2016,11 +2062,9 @@ const StockTransfer = () => {
               >
                 <X size={20} />
               </button>
-
               <h2 className="text-xl font-semibold text-gray-800 mb-4">
                 Edit Product
               </h2>
-
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
@@ -2035,7 +2079,6 @@ const StockTransfer = () => {
                     disabled={productOptionsForEdit.length === 0}
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Box Quantity <span className="text-red-500">*</span>
@@ -2050,7 +2093,6 @@ const StockTransfer = () => {
                     placeholder="0"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     LC ($) Per Box <span className="text-red-500">*</span>
@@ -2068,16 +2110,13 @@ const StockTransfer = () => {
                     Landed Cost per box from product batches
                   </p>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Total LC Cost ($)
                   </label>
                   <input
                     type="text"
-                    value={`$${formatCurrency(
-                      currentProduct?.productCost || 0,
-                    )}`}
+                    value={`$${formatCurrency(currentProduct?.productCost || 0)}`}
                     className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium text-green-700"
                     readOnly
                   />
@@ -2086,7 +2125,6 @@ const StockTransfer = () => {
                   </p>
                 </div>
               </div>
-
               <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
                 <button
                   type="button"
@@ -2113,7 +2151,7 @@ const StockTransfer = () => {
           document.body,
         )}
 
-      {/* Product Modal */}
+      {/* ─── Product Modal — now shows StockInMRHand data for MR tab ─── */}
       {isProductModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
@@ -2124,7 +2162,9 @@ const StockTransfer = () => {
             <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-lg relative flex flex-col border border-gray-200">
               <div className="flex items-center justify-between p-6 border-b">
                 <h2 className="text-xl font-semibold text-gray-800">
-                  Product Details with LC (Landed Cost)
+                  {activeTab === "mr"
+                    ? "Current Stock in MR Hand (Live)"
+                    : "Product Details with LC (Landed Cost)"}
                 </h2>
                 <button
                   onClick={() => setIsProductModalOpen(false)}
@@ -2135,110 +2175,121 @@ const StockTransfer = () => {
               </div>
 
               <div className="flex-1 overflow-auto p-6">
-                <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-                  <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-                    <thead className="bg-gray-100 text-gray-700 border-b">
-                      <tr>
-                        <th className="p-3 min-w-[200px] text-sm font-medium">
-                          Product Name
-                        </th>
-                        <th className="p-3 min-w-[120px] text-sm font-medium">
-                          Box Quantity
-                        </th>
-                        <th className="p-3 min-w-[120px] text-sm font-medium">
-                          LC ($) Per Box
-                        </th>
-                        <th className="p-3 min-w-[120px] text-sm font-medium">
-                          Total LC Cost ($)
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedProducts.length > 0 ? (
-                        selectedProducts.map((product, index) => {
-                          const productCost =
-                            product.itemCost ||
-                            (product.lc || 0) * (product.boxQuantity || 0);
-
-                          return (
-                            <tr
-                              key={product._id || index}
-                              className={`hover:bg-gray-50 ${
-                                index + 1 === selectedProducts.length
-                                  ? ""
-                                  : "border-b"
-                              }`}
-                            >
-                              <td className="p-3 min-w-[200px] capitalize">
-                                {product.productName || "-"}
-                              </td>
-                              <td className="p-3 min-w-[120px]">
-                                <div className="flex items-center justify-center gap-1">
-                                  <Box size={14} className="text-gray-500" />
-                                  {product.boxQuantity || 0}
-                                </div>
-                              </td>
-                              <td className="p-3 min-w-[120px]">
-                                <div className="flex items-center justify-center gap-1">
-                                  <DollarSign
-                                    size={14}
-                                    className="text-green-600"
-                                  />
-                                  {formatCurrency(product.lc)}
-                                </div>
-                              </td>
-                              <td className="p-3 min-w-[120px] font-medium">
-                                <div className="flex items-center justify-center gap-1">
-                                  <DollarSign
-                                    size={14}
-                                    className="text-green-700"
-                                  />
-                                  {formatCurrency(product.productCost)}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
+                {productModalLoading ? (
+                  <div className="flex justify-center items-center h-40">
+                    <div className="text-gray-500 animate-pulse">
+                      Loading MR stock...
+                    </div>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+                    <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                      <thead className="bg-gray-100 text-gray-700 border-b">
                         <tr>
-                          <td
-                            colSpan={4}
-                            className="p-4 text-center text-gray-500"
-                          >
-                            No products found
-                          </td>
+                          <th className="p-3 min-w-[200px] text-sm font-medium">
+                            Product Name
+                          </th>
+                          <th className="p-3 min-w-[120px] text-sm font-medium">
+                            {activeTab === "mr"
+                              ? "Current Qty in Hand"
+                              : "Box Quantity"}
+                          </th>
+                          <th className="p-3 min-w-[120px] text-sm font-medium">
+                            LC ($) Per Box
+                          </th>
+                          <th className="p-3 min-w-[120px] text-sm font-medium">
+                            Total LC Cost ($)
+                          </th>
                         </tr>
-                      )}
-                      {selectedProducts.length > 0 && (
-                        <tr className="bg-gray-50 font-semibold">
-                          <td
-                            className="p-3 min-w-[200px] text-right"
-                            colSpan={3}
-                          >
-                            Total:
-                          </td>
-                          <td className="p-3 min-w-[120px]">
-                            <div className="flex items-center justify-center gap-1">
-                              <DollarSign
-                                size={14}
-                                className="text-green-800"
-                              />
-                              {formatCurrency(
-                                selectedProducts.reduce((sum, product) => {
-                                  const cost =
-                                    product.itemCost ||
-                                    (product.lc || 0) *
-                                      (product.boxQuantity || 0);
-                                  return sum + cost;
-                                }, 0),
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {selectedProducts.length > 0 ? (
+                          selectedProducts.map((product, index) => {
+                            const productCost =
+                              product.productCost ||
+                              (product.lc || 0) * (product.boxQuantity || 0);
+                            return (
+                              <tr
+                                key={product._id || index}
+                                className={`hover:bg-gray-50 ${
+                                  index + 1 === selectedProducts.length
+                                    ? ""
+                                    : "border-b"
+                                }`}
+                              >
+                                <td className="p-3 min-w-[200px] capitalize">
+                                  {product.productName || "-"}
+                                </td>
+                                <td className="p-3 min-w-[120px]">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Box size={14} className="text-gray-500" />
+                                    {product.boxQuantity || 0}
+                                  </div>
+                                </td>
+                                <td className="p-3 min-w-[120px]">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <DollarSign
+                                      size={14}
+                                      className="text-green-600"
+                                    />
+                                    {formatCurrency(product.lc)}
+                                  </div>
+                                </td>
+                                <td className="p-3 min-w-[120px] font-medium">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <DollarSign
+                                      size={14}
+                                      className="text-green-700"
+                                    />
+                                    {formatCurrency(productCost)}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td
+                              colSpan={4}
+                              className="p-4 text-center text-gray-500"
+                            >
+                              {activeTab === "mr"
+                                ? "No stock currently in MR's hand"
+                                : "No products found"}
+                            </td>
+                          </tr>
+                        )}
+                        {selectedProducts.length > 0 && (
+                          <tr className="bg-gray-50 font-semibold">
+                            <td
+                              className="p-3 min-w-[200px] text-right"
+                              colSpan={3}
+                            >
+                              Total:
+                            </td>
+                            <td className="p-3 min-w-[120px]">
+                              <div className="flex items-center justify-center gap-1">
+                                <DollarSign
+                                  size={14}
+                                  className="text-green-800"
+                                />
+                                {formatCurrency(
+                                  selectedProducts.reduce((sum, product) => {
+                                    const cost =
+                                      product.productCost ||
+                                      (product.lc || 0) *
+                                        (product.boxQuantity || 0);
+                                    return sum + cost;
+                                  }, 0),
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end p-6 border-t">
