@@ -15,7 +15,7 @@ import {
   Search,
   CheckCircle,
   AlertCircle,
-  Download,               // <-- NEW ICON
+  Download,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -30,7 +30,7 @@ import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustome
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import LoadingOverlay from "../../components/Loading";
-import {parseExcelDateValue} from "../../utils/dateUtil";
+import { parseExcelDateValue } from "../../utils/dateUtil";
 
 import {
   fetchProvinces as fetchProvincesAPI,
@@ -41,35 +41,34 @@ import {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-const isSampleDownloadFile = import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true"; // <-- NEW ENV
+const isSampleDownloadFile =
+  import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
+// ✅ NEW: Controls whether customer code is shown in export and importable
+const isWithCustomerCode =
+  import.meta.env.VITE_IS_WITH_CUSTOMER_CODE === "true";
+
 const customersPerPage = 10;
 
 // --- Axios Interceptor Setup ---
-// Attach token to every request
 axios.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+    if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
-// Handle 401 responses globally
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // Token expired or invalid – clear token and redirect to login
       localStorage.removeItem("token");
       window.location.href = "/login";
     }
     return Promise.reject(error);
-  }
+  },
 );
-// ---------------------------------
 
 function capitalizeFirstLetter(str) {
   if (!str) return "";
@@ -79,19 +78,6 @@ function capitalizeFirstLetter(str) {
 
 const formatDateToYYYYMMDD = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const excelSerialToDateString = (serial) => {
-  if (!serial && serial !== 0) return "";
-  const num = typeof serial === "string" ? parseFloat(serial) : serial;
-  if (isNaN(num)) return "";
-  const adjustedNum = num >= 60 ? num - 1 : num;
-  const excelEpoch = new Date(1900, 0, 0);
-  const date = new Date(excelEpoch.getTime() + (adjustedNum - 1) * 86400000);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -117,9 +103,7 @@ const formatDateForDisplay = (dateString) => {
   const match = String(dateString).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (match) {
     const [, year, month, day] = match.map(Number);
-    if (month >= 1 && month <= 12) {
-      return `${day} ${MONTHS[month - 1]} ${year}`;
-    }
+    if (month >= 1 && month <= 12) return `${day} ${MONTHS[month - 1]} ${year}`;
   }
   return "--";
 };
@@ -146,10 +130,9 @@ const useCustomerForm = (initialCustomerCode = "") => {
     return str
       .toLowerCase()
       .split(" ")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
       .join(" ");
   };
-
   const toLowerCase = (str) => (str ? str.toLowerCase() : "");
 
   const handleChange = useCallback(
@@ -214,6 +197,9 @@ const useCustomerForm = (initialCustomerCode = "") => {
   };
 };
 
+// ─────────────────────────────────────────────
+// Import Modal
+// ─────────────────────────────────────────────
 const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [parsedData, setParsedData] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -222,8 +208,9 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [existingCustomers, setExistingCustomers] = useState([]);
   const [duplicateRows, setDuplicateRows] = useState([]);
   const [loadingExisting, setLoadingExisting] = useState(false);
+  // ✅ NEW: checkbox — only visible when isWithCustomerCode is true
+  const [importWithCode, setImportWithCode] = useState(false);
 
-  // Normalise a row for duplicate comparison (all fields, trimmed + lowercased)
   const getRowKey = (row) => {
     const fields = [
       row.date || "",
@@ -239,10 +226,18 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     return fields.map((f) => f.toString().trim().toLowerCase()).join("||");
   };
 
-  // Fetch existing customers when modal opens
   useEffect(() => {
-    if (isOpen) {
-      fetchExistingCustomers();
+    if (isOpen) fetchExistingCustomers();
+  }, [isOpen]);
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setParsedData([]);
+      setParseErrors([]);
+      setFileName("");
+      setDuplicateRows([]);
+      setImportWithCode(false);
     }
   }, [isOpen]);
 
@@ -256,6 +251,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           customers.map((c) => ({
             customerNumber: c.customerNumber,
             name: c.name,
+            customerCode: c.customerCode,
           })),
         );
       }
@@ -270,7 +266,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     }
   };
 
-  // Check for duplicates whenever parsedData or existingCustomers change
   useEffect(() => {
     if (!parsedData.length) {
       setDuplicateRows([]);
@@ -278,50 +273,44 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     }
 
     const duplicateIndices = new Set();
-
-    // 1. Intra‑file duplicates (full row equality)
     const keyCount = new Map();
-    parsedData.forEach((row, idx) => {
+    parsedData.forEach((row) => {
       const key = getRowKey(row);
       keyCount.set(key, (keyCount.get(key) || 0) + 1);
     });
-
     parsedData.forEach((row, idx) => {
-      const key = getRowKey(row);
-      if (keyCount.get(key) > 1) {
-        duplicateIndices.add(idx);
-      }
+      if (keyCount.get(getRowKey(row)) > 1) duplicateIndices.add(idx);
     });
 
-    // 2. Database duplicates by full row (all fields)
     if (existingCustomers.length > 0) {
-      const existingKeys = new Set(
-        existingCustomers.map((c) => getRowKey(c)) // This requires existingCustomers to have all fields, which they don't – so we need to adjust
-        // Since existingCustomers only has number and name, we can't do full row check here. The backend does full row check.
-        // So we rely on backend duplicate check; frontend just shows warning based on number for UX.
-      );
-      // For UX, we can still show number duplicates as warning
       const existingNumbers = new Set(
         existingCustomers
           .map((c) => c.customerNumber?.trim().toLowerCase())
           .filter(Boolean),
       );
+      // ✅ If importing with customer code, also check for duplicate codes
+      const existingCodes = new Set(
+        existingCustomers
+          .map((c) => c.customerCode?.trim().toLowerCase())
+          .filter(Boolean),
+      );
+
       parsedData.forEach((row, idx) => {
         const num = row.customerNumber?.trim().toLowerCase();
-        if (num && existingNumbers.has(num)) {
-          duplicateIndices.add(idx);
+        if (num && existingNumbers.has(num)) duplicateIndices.add(idx);
+        if (importWithCode && row.customerCode) {
+          const code = row.customerCode?.trim().toLowerCase();
+          if (code && existingCodes.has(code)) duplicateIndices.add(idx);
         }
       });
     }
 
-    const dupes = parsedData.filter((_, idx) => duplicateIndices.has(idx));
-    setDuplicateRows(dupes);
-  }, [parsedData, existingCustomers]);
+    setDuplicateRows(parsedData.filter((_, idx) => duplicateIndices.has(idx)));
+  }, [parsedData, existingCustomers, importWithCode]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setFileName(file.name);
     setParseErrors([]);
     setParsedData([]);
@@ -395,7 +384,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           headers.forEach((h, i) => {
             obj[h] = row[i] !== undefined ? row[i] : "";
           });
-
           if (!Object.values(obj).some((v) => v.toString().trim() !== ""))
             return;
 
@@ -424,7 +412,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             return;
           }
 
-          validRows.push({
+          const rowData = {
             date: parseExcelDateValue(getValue(obj, ["Date", "Joining Date"])),
             medicalRepName: String(
               getValue(obj, [
@@ -447,7 +435,17 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             remark: String(
               getValue(obj, ["Remark", "Notes", "Comments"]) || "",
             ).trim(),
-          });
+          };
+
+          // ✅ If importWithCode is enabled and VITE_IS_WITH_CUSTOMER_CODE is true, read customer code
+          if (isWithCustomerCode && importWithCode) {
+            const code = String(
+              getValue(obj, ["Customer Code", "Code"]) || "",
+            ).trim();
+            if (code) rowData.customerCode = code;
+          }
+
+          validRows.push(rowData);
         });
 
         if (validRows.length === 0) {
@@ -457,12 +455,11 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
 
         setParsedData(validRows);
         setParseErrors(rowErrors);
-        if (rowErrors.length) {
+        if (rowErrors.length)
           showToast(
             "warning",
             `${validRows.length} valid rows, ${rowErrors.length} skipped`,
           );
-        }
       } catch (err) {
         console.error("Parse error:", err);
         showToast("error", "Failed to parse file: " + err.message);
@@ -476,10 +473,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
       showToast("warning", "Upload a valid file first");
       return;
     }
-
-    // Filter out duplicate rows (keep only unique ones)
     const uniqueData = parsedData.filter((row) => !duplicateRows.includes(row));
-
     if (uniqueData.length === 0) {
       showToast("warning", "No unique records to import");
       return;
@@ -489,11 +483,12 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     try {
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
-        uniqueData,
+        // ✅ Send flag to backend so it knows to use provided customer codes
         {
-          headers: { "Content-Type": "application/json" },
-          timeout: 60000,
+          customers: uniqueData,
+          importWithCode: isWithCustomerCode && importWithCode,
         },
+        { headers: { "Content-Type": "application/json" }, timeout: 60000 },
       );
       if (res.status === 200) {
         showToast(
@@ -516,7 +511,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   };
 
   if (!isOpen) return null;
-
   const isDuplicateRow = (row) => duplicateRows.includes(row);
 
   return ReactDOM.createPortal(
@@ -532,6 +526,36 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
 
         <h2 className="text-lg font-semibold mb-1">Import Customers</h2>
         {isSampleFile && <SampleExcelDownloadCustomer />}
+
+        {/* ✅ NEW: Customer Code checkbox — only shown when VITE_IS_WITH_CUSTOMER_CODE=true */}
+        {isWithCustomerCode && (
+          <div className="mb-3 flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <input
+              type="checkbox"
+              id="importWithCode"
+              checked={importWithCode}
+              onChange={(e) => {
+                setImportWithCode(e.target.checked);
+                // Re-parse the file if already uploaded
+                setParsedData([]);
+                setParseErrors([]);
+                setFileName("");
+                setDuplicateRows([]);
+              }}
+              className="w-4 h-4 text-blue-600 cursor-pointer"
+            />
+            <label
+              htmlFor="importWithCode"
+              className="text-sm font-medium text-blue-800 cursor-pointer select-none"
+            >
+              Import with Customer Code
+              <span className="block text-xs text-blue-600 font-normal mt-0.5">
+                If checked, the "Customer Code" column from your file will be
+                used instead of auto-generating codes.
+              </span>
+            </label>
+          </div>
+        )}
 
         <div className="mb-4">
           <label className="block text-gray-700 mb-2 font-medium">
@@ -568,6 +592,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
               {duplicateRows.slice(0, 5).map((row, i) => (
                 <div key={i} className="mb-1">
                   • {row.name} ({row.customerNumber})
+                  {row.customerCode ? ` [${row.customerCode}]` : ""}
                 </div>
               ))}
               {duplicateRows.length > 5 && (
@@ -599,6 +624,9 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                 <thead className="bg-green-100">
                   <tr>
                     <th className="p-1 text-left">#</th>
+                    {isWithCustomerCode && importWithCode && (
+                      <th className="p-1 text-left">Code</th>
+                    )}
                     <th className="p-1 text-left">Name</th>
                     <th className="p-1 text-left">MR</th>
                     <th className="p-1 text-left">Number</th>
@@ -614,6 +642,11 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                         className={`border-t ${duplicate ? "bg-red-100 text-red-800 font-medium" : ""}`}
                       >
                         <td className="p-1 text-gray-500">{i + 1}</td>
+                        {isWithCustomerCode && importWithCode && (
+                          <td className="p-1 font-mono">
+                            {row.customerCode || "—"}
+                          </td>
+                        )}
                         <td className="p-1">{row.name || "—"}</td>
                         <td className="p-1">{row.medicalRepName || "—"}</td>
                         <td className="p-1">{row.customerNumber || "—"}</td>
@@ -648,32 +681,28 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           </div>
         )}
 
-        <div className="flex justify-end mt-4">
-          <div className="flex gap-3">
-            <button
-              onClick={() => onClose(false)}
-              disabled={isUploading}
-              className="px-5 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 cursor-pointer disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleImport}
-              disabled={
-                isUploading || parsedData.length === 0 || loadingExisting
-              }
-              className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {isUploading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                  Importing…
-                </>
-              ) : (
-                `Import`
-              )}
-            </button>
-          </div>
+        <div className="flex justify-end mt-4 gap-3">
+          <button
+            onClick={() => onClose(false)}
+            disabled={isUploading}
+            className="px-5 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={isUploading || parsedData.length === 0 || loadingExisting}
+            className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isUploading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                Importing…
+              </>
+            ) : (
+              "Import"
+            )}
+          </button>
         </div>
       </div>
     </div>,
@@ -681,6 +710,9 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   );
 };
 
+// ─────────────────────────────────────────────
+// Main Customer Component
+// ─────────────────────────────────────────────
 const Customer = () => {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
@@ -704,7 +736,6 @@ const Customer = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [errors, setErrors] = useState({});
 
-  // State for duplicate check in edit modal
   const [isDuplicateNumber, setIsDuplicateNumber] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const duplicateCheckTimeoutRef = useRef(null);
@@ -722,18 +753,15 @@ const Customer = () => {
 
   const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
-  // Reset duplicate state when modal closes
   useEffect(() => {
     if (!isEditModalOpen) {
       setIsDuplicateNumber(false);
       setCheckingDuplicate(false);
-      if (duplicateCheckTimeoutRef.current) {
+      if (duplicateCheckTimeoutRef.current)
         clearTimeout(duplicateCheckTimeoutRef.current);
-      }
     }
   }, [isEditModalOpen]);
 
-  // Reset to page 1 when search term changes (debounced)
   useEffect(() => {
     if (!searchTerm) return;
     const timer = setTimeout(() => setCurrentPage(1), 500);
@@ -742,12 +770,9 @@ const Customer = () => {
 
   useEffect(() => {
     fetchCustomers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, searchTerm]);
-
   useEffect(() => {
     fetchDropdownData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchDropdownData = async () => {
@@ -820,7 +845,6 @@ const Customer = () => {
     });
     if (confirm.isConfirmed) {
       try {
-        // Token is automatically added by interceptor
         const res = await axios.delete(`${backendUrl}/api/customers`, {
           data: { ids: selected.map((s) => s.id) },
         });
@@ -921,13 +945,12 @@ const Customer = () => {
         "success",
         `Customer <b>${customerToToggle.name}</b> ${newStatus ? "enabled" : "disabled"} successfully`,
       );
-    } catch(error) {
+    } catch (error) {
       fetchCustomers();
       showToast(
-          "error",
-          error.response?.data?.message ||
-            "Failed to delete selected customers.",
-        );
+        "error",
+        error.response?.data?.message || "Failed to update status.",
+      );
     }
   };
 
@@ -971,7 +994,6 @@ const Customer = () => {
     [errors],
   );
 
-  // Duplicate check function for edit modal
   const performDuplicateCheck = useCallback(
     async (number) => {
       if (!number) {
@@ -990,7 +1012,6 @@ const Customer = () => {
           setIsDuplicateNumber(!!found);
         }
       } catch (err) {
-        console.error("Duplicate check error", err);
         setIsDuplicateNumber(false);
       } finally {
         setCheckingDuplicate(false);
@@ -1047,20 +1068,17 @@ const Customer = () => {
     setShowImportModal(false);
     if (shouldRefresh) fetchCustomers();
   };
-
   const handleIconClick = () => {
     inputRef.current?.focus();
-    inputRef.current?.classList.add("highlight");
-    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
   };
 
-  // NEW: Download all customers as Excel
+  // ✅ Export — includes Customer Code column when isWithCustomerCode=true
   const handleDownloadAll = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/customers/export`, {
+        params: { withCode: isWithCustomerCode }, // ✅ tell backend to include code
         responseType: "blob",
       });
-      // Create a download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -1107,7 +1125,6 @@ const Customer = () => {
       }),
     [businessTypes],
   );
-
   const visiblePages = getVisiblePages(currentPage, totalPages);
 
   if (loading && customers.length === 0)
@@ -1142,7 +1159,7 @@ const Customer = () => {
             >
               <Upload size={18} /> Import Customer
             </button>
-            {/* NEW DOWNLOAD BUTTON – only shown when env var is true */}
+            {/* ✅ Export button shown only when VITE_IS_SAMPLE_DOWNLOAD_FILE=true */}
             {isSampleDownloadFile && (
               <button
                 onClick={handleDownloadAll}
@@ -1251,7 +1268,7 @@ const Customer = () => {
                       "Loading..."
                     ) : searchTerm ? (
                       <>
-                        No customers found matching your search.
+                        <span>No customers found matching your search.</span>
                         <br />
                         <button
                           onClick={() => setSearchTerm("")}
@@ -1309,11 +1326,7 @@ const Customer = () => {
                     <td className="p-3">
                       <button
                         onClick={() => handleStatusToggle(customer._id)}
-                        className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
-                          customer.enabled
-                            ? "bg-green-100 text-green-600"
-                            : "bg-gray-200 text-gray-600"
-                        }`}
+                        className={`px-3 py-1 rounded-full text-sm cursor-pointer ${customer.enabled ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-600"}`}
                       >
                         {customer.enabled ? "Enabled" : "Disabled"}
                       </button>
@@ -1361,13 +1374,7 @@ const Customer = () => {
                   key={index}
                   onClick={() => typeof p === "number" && setCurrentPage(p)}
                   disabled={p === "..."}
-                  className={`px-4 py-2 rounded ${
-                    p === "..."
-                      ? "bg-gray-200 cursor-not-allowed"
-                      : currentPage === p
-                        ? "bg-indigo-600 text-white cursor-pointer"
-                        : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-                  }`}
+                  className={`px-4 py-2 rounded ${p === "..." ? "bg-gray-200 cursor-not-allowed" : currentPage === p ? "bg-indigo-600 text-white cursor-pointer" : "bg-gray-200 hover:bg-gray-300 cursor-pointer"}`}
                 >
                   {p}
                 </button>
@@ -1513,12 +1520,12 @@ const Customer = () => {
                         value={form.customerNumber || ""}
                         onChange={(e) => {
                           handleNumericInput(e, "customerNumber");
-                          if (duplicateCheckTimeoutRef.current) {
+                          if (duplicateCheckTimeoutRef.current)
                             clearTimeout(duplicateCheckTimeoutRef.current);
-                          }
-                          duplicateCheckTimeoutRef.current = setTimeout(() => {
-                            performDuplicateCheck(e.target.value);
-                          }, 500);
+                          duplicateCheckTimeoutRef.current = setTimeout(
+                            () => performDuplicateCheck(e.target.value),
+                            500,
+                          );
                         }}
                         placeholder="Numbers only"
                         className="px-3 py-2 border-gray-300 border rounded-lg w-full"

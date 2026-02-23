@@ -30,7 +30,7 @@ import {
   fetchProductPackingType,
 } from "./common/fetchDropdown";
 import { handleAxiosError } from "../../utils/errorHandler";
-import {parseExcelDateValue} from "../../utils/dateUtil";
+import { parseExcelDateValue } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -76,6 +76,7 @@ const formatDisplayText = (text) => {
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
 };
+
 
 /**
  * Format a date (string or Date) to "DD MMM YYYY" using UTC components.
@@ -276,7 +277,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
           if (dateVal) {
             licenseValidityDate = parseExcelDateValue(dateVal);
           }
-
+          
           validRows.push({
             productName,
             type,
@@ -1232,12 +1233,17 @@ const Product = () => {
                                 })()
                               : null
                           }
-                          onChange={(date) =>
-                            setForm({
-                              ...form,
-                              licenseValidityDate: date ? date.toISOString().split('T')[0] : "",
-                            })
-                          }
+                          onChange={(date) => {
+                            if (date) {
+                              // Use local date components to build YYYY-MM-DD
+                              const year = date.getFullYear();
+                              const month = String(date.getMonth() + 1).padStart(2, '0');
+                              const day = String(date.getDate()).padStart(2, '0');
+                              setForm({ ...form, licenseValidityDate: `${year}-${month}-${day}` });
+                            } else {
+                              setForm({ ...form, licenseValidityDate: '' });
+                            }
+                          }}
                           dateFormat="yyyy-MM-dd"
                           placeholderText="Select date"
                           className="w-full px-3 py-2 border-none rounded-lg focus:ring-0"
