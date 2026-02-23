@@ -1105,7 +1105,7 @@ const ImportSalesModal = ({
             "warning",
             `Found ${validInvoices.length} valid invoices with ${validationErrors.length} validation errors`,
           );
-        } 
+        }
 
         setShowParsedSection(true);
       } catch (error) {
@@ -1205,49 +1205,122 @@ const ImportSalesModal = ({
     }
   }, []);
 
-  const validateStockBeforeImport = useCallback(async (invoices) => {
-    try {
-      setIsValidatingStock(true);
-      setImportMessage(`Checking stock for ${invoices.length} invoices...`);
+  // const validateStockBeforeImport = useCallback(async (invoices) => {
+  //   try {
+  //     setIsValidatingStock(true);
+  //     setImportMessage(`Checking stock for ${invoices.length} invoices...`);
 
-      const response = await axios.post(
-        `${backendUrl}/api/sales/validate-import-stock`,
-        { invoices },
-        getAuthHeaders(),
-      );
+  //     const response = await axios.post(
+  //       `${backendUrl}/api/sales/validate-import-stock`,
+  //       { invoices },
+  //       getAuthHeaders(),
+  //     );
 
-      setIsValidatingStock(false);
+  //     setIsValidatingStock(false);
 
-      if (response.data.success) {
-        return response.data.validationResult;
-      } else {
-        throw new Error(response.data.message || "Stock validation failed");
-      }
-    } catch (error) {
-      console.error("Stock validation error:", error);
-      setIsValidatingStock(false);
-      return {
-        stockIssues: [],
-        totalInvoices: invoices.length,
-        summary: {
-          totalProducts: 0,
-          totalRequired: 0,
-          totalAvailable: 0,
-          totalInsufficient: 0,
-          missingProducts: 0,
-          lowStockProducts: 0,
-          hasCriticalIssues: true,
-          hasInsufficientStock: false,
+  //     if (response.data.success) {
+  //       return response.data.validationResult;
+  //     } else {
+  //       throw new Error(response.data.message || "Stock validation failed");
+  //     }
+  //   } catch (error) {
+  //     console.error("Stock validation error:", error);
+  //     setIsValidatingStock(false);
+  //     return {
+  //       stockIssues: [],
+  //       totalInvoices: invoices.length,
+  //       summary: {
+  //         totalProducts: 0,
+  //         totalRequired: 0,
+  //         totalAvailable: 0,
+  //         totalInsufficient: 0,
+  //         missingProducts: 0,
+  //         lowStockProducts: 0,
+  //         hasCriticalIssues: true,
+  //         hasInsufficientStock: false,
+  //         importBlocked: true,
+  //       },
+  //       insufficientStockIssues: [],
+  //       missingProductIssues: [],
+  //       importBlocked: true,
+  //       blockReason: "VALIDATION_ERROR",
+  //       message: `Stock validation failed: ${error.message}`,
+  //     };
+  //   }
+  // }, []);
+
+  const validateStockBeforeImport = useCallback(
+    async (invoices) => {
+      try {
+        setIsValidatingStock(true);
+        setImportMessage(`Checking stock for ${invoices.length} invoices...`);
+
+        // For MR sales, skip warehouse stock validation
+        if (importSaleType === "mr") {
+          setIsValidatingStock(false);
+          return {
+            stockIssues: [],
+            totalInvoices: invoices.length,
+            summary: {
+              totalProducts: 0,
+              totalRequired: 0,
+              totalAvailable: 0,
+              totalInsufficient: 0,
+              missingProducts: 0,
+              lowStockProducts: 0,
+              hasCriticalIssues: false,
+              hasInsufficientStock: false,
+              importBlocked: false,
+            },
+            insufficientStockIssues: [],
+            missingProductIssues: [],
+            importBlocked: false,
+            blockReason: "NO_ISSUES",
+            message:
+              "MR sale - stock from MR hands will be validated during import.",
+          };
+        }
+
+        const response = await axios.post(
+          `${backendUrl}/api/sales/validate-import-stock`,
+          { invoices, isMrSaleImport: importSaleType === "mr" },
+          getAuthHeaders(),
+        );
+
+        setIsValidatingStock(false);
+
+        if (response.data.success) {
+          return response.data.validationResult;
+        } else {
+          throw new Error(response.data.message || "Stock validation failed");
+        }
+      } catch (error) {
+        console.error("Stock validation error:", error);
+        setIsValidatingStock(false);
+        return {
+          stockIssues: [],
+          totalInvoices: invoices.length,
+          summary: {
+            totalProducts: 0,
+            totalRequired: 0,
+            totalAvailable: 0,
+            totalInsufficient: 0,
+            missingProducts: 0,
+            lowStockProducts: 0,
+            hasCriticalIssues: true,
+            hasInsufficientStock: false,
+            importBlocked: true,
+          },
+          insufficientStockIssues: [],
+          missingProductIssues: [],
           importBlocked: true,
-        },
-        insufficientStockIssues: [],
-        missingProductIssues: [],
-        importBlocked: true,
-        blockReason: "VALIDATION_ERROR",
-        message: `Stock validation failed: ${error.message}`,
-      };
-    }
-  }, []);
+          blockReason: "VALIDATION_ERROR",
+          message: `Stock validation failed: ${error.message}`,
+        };
+      }
+    },
+    [importSaleType],
+  ); // <-- add importSaleType to deps
 
   const handleImportData = useCallback(async () => {
     if (parsedData.length === 0) {

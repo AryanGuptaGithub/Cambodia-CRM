@@ -464,7 +464,7 @@ const getCustomerByCode = async (customerCode, session = null) => {
       return {
         success: false,
         message: "Customer code is required",
-        customer: null
+        customer: null,
       };
     }
 
@@ -487,9 +487,9 @@ const getCustomerByCode = async (customerCode, session = null) => {
       if (digitsMatch) {
         const digits = digitsMatch[0];
         const paddedCode = digits.padStart(5, "0");
-        
+
         console.log(`Trying padded code: "${paddedCode}"`);
-        
+
         query = Customer.findOne({
           customerCode: paddedCode,
           enabled: true,
@@ -506,7 +506,7 @@ const getCustomerByCode = async (customerCode, session = null) => {
     // If still not found, try case-insensitive search
     if (!customer) {
       query = Customer.findOne({
-        customerCode: { $regex: new RegExp(`^${cleanedCode}$`, 'i') },
+        customerCode: { $regex: new RegExp(`^${cleanedCode}$`, "i") },
         enabled: true,
       });
 
@@ -522,12 +522,14 @@ const getCustomerByCode = async (customerCode, session = null) => {
       return {
         success: false,
         message: `Customer with code "${cleanedCode}" not found`,
-        customer: null
+        customer: null,
       };
     }
 
-    console.log(`Found customer: ${customer.name} with code ${customer.customerCode}`);
-    
+    console.log(
+      `Found customer: ${customer.name} with code ${customer.customerCode}`,
+    );
+
     return {
       success: true,
       customer: {
@@ -537,11 +539,14 @@ const getCustomerByCode = async (customerCode, session = null) => {
       },
     };
   } catch (error) {
-    console.error(`Error fetching customer with code "${customerCode}":`, error);
+    console.error(
+      `Error fetching customer with code "${customerCode}":`,
+      error,
+    );
     return {
       success: false,
       message: `Error fetching customer: ${error.message}`,
-      customer: null
+      customer: null,
     };
   }
 };
@@ -1524,14 +1529,69 @@ router.post("/check-stock", async (req, res) => {
 });
 
 // NEW: Validate stock for multiple products (for import)
+// router.post("/validate-import-stock", async (req, res) => {
+//   try {
+//     const { invoices } = req.body;
+
+//     if (!invoices || !Array.isArray(invoices)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invoices array is required",
+//       });
+//     }
+
+//     const validationResult = await validateStockForImport(invoices);
+
+//     res.json({
+//       success: true,
+//       validationResult,
+//     });
+//   } catch (error) {
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to validate import stock",
+//       error: error.message,
+//     });
+//   }
+// });
+
+// FIXED: Validate stock for multiple products (for import)
 router.post("/validate-import-stock", async (req, res) => {
   try {
-    const { invoices } = req.body;
+    const { invoices, isMrSaleImport = false } = req.body;
 
     if (!invoices || !Array.isArray(invoices)) {
       return res.status(400).json({
         success: false,
         message: "Invoices array is required",
+      });
+    }
+
+    // For MR sale imports, skip warehouse stock validation entirely
+    if (isMrSaleImport) {
+      return res.json({
+        success: true,
+        validationResult: {
+          stockIssues: [],
+          totalInvoices: invoices.length,
+          summary: {
+            totalProducts: 0,
+            totalRequired: 0,
+            totalAvailable: 0,
+            totalInsufficient: 0,
+            missingProducts: 0,
+            lowStockProducts: 0,
+            hasCriticalIssues: false,
+            hasInsufficientStock: false,
+            importBlocked: false,
+          },
+          insufficientStockIssues: [],
+          missingProductIssues: [],
+          importBlocked: false,
+          blockReason: "NO_ISSUES",
+          message:
+            "MR sale import - stock validated from MR hands, not warehouse.",
+        },
       });
     }
 
@@ -1820,7 +1880,7 @@ router.get("/debug/customer/:code", async (req, res) => {
     res.json({
       success: true,
       code: code,
-      result: result
+      result: result,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1831,12 +1891,14 @@ router.post("/import-with-stock-deduction", async (req, res) => {
   let sessionId = null;
   try {
     const { invoices, bypassStockCheck = false } = req.body;
-    
+
     // Ensure each invoice has a customerName
-    const invoiceData = (Array.isArray(invoices) ? invoices : []).map(inv => ({
-      ...inv,
-      customerName: inv.customerName || "Unknown", // Default to "Unknown" if missing
-    }));
+    const invoiceData = (Array.isArray(invoices) ? invoices : []).map(
+      (inv) => ({
+        ...inv,
+        customerName: inv.customerName || "Unknown", // Default to "Unknown" if missing
+      }),
+    );
 
     if (!invoiceData.length) {
       return res
@@ -2014,7 +2076,9 @@ const processSingleInvoiceWithMRDistribution = async (
     let customerId = invoiceData.customerId || null;
     let customerCode = invoiceData.customerCode || "";
 
-    console.log(`Processing invoice ${invoiceData.invoiceNumber} with customer code: "${customerCode}"`);
+    console.log(
+      `Processing invoice ${invoiceData.invoiceNumber} with customer code: "${customerCode}"`,
+    );
 
     if (customerCode && customerCode.trim() !== "") {
       const customerResult = await getCustomerByCode(customerCode, session);
@@ -2024,22 +2088,49 @@ const processSingleInvoiceWithMRDistribution = async (
         customerCode = customerResult.customer.customerCode; // Use normalized code
         console.log(`Found customer: ${customerName} (ID: ${customerId})`);
       } else {
-        console.warn(`Customer not found for code: ${customerCode}, using "Unknown" as customer name`);
+        console.warn(
+          `Customer not found for code: ${customerCode}, using "Unknown" as customer name`,
+        );
         // Keep "Unknown" as customer name
       }
     } else {
-      console.log(`No customer code provided, using "Unknown" as customer name`);
+      console.log(
+        `No customer code provided, using "Unknown" as customer name`,
+      );
     }
 
     // Build product -> MR name mapping from _mrDistribution (set during grouping)
+    // const productToMrMap = new Map();
+    // if (invoiceData._mrDistribution) {
+    //   for (const [mrName, mrData] of invoiceData._mrDistribution.entries()) {
+    //     for (const prod of mrData.products) {
+    //       const prodName = prod.productName?.trim();
+    //       if (prodName && !productToMrMap.has(prodName)) {
+    //         productToMrMap.set(prodName, mrName);
+    //       }
+    //     }
+    //   }
+    // }
+
+    // Build product -> MR name mapping from _mrDistribution (set during grouping)
     const productToMrMap = new Map();
-    if (invoiceData._mrDistribution) {
+    const invoiceHeaderMR = invoiceData.mrName?.trim();
+
+    if (invoiceData._mrDistribution && invoiceData._mrDistribution.size > 0) {
       for (const [mrName, mrData] of invoiceData._mrDistribution.entries()) {
         for (const prod of mrData.products) {
           const prodName = prod.productName?.trim();
           if (prodName && !productToMrMap.has(prodName)) {
             productToMrMap.set(prodName, mrName);
           }
+        }
+      }
+    } else if (invoiceHeaderMR && invoiceData.isMrSaleImport) {
+      // Fallback: if no _mrDistribution, map ALL products to the invoice-level MR
+      for (const prod of invoiceData.products || []) {
+        const prodName = prod.productName?.trim();
+        if (prodName) {
+          productToMrMap.set(prodName, invoiceHeaderMR);
         }
       }
     }
@@ -3355,7 +3446,9 @@ router.post("/create", async (req, res) => {
         customerId = customerResult.customer.customerId;
         customerCode = customerResult.customer.customerCode;
       } else {
-        console.warn(`Customer not found for code: ${data.customerCode}, using "Unknown"`);
+        console.warn(
+          `Customer not found for code: ${data.customerCode}, using "Unknown"`,
+        );
       }
     }
 
@@ -3408,7 +3501,7 @@ router.post("/create", async (req, res) => {
           console.error(
             `❌ Product "${p.productName}" not found in ${mrStock.mrName}'s stock`,
           );
-       
+
           throw new Error(
             `Product "${p.productName}" not found in ${mrStock.mrName}'s stock. ` +
               `Available products: ${mrStock.productsInHand?.map((p) => p.productName).join(", ") || "None"}`,
