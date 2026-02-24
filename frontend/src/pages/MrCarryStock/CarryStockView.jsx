@@ -57,7 +57,9 @@ const CarryStockView = () => {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/stock-transfer-to-mr/mrs`);
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfer-to-mr/mrs`,
+      );
       if (response.data.success) {
         setMrList(response.data.data || []);
       } else {
@@ -72,25 +74,126 @@ const CarryStockView = () => {
   }, []);
 
   // ─── Fetch Stock Data ────────────────────────────────────────────────────
+  // const fetchStockData = useCallback(async () => {
+  //   try {
+  //     setLoading(true);
+  //     const params = {};
+  //     if (selectedMr !== "all") {
+  //       const mrValue =
+  //         typeof selectedMr === "object" ? selectedMr.value : selectedMr;
+  //       params.mrName = mrValue;
+  //     }
+  //     if (searchTerm.trim()) {
+  //       params.search = searchTerm;
+  //     }
+
+  //     const response = await axios.get(
+  //       `${backendUrl}/api/stock-transfer-to-mr/mr-hand`,
+  //       { params },
+  //     );
+
+  //     console.log("values of resposnt", response);
+  //     if (response.status === 200) {
+  //       // Determine the data array
+  //       let rawData = response.data;
+  //       // If response.data has a 'data' property that is an array, use that (common paginated response)
+  //       if (rawData && Array.isArray(rawData.data)) {
+  //         rawData = rawData.data;
+  //       } else if (!Array.isArray(rawData)) {
+  //         // If it's not an array, maybe it's an object with some other structure; fallback to empty array
+  //         console.warn("Unexpected response data format", rawData);
+  //         rawData = [];
+  //       }
+  //       const transformedData = rawData.map((item, index) => ({
+  //         id: item.id || `${item.mrName}-${item.productId}-${index}`,
+  //         mrCode: item.mrName || "N/A",
+  //         mrName: item.mrName || "N/A",
+  //         productId: item.productId || `PROD-${index}`,
+  //         productCode: item.productCode || `PROD-${index}`,
+  //         productName: item.productName || "Unknown Product",
+  //         batch: item.batch || "N/A",
+  //         expiry: item.expiry || "N/A",
+  //         assignedQty: item.assignedQty || 0,
+  //         remainingQty: item.remainingQty || item.boxQuantity || 0,
+  //         usedQty: item.usedQty || 0,
+  //         assignedDate:
+  //           item.assignedDate || new Date().toISOString().split("T")[0],
+  //         createdAt: item.createdAt || item.assignedDate,
+  //         status: (item.remainingQty || 0) > 0 ? "Active" : "Depleted",
+  //         invoiceNumbers: item.invoiceNumbers || [],
+  //         lc: item.lc || 0,
+  //         unit: item.unit || "pcs",
+  //         category: item.category || "General",
+  //         packSize: item.packSize || 0,
+  //         costPrice: item.costPrice || 0,
+  //         boxQuantity: item.boxQuantity || item.remainingQty || 0,
+  //       }));
+  //       setAllStockData(transformedData);
+  //     } else {
+  //       showToast(
+  //         "error",
+  //         response.data.message || "Failed to load carry stock data",
+  //       );
+  //       setAllStockData([]);
+  //     }
+  //   } catch (error) {
+  //     console.error("Error fetching stock data:", error);
+  //     showToast("error", "Failed to load carry stock data");
+  //     setAllStockData([]);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // }, [selectedMr, searchTerm]);
+
   const fetchStockData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const params = {};
-      if (selectedMr !== "all") {
-        const mrValue = typeof selectedMr === "object" ? selectedMr.value : selectedMr;
-        params.mrName = mrValue;
-      }
-      if (searchTerm.trim()) {
-        params.search = searchTerm;
+  try {
+    setLoading(true);
+    const params = {};
+    if (selectedMr !== "all") {
+      const mrValue =
+        typeof selectedMr === "object" ? selectedMr.value : selectedMr;
+      params.mrName = mrValue;
+    }
+    if (searchTerm.trim()) {
+      params.search = searchTerm;
+    }
+
+    const response = await axios.get(
+      `${backendUrl}/api/stock-transfer-to-mr/mr-hand`,
+      { params },
+    );
+
+    console.log("API Response:", response);
+
+    if (response.status === 200) {
+      // Extract the data array – handle both direct array and { data: [...] }
+      let rawData = response.data;
+      if (rawData && Array.isArray(rawData.data)) {
+        rawData = rawData.data;
+      } else if (!Array.isArray(rawData)) {
+        console.warn("Unexpected response data format", rawData);
+        rawData = [];
       }
 
-      const response = await axios.get(
-        `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
-        { params }
-      );
+      const transformedData = rawData.map((item, index) => {
+        // Try to find assigned quantity from common field names
+        const assignedQty =
+          item.assignedQty ??
+          item.originalQuantity ??
+          item.totalBoxes ??
+          item.quantity ??
+          item.boxes ??
+          0;
 
-      if (response.data.success) {
-        const transformedData = response.data.data.map((item, index) => ({
+        // Remaining quantity – use remainingQty or boxQuantity
+        const remainingQty = item.remainingQty ?? item.boxQuantity ?? 0;
+
+        // Used quantity – if provided, use it; otherwise compute from assigned - remaining
+        const usedQty =
+          item.usedQty ??
+          (assignedQty > 0 ? Math.max(0, assignedQty - remainingQty) : 0);
+
+        return {
           id: item.id || `${item.mrName}-${item.productId}-${index}`,
           mrCode: item.mrName || "N/A",
           mrName: item.mrName || "N/A",
@@ -99,124 +202,146 @@ const CarryStockView = () => {
           productName: item.productName || "Unknown Product",
           batch: item.batch || "N/A",
           expiry: item.expiry || "N/A",
-          assignedQty: item.assignedQty || 0,
-          remainingQty: item.remainingQty || item.boxQuantity || 0,
-          usedQty: item.usedQty || 0,
-          assignedDate: item.assignedDate || new Date().toISOString().split("T")[0],
+          assignedQty,
+          remainingQty,
+          usedQty,
+          assignedDate:
+            item.assignedDate || new Date().toISOString().split("T")[0],
           createdAt: item.createdAt || item.assignedDate,
-          status: (item.remainingQty || 0) > 0 ? "Active" : "Depleted",
+          status: remainingQty > 0 ? "Active" : "Depleted",
           invoiceNumbers: item.invoiceNumbers || [],
           lc: item.lc || 0,
           unit: item.unit || "pcs",
           category: item.category || "General",
           packSize: item.packSize || 0,
           costPrice: item.costPrice || 0,
-          boxQuantity: item.boxQuantity || item.remainingQty || 0,
-        }));
+          boxQuantity: remainingQty, // store remaining for backward compatibility
+        };
+      });
 
-        setAllStockData(transformedData);
-      } else {
-        showToast("error", response.data.message || "Failed to load carry stock data");
-        setAllStockData([]);
-      }
-    } catch (error) {
-      console.error("Error fetching stock data:", error);
-      showToast("error", "Failed to load carry stock data");
+      setAllStockData(transformedData);
+    } else {
+      showToast(
+        "error",
+        response.data?.message || "Failed to load carry stock data",
+      );
       setAllStockData([]);
-    } finally {
-      setLoading(false);
     }
-  }, [selectedMr, searchTerm]);
+  } catch (error) {
+    console.error("Error fetching stock data:", error);
+    showToast("error", "Failed to load carry stock data");
+    setAllStockData([]);
+  } finally {
+    setLoading(false);
+  }
+}, [selectedMr, searchTerm]);
 
   // ─── Apply Date Filter ───────────────────────────────────────────────────
-  const applyDateFilter = useCallback((data, filterType, startDate, endDate) => {
-    if (filterType === "all" || !data || data.length === 0) return data;
-    const now = new Date();
-    let dateFrom, dateTo;
-    switch (filterType) {
-      case "today":
-        dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-        break;
-      case "currentMonth":
-        dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
-        dateTo = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        break;
-      case "yearToDate":
-        dateFrom = new Date(now.getFullYear(), 0, 1);
-        dateTo = new Date(now.getFullYear(), 11, 31);
-        break;
-      case "custom":
-        if (startDate && endDate) {
-          dateFrom = startDate;
-          dateTo = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate() + 1);
-        } else return data;
-        break;
-      default:
-        return data;
-    }
-    return data.filter((item) => {
-      if (!item.assignedDate) return false;
-      const itemDate = new Date(item.assignedDate);
-      return itemDate >= dateFrom && itemDate <= dateTo;
-    });
-  }, []);
+  const applyDateFilter = useCallback(
+    (data, filterType, startDate, endDate) => {
+      if (filterType === "all" || !data || data.length === 0) return data;
+      const now = new Date();
+      let dateFrom, dateTo;
+      switch (filterType) {
+        case "today":
+          dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          dateTo = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() + 1,
+          );
+          break;
+        case "currentMonth":
+          dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+          dateTo = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          break;
+        case "yearToDate":
+          dateFrom = new Date(now.getFullYear(), 0, 1);
+          dateTo = new Date(now.getFullYear(), 11, 31);
+          break;
+        case "custom":
+          if (startDate && endDate) {
+            dateFrom = startDate;
+            dateTo = new Date(
+              endDate.getFullYear(),
+              endDate.getMonth(),
+              endDate.getDate() + 1,
+            );
+          } else return data;
+          break;
+        default:
+          return data;
+      }
+      return data.filter((item) => {
+        if (!item.assignedDate) return false;
+        const itemDate = new Date(item.assignedDate);
+        return itemDate >= dateFrom && itemDate <= dateTo;
+      });
+    },
+    [],
+  );
 
   // ─── Apply All Filters + Group by MR ────────────────────────────────────
-  const applyFiltersAndGroup = useCallback((
-    data, sterm, dateF, startD, endD, mrFilter
-  ) => {
-    let filtered = [...data];
+  const applyFiltersAndGroup = useCallback(
+    (data, sterm, dateF, startD, endD, mrFilter) => {
+      let filtered = [...data];
 
-    // MR filter
-    if (mrFilter !== "all") {
-      const mrVal = typeof mrFilter === "object"
-        ? (mrFilter.value || mrFilter.label || mrFilter.mrName)
-        : mrFilter;
-      filtered = filtered.filter(
-        (item) => item.mrName === mrVal || item.mrCode === mrVal
-      );
-    }
-
-    // Search
-    if (sterm.trim()) {
-      filtered = filtered.filter(
-        (item) =>
-          item.productName?.toLowerCase().includes(sterm.toLowerCase()) ||
-          item.productCode?.toLowerCase().includes(sterm.toLowerCase()) ||
-          item.mrName?.toLowerCase().includes(sterm.toLowerCase()) ||
-          item.mrCode?.toLowerCase().includes(sterm.toLowerCase()) ||
-          item.batch?.toLowerCase().includes(sterm.toLowerCase())
-      );
-    }
-
-    // Date
-    filtered = applyDateFilter(filtered, dateF, startD, endD);
-
-    // Group by MR
-    const grouped = {};
-    filtered.forEach((item) => {
-      const key = item.mrName;
-      if (!grouped[key]) {
-        grouped[key] = {
-          mrName: item.mrName,
-          mrCode: item.mrCode,
-          products: [],
-          lastAssignedDate: item.assignedDate,
-        };
+      // MR filter
+      if (mrFilter !== "all") {
+        const mrVal =
+          typeof mrFilter === "object"
+            ? mrFilter.value || mrFilter.label || mrFilter.mrName
+            : mrFilter;
+        filtered = filtered.filter(
+          (item) => item.mrName === mrVal || item.mrCode === mrVal,
+        );
       }
-      grouped[key].products.push(item);
-      // Track latest assigned date
-      if (item.assignedDate > grouped[key].lastAssignedDate) {
-        grouped[key].lastAssignedDate = item.assignedDate;
-      }
-    });
 
-    return Object.values(grouped).sort((a, b) => a.mrName.localeCompare(b.mrName));
-  }, [applyDateFilter]);
+      // Search
+      if (sterm.trim()) {
+        filtered = filtered.filter(
+          (item) =>
+            item.productName?.toLowerCase().includes(sterm.toLowerCase()) ||
+            item.productCode?.toLowerCase().includes(sterm.toLowerCase()) ||
+            item.mrName?.toLowerCase().includes(sterm.toLowerCase()) ||
+            item.mrCode?.toLowerCase().includes(sterm.toLowerCase()) ||
+            item.batch?.toLowerCase().includes(sterm.toLowerCase()),
+        );
+      }
+
+      // Date
+      filtered = applyDateFilter(filtered, dateF, startD, endD);
+
+      // Group by MR
+      const grouped = {};
+      filtered.forEach((item) => {
+        const key = item.mrName;
+        if (!grouped[key]) {
+          grouped[key] = {
+            mrName: item.mrName,
+            mrCode: item.mrCode,
+            products: [],
+            lastAssignedDate: item.assignedDate,
+          };
+        }
+        grouped[key].products.push(item);
+        // Track latest assigned date
+        if (item.assignedDate > grouped[key].lastAssignedDate) {
+          grouped[key].lastAssignedDate = item.assignedDate;
+        }
+      });
+
+      return Object.values(grouped).sort((a, b) =>
+        a.mrName.localeCompare(b.mrName),
+      );
+    },
+    [applyDateFilter],
+  );
 
   // ─── Effects ─────────────────────────────────────────────────────────────
-  useEffect(() => { fetchMRList(); }, []);
+  useEffect(() => {
+    fetchMRList();
+  }, []);
 
   useEffect(() => {
     if (mrList.length > 0 || selectedMr === "all") {
@@ -227,13 +352,26 @@ const CarryStockView = () => {
   useEffect(() => {
     if (allStockData.length >= 0) {
       const grouped = applyFiltersAndGroup(
-        allStockData, searchTerm, dateFilter, customStartDate, customEndDate, selectedMr
+        allStockData,
+        searchTerm,
+        dateFilter,
+        customStartDate,
+        customEndDate,
+        selectedMr,
       );
       setGroupedData(grouped);
       setTotalCount(grouped.length);
       setCurrentPage(1);
     }
-  }, [allStockData, searchTerm, dateFilter, customStartDate, customEndDate, selectedMr, applyFiltersAndGroup]);
+  }, [
+    allStockData,
+    searchTerm,
+    dateFilter,
+    customStartDate,
+    customEndDate,
+    selectedMr,
+    applyFiltersAndGroup,
+  ]);
 
   // Paginate grouped data
   useEffect(() => {
@@ -253,8 +391,14 @@ const CarryStockView = () => {
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) return "N/A";
-      return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-    } catch { return "N/A"; }
+      return date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch {
+      return "N/A";
+    }
   };
 
   const formatDateTime = (dateString) => {
@@ -263,9 +407,15 @@ const CarryStockView = () => {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) return "N/A";
       return date.toLocaleDateString(undefined, {
-        year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
       });
-    } catch { return "N/A"; }
+    } catch {
+      return "N/A";
+    }
   };
 
   const mrOptions = useMemo(() => {
@@ -284,7 +434,12 @@ const CarryStockView = () => {
     const rangeWithDots = [];
     let l;
     for (let i = 1; i <= total; i++) {
-      if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) range.push(i);
+      if (
+        i === 1 ||
+        i === total ||
+        (i >= current - delta && i <= current + delta)
+      )
+        range.push(i);
     }
     range.forEach((i) => {
       if (l) {
@@ -299,20 +454,30 @@ const CarryStockView = () => {
   const visiblePages = getVisiblePages(currentPage, totalPages);
 
   const handleMrChange = (selectedOption) => {
-    if (!selectedOption) { setSelectedMr("all"); return; }
-    if (typeof selectedOption === "string") { setSelectedMr(selectedOption); return; }
+    if (!selectedOption) {
+      setSelectedMr("all");
+      return;
+    }
+    if (typeof selectedOption === "string") {
+      setSelectedMr(selectedOption);
+      return;
+    }
     setSelectedMr(selectedOption.value || "all");
   };
 
   const getCurrentMrDisplayName = () => {
     if (selectedMr === "all") return "All MRs";
-    const opt = mrOptions.find((o) => o.value === selectedMr || o.label === selectedMr);
+    const opt = mrOptions.find(
+      (o) => o.value === selectedMr || o.label === selectedMr,
+    );
     return opt ? opt.label : selectedMr;
   };
 
   const handleDateFilterChange = (filterType) => setDateFilter(filterType);
   const clearCustomDateRange = () => {
-    setCustomStartDate(null); setCustomEndDate(null); setDateFilter("all");
+    setCustomStartDate(null);
+    setCustomEndDate(null);
+    setDateFilter("all");
   };
 
   const handleViewDetails = (stock) => {
@@ -339,9 +504,10 @@ const CarryStockView = () => {
       // Build params same as view
       const params = {};
       if (selectedMr !== "all") {
-        const mrValue = typeof selectedMr === "object"
-          ? (selectedMr.value || selectedMr.label)
-          : selectedMr;
+        const mrValue =
+          typeof selectedMr === "object"
+            ? selectedMr.value || selectedMr.label
+            : selectedMr;
         params.mrName = mrValue;
       }
       if (dateFilter === "custom" && customStartDate && customEndDate) {
@@ -352,7 +518,7 @@ const CarryStockView = () => {
       // Fetch the JSON data (backend returns JSON, not xlsx blob)
       const response = await axios.get(
         `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
-        { params }
+        { params },
       );
 
       if (!response.data.success) {
@@ -382,9 +548,12 @@ const CarryStockView = () => {
         const assignedQty = item.assignedQty || 0;
         const remainingQty = item.remainingQty || 0;
         const usedQty = item.usedQty || Math.max(0, assignedQty - remainingQty);
-        const utilization = assignedQty > 0
-          ? Math.round((Math.max(0, assignedQty - remainingQty) / assignedQty) * 100)
-          : 0;
+        const utilization =
+          assignedQty > 0
+            ? Math.round(
+                (Math.max(0, assignedQty - remainingQty) / assignedQty) * 100,
+              )
+            : 0;
         const invoices = Array.isArray(item.invoiceNumbers)
           ? item.invoiceNumbers.join("; ")
           : "";
@@ -407,12 +576,18 @@ const CarryStockView = () => {
           .join(",");
       });
 
-      const csvContent = [headers.map((h) => `"${h}"`).join(","), ...csvRows].join("\n");
+      const csvContent = [
+        headers.map((h) => `"${h}"`).join(","),
+        ...csvRows,
+      ].join("\n");
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `carry-stock-${new Date().toISOString().split("T")[0]}.csv`);
+      link.setAttribute(
+        "download",
+        `carry-stock-${new Date().toISOString().split("T")[0]}.csv`,
+      );
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -443,7 +618,9 @@ const CarryStockView = () => {
         {/* ── Header ── */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Carry Stock View</h1>
+            <h1 className="text-2xl font-bold text-gray-800">
+              Carry Stock View
+            </h1>
             <p className="text-gray-600">View stock assigned to MRs</p>
           </div>
           <div className="flex items-center gap-6 flex-wrap justify-end">
@@ -453,7 +630,9 @@ const CarryStockView = () => {
                 className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2 cursor-pointer shadow-sm"
                 disabled={loading}
               >
-                <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                />
                 {loading ? "Loading..." : "Refresh"}
               </button>
               <button
@@ -488,14 +667,24 @@ const CarryStockView = () => {
             {[
               { key: "all", label: "All Dates", color: "bg-blue-600" },
               { key: "today", label: "Today", color: "bg-green-600" },
-              { key: "currentMonth", label: "Current Month", color: "bg-purple-600" },
-              { key: "yearToDate", label: "Year to Date", color: "bg-orange-600" },
+              {
+                key: "currentMonth",
+                label: "Current Month",
+                color: "bg-purple-600",
+              },
+              {
+                key: "yearToDate",
+                label: "Year to Date",
+                color: "bg-orange-600",
+              },
             ].map(({ key, label, color }) => (
               <button
                 key={key}
                 onClick={() => handleDateFilterChange(key)}
                 className={`px-4 py-2 rounded-lg transition-colors cursor-pointer ${
-                  dateFilter === key ? `${color} text-white shadow-md` : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  dateFilter === key
+                    ? `${color} text-white shadow-md`
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                 }`}
               >
                 {label}
@@ -504,7 +693,9 @@ const CarryStockView = () => {
             <button
               onClick={() => handleDateFilterChange("custom")}
               className={`px-4 py-2 rounded-lg transition-colors cursor-pointer flex items-center gap-2 ${
-                dateFilter === "custom" ? "bg-red-600 text-white shadow-md" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                dateFilter === "custom"
+                  ? "bg-red-600 text-white shadow-md"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
             >
               <Calendar className="w-4 h-4" />
@@ -520,12 +711,16 @@ const CarryStockView = () => {
                   selected={customStartDate}
                   onChange={(date) => {
                     setCustomStartDate(date);
-                    if (date && customEndDate && date > customEndDate) setCustomEndDate(null);
+                    if (date && customEndDate && date > customEndDate)
+                      setCustomEndDate(null);
                   }}
-                  selectsStart startDate={customStartDate} endDate={customEndDate}
+                  selectsStart
+                  startDate={customStartDate}
+                  endDate={customEndDate}
                   maxDate={new Date()}
                   className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholderText="Select start date" dateFormat="yyyy-MM-dd"
+                  placeholderText="Select start date"
+                  dateFormat="yyyy-MM-dd"
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -533,11 +728,15 @@ const CarryStockView = () => {
                 <DatePicker
                   selected={customEndDate}
                   onChange={(date) => setCustomEndDate(date)}
-                  selectsEnd startDate={customStartDate} endDate={customEndDate}
-                  minDate={customStartDate} maxDate={new Date()}
+                  selectsEnd
+                  startDate={customStartDate}
+                  endDate={customEndDate}
+                  minDate={customStartDate}
+                  maxDate={new Date()}
                   className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholderText="Select end date"
-                  disabled={!customStartDate} dateFormat="yyyy-MM-dd"
+                  disabled={!customStartDate}
+                  dateFormat="yyyy-MM-dd"
                 />
               </div>
               {(customStartDate || customEndDate) && (
@@ -600,7 +799,10 @@ const CarryStockView = () => {
                 value={
                   selectedMr === "all"
                     ? { value: "all", label: "All MRs" }
-                    : mrOptions.find((opt) => opt.value === selectedMr) || { value: selectedMr, label: selectedMr }
+                    : mrOptions.find((opt) => opt.value === selectedMr) || {
+                        value: selectedMr,
+                        label: selectedMr,
+                      }
                 }
                 onChange={handleMrChange}
                 options={mrOptions}
@@ -615,7 +817,8 @@ const CarryStockView = () => {
 
         {/* ── Summary ── */}
         <div className="mb-3 text-sm text-gray-500">
-          Showing {pagedData.length} of {totalCount} MR{totalCount !== 1 ? "s" : ""}
+          Showing {pagedData.length} of {totalCount} MR
+          {totalCount !== 1 ? "s" : ""}
           {totalCount > 0 && ` (${allStockData.length} total product records)`}
         </div>
 
@@ -624,10 +827,18 @@ const CarryStockView = () => {
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                <th className="p-3 whitespace-nowrap min-w-[180px] text-sm font-medium text-left pl-5">MR Name</th>
-                <th className="p-3 whitespace-nowrap min-w-[140px] text-sm font-medium">Products</th>
-                <th className="p-3 whitespace-nowrap min-w-[160px] text-sm font-medium">Last Assigned Date</th>
-                <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">Actions</th>
+                <th className="p-3 whitespace-nowrap min-w-[180px] text-sm font-medium text-left pl-5">
+                  MR Name
+                </th>
+                <th className="p-3 whitespace-nowrap min-w-[140px] text-sm font-medium">
+                  Products
+                </th>
+                <th className="p-3 whitespace-nowrap min-w-[160px] text-sm font-medium">
+                  Last Assigned Date
+                </th>
+                <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -640,7 +851,9 @@ const CarryStockView = () => {
                       </div>
                     ) : (
                       <div>
-                        <div className="text-lg mb-2">No carry stock records found</div>
+                        <div className="text-lg mb-2">
+                          No carry stock records found
+                        </div>
                         <div className="text-sm text-gray-400">
                           {selectedMr !== "all"
                             ? `No stock found for selected MR: ${getCurrentMrDisplayName()}`
@@ -658,9 +871,13 @@ const CarryStockView = () => {
                   >
                     {/* MR Name */}
                     <td className="p-3 text-left pl-5">
-                      <div className="font-semibold text-gray-900">{mrGroup.mrName}</div>
+                      <div className="font-semibold text-gray-900">
+                        {mrGroup.mrName}
+                      </div>
                       {mrGroup.mrCode && mrGroup.mrCode !== mrGroup.mrName && (
-                        <div className="text-xs text-gray-500">{mrGroup.mrCode}</div>
+                        <div className="text-xs text-gray-500">
+                          {mrGroup.mrCode}
+                        </div>
                       )}
                     </td>
 
@@ -672,9 +889,13 @@ const CarryStockView = () => {
                         title={`View ${mrGroup.products.length} product(s)`}
                       >
                         <Package size={16} />
-                        <span className="font-semibold">{mrGroup.products.length}</span>
+                        <span className="font-semibold">
+                          {mrGroup.products.length}
+                        </span>
                         <span className="text-xs text-indigo-500">
-                          {mrGroup.products.length === 1 ? "product" : "products"}
+                          {mrGroup.products.length === 1
+                            ? "product"
+                            : "products"}
                         </span>
                       </button>
                     </td>
@@ -718,22 +939,31 @@ const CarryStockView = () => {
                 </button>
                 {visiblePages.map((page, idx) =>
                   page === "..." ? (
-                    <span key={`ellipsis-${idx}`} className="px-3 py-1 text-gray-500 select-none">...</span>
+                    <span
+                      key={`ellipsis-${idx}`}
+                      className="px-3 py-1 text-gray-500 select-none"
+                    >
+                      ...
+                    </span>
                   ) : (
                     <button
                       key={`page-${page}-${idx}`}
                       onClick={() => setCurrentPage(page)}
                       disabled={loading}
                       className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                        currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"
+                        currentPage === page
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
                       }`}
                     >
                       {page}
                     </button>
-                  )
+                  ),
                 )}
                 <button
-                  onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(p + 1, totalPages))
+                  }
                   disabled={currentPage === totalPages || loading}
                   className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
                 >
@@ -765,49 +995,84 @@ const CarryStockView = () => {
 
                 <div className="mb-5">
                   <h2 className="text-xl font-semibold text-gray-800">
-                    Products for MR: <span className="text-indigo-600">{selectedMrName}</span>
+                    Products for MR:{" "}
+                    <span className="text-indigo-600">{selectedMrName}</span>
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">
-                    {selectedMrProducts.length} product{selectedMrProducts.length !== 1 ? "s" : ""} in hand
+                    {selectedMrProducts.length} product
+                    {selectedMrProducts.length !== 1 ? "s" : ""} in hand
                   </p>
                 </div>
 
                 {selectedMrProducts.length === 0 ? (
-                  <div className="text-center py-12 text-gray-400">No products found.</div>
+                  <div className="text-center py-12 text-gray-400">
+                    No products found.
+                  </div>
                 ) : (
                   <div className="overflow-x-auto rounded-xl border border-gray-200">
                     <table className="w-full text-sm border-collapse">
                       <thead className="bg-gray-100 text-gray-700">
                         <tr>
-                          <th className="px-4 py-3 text-left font-medium whitespace-nowrap">#</th>
-                          <th className="px-4 py-3 text-left font-medium whitespace-nowrap">Product Details</th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">Quantity</th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">Utilization</th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">Status</th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">Actions</th>
+                          <th className="px-4 py-3 text-left font-medium whitespace-nowrap">
+                            #
+                          </th>
+                          <th className="px-4 py-3 text-left font-medium whitespace-nowrap">
+                            Product Details
+                          </th>
+                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                            Quantity
+                          </th>
+                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                            Utilization
+                          </th>
+                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                            Actions
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {selectedMrProducts.map((product, idx) => {
-                          const utilization = calculateUtilization(product.assignedQty, product.remainingQty);
-                          const used = product.usedQty || Math.max(0, (product.assignedQty || 0) - (product.remainingQty || 0));
+                          const utilization = calculateUtilization(
+                            product.assignedQty,
+                            product.remainingQty,
+                          );
+                          const used =
+                            product.usedQty ||
+                            Math.max(
+                              0,
+                              (product.assignedQty || 0) -
+                                (product.remainingQty || 0),
+                            );
                           return (
                             <tr
                               key={product.id || idx}
                               className={`hover:bg-gray-50 ${idx < selectedMrProducts.length - 1 ? "border-b" : ""}`}
                             >
                               {/* # */}
-                              <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
+                              <td className="px-4 py-3 text-gray-500">
+                                {idx + 1}
+                              </td>
 
                               {/* Product Details */}
                               <td className="px-4 py-3 text-left">
-                                <div className="font-semibold text-gray-900">{product.productName}</div>
-                                <div className="text-xs text-gray-500">{product.productCode}</div>
+                                <div className="font-semibold text-gray-900">
+                                  {product.productName}
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                  {product.productCode}
+                                </div>
                                 {product.category && (
-                                  <div className="text-xs text-gray-400">{product.category}</div>
+                                  <div className="text-xs text-gray-400">
+                                    {product.category}
+                                  </div>
                                 )}
                                 {product.unit && (
-                                  <div className="text-xs text-indigo-500">{product.unit}</div>
+                                  <div className="text-xs text-indigo-500">
+                                    {product.unit}
+                                  </div>
                                 )}
                               </td>
 
@@ -815,16 +1080,26 @@ const CarryStockView = () => {
                               <td className="px-4 py-3 text-center">
                                 <div className="inline-block text-xs space-y-0.5 min-w-[110px] text-left">
                                   <div className="flex justify-between gap-4">
-                                    <span className="text-gray-500">Assigned:</span>
-                                    <span className="font-semibold text-gray-800">{product.assignedQty || 0}</span>
+                                    <span className="text-gray-500">
+                                      Assigned:
+                                    </span>
+                                    <span className="font-semibold text-gray-800">
+                                      {product.assignedQty || 0}
+                                    </span>
                                   </div>
                                   <div className="flex justify-between gap-4">
-                                    <span className="text-gray-500">Remaining:</span>
-                                    <span className="font-semibold text-green-700">{product.remainingQty || 0}</span>
+                                    <span className="text-gray-500">
+                                      Remaining:
+                                    </span>
+                                    <span className="font-semibold text-green-700">
+                                      {product.remainingQty || 0}
+                                    </span>
                                   </div>
                                   <div className="flex justify-between gap-4">
                                     <span className="text-gray-500">Used:</span>
-                                    <span className="font-semibold text-orange-600">{used}</span>
+                                    <span className="font-semibold text-orange-600">
+                                      {used}
+                                    </span>
                                   </div>
                                 </div>
                               </td>
@@ -838,10 +1113,12 @@ const CarryStockView = () => {
                                         utilization >= 80
                                           ? "bg-green-600"
                                           : utilization >= 50
-                                          ? "bg-yellow-500"
-                                          : "bg-red-500"
+                                            ? "bg-yellow-500"
+                                            : "bg-red-500"
                                       }`}
-                                      style={{ width: `${Math.min(utilization, 100)}%` }}
+                                      style={{
+                                        width: `${Math.min(utilization, 100)}%`,
+                                      }}
                                     />
                                   </div>
                                   <span className="text-xs font-semibold text-gray-700 w-10 text-right">
@@ -859,7 +1136,9 @@ const CarryStockView = () => {
                                       : "bg-red-100 text-red-800"
                                   }`}
                                 >
-                                  {(product.remainingQty || 0) > 0 ? "Active" : "Depleted"}
+                                  {(product.remainingQty || 0) > 0
+                                    ? "Active"
+                                    : "Depleted"}
                                 </span>
                               </td>
 
@@ -868,7 +1147,10 @@ const CarryStockView = () => {
                                 <button
                                   onClick={() => {
                                     setIsProductsModalOpen(false);
-                                    setTimeout(() => handleViewDetails(product), 100);
+                                    setTimeout(
+                                      () => handleViewDetails(product),
+                                      100,
+                                    );
                                   }}
                                   className="text-blue-600 hover:text-blue-800 cursor-pointer p-1 hover:bg-blue-50 rounded"
                                   title="View Full Details"
@@ -894,7 +1176,7 @@ const CarryStockView = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* ════════════════════════════════════════════════════════════════════
@@ -915,45 +1197,75 @@ const CarryStockView = () => {
                   <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">Stock Details</h2>
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Stock Details
+                </h2>
 
                 {/* MR Information */}
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">MR Information</h3>
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    MR Information
+                  </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">MR Name</label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock?.mrName || "-"}</p>
+                      <label className="block text-sm font-medium text-gray-600">
+                        MR Name
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {selectedStock?.mrName || "-"}
+                      </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">MR Code</label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock?.mrCode || "-"}</p>
+                      <label className="block text-sm font-medium text-gray-600">
+                        MR Code
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {selectedStock?.mrCode || "-"}
+                      </p>
                     </div>
                   </div>
                 </div>
 
                 {/* Product Information */}
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">Product Information</h3>
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Product Information
+                  </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">Product Name</label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock?.productName || "-"}</p>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Product Name
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {selectedStock?.productName || "-"}
+                      </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">Product Code</label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock?.productCode || "-"}</p>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Product Code
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {selectedStock?.productCode || "-"}
+                      </p>
                     </div>
                     {selectedStock?.category && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-600">Category</label>
-                        <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock.category}</p>
+                        <label className="block text-sm font-medium text-gray-600">
+                          Category
+                        </label>
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                          {selectedStock.category}
+                        </p>
                       </div>
                     )}
                     {selectedStock?.unit && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-600">Unit</label>
-                        <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock.unit}</p>
+                        <label className="block text-sm font-medium text-gray-600">
+                          Unit
+                        </label>
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                          {selectedStock.unit}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -961,37 +1273,60 @@ const CarryStockView = () => {
 
                 {/* Stock Information */}
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">Stock Information</h3>
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Stock Information
+                  </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">Assigned Quantity</label>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Assigned Quantity
+                      </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
                         {selectedStock?.assignedQty || 0}
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">Remaining Quantity</label>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Remaining Quantity
+                      </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
-                        {selectedStock?.remainingQty || selectedStock?.boxQuantity || 0}
+                        {selectedStock?.remainingQty ||
+                          selectedStock?.boxQuantity ||
+                          0}
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">Used Quantity</label>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Used Quantity
+                      </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
-                        {selectedStock?.usedQty || Math.max(0, (selectedStock?.assignedQty || 0) - (selectedStock?.remainingQty || 0))}
+                        {selectedStock?.usedQty ||
+                          Math.max(
+                            0,
+                            (selectedStock?.assignedQty || 0) -
+                              (selectedStock?.remainingQty || 0),
+                          )}
                       </p>
                     </div>
                     <div className="md:col-span-3">
-                      <label className="block text-sm font-medium text-gray-600">Utilization</label>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Utilization
+                      </label>
                       <div className="flex items-center gap-2 mt-1">
                         <div className="w-full bg-gray-200 rounded-full h-2.5">
                           <div
                             className={`h-2.5 rounded-full ${
-                              calculateUtilization(selectedStock?.assignedQty || 0, selectedStock?.remainingQty || 0) > 80
+                              calculateUtilization(
+                                selectedStock?.assignedQty || 0,
+                                selectedStock?.remainingQty || 0,
+                              ) > 80
                                 ? "bg-green-600"
-                                : calculateUtilization(selectedStock?.assignedQty || 0, selectedStock?.remainingQty || 0) > 50
-                                ? "bg-yellow-500"
-                                : "bg-red-600"
+                                : calculateUtilization(
+                                      selectedStock?.assignedQty || 0,
+                                      selectedStock?.remainingQty || 0,
+                                    ) > 50
+                                  ? "bg-yellow-500"
+                                  : "bg-red-600"
                             }`}
                             style={{
                               width: `${calculateUtilization(selectedStock?.assignedQty || 0, selectedStock?.remainingQty || 0)}%`,
@@ -999,7 +1334,11 @@ const CarryStockView = () => {
                           />
                         </div>
                         <span className="text-sm font-medium">
-                          {calculateUtilization(selectedStock?.assignedQty || 0, selectedStock?.remainingQty || 0)}%
+                          {calculateUtilization(
+                            selectedStock?.assignedQty || 0,
+                            selectedStock?.remainingQty || 0,
+                          )}
+                          %
                         </span>
                       </div>
                     </div>
@@ -1008,40 +1347,58 @@ const CarryStockView = () => {
 
                 {/* Additional Information */}
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">Additional Information</h3>
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Additional Information
+                  </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">Assigned Date</label>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Assigned Date
+                      </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100">
                         {formatDate(selectedStock?.assignedDate) || "-"}
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">Status</label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock?.status || "-"}</p>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Status
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {selectedStock?.status || "-"}
+                      </p>
                     </div>
                     {selectedStock?.lc ? (
                       <div>
-                        <label className="block text-sm font-medium text-gray-600">LC Rate</label>
-                        <p className="border px-3 py-2 rounded-lg bg-gray-100">{selectedStock.lc}</p>
+                        <label className="block text-sm font-medium text-gray-600">
+                          LC Rate
+                        </label>
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                          {selectedStock.lc}
+                        </p>
                       </div>
                     ) : null}
                   </div>
                 </div>
 
                 {/* Invoice Numbers */}
-                {selectedStock?.invoiceNumbers && selectedStock.invoiceNumbers.length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="text-lg font-medium text-gray-700 mb-3">Related Invoices</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedStock.invoiceNumbers.map((invoice, index) => (
-                        <span key={index} className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
-                          {invoice}
-                        </span>
-                      ))}
+                {selectedStock?.invoiceNumbers &&
+                  selectedStock.invoiceNumbers.length > 0 && (
+                    <div className="mb-6">
+                      <h3 className="text-lg font-medium text-gray-700 mb-3">
+                        Related Invoices
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedStock.invoiceNumbers.map((invoice, index) => (
+                          <span
+                            key={index}
+                            className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                          >
+                            {invoice}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
                 <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
                   <button
@@ -1053,7 +1410,7 @@ const CarryStockView = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>

@@ -368,7 +368,7 @@ const useProductSuggestions = (products, productNames) => {
 };
 
 // ------------------------------------------------
-// CUSTOM HOOK – SALE FORM (unchanged)
+// CUSTOM HOOK – SALE FORM (modified addProduct to accept saleType)
 // ------------------------------------------------
 const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
   const [form, setForm] = useState({
@@ -642,21 +642,28 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     return products.some((product) => product.productName.trim() !== "");
   }, []);
 
-  const addProduct = useCallback(() => {
+  // --- MODIFIED: addProduct now accepts saleType to copy MR for MR sale ---
+  const addProduct = useCallback((saleType) => {
     setForm((prev) => {
-      const newProducts = [
-        ...prev.products,
-        {
-          ...INITIAL_PRODUCT_STATE,
-          totalQty: "0",
-          amount: "0.00",
-          netSellingAmount: "0.00",
-          averageUnitPrice: "0.00",
-          profitLoss: "0.00",
-          selectedMrId: "",
-          selectedMrName: "",
-        },
-      ];
+      let newProduct = {
+        ...INITIAL_PRODUCT_STATE,
+        totalQty: "0",
+        amount: "0.00",
+        netSellingAmount: "0.00",
+        averageUnitPrice: "0.00",
+        profitLoss: "0.00",
+        selectedMrId: "",
+        selectedMrName: "",
+      };
+
+      // For MR sale, copy MR from the last product if any
+      if (saleType === 'mr' && prev.products.length > 0) {
+        const lastProduct = prev.products[prev.products.length - 1];
+        newProduct.selectedMrId = lastProduct.selectedMrId;
+        newProduct.selectedMrName = lastProduct.selectedMrName;
+      }
+
+      const newProducts = [...prev.products, newProduct];
       const totalAmount = calculateTotalAmount(newProducts);
       const totalNetAmount = calculateTotalNetAmount(newProducts);
       const dueAmount = (
@@ -1257,28 +1264,78 @@ const AddSale = () => {
 
   const { statuses, loading: initialLoading } = useInitialSaleData();
 
-  // ----- 🔥 NEW: MR Stock List (MRs with stock) -----
+  // ----- MR Stock List (MRs with stock) – now refetched when saleType === 'mr' -----
   const [mrStockList, setMrStockList] = useState([]);
   const [mrStockListLoading, setMrStockListLoading] = useState(false);
 
   useEffect(() => {
-    const fetchMRStockList = async () => {
-      setMrStockListLoading(true);
-      try {
-        const response = await axios.get(`${backendUrl}/api/sales/mr-stock/mrs-with-stock`);
-        if (response.data.success) {
-          setMrStockList(response.data.data || []);
-          console.log("✅ Fetched MRs with stock:", response.data.data);
+    if (saleType === 'mr') {
+      const fetchMRStockList = async () => {
+        setMrStockListLoading(true);
+        try {
+          const response = await axios.get(`${backendUrl}/api/sales/mr-stock/mrs-with-stock`);
+          console.log('values of response', response);
+          if (response.data.success) {
+            setMrStockList(response.data.data || []);
+          } else {
+            showToast("error", "Failed to load MR stock list");
+          }
+        } catch (error) {
+          console.error("Error fetching MR stock list:", error);
+          showToast("error", "Could not load MR list for MR Sale");
+        } finally {
+          setMrStockListLoading(false);
         }
-      } catch (error) {
-        console.error("❌ Error fetching MR stock list:", error);
-        showToast("error", "Could not load MR list for MR Sale");
-      } finally {
-        setMrStockListLoading(false);
+      };
+      fetchMRStockList();
+    }
+  }, [saleType, backendUrl]);
+
+  // Build dropdown options with loading/empty states
+  const mrStockOptions = useMemo(() => {
+    if (mrStockListLoading) {
+      return [{ value: "", label: "Loading MRs...", disabled: true }];
+    }
+    if (mrStockList.length === 0) {
+      return [{ value: "", label: "No MRs with stock available", disabled: true }];
+    }
+    return [
+      { value: "", label: "Select Medical Representative" },
+      ...mrStockList.map((mr) => ({
+        value: mr._id,
+        label: `${mr.mrName} (${mr.totalProducts || 0} products, ${mr.totalQuantity || 0} boxes)`,
+      })),
+    ];
+  }, [mrStockList, mrStockListLoading]);
+
+  // --- Fetch available products for a given MR and row index ---
+  const fetchMRAvailableProducts = useCallback(async (mrId, index) => {
+    if (!mrId) return;
+    try {
+      const response = await axios.get(`${backendUrl}/api/sales/mr-stock/products/${mrId}`);
+      if (response.data.success) {
+        setMrAvailableProducts(prev => {
+          const newList = [...prev];
+          newList[index] = response.data.products;
+          return newList;
+        });
       }
-    };
-    fetchMRStockList();
-  }, [backendUrl]);
+    } catch (error) {
+      console.error("Failed to fetch MR product list:", error);
+      showToast("error", "Could not load product list for this MR");
+    }
+  }, [backendUrl, setMrAvailableProducts]);
+
+  // --- Automatically fetch available products for a new row when MR is set ---
+  useEffect(() => {
+    if (saleType === 'mr' && form.products.length > 0) {
+      const lastIndex = form.products.length - 1;
+      const product = form.products[lastIndex];
+      if (product.selectedMrId && !mrAvailableProducts[lastIndex]?.length) {
+        fetchMRAvailableProducts(product.selectedMrId, lastIndex);
+      }
+    }
+  }, [form.products.length, saleType, mrAvailableProducts, fetchMRAvailableProducts]);
 
   const [showUploadMessage, setShowUploadMessage] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
@@ -1297,7 +1354,7 @@ const AddSale = () => {
     productsListLoading ||
     mrStockListLoading;
 
-  // --- Normal Sale: MR options for header (unchanged) ---
+  // --- Normal Sale: MR options for header ---
   const mrOptions = useMemo(() => {
     if (mrList.length === 0 && !mrListLoading) {
       return [
@@ -1317,7 +1374,7 @@ const AddSale = () => {
     ];
   }, [mrList, mrListLoading]);
 
-  // --- Customer dropdown (unchanged) ---
+  // --- Customer dropdown ---
   const customerOptions = useMemo(() => {
     if (customerList.length === 0 && !customerListLoading) {
       return [
@@ -1337,17 +1394,17 @@ const AddSale = () => {
     ];
   }, [customerList, customerListLoading]);
 
-  // --- Payment status suggestions (unchanged) ---
+  // --- Payment status suggestions ---
   const paymentStatusSuggestions = useSuggestions(
     statuses,
     "type",
     form.paymentStatus
   );
 
-  // --- Product suggestions (unchanged) ---
+  // --- Product suggestions ---
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
-  // --- MR‑specific stock fetch (unchanged) ---
+  // --- MR‑specific stock fetch ---
   const fetchMRProductStock = useCallback(async (mrId, productName, index) => {
     if (!mrId || !productName) return null;
     try {
@@ -1368,25 +1425,7 @@ const AddSale = () => {
     return null;
   }, [backendUrl, setMrProductStock]);
 
-  // --- Fetch list of products that the MR has stock for (unchanged) ---
-  const fetchMRAvailableProducts = useCallback(async (mrId, index) => {
-    if (!mrId) return;
-    try {
-      const response = await axios.get(`${backendUrl}/api/sales/mr-stock/products/${mrId}`);
-      if (response.data.success) {
-        setMrAvailableProducts(prev => {
-          const newList = [...prev];
-          newList[index] = response.data.products;
-          return newList;
-        });
-      }
-    } catch (error) {
-      console.error("Failed to fetch MR product list:", error);
-      showToast("error", "Could not load product list for this MR");
-    }
-  }, [backendUrl, setMrAvailableProducts]);
-
-  // --- Normal Sale expiry info (unchanged) ---
+  // --- Normal Sale expiry info ---
   const getProductExpiryInfo = (productName) => {
     const productData = products.find((p) => p.productName === productName);
     if (!productData?.batches) return null;
@@ -1408,7 +1447,7 @@ const AddSale = () => {
     };
   };
 
-  // --- MR Sale expiry info (unchanged) ---
+  // --- MR Sale expiry info ---
   const getMRProductExpiryInfo = (mrStockData) => {
     if (!mrStockData?.batches) return null;
     const valid = mrStockData.batches.filter(b => b.boxes > 0 && b.expiryDate);
@@ -1424,7 +1463,7 @@ const AddSale = () => {
     };
   };
 
-  // --- Check required master data (unchanged) ---
+  // --- Check required master data ---
   const checkRequiredData = useCallback(() => {
     const missingFields = [];
     if (productsList.length === 0 && !productsListLoading) {
@@ -1457,7 +1496,7 @@ const AddSale = () => {
     checkRequiredData();
   }, [checkRequiredData]);
 
-  // --- Get product details (unchanged) ---
+  // --- Get product details ---
   const getProductDetails = (productName) => {
     const product = products.find((p) => p.productName === productName);
     if (!product) {
@@ -1481,7 +1520,7 @@ const AddSale = () => {
     };
   };
 
-  // --- Enhanced change handler for form fields (unchanged) ---
+  // --- Enhanced change handler for form fields ---
   const enhancedHandleChange = useCallback(
     (e) => {
       if (isFormDisabled) return;
@@ -1517,7 +1556,7 @@ const AddSale = () => {
     [handleChange, paymentStatusSuggestions, updateFormField, form.totalAmount, form.paymentStatus, isFormDisabled]
   );
 
-  // --- Filter product names per row (unchanged) ---
+  // --- Filter product names per row ---
   const getProductNamesForRow = useCallback((index) => {
     if (saleType === 'mr') {
       const available = mrAvailableProducts[index];
@@ -1529,7 +1568,7 @@ const AddSale = () => {
     return productNames;
   }, [saleType, mrAvailableProducts, productNames]);
 
-  // --- 🔥 ENHANCED: product change handler using mrStockList for MR Sale ---
+  // --- Enhanced product change handler ---
   const enhancedProductChange = useCallback(
     (index, field, value) => {
       if (isFormDisabled) return;
@@ -1555,7 +1594,6 @@ const AddSale = () => {
         productSuggestions.setHighlightedIndex(index, 0);
       }
 
-      // 🔥 MR Sale: when MR is selected, use mrStockList (not mrList)
       if (saleType === 'mr' && field === 'selectedMrId') {
         const selectedMr = mrStockList.find(mr => mr._id === value);
         if (selectedMr) {
@@ -1585,7 +1623,7 @@ const AddSale = () => {
       validateProductField,
       products,
       saleType,
-      mrStockList,          // 🔥 NOW uses mrStockList
+      mrStockList,
       fetchMRProductStock,
       fetchMRAvailableProducts,
       mrProductStock,
@@ -1595,7 +1633,7 @@ const AddSale = () => {
     ]
   );
 
-  // --- Keyboard / focus handlers (unchanged) ---
+  // --- Keyboard / focus handlers ---
   const handlePaymentStatusKeyDown = useCallback(
     (e) => {
       if (isFormDisabled) return;
@@ -1640,7 +1678,7 @@ const AddSale = () => {
     [productSuggestions, isFormDisabled]
   );
 
-  // --- "Add Product" validation (unchanged) ---
+  // --- "Add Product" validation ---
   const isCurrentProductValid = useCallback(() => {
     if (isFormDisabled) return false;
     const currentProduct = form.products[form.products.length - 1];
@@ -1708,192 +1746,169 @@ const AddSale = () => {
     [isFormDisabled]
   );
 
-  // --- SUBMIT (unchanged) ---
-// --- SUBMIT (FIXED) ---
-const handleSubmit = async (e) => {
-  e.preventDefault();
+  // --- SUBMIT ---
+  const handleSubmit = async (e) => {
+    e.preventDefault();
 
-  if (!checkRequiredData()) return;
+    if (!checkRequiredData()) return;
 
-  if (!validate(products, saleType, mrProductStock)) {
-    showToast("error", "Please fix the validation errors before submitting");
-    return;
-  }
-
-  try {
-    const validProducts = form.products.filter(
-      (product) =>
-        product.productName &&
-        product.productName.trim() !== "" &&
-        (Number(product.salesQty) > 0 || Number(product.bonusQty) > 0)
-    );
-
-    if (validProducts.length === 0) {
-      showToast("error", "Please add at least one product with quantity");
+    if (!validate(products, saleType, mrProductStock)) {
+      showToast("error", "Please fix the validation errors before submitting");
       return;
     }
 
-    const stockErrors = [];
-    for (const product of validProducts) {
-      if (saleType === 'mr') {
-        const index = form.products.findIndex(p => p === product);
-        const stockData = mrProductStock[index];
-        if (!stockData) {
-          stockErrors.push(`"${product.productName}": Stock information not loaded`);
-          continue;
-        }
-        const availableStock = calculateMRStock(stockData);
-        const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
-        if (totalQty > availableStock) {
-          stockErrors.push(
-            `"${product.productName}" for MR ${product.selectedMrName || 'unknown'}: Required ${totalQty}, Available ${availableStock}`
-          );
-        }
-      } else {
-        const productData = products.find(
-          (p) => p.productName === product.productName
-        );
-        if (productData) {
-          const availableStock = calculateAvailableStock(productData);
+    try {
+      const validProducts = form.products.filter(
+        (product) =>
+          product.productName &&
+          product.productName.trim() !== "" &&
+          (Number(product.salesQty) > 0 || Number(product.bonusQty) > 0)
+      );
+
+      if (validProducts.length === 0) {
+        showToast("error", "Please add at least one product with quantity");
+        return;
+      }
+
+      const stockErrors = [];
+      for (const product of validProducts) {
+        if (saleType === 'mr') {
+          const index = form.products.findIndex(p => p === product);
+          const stockData = mrProductStock[index];
+          if (!stockData) {
+            stockErrors.push(`"${product.productName}": Stock information not loaded`);
+            continue;
+          }
+          const availableStock = calculateMRStock(stockData);
           const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
           if (totalQty > availableStock) {
             stockErrors.push(
-              `"${product.productName}": Required ${totalQty}, Available ${availableStock}`
+              `"${product.productName}" for MR ${product.selectedMrName || 'unknown'}: Required ${totalQty}, Available ${availableStock}`
             );
+          }
+        } else {
+          const productData = products.find(
+            (p) => p.productName === product.productName
+          );
+          if (productData) {
+            const availableStock = calculateAvailableStock(productData);
+            const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
+            if (totalQty > availableStock) {
+              stockErrors.push(
+                `"${product.productName}": Required ${totalQty}, Available ${availableStock}`
+              );
+            }
           }
         }
       }
-    }
 
-    if (stockErrors.length > 0) {
-      showToast("error", "Stock insufficient: " + stockErrors.join("; "));
-      return;
-    }
-
-    const safeFormatDate = (dateString) => {
-      if (!dateString) return "";
-      const date = new Date(dateString);
-      return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
-    };
-
-    // ✅ FIX: Create saleData with isMRSale flag
-    const saleData = {
-      // Add the isMRSale flag - this is the critical fix
-      isMRSale: saleType === 'mr',
-      
-      recordingDate: safeFormatDate(form.recordingDate),
-      invoiceNumber: form.invoiceNumber?.trim() || "",
-      invoiceDate: safeFormatDate(form.invoiceDate),
-      customerCode: form.customerCode || "",
-      customerId: form.customerId || null,
-      customerName: form.customerName || "",
-      products: validProducts.map((product) => ({
-        productName: product.productName.trim(),
-        salesQty: Number(product.salesQty) || 0,
-        bonusQty: Number(product.bonusQty) || 0,
-        totalQty: Number(product.totalQty) || 0,
-        sellingPrice: Number(product.sellingPrice) || 0,
-        amount: Number(product.amount) || 0,
-        discount: Number(product.discount) || 0,
-        netSellingAmount: Number(product.netSellingAmount) || 0,
-        averageUnitPrice: Number(product.averageUnitPrice) || 0,
-        lc: Number(product.lc) || 0,
-        fob: Number(product.fob) || 0,
-        cif: Number(product.cif) || 0,
-        profitLoss: Number(product.profitLoss) || 0,
-        isProductAccept: true,
-        remark: product.remark || "",
-        ...(saleType === 'mr' && {
-          mrId: product.selectedMrId,
-          mrName: product.selectedMrName,
-        }),
-      })),
-      creditDays: form.creditDays ? Number(form.creditDays) : null,
-      dueDate: safeFormatDate(form.dueDate),
-      deliveryDate: safeFormatDate(form.deliveryDate),
-      paidAmount: Number(form.paidAmount) || 0,
-      dueAmount: Number(form.dueAmount) || 0,
-      totalAmount: Number(form.totalAmount) || 0,
-      paymentStatus: form.paymentStatus || "Credit",
-      remark: form.remark || "",
-    };
-
-    // Add header MR fields for normal sale
-    if (saleType !== 'mr') {
-      saleData.mrName = form.mrName || "";
-      saleData.mrId = form.mrId || null;
-    } else {
-      // For MR sale, set primary MR from first product (for backward compatibility)
-      if (validProducts.length > 0 && validProducts[0].selectedMrName) {
-        saleData.mrName = validProducts[0].selectedMrName;
-        saleData.mrId = validProducts[0].selectedMrId;
+      if (stockErrors.length > 0) {
+        showToast("error", "Stock insufficient: " + stockErrors.join("; "));
+        return;
       }
-      
-      // ✅ FIX: Create MR distribution map for multi-MR invoices
-      // This helps track which products belong to which MR
-      const mrDistribution = {};
-      validProducts.forEach((product) => {
-        const mrName = product.selectedMrName || 'Unknown';
-        const mrId = product.selectedMrId;
-        
-        if (!mrDistribution[mrName]) {
-          mrDistribution[mrName] = {
-            mrName,
-            mrId,
-            products: []
-          };
-        }
-        
-        mrDistribution[mrName].products.push({
-          productName: product.productName,
-          salesQty: Number(product.salesQty),
-          bonusQty: Number(product.bonusQty),
-          sellingPrice: Number(product.sellingPrice),
-          discount: Number(product.discount),
-        });
-      });
-      
-      // Add the distribution to saleData
-      saleData._mrDistribution = mrDistribution;
-    }
 
-    console.log("📤 Sending sale data:", {
-      ...saleData,
-      isMRSale: saleData.isMRSale, // This should now be true for MR sales
-      products: saleData.products.map(p => ({
-        productName: p.productName,
-        mrId: p.mrId,
-        mrName: p.mrName
-      }))
-    });
+      const safeFormatDate = (dateString) => {
+        if (!dateString) return "";
+        const date = new Date(dateString);
+        return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
+      };
 
-    const response = await fetch(`${backendUrl}/api/sales/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(saleData),
-    });
+      const saleData = {
+        isMRSale: saleType === 'mr',
+        recordingDate: safeFormatDate(form.recordingDate),
+        invoiceNumber: form.invoiceNumber?.trim() || "",
+        invoiceDate: safeFormatDate(form.invoiceDate),
+        customerCode: form.customerCode || "",
+        customerId: form.customerId || null,
+        customerName: form.customerName || "",
+        products: validProducts.map((product) => ({
+          productName: product.productName.trim(),
+          salesQty: Number(product.salesQty) || 0,
+          bonusQty: Number(product.bonusQty) || 0,
+          totalQty: Number(product.totalQty) || 0,
+          sellingPrice: Number(product.sellingPrice) || 0,
+          amount: Number(product.amount) || 0,
+          discount: Number(product.discount) || 0,
+          netSellingAmount: Number(product.netSellingAmount) || 0,
+          averageUnitPrice: Number(product.averageUnitPrice) || 0,
+          lc: Number(product.lc) || 0,
+          fob: Number(product.fob) || 0,
+          cif: Number(product.cif) || 0,
+          profitLoss: Number(product.profitLoss) || 0,
+          isProductAccept: true,
+          remark: product.remark || "",
+          ...(saleType === 'mr' && {
+            mrId: product.selectedMrId,
+            mrName: product.selectedMrName,
+          }),
+        })),
+        creditDays: form.creditDays ? Number(form.creditDays) : null,
+        dueDate: safeFormatDate(form.dueDate),
+        deliveryDate: safeFormatDate(form.deliveryDate),
+        paidAmount: Number(form.paidAmount) || 0,
+        dueAmount: Number(form.dueAmount) || 0,
+        totalAmount: Number(form.totalAmount) || 0,
+        paymentStatus: form.paymentStatus || "Credit",
+        remark: form.remark || "",
+      };
 
-    const contentType = response.headers.get("content-type");
-    if (!response.ok) {
-      let errorMessage;
-      if (contentType && contentType.includes("application/json")) {
-        const respData = await response.json();
-        errorMessage = respData.error || respData.message || `HTTP error! status: ${response.status}`;
+      if (saleType !== 'mr') {
+        saleData.mrName = form.mrName || "";
+        saleData.mrId = form.mrId || null;
       } else {
-        const text = await response.text();
-        errorMessage = `Server returned ${response.status}: ${text.substring(0, 100)}...`;
+        if (validProducts.length > 0 && validProducts[0].selectedMrName) {
+          saleData.mrName = validProducts[0].selectedMrName;
+          saleData.mrId = validProducts[0].selectedMrId;
+        }
+        const mrDistribution = {};
+        validProducts.forEach((product) => {
+          const mrName = product.selectedMrName || 'Unknown';
+          const mrId = product.selectedMrId;
+          if (!mrDistribution[mrName]) {
+            mrDistribution[mrName] = {
+              mrName,
+              mrId,
+              products: []
+            };
+          }
+          mrDistribution[mrName].products.push({
+            productName: product.productName,
+            salesQty: Number(product.salesQty),
+            bonusQty: Number(product.bonusQty),
+            sellingPrice: Number(product.sellingPrice),
+            discount: Number(product.discount),
+          });
+        });
+        saleData._mrDistribution = mrDistribution;
       }
-      throw new Error(errorMessage);
-    }
 
-    const respData = await response.json();
-    showToast("success", respData.message || "Sale created successfully!");
-    navigate("/salelayout/sale");
-  } catch (err) {
-    console.error("❌ Error submitting sale:", err);
-    showToast("error", err.message || "Failed to submit sale");
-  }
-};
+      const response = await fetch(`${backendUrl}/api/sales/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(saleData),
+      });
+
+      const contentType = response.headers.get("content-type");
+      if (!response.ok) {
+        let errorMessage;
+        if (contentType && contentType.includes("application/json")) {
+          const respData = await response.json();
+          errorMessage = respData.error || respData.message || `HTTP error! status: ${response.status}`;
+        } else {
+          const text = await response.text();
+          errorMessage = `Server returned ${response.status}: ${text.substring(0, 100)}...`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const respData = await response.json();
+      showToast("success", respData.message || "Sale created successfully!");
+      navigate("/salelayout/sale");
+    } catch (err) {
+      console.error("Error submitting sale:", err);
+      showToast("error", err.message || "Failed to submit sale");
+    }
+  };
 
   const paidInFull = isPaidInFull();
 
@@ -1936,7 +1951,7 @@ const handleSubmit = async (e) => {
         </button>
       </div>
 
-      {/* UPLOAD WARNING (unchanged) */}
+      {/* UPLOAD WARNING */}
       {showUploadMessage && (
         <div className={`mb-6 p-4 rounded-lg ${
           uploadMessage.includes("out of stock") 
@@ -1955,7 +1970,7 @@ const handleSubmit = async (e) => {
         <button
           type="button"
           disabled={!isCurrentProductValid() || isFormDisabled}
-          onClick={addProduct}
+          onClick={() => addProduct(saleType)}   // ← pass saleType
           className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
             isCurrentProductValid() && !isFormDisabled
               ? "bg-green-600 text-white hover:bg-green-700"
@@ -2093,26 +2108,31 @@ const handleSubmit = async (e) => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* 🔥 MR Sale: per‑product MR dropdown – now uses mrStockList */}
+                    {/* MR Sale: per‑product MR dropdown – only first row editable, others read-only */}
                     {saleType === 'mr' && (
                       <div className="relative flex flex-col">
-                        <SearchableDropdown
-                          value={product.selectedMrId || ''}
-                          onChange={(mrId) => enhancedProductChange(index, 'selectedMrId', mrId)}
-                          options={[
-                            { value: "", label: "Select Medical Representative" },
-                            ...mrStockList.map((mr) => ({
-                              value: mr._id,
-                              label: `${mr.mrName} (${mr.totalProducts || 0} products, ${mr.totalQuantity || 0} boxes)`,
-                            })),
-                          ]}
-                          placeholder="Select Medical Representative"
-                          required={true}
-                          loading={mrStockListLoading}
-                          error={errors[`selectedMrId_${index}`]}
-                          label="Medical Representative"
-                          disabled={isFormDisabled}
-                        />
+                        {index === 0 ? (
+                          <SearchableDropdown
+                            value={product.selectedMrId || ''}
+                            onChange={(mrId) => enhancedProductChange(index, 'selectedMrId', mrId)}
+                            options={mrStockOptions}
+                            placeholder="Select Medical Representative"
+                            required={true}
+                            loading={mrStockListLoading}
+                            error={errors[`selectedMrId_${index}`]}
+                            label="Medical Representative"
+                            disabled={isFormDisabled}
+                          />
+                        ) : (
+                          <div>
+                            <label className="text-sm font-medium text-gray-700 mb-1">
+                              Medical Representative
+                            </label>
+                            <div className="border rounded-md px-3 py-2 bg-gray-100 text-gray-700">
+                              {product.selectedMrName || 'Not set'}
+                            </div>
+                          </div>
+                        )}
                         {errors[`selectedMrId_${index}`] && (
                           <p className="text-red-500 text-xs mt-0.5">
                             {errors[`selectedMrId_${index}`]}
@@ -2374,7 +2394,7 @@ const handleSubmit = async (e) => {
             disabled={isFormDisabled}
           />
 
-          {/* Normal Sale: header MR dropdown (unchanged) */}
+          {/* Normal Sale: header MR dropdown */}
           {saleType !== 'mr' && (
             <SearchableDropdown
               value={form.mrId}
@@ -2413,7 +2433,7 @@ const handleSubmit = async (e) => {
           />
         </div>
 
-        {/* Payment section (unchanged) */}
+        {/* Payment section */}
         <div
           className={`grid grid-cols-1 ${
             paidInFull ? "sm:grid-cols-2" : "sm:grid-cols-3"

@@ -39,6 +39,7 @@ router.get("/", async (req, res) => {
       return sum + (report.totalBoxes || 0);
     }, 0);
 
+    console.log('value sof allReports', allReports);
     res.status(200).json({
       success: true,
       count: filteredReports.length,

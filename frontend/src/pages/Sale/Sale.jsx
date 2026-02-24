@@ -27,9 +27,6 @@ import {
   Truck,
   Clock,
   PackageCheck,
-  FileSpreadsheet,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
@@ -1205,50 +1202,6 @@ const ImportSalesModal = ({
     }
   }, []);
 
-  // const validateStockBeforeImport = useCallback(async (invoices) => {
-  //   try {
-  //     setIsValidatingStock(true);
-  //     setImportMessage(`Checking stock for ${invoices.length} invoices...`);
-
-  //     const response = await axios.post(
-  //       `${backendUrl}/api/sales/validate-import-stock`,
-  //       { invoices },
-  //       getAuthHeaders(),
-  //     );
-
-  //     setIsValidatingStock(false);
-
-  //     if (response.data.success) {
-  //       return response.data.validationResult;
-  //     } else {
-  //       throw new Error(response.data.message || "Stock validation failed");
-  //     }
-  //   } catch (error) {
-  //     console.error("Stock validation error:", error);
-  //     setIsValidatingStock(false);
-  //     return {
-  //       stockIssues: [],
-  //       totalInvoices: invoices.length,
-  //       summary: {
-  //         totalProducts: 0,
-  //         totalRequired: 0,
-  //         totalAvailable: 0,
-  //         totalInsufficient: 0,
-  //         missingProducts: 0,
-  //         lowStockProducts: 0,
-  //         hasCriticalIssues: true,
-  //         hasInsufficientStock: false,
-  //         importBlocked: true,
-  //       },
-  //       insufficientStockIssues: [],
-  //       missingProductIssues: [],
-  //       importBlocked: true,
-  //       blockReason: "VALIDATION_ERROR",
-  //       message: `Stock validation failed: ${error.message}`,
-  //     };
-  //   }
-  // }, []);
-
   const validateStockBeforeImport = useCallback(
     async (invoices) => {
       try {
@@ -1320,7 +1273,7 @@ const ImportSalesModal = ({
       }
     },
     [importSaleType],
-  ); // <-- add importSaleType to deps
+  );
 
   const handleImportData = useCallback(async () => {
     if (parsedData.length === 0) {
@@ -2205,6 +2158,9 @@ const Sales = () => {
   const inputRef = useRef(null);
   const { statuses, loading } = useInitialSaleData();
 
+  // Add state for sale type filter
+  const [saleTypeTab, setSaleTypeTab] = useState("all");
+
   const [form, setForm] = useState({
     _id: null,
     recordingDate: "",
@@ -2444,8 +2400,10 @@ const Sales = () => {
     [],
   );
 
+  // Payment status tabs (All, Cash, Credit, etc.)
   const paymentStatusTabs = useMemo(() => {
-    if (!Array.isArray(sales) || sales.length === 0) return ["All"];
+    if (!Array.isArray(sales) || sales.length === 0) return ["All", "Cash", "Credit"];
+    
     const uniqueStatuses = [
       ...new Set(
         sales
@@ -2454,23 +2412,62 @@ const Sales = () => {
           .map((s) => s.trim()),
       ),
     ].sort();
-    return ["All", ...uniqueStatuses];
+    
+    // Ensure Cash and Credit are included, then add any other statuses
+    const baseTabs = ["All"];
+    
+    if (uniqueStatuses.includes("Cash")) baseTabs.push("Cash");
+    if (uniqueStatuses.includes("Credit")) baseTabs.push("Credit");
+    
+    // Add any other unique statuses (like Partial Paid, Paid, etc.)
+    uniqueStatuses.forEach(status => {
+      if (!baseTabs.includes(status) && status !== "Cash" && status !== "Credit") {
+        baseTabs.push(status);
+      }
+    });
+    
+    return baseTabs;
   }, [sales]);
 
+  // Sale type tabs (Normal Sale, MR Sale) with sublabels
+  const saleTypeTabs = useMemo(() => {
+    return [
+      { id: "all", label: "All" },
+      { id: "normal", label: "Normal Sale", subLabel: "Warehouse Stock" },
+      { id: "mr", label: "MR Sale", subLabel: "MR Hand Stock" },
+    ];
+  }, []);
+
+  // Filtered sales based on payment status, sale type, and search term
   const filteredSales = useMemo(() => {
     if (!Array.isArray(sales)) return [];
     const lowerSearch = searchTerm.trim().toLowerCase();
     const selectedTabLower = selectedTab.toLowerCase();
+    const selectedSaleType = saleTypeTab.toLowerCase();
+
     return sales.filter((sale) => {
+      // Determine if this is an MR sale - check both possible fields
+      const isMRSale = sale.isMRSale === true || sale.isMrSaleImport === true;
+      
+      // Filter by payment status (All, Cash, Credit, etc.)
       const paymentStatus = (sale.paymentStatus || "").toLowerCase();
-      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus)
+      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
         return false;
+      }
+
+      // Filter by sale type (All, Normal Sale, MR Sale)
+      if (selectedSaleType !== "all") {
+        if (selectedSaleType === "mr" && !isMRSale) return false;
+        if (selectedSaleType === "normal" && isMRSale) return false;
+      }
+
+      // Filter by search term
       if (!lowerSearch) return true;
       return [sale.invoiceNumber, sale.customerName, sale.mrName].some((f) =>
         (f ?? "").toString().toLowerCase().includes(lowerSearch),
       );
     });
-  }, [sales, searchTerm, selectedTab]);
+  }, [sales, searchTerm, selectedTab, saleTypeTab]);
 
   const currentSales = useMemo(() => {
     const start = (currentPage - 1) * SALES_PER_PAGE;
@@ -2488,7 +2485,7 @@ const Sales = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedTab]);
+  }, [searchTerm, selectedTab, saleTypeTab]);
 
   const getFieldValue = useCallback((sale, dbName) => {
     if (dbName === "products") return sale.products?.length || 0;
@@ -3270,56 +3267,164 @@ const Sales = () => {
             </div>
           )}
 
-        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-          {sales.length > 0 ? (
-            <div className="flex items-center gap-6">
-              <div className="flex gap-4 flex-wrap">
+        {sales.length > 0 && (
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            {/* Left side - Payment Status + Sale Type Tabs */}
+            <div className="flex gap-2 flex-wrap items-center">
+              {/* Payment Status Group */}
+              <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
+                <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
+                  Payment
+                </span>
                 {paymentStatusTabs.map((tab) => (
                   <button
-                    key={`tab-${tab}`}
+                    key={`payment-tab-${tab}`}
                     onClick={() => {
                       setSelectedTab(tab);
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                    className={`px-4 py-1.5 rounded-lg cursor-pointer transition-colors text-sm font-medium ${
+                      selectedTab === tab
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-gray-600 hover:bg-gray-200"
+                    }`}
                   >
                     {tab}
                   </button>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div></div>
-          )}
-          {sales.length > 0 && (
-            <div className="flex items-center gap-8 flex-wrap">
-              <p className="text-lg font-semibold text-gray-700">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredSales.length}
+
+              {/* Divider */}
+              <div className="w-px h-8 bg-gray-300 mx-1" />
+
+              {/* Sale Type Group */}
+              <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
+                <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
+                  Sale Type
                 </span>
-              </p>
-              <div className="relative w-full md:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
-                  size={16}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search invoice, MR name, Customer name..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition"
-                />
+                {saleTypeTabs.map((tab) => (
+                  <button
+                    key={`sale-type-tab-${tab.id}`}
+                    onClick={() => {
+                      setSaleTypeTab(tab.id);
+                      setCurrentPage(1);
+                      setSelected([]);
+                    }}
+                    className={`flex items-center gap-2 px-4 py-1.5 rounded-full cursor-pointer transition-colors text-sm font-medium ${
+                      saleTypeTab === tab.id
+                        ? tab.id === "normal"
+                          ? "bg-indigo-600 text-white shadow"
+                          : tab.id === "mr"
+                            ? "bg-green-600 text-white shadow"
+                            : "bg-gray-600 text-white shadow"
+                        : "text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {/* Icon */}
+                    {tab.id === "normal" ? (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M16 3H8v4h8V3z"
+                        />
+                      </svg>
+                    ) : tab.id === "mr" ? (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 6h16M4 12h16M4 18h16"
+                        />
+                      </svg>
+                    )}
+
+                    {/* Label */}
+                    <span>{tab.label}</span>
+
+                    {/* SubLabel as pill */}
+                    {tab.subLabel && (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          saleTypeTab === tab.id
+                            ? "bg-white/20 text-white"
+                            : "bg-gray-200 text-gray-500"
+                        }`}
+                      >
+                        {tab.subLabel}
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
             </div>
-          )}
-        </div>
+
+            {/* Right side - Total Count + Search */}
+            {sales.length > 0 && (
+              <div className="flex items-center justify-end gap-4 flex-wrap">
+                <p className="text-lg font-semibold text-gray-700">
+                  Total Count:{" "}
+                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                    {filteredSales.length}
+                  </span>
+                </p>
+                <div className="relative w-full md:w-72">
+                  <Search
+                    className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
+                    size={16}
+                  />
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Search invoice, MR name, Customer name..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="overflow-x-auto shadow-lg rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
@@ -3407,6 +3512,11 @@ const Sales = () => {
                               />
                               <span className="font-medium">
                                 {sale.invoiceNumber}
+                                {(sale.isMRSale || sale.isMrSaleImport) && (
+                                  <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+                                    MR
+                                  </span>
+                                )}
                               </span>
                             </div>
                           ) : item.id === "productCount" ? (
@@ -3446,7 +3556,15 @@ const Sales = () => {
                             </div>
                           ) : item.id === "paymentStatus" ? (
                             <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${sale.paymentStatus === "Paid" ? "bg-green-100 text-green-800" : sale.paymentStatus === "Credit" ? "bg-yellow-100 text-yellow-800" : sale.paymentStatus === "Partial" ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                sale.paymentStatus === "Paid"
+                                  ? "bg-green-100 text-green-800"
+                                  : sale.paymentStatus === "Credit"
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : sale.paymentStatus === "Partial"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : "bg-gray-100 text-gray-800"
+                              }`}
                             >
                               {getFieldValue(sale, item.dbName)}
                             </span>
@@ -3492,7 +3610,11 @@ const Sales = () => {
                         setCurrentPage(page);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                        currentPage === page
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
+                      }`}
                     >
                       {page}
                     </button>

@@ -114,8 +114,9 @@ const formatCustomerResponse = (customer) => {
 const generateNextCustomerCode = async () => {
   try {
     const last = await Customer.findOne({})
-      .sort({ createdAt: -1 })
+      .sort({ customerCode: -1 })  // ✅ Sort by customerCode, not createdAt
       .select("customerCode");
+
     let nextCode = 1;
     if (last?.customerCode) {
       const match = last.customerCode.match(/\d+/);
@@ -124,6 +125,7 @@ const generateNextCustomerCode = async () => {
         if (!isNaN(parsed)) nextCode = parsed + 1;
       }
     }
+
     return nextCode.toString().padStart(5, "0");
   } catch {
     return "00001";
@@ -575,11 +577,14 @@ router.get("/province/:province", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "" } = req.query;
+
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
     const searchQuery = {};
+
+    // 🔎 Search Filter
     if (search.trim()) {
       const s = search.trim();
       searchQuery.$or = [
@@ -597,10 +602,14 @@ router.get("/", async (req, res) => {
 
     const [total, customers, nextCustomerCode] = await Promise.all([
       Customer.countDocuments(searchQuery),
+
+      // 🔥 Highest Customer Code First
       Customer.find(searchQuery)
-        .sort({ createdAt: -1 })
+        .collation({ locale: "en", numericOrdering: true }) // Treat string numbers as numbers
+        .sort({ customerCode: -1 }) // Descending (highest first)
         .skip(skip)
         .limit(limitNum),
+
       generateNextCustomerCode(),
     ]);
 
@@ -612,6 +621,7 @@ router.get("/", async (req, res) => {
       nextCustomerCode,
       ok: true,
     });
+
   } catch (err) {
     handleServerError(res, err);
   }

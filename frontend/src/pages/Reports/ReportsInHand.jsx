@@ -217,9 +217,9 @@ const ReportsInHand = () => {
         "Total Boxes": item.boxes, // ✅ Show totalBoxes
         "Min Stock": item.minStock,
         Status: item.status,
-        "LC Price ($)": item.lc?.toFixed(2) || "0.00",
-        "FOB Price ($)": item.fob?.toFixed(2) || "0.00",
-        "Total Amount ($)": item.totalPrice?.toFixed(2) || "0.00",
+        "LC Price ($)": item.lc?.toFixed(3) || "0.000",
+        "FOB Price ($)": item.fob?.toFixed(3) || "0.000",
+        "Total Amount ($)": item.totalPrice?.toFixed(3) || "0.000",
         "Last Updated": item.lastUpdated,
       }));
 
@@ -575,13 +575,13 @@ const ReportsInHand = () => {
                   <td className="p-3">{getStatusBadge(product.status)}</td>
                   <td className="p-3">
                     <div className="text-sm font-medium text-gray-900">
-                      {product.lc.toFixed(2)}
+                      {product.lc.toFixed(3)}
                     </div>
                   </td>
 
                   <td className="p-3">
                     <div className="text-sm font-medium text-gray-900">
-                      {product.fob.toFixed(2)}
+                      {product.fob.toFixed(3)}
                     </div>
                   </td>
                   <td className="p-3">

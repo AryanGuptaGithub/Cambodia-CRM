@@ -263,144 +263,122 @@ router.get("/", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /mr-hand-admin
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /mr-hand-admin
 router.get("/mr-hand-admin", async (req, res) => {
   try {
     const { mrName, search } = req.query;
-    let matchStage = { $match: {} };
+    
+    // Build match stage for aggregation
+    let matchStage = {};
     if (mrName && mrName !== "all") {
-      matchStage.$match.mrName = {
-        $regex: new RegExp(`^${mrName}$`, "i"),
+      matchStage.stockTransferToMr = {
+        $regex: new RegExp(`^${mrName}$`, "i")
       };
     }
 
+    // Aggregate from StockTransferToMR
     const stockAggregation = [
-      matchStage,
-      { $unwind: "$productsInHand" },
+      { $match: matchStage },
+      { $unwind: "$items" },
       {
         $lookup: {
           from: "products",
-          localField: "productsInHand.productId",
+          localField: "items.productId",
           foreignField: "_id",
-          as: "productDetails",
-        },
+          as: "productDetails"
+        }
       },
       {
         $unwind: {
           path: "$productDetails",
-          preserveNullAndEmptyArrays: true,
-        },
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $group: {
+          _id: {
+            mrName: "$stockTransferToMr",
+            productId: "$items.productId"
+          },
+          totalAssigned: { $sum: "$items.boxQuantity" },
+          latestTransferDate: { $max: "$createdAt" },
+          transfers: { 
+            $push: {
+              invoiceNo: "$invoiceNo",
+              createdAt: "$createdAt",
+              boxQuantity: "$items.boxQuantity"
+            }
+          },
+          productDetails: { $first: "$productDetails" },
+          mrName: { $first: "$stockTransferToMr" }
+        }
       },
       {
         $project: {
-          mrId: 1,
-          mrName: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          productId: "$productsInHand.productId",
+          _id: 0,
+          mrName: "$_id.mrName",
+          productId: "$_id.productId",
+          totalAssigned: 1,
+          latestTransferDate: 1,
+          transfers: 1,
           productName: {
             $cond: {
-              if: { $gt: ["$productsInHand.productName", ""] },
-              then: "$productsInHand.productName",
-              else: "$productDetails.productName",
-            },
+              if: { $gt: ["$productDetails.productName", ""] },
+              then: "$productDetails.productName",
+              else: "Unknown Product"
+            }
           },
-          quantity: "$productsInHand.quantity",
-          lc: {
-            $cond: {
-              if: { $gt: ["$productsInHand.lc", 0] },
-              then: "$productsInHand.lc",
-              else: "$productDetails.lc",
-            },
-          },
+          lc: "$productDetails.lc",
           costPrice: "$productDetails.costPrice",
           unit: "$productDetails.unit",
           category: "$productDetails.category",
           packSize: "$productDetails.packSize",
-          productCode: "$productDetails.productCode",
-          stockId: "$_id",
-          lastUpdated: "$productsInHand.lastUpdated",
-        },
+          productCode: "$productDetails.productCode"
+        }
       },
-      { $sort: { mrName: 1, productName: 1 } },
+      { $sort: { mrName: 1, productName: 1 } }
     ];
 
-    const stockResults = await StockInMRHand.aggregate(stockAggregation);
+    const stockResults = await StockTransferToMR.aggregate(stockAggregation);
 
-    const transferMatch = { transferType: "send" };
-    if (mrName && mrName !== "all") {
-      transferMatch.stockTransferToMr = {
-        $regex: new RegExp(`^${mrName}$`, "i"),
-      };
-    }
-
-    const transfers = await StockTransferToMR.find(transferMatch);
-    const assignedMap = {};
-    transfers.forEach((transfer) => {
-      transfer.items.forEach((item) => {
-        const key = `${transfer.stockTransferToMr}_${item.productId}`;
-        if (!assignedMap[key]) {
-          assignedMap[key] = {
-            totalAssigned: 0,
-            latestTransferDate: transfer.createdAt,
-            invoiceNo: transfer.invoiceNo,
-          };
-        }
-        assignedMap[key].totalAssigned += item.boxQuantity || 0;
-        if (transfer.createdAt > assignedMap[key].latestTransferDate) {
-          assignedMap[key].latestTransferDate = transfer.createdAt;
-        }
-      });
-    });
-
+    // Format the results
     const formattedResult = stockResults.map((item, index) => {
-      const key = `${item.mrName}_${item.productId}`;
-      const assignedData = assignedMap[key] || {
-        totalAssigned: item.quantity || 0,
-        latestTransferDate: item.createdAt,
-        invoiceNo: null,
-      };
-      const remainingQty = item.quantity || 0;
-      const assignedQty = assignedData.totalAssigned;
-      const usedQty = Math.max(0, assignedQty - remainingQty);
+      const invoiceNumbers = item.transfers
+        .map(t => t.invoiceNo)
+        .filter((v, i, a) => a.indexOf(v) === i); // Get unique invoice numbers
+      
       return {
-        assignedDate: assignedData.latestTransferDate
-          ? new Date(assignedData.latestTransferDate)
-              .toISOString()
-              .split("T")[0]
+        assignedDate: item.latestTransferDate
+          ? new Date(item.latestTransferDate).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
-        assignedQty,
+        assignedQty: item.totalAssigned,
         batch: "N/A",
-        createdAt: item.createdAt
-          ? new Date(item.createdAt).toISOString().split("T")[0]
+        createdAt: item.latestTransferDate
+          ? new Date(item.latestTransferDate).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
         expiry: "N/A",
-        id:
-          item.stockId?.toString() ||
-          `${item.mrName}-${item.productId}-${index}`,
-        invoiceNumbers: assignedData.invoiceNo
-          ? [assignedData.invoiceNo]
-          : [],
+        id: `${item.mrName}-${item.productId}-${index}`,
+        invoiceNumbers: invoiceNumbers,
         mrCode: item.mrName,
         mrName: item.mrName,
-        productCode:
-          item.productCode ||
-          `PROD-${item.productId?.toString().slice(-4) || "0000"}`,
+        productCode: item.productCode || `PROD-${item.productId?.toString().slice(-4) || "0000"}`,
         productId: item.productId,
-        productName: item.productName || "Unknown Product",
-        remainingQty,
-        usedQty,
-        status: remainingQty > 0 ? "Active" : "Depleted",
-        boxQuantity: item.quantity || 0,
-        quantity: item.quantity || 0,
+        productName: item.productName,
+        remainingQty: item.totalAssigned, // Since this is from transfers, remaining = assigned
+        usedQty: 0, // You might want to calculate this based on some usage data
+        status: "Active",
+        boxQuantity: item.totalAssigned,
+        quantity: item.totalAssigned,
         lc: item.lc || 0,
         unit: item.unit || "pcs",
         category: item.category || "General",
         packSize: item.packSize || 0,
         costPrice: item.costPrice || 0,
-        lastUpdated: item.lastUpdated || item.createdAt,
+        lastUpdated: item.latestTransferDate
       };
     });
 
+    // Apply search filter if provided
     let filteredResult = formattedResult;
     if (search && search.trim()) {
       const searchLower = search.toLowerCase();
@@ -415,10 +393,11 @@ router.get("/mr-hand-admin", async (req, res) => {
     res.json({
       success: true,
       data: filteredResult,
-      count: filteredResult.length,
+      count: filteredResult.length
     });
+
   } catch (err) {
-    console.error("Failed to fetch MR stock:", err);
+    console.error("Failed to fetch MR stock from transfers:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -63,6 +63,12 @@ const saleSummarySchema = new Schema(
       enum: ["Cash", "Credit", "Partial Paid", "Paid", "Return", "Unpaid"],
       default: "Credit",
     },
+    // 🆕 New field: saleType
+    saleType: {
+      type: String,
+      enum: ["Normal Sale", "MR Sale"],
+      default: "Normal Sale",
+    },
     remark: { type: String, default: "", trim: true },
     isExchange: { type: Boolean, default: false },
     isReturn: { type: Boolean, default: false },

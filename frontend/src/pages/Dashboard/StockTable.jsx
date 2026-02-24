@@ -8,88 +8,60 @@ export const StockTable = ({
   loadingStockData,
   activeStockSubTab,
   dateRanges,
-  onViewStockDetails, // function to show batch-wise LC in modal
+  onViewStockDetails,
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 5;
 
-  // Calculate pagination values
+  console.log('values of stockTableData', stockTableData);
+
   const totalRows = stockTableData?.length || 0;
   const totalPages = Math.ceil(totalRows / rowsPerPage);
-  
-  // Reset to page 1 when tab changes
+
   useEffect(() => {
     setCurrentPage(1);
   }, [activeStockSubTab, stockTableData]);
 
-  // Get data for current page
   const paginatedData = useMemo(() => {
-    if (!stockTableData || stockTableData.length === 0) {
-      return [];
-    }
-    
+    if (!stockTableData || stockTableData.length === 0) return [];
     const startIndex = (currentPage - 1) * rowsPerPage;
     const endIndex = startIndex + rowsPerPage;
     return stockTableData.slice(startIndex, endIndex);
   }, [stockTableData, currentPage]);
 
-  // Handle page change
   const handlePageChange = (page) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
-  // Generate page numbers for pagination
   const getPageNumbers = () => {
     const pages = [];
     const maxVisiblePages = 5;
-    
     if (totalPages <= maxVisiblePages) {
-      // Show all pages if total pages is less than or equal to maxVisiblePages
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
-      // Show limited pages with ellipsis
       if (currentPage <= 3) {
-        // Show first 4 pages and last page
-        for (let i = 1; i <= 4; i++) {
-          pages.push(i);
-        }
+        for (let i = 1; i <= 4; i++) pages.push(i);
         pages.push('...');
         pages.push(totalPages);
       } else if (currentPage >= totalPages - 2) {
-        // Show first page and last 4 pages
         pages.push(1);
         pages.push('...');
-        for (let i = totalPages - 3; i <= totalPages; i++) {
-          pages.push(i);
-        }
+        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
       } else {
-        // Show pages around current page
         pages.push(1);
         pages.push('...');
-        for (let i = currentPage - 1; i <= currentPage + 1; i++) {
-          pages.push(i);
-        }
+        for (let i = currentPage - 1; i <= currentPage + 1; i++) pages.push(i);
         pages.push('...');
         pages.push(totalPages);
       }
     }
-    
     return pages;
   };
 
-  // Calculate stock statistics for the entire dataset
+  // ✅ Use totalAmount from backend for accurate totals
   const stockStats = useMemo(() => {
     if (!stockTableData || stockTableData.length === 0) {
-      return {
-        totalValue: 0,
-        totalProducts: 0,
-        totalBoxes: 0,
-        lowStockCount: 0,
-      };
+      return { totalValue: 0, totalProducts: 0, totalBoxes: 0, lowStockCount: 0 };
     }
 
     let totalValue = 0;
@@ -98,22 +70,15 @@ export const StockTable = ({
 
     stockTableData.forEach((item) => {
       const currentStock = item.batches?.reduce(
-        (sum, batch) => sum + (batch.boxes || 0),
-        0
+        (sum, batch) => sum + (batch.boxes || 0), 0
       ) || 0;
       
-      const productValue = item.batches?.reduce(
-        (sum, batch) => sum + (batch.lc || 0) * (batch.boxes || 0),
-        0
-      ) || 0;
-      
-      totalValue += productValue;
+      // ✅ Use item.totalAmount (already rounded)
+      totalValue += item.totalAmount || 0;
       totalBoxes += currentStock;
       
       const minStockLevel = item.minStockLevel || 0;
-      if (currentStock < minStockLevel) {
-        lowStockCount++;
-      }
+      if (currentStock < minStockLevel) lowStockCount++;
     });
 
     return {
@@ -124,7 +89,6 @@ export const StockTable = ({
     };
   }, [stockTableData]);
 
-  // Columns for main stock table (shows average LC)
   const columns = [
     {
       header: "Product Name",
@@ -149,10 +113,8 @@ export const StockTable = ({
       header: "Quantity (Boxes)",
       render: (item) => {
         const totalBoxes = item.batches?.reduce(
-          (sum, batch) => sum + (batch.boxes || 0),
-          0
+          (sum, batch) => sum + (batch.boxes || 0), 0
         ) || 0;
-        
         const minStockLevel = item.minStockLevel || 0;
         const isLowStock = totalBoxes < minStockLevel;
         
@@ -162,33 +124,27 @@ export const StockTable = ({
               {totalBoxes.toLocaleString()}
             </span>
             {minStockLevel > 0 && (
-              <span className="text-xs text-gray-500">
-                Min: {minStockLevel}
-              </span>
+              <span className="text-xs text-gray-500">Min: {minStockLevel}</span>
             )}
           </div>
         );
       },
     },
     {
-      header: "LC Price ($)", // Average LC per product
+      header: "LC Price ($)",
       render: (item) => {
         const totalBoxes = item.batches?.reduce(
-          (sum, batch) => sum + (batch.boxes || 0),
-          0
+          (sum, batch) => sum + (batch.boxes || 0), 0
         ) || 0;
-        
         const totalLC = item.batches?.reduce(
-          (sum, batch) => sum + (batch.lc || 0) * (batch.boxes || 0),
-          0
+          (sum, batch) => sum + (batch.lc || 0) * (batch.boxes || 0), 0
         ) || 0;
-        
         const avgLC = totalBoxes ? totalLC / totalBoxes : 0;
         
         return (
           <div className="flex flex-col">
             <span className="font-medium text-blue-600">
-              ${formatCurrency(avgLC)}
+              ${avgLC.toFixed(3)}
             </span>
             <span className="text-xs text-gray-500">
               {item.batches?.length || 0} batch{item.batches?.length !== 1 ? 'es' : ''}
@@ -199,12 +155,9 @@ export const StockTable = ({
     },
     {
       header: "Stock Value ($)",
+      // ✅ Use item.totalAmount instead of recomputing
       render: (item) => {
-        const value = item.batches?.reduce(
-          (sum, batch) => sum + (batch.lc || 0) * (batch.boxes || 0),
-          0
-        ) || 0;
-        
+        const value = item.totalAmount || 0;
         return (
           <div className="flex flex-col">
             <span className="text-green-600 font-semibold">
@@ -221,10 +174,8 @@ export const StockTable = ({
       header: "Status",
       render: (item) => {
         const currentStock = item.batches?.reduce(
-          (sum, batch) => sum + (batch.boxes || 0),
-          0
+          (sum, batch) => sum + (batch.boxes || 0), 0
         ) || 0;
-        
         const minStockLevel = item.minStockLevel || 0;
         const isLowStock = currentStock < minStockLevel;
 
@@ -258,31 +209,20 @@ export const StockTable = ({
   ];
 
   const getTableTitle = () => {
-    if (!dateRanges) {
-      return `Stock Details - ${activeStockSubTab || 'Stock'}`;
-    }
-    
+    if (!dateRanges) return `Stock Details - ${activeStockSubTab || 'Stock'}`;
     switch (activeStockSubTab) {
-      case "Today":
-        return `Stock Details - ${dateRanges.today?.label || 'Today'}`;
-      case "Low Stock":
-        return "Low Stock Alert - Products Below Minimum Level";
-      case "Expiring":
-        return "Expiring Soon - Products Near Expiry Date";
-      case "All":
-        return "Complete Stock Inventory";
-      case "Overdue":
-        return "Overdue Stock - Past Expiry Date";
-      case "Unreceive_Payment":
-        return "Pending Receipt Stock";
-      default:
-        return `Stock Details - ${activeStockSubTab || 'Stock'}`;
+      case "Today": return `Stock Details - ${dateRanges.today?.label || 'Today'}`;
+      case "Low Stock": return "Low Stock Alert - Products Below Minimum Level";
+      case "Expiring": return "Expiring Soon - Products Near Expiry Date";
+      case "All": return "Complete Stock Inventory";
+      case "Overdue": return "Overdue Stock - Past Expiry Date";
+      case "Unreceive_Payment": return "Pending Receipt Stock";
+      default: return `Stock Details - ${activeStockSubTab || 'Stock'}`;
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* Stock Summary Statistics */}
       {!loadingStockData && stockStats.totalProducts > 0 && (
         <div className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -314,7 +254,6 @@ export const StockTable = ({
         </div>
       )}
 
-      {/* Data Table */}
       <DataTable
         title={getTableTitle()}
         loading={loadingStockData}
@@ -324,11 +263,9 @@ export const StockTable = ({
         data={paginatedData}
       />
 
-      {/* Pagination Controls - Only show if we have data and more than one page */}
       {totalRows > 0 && totalPages > 1 && (
         <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4">
           <div className="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0">
-            {/* Showing results info */}
             <div className="text-sm text-gray-700">
               <span className="font-medium">Page {currentPage} of {totalPages}</span>
               <span className="mx-2">•</span>
@@ -341,9 +278,7 @@ export const StockTable = ({
               </span>
             </div>
             
-            {/* Page Navigation */}
             <div className="flex items-center space-x-2">
-              {/* Previous Page Button */}
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
@@ -357,7 +292,6 @@ export const StockTable = ({
                 <ChevronLeft className="h-5 w-5" />
               </button>
 
-              {/* Page Numbers */}
               {getPageNumbers().map((page, index) => (
                 <button
                   key={index}
@@ -377,7 +311,6 @@ export const StockTable = ({
                 </button>
               ))}
 
-              {/* Next Page Button */}
               <button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
@@ -395,7 +328,6 @@ export const StockTable = ({
         </div>
       )}
 
-      {/* Show simple info if only one page */}
       {totalRows > 0 && totalPages === 1 && (
         <div className="text-sm text-gray-500 text-center py-2 bg-white border border-gray-200 rounded-lg px-4">
           Showing all {totalRows} products (Page 1 of 1)
