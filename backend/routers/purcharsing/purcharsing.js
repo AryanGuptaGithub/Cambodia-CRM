@@ -684,7 +684,7 @@ router.get("/", async (req, res) => {
   try {
     const purchases = await purchaseInventory
       .find()
-      .sort({ createdAt: -1 })
+      .sort({ invoiceDate: -1 }) // 👈 changed from createdAt to invoiceDate
       .lean();
 
     const productList = await Product.find(
@@ -692,11 +692,10 @@ router.get("/", async (req, res) => {
       "productName type packing qtyPerBoxStrip sellingPrice batches",
     ).lean();
 
-    // 🔹 Build product map with normalized names
+    // Build product map with normalized names
     const productMap = new Map();
     productList.forEach((prod) => {
       if (prod.productName) {
-        // Normalize product name for matching
         const normalizedKey = normalizeProductName(prod.productName);
         productMap.set(normalizedKey, prod);
       }
@@ -704,16 +703,9 @@ router.get("/", async (req, res) => {
 
     const enhancedPurchases = purchases.map((invoice) => {
       const enhancedProducts = invoice.products.map((p) => {
-        // Normalize the purchase product name
         const normalizedProductName = normalizeProductName(p.productName);
-
-        // Find matching product in database
-        const productInfo = productMap.get(normalizedProductName);
-
-        // Try to find product with exact match first, then try partial match
-        let matchedProduct = productInfo;
+        let matchedProduct = productMap.get(normalizedProductName);
         if (!matchedProduct) {
-          // Try to find by partial match
           for (const [key, prod] of productMap.entries()) {
             if (
               normalizedProductName.includes(key) ||
@@ -727,7 +719,6 @@ router.get("/", async (req, res) => {
 
         return {
           ...p,
-          // Get type from matched product database, fallback to purchase product type or empty
           productType: matchedProduct?.type || p?.type || "",
           productPacking: matchedProduct?.packing || "",
           productQtyPerBoxStrip: matchedProduct?.qtyPerBoxStrip || 0,
@@ -1205,12 +1196,10 @@ router.post("/reports-in-hand/merge-decimal-variations", async (req, res) => {
   }
 });
 
-// Changed from: router.post("/purchase/import", ...)
-// To: router.post("/import", ...)
 router.post("/import", async (req, res) => {
   try {
     const rows = req.body;
-
+    console.log('value rows', rows);
     if (!Array.isArray(rows)) {
       return res.status(400).json({
         message: "Invalid data format. Expected array of invoices.",
@@ -1226,13 +1215,12 @@ router.post("/import", async (req, res) => {
       "productName type batches",
     ).lean();
 
-    // Create a product mapping from database
     const productMap = await getProductMappingFromDatabase();
 
     const skipped = [];
     const importedInvoices = [];
 
-    // Get the last invoice number
+    // Get last invoice number for generating new ones if needed
     const lastInvoice = await purchaseInventory
       .findOne({}, { invoiceNumber: 1 })
       .sort({ createdAt: -1 })
@@ -1245,6 +1233,25 @@ router.post("/import", async (req, res) => {
         invoiceCounter = parseInt(match[1]) + 1;
       }
     }
+
+    // ----- ROBUST DATE PARSER -----
+    const parseDate = (dateValue) => {
+      if (!dateValue) return null;
+      // If it's already a Date object
+      if (dateValue instanceof Date) {
+        return isNaN(dateValue.getTime()) ? null : dateValue;
+      }
+      // Excel serial number (days since 1900-01-01)
+      if (typeof dateValue === "number") {
+        const excelEpoch = new Date(1900, 0, 0);
+        const date = new Date(excelEpoch.getTime() + (dateValue - 1) * 86400000);
+        return isNaN(date.getTime()) ? null : date;
+      }
+      // Try to parse string with dayjs
+      const d = dayjs(dateValue);
+      return d.isValid() ? d.toDate() : null;
+    };
+    // ------------------------------
 
     // Process each invoice
     for (const invoiceData of rows) {
@@ -1282,26 +1289,27 @@ router.post("/import", async (req, res) => {
 
         const deliveryNumber = invoiceData.deliveryNumber || invoiceNumber;
 
-        // Process each product with database-based standardization
+        // Parse invoice-level dates
+        const invoiceDate = parseDate(invoiceData.invoiceDate);
+        const receivedDate = parseDate(invoiceData.receivedDate) || invoiceDate;
+
+        // Process each product
         const processedProducts = await Promise.all(
-          invoiceData.products.map(async (product, idx) => {
+          invoiceData.products.map(async (product) => {
             const quantityPerBoxStrip =
               parseFloat(product.quantityPerBoxStrip) || 0;
-            let lc =
-              parseFloat(product.lc) || parseFloat(product.lcNumber) || 0;
+            let lc = parseFloat(product.lc) || parseFloat(product.lcNumber) || 0;
             let fob = parseFloat(product.fob) || 0;
             let cif = parseFloat(product.cif) || 0;
 
-            // STANDARDIZE PRODUCT NAME USING DATABASE
+            // Standardize product name using database
             const standardizedName = await getStandardizedProductName(
               product.productName,
             );
 
-            // Find product info in database
             const normalizedSearch = normalizeProductName(standardizedName);
             let productInfo = null;
 
-            // Search in allProducts array
             for (const prod of allProducts) {
               if (
                 prod.productName &&
@@ -1315,28 +1323,23 @@ router.post("/import", async (req, res) => {
             let productNameToUse = standardizedName;
 
             if (productInfo) {
-              // Use the standardized name from productInfo
               productNameToUse = await getStandardizedProductName(
                 productInfo.productName,
               );
-              if (fob === 0) {
-                fob = productInfo.batches?.[0]?.fob || 0;
-              }
-              if (cif === 0) {
-                cif = productInfo.batches?.[0]?.cif || 0;
-              }
-              if (lc === 0) {
-                lc = productInfo.batches?.[0]?.lc || 0;
-              }
+              if (fob === 0) fob = productInfo.batches?.[0]?.fob || 0;
+              if (cif === 0) cif = productInfo.batches?.[0]?.cif || 0;
+              if (lc === 0) lc = productInfo.batches?.[0]?.lc || 0;
             }
 
+            // Parse expiry date
+            const expiryDate = parseDate(product.expiryDate);
+
             const amount = quantityPerBoxStrip * lc;
+
             return {
-              productName: productNameToUse, // Store standardized name
+              productName: productNameToUse,
               type: product.type || productInfo?.type || "",
-              expiryDate: product.expiryDate
-                ? new Date(product.expiryDate)
-                : null,
+              expiryDate, // now a valid Date object or null
               quantityPerBoxStrip,
               lc,
               fob,
@@ -1355,13 +1358,13 @@ router.post("/import", async (req, res) => {
         // Create invoice
         const invoice = await purchaseInventory.create({
           invoiceNumber: invoiceNumber,
-          invoiceDate: invoiceData.invoiceDate,
-          deliveryNumber: deliveryNumber,
-          receivedDate: invoiceData.receivedDate,
+          invoiceDate,
+          deliveryNumber,
+          receivedDate,
           supplierName: invoiceData.supplierName,
           remarks: invoiceData.remarks,
           products: processedProducts,
-          totalAmount: totalAmount,
+          totalAmount,
         });
 
         // Update ReportInHand with standardized names
@@ -1865,6 +1868,153 @@ router.post("/reports-in-hand/fix-totals", async (req, res) => {
   }
 });
 
+router.post("/download-excel", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.body;
+    let query = {};
+
+    // Apply date filter ONLY if both dates are provided
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      query.invoiceDate = { $gte: start, $lte: end };
+    }
+
+    const purchases = await purchaseInventory.find(query).lean();
+
+    if (purchases.length === 0) {
+      return res.status(200).json({
+        success: false,
+        message: startDate && endDate 
+          ? "No purchases found for selected date range"
+          : "No purchases found in inventory",
+      });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Purchases");
+
+    const header = [
+      "Invoice Number",
+      "Invoice Date",
+      "Delivery No.",
+      "Received Date",
+      "Product Name",
+      "Product Type",
+      "Supplier Name",
+      "Expiry Date",
+      "Quantity Per Box/Strip",
+      "FOB (USD)",
+      "CIF (USD)",
+      "LC (USD)",
+      "Amount",
+      "Remarks",
+    ];
+
+    const headerRow = worksheet.addRow(header);
+    headerRow.font = { bold: true };
+
+    worksheet.columns = [
+      { width: 18 },
+      { width: 15 },
+      { width: 15 },
+      { width: 15 },
+      { width: 22 },
+      { width: 15 },
+      { width: 25 },
+      { width: 15 },
+      { width: 20 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 15 },
+      { width: 20 },
+    ];
+
+    purchases.forEach((purchase) => {
+      if (purchase.products && Array.isArray(purchase.products)) {
+        purchase.products.forEach((product) => {
+          const quantity = Number(product.quantityPerBoxStrip) || 0;
+          const lc = Number(product.lc) || 0;
+          const amount = product.amount || quantity * lc;
+
+          const rowData = [
+            purchase.invoiceNumber || "",
+            purchase.invoiceDate
+              ? dayjs(purchase.invoiceDate).format("DD/MM/YYYY")
+              : "",
+            purchase.deliveryNumber || "",
+            purchase.receivedDate
+              ? dayjs(purchase.receivedDate).format("DD/MM/YYYY")
+              : "",
+            product.productName || "",
+            product.type || "",
+            purchase.supplierName || "",
+            product.expiryDate
+              ? dayjs(product.expiryDate).format("DD/MM/YYYY")
+              : "",
+            quantity,
+            product.fob || 0,
+            product.cif || 0,
+            lc,
+            amount,
+            purchase.remarks || "",
+          ];
+
+          worksheet.addRow(rowData);
+        });
+      }
+    });
+
+    // Apply borders to all cells
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" },
+          bottom: { style: "thin" },
+        };
+      });
+    });
+
+    // Generate filename based on whether date range was provided
+    let fileName;
+    if (startDate && endDate) {
+      fileName = `purchase_summary_${dayjs(startDate).format("DD-MM-YYYY")}_to_${dayjs(endDate).format("DD-MM-YYYY")}.xlsx`;
+    } else {
+      fileName = `purchase_summary_all_${dayjs().format("DD-MM-YYYY")}.xlsx`;
+    }
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+  } catch (error) {
+    console.error("🔥 Error occurred in purchase download-excel endpoint:");
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+
+    if (error.code) {
+      console.error("Error code:", error.code);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate purchase excel file",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : "Internal server error",
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 router.post("/reports-in-hand/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
@@ -2122,156 +2272,7 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
   }
 });
 
-// Download purchase excel - FIXED VERSION
-// Changed from: router.post("/purchases/download-excel", ...)
-// To: router.post("/download-excel", ...)
-router.post("/download-excel", async (req, res) => {
-  try {
-    const { startDate, endDate } = req.body;
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        message: "Start date and end date are required",
-      });
-    }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    // Set end date to end of day
-    end.setHours(23, 59, 59, 999);
-    const purchases = await purchaseInventory
-      .find({
-        invoiceDate: { $gte: start, $lte: end },
-      })
-      .lean();
-
-    if (purchases.length === 0) {
-      return res.status(200).json({
-        success: false,
-        message: "No purchases found for selected date range",
-      });
-    }
-
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Purchases");
-
-    const header = [
-      "Invoice Number",
-      "Invoice Date",
-      "Delivery No.",
-      "Received Date",
-      "Product Name",
-      "Product Type",
-      "Supplier Name",
-      "Expiry Date",
-      "Quantity Per Box/Strip",
-      "FOB (USD)",
-      "CIF (USD)",
-      "LC (USD)",
-      "Amount",
-      "Remarks",
-    ];
-
-    const headerRow = worksheet.addRow(header);
-    headerRow.font = { bold: true };
-
-    worksheet.columns = [
-      { width: 18 },
-      { width: 15 },
-      { width: 15 },
-      { width: 15 },
-      { width: 22 },
-      { width: 15 },
-      { width: 25 },
-      { width: 15 },
-      { width: 20 },
-      { width: 12 },
-      { width: 12 },
-      { width: 12 },
-      { width: 15 },
-      { width: 20 },
-    ];
-
-    let totalRows = 0;
-    purchases.forEach((purchase, purchaseIndex) => {
-      if (purchase.products && Array.isArray(purchase.products)) {
-        purchase.products.forEach((product, productIndex) => {
-          // Calculate amount if not provided
-          const quantity = Number(product.quantityPerBoxStrip) || 0;
-          const lc = Number(product.lc) || 0;
-          const amount = product.amount || quantity * lc;
-
-          const rowData = [
-            purchase.invoiceNumber || "",
-            purchase.invoiceDate
-              ? dayjs(purchase.invoiceDate).format("DD/MM/YYYY")
-              : "",
-            purchase.deliveryNumber || "",
-            purchase.receivedDate
-              ? dayjs(purchase.receivedDate).format("DD/MM/YYYY")
-              : "",
-            product.productName || "",
-            product.type || "",
-            purchase.supplierName || "",
-            product.expiryDate
-              ? dayjs(product.expiryDate).format("DD/MM/YYYY")
-              : "",
-            quantity,
-            product.fob || 0,
-            product.cif || 0,
-            lc,
-            amount,
-            purchase.remarks || "",
-          ];
-
-          worksheet.addRow(rowData);
-          totalRows++;
-        });
-      }
-    });
-
-    worksheet.eachRow((row, rowNumber) => {
-      row.eachCell((cell, colNumber) => {
-        cell.border = {
-          top: { style: "thin" },
-          left: { style: "thin" },
-          right: { style: "thin" },
-          bottom: { style: "thin" },
-        };
-      });
-    });
-
-    const fileName = `purchase_summary_${dayjs(startDate).format(
-      "DD-MM-YYYY",
-    )}_to_${dayjs(endDate).format("DD-MM-YYYY")}.xlsx`;
-
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-
-    await workbook.xlsx.write(res);
-  } catch (error) {
-    console.error("🔥 Error occurred in purchase download-excel endpoint:");
-    console.error("Error message:", error.message);
-    console.error("Error stack:", error.stack);
-
-    if (error.code) {
-      console.error("Error code:", error.code);
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to generate purchase excel file",
-      error:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : "Internal server error",
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
 
 // 🔥 NEW: Debug endpoint for product matching in purchase context
 router.get("/debug/purchase-product-match/:productName", async (req, res) => {
@@ -2343,6 +2344,309 @@ router.get("/check", async (req, res) => {
       success: false,
       message: "Error checking purchase inventories",
       error: error.message,
+    });
+  }
+});
+
+router.get("/download-all-excel", async (req, res) => {
+  try {
+    // Fetch all purchases sorted by invoice date descending
+    const purchases = await purchaseInventory
+      .find()
+      .sort({ invoiceDate: -1 })
+      .lean();
+
+    if (!purchases || purchases.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No purchase records found to download",
+      });
+    }
+
+    // ── Build flat row list (one row per product per invoice) ──────────
+    const rows = [];
+    purchases.forEach((invoice) => {
+      const products = Array.isArray(invoice.products) ? invoice.products : [];
+
+      if (products.length === 0) {
+        // Include invoice even with no products (single blank product row)
+        rows.push({
+          invoiceNumber: invoice.invoiceNumber || "",
+          invoiceDate: invoice.invoiceDate || null,
+          deliveryNumber: invoice.deliveryNumber || "",
+          receivedDate: invoice.receivedDate || null,
+          productName: "",
+          supplierName: invoice.supplierName || "",
+          expiryDate: null,
+          quantityPerBoxStrip: 0,
+          fob: 0,
+          cif: 0,
+          lc: 0,
+          remarks: invoice.remarks || "",
+        });
+      } else {
+        products.forEach((product) => {
+          rows.push({
+            invoiceNumber: invoice.invoiceNumber || "",
+            invoiceDate: invoice.invoiceDate || null,
+            deliveryNumber: invoice.deliveryNumber || "",
+            receivedDate: invoice.receivedDate || null,
+            productName: product.productName || "",
+            supplierName: invoice.supplierName || "",
+            expiryDate: product.expiryDate || null,
+            quantityPerBoxStrip: Number(product.quantityPerBoxStrip) || 0,
+            fob: Number(product.fob) || 0,
+            cif: Number(product.cif) || 0,
+            lc: Number(product.lc) || 0,
+            remarks: invoice.remarks || "",
+          });
+        });
+      }
+    });
+
+    // ── Create workbook exactly matching the sample layout ─────────────
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Healthcare South East Asia";
+    workbook.created = new Date();
+
+    const ws = workbook.addWorksheet("Purchase Inventory");
+
+    // ── Column widths (match sample file exactly) ──────────────────────
+    ws.columns = [
+      { key: "invoiceNumber",       width: 25 },  // A
+      { key: "invoiceDate",         width: 20 },  // B
+      { key: "deliveryNumber",      width: 20 },  // C
+      { key: "receivedDate",        width: 20 },  // D
+      { key: "productName",         width: 30 },  // E
+      { key: "supplierName",        width: 25 },  // F
+      { key: "expiryDate",          width: 20 },  // G
+      { key: "quantityPerBoxStrip", width: 25 },  // H
+      { key: "fob",                 width: 15 },  // I
+      { key: "cif",                 width: 15 },  // J
+      { key: "lc",                  width: 20 },  // K
+      { key: "remarks",             width: 30 },  // L
+    ];
+
+    // ── ROW 1: Company name (merged A1:L1) ─────────────────────────────
+    ws.mergeCells("A1:L1");
+    const companyCell = ws.getCell("A1");
+    companyCell.value = "HEALTHCARE SOUTH EAST ASIA";
+    companyCell.font = { bold: true, size: 16, name: "Arial" };
+    companyCell.alignment = { horizontal: "center", vertical: "middle" };
+    ws.getRow(1).height = 21;
+
+    // ── ROW 2: Sheet title (merged A2:L2) ──────────────────────────────
+    ws.mergeCells("A2:L2");
+    const titleCell = ws.getCell("A2");
+    titleCell.value = "Purchase Inventory Summary";
+    titleCell.font = { bold: true, size: 14, name: "Arial" };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    ws.getRow(2).height = 18.75;
+
+    // ── ROW 3: Empty spacer row ────────────────────────────────────────
+    ws.getRow(3).height = 10;
+
+    // ── ROW 4: Column headers ──────────────────────────────────────────
+    const headers = [
+      "Invoice Number",
+      "Invoice Date",
+      "Delivery No.",
+      "Received Date",
+      "Product Name",
+      "Supplier Name",
+      "Expiry Date",
+      "Quantity per Box/Strip",
+      "FOB (USD)",
+      "CIF (USD)",
+      "LC (USD)",
+      "Remarks",
+    ];
+
+    const headerRow = ws.getRow(4);
+    headerRow.height = 22;
+
+    const headerFill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFD9E1F2" }, // Light blue-grey matching professional style
+    };
+    const headerBorder = {
+      top:    { style: "thin", color: { argb: "FF4472C4" } },
+      bottom: { style: "thin", color: { argb: "FF4472C4" } },
+      left:   { style: "thin", color: { argb: "FFD9D9D9" } },
+      right:  { style: "thin", color: { argb: "FFD9D9D9" } },
+    };
+
+    headers.forEach((header, idx) => {
+      const cell = headerRow.getCell(idx + 1);
+      cell.value = header;
+      cell.font  = { bold: true, size: 11, name: "Arial", color: { argb: "FF1F3864" } };
+      cell.fill  = headerFill;
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = headerBorder;
+    });
+
+    // ── ROW 5+: Data rows ──────────────────────────────────────────────
+    const dateBorder = {
+      top:    { style: "thin", color: { argb: "FFD9D9D9" } },
+      bottom: { style: "thin", color: { argb: "FFD9D9D9" } },
+      left:   { style: "thin", color: { argb: "FFD9D9D9" } },
+      right:  { style: "thin", color: { argb: "FFD9D9D9" } },
+    };
+
+    // Alternate row fill colors for readability
+    const fillEven = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F7FF" } };
+    const fillOdd  = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
+
+    // Track current invoice for alternate-per-invoice coloring
+    let invoiceColorMap = {};
+    let invoiceColorIndex = 0;
+    rows.forEach((r) => {
+      const key = r.invoiceNumber || "unknown";
+      if (!(key in invoiceColorMap)) {
+        invoiceColorMap[key] = invoiceColorIndex % 2 === 0 ? fillOdd : fillEven;
+        invoiceColorIndex++;
+      }
+    });
+
+    const formatDate = (val) => {
+      if (!val) return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    };
+
+    rows.forEach((rowData, i) => {
+      const excelRowNum = i + 5; // data starts at row 5
+      const dataRow = ws.getRow(excelRowNum);
+      const rowFill = invoiceColorMap[rowData.invoiceNumber || "unknown"] || fillOdd;
+
+      const values = [
+        rowData.invoiceNumber,
+        formatDate(rowData.invoiceDate),
+        rowData.deliveryNumber,
+        formatDate(rowData.receivedDate),
+        rowData.productName,
+        rowData.supplierName,
+        formatDate(rowData.expiryDate),
+        rowData.quantityPerBoxStrip,
+        rowData.fob,
+        rowData.cif,
+        rowData.lc,
+        rowData.remarks,
+      ];
+
+      values.forEach((val, colIdx) => {
+        const cell = dataRow.getCell(colIdx + 1);
+        cell.value = val;
+        cell.font = { name: "Arial", size: 11 };
+        cell.fill = rowFill;
+        cell.border = dateBorder;
+
+        // Column-specific formatting
+        const colNum = colIdx + 1;
+
+        if (colNum === 2 || colNum === 4 || colNum === 7) {
+          // Date columns: B, D, G
+          cell.numFmt = "DD/MM/YYYY";
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        } else if (colNum === 8) {
+          // Quantity — integer
+          cell.numFmt = "#,##0";
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        } else if (colNum === 9 || colNum === 10 || colNum === 11) {
+          // FOB, CIF, LC — 5 decimal places like sample
+          cell.numFmt = "#,##0.00000";
+          cell.alignment = { horizontal: "right", vertical: "middle" };
+        } else if (colNum === 1 || colNum === 3) {
+          // Invoice No, Delivery No
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        } else {
+          cell.alignment = { horizontal: "left", vertical: "middle", wrapText: false };
+        }
+      });
+
+      dataRow.height = 18;
+    });
+
+    // ── Summary footer row ─────────────────────────────────────────────
+    const footerRowNum = rows.length + 5;
+    const footerRow = ws.getRow(footerRowNum);
+
+    const footerFill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFD9E1F2" },
+    };
+    const footerBorder = {
+      top:    { style: "medium", color: { argb: "FF4472C4" } },
+      bottom: { style: "medium", color: { argb: "FF4472C4" } },
+      left:   { style: "thin",   color: { argb: "FFD9D9D9" } },
+      right:  { style: "thin",   color: { argb: "FFD9D9D9" } },
+    };
+
+    const totalQty = rows.reduce((s, r) => s + (r.quantityPerBoxStrip || 0), 0);
+
+    const footerLabels = [
+      "TOTAL",       // A
+      "",            // B
+      "",            // C
+      "",            // D
+      `${rows.length} Products`, // E
+      `${purchases.length} Invoices`, // F
+      "",            // G
+      totalQty,      // H
+      "",            // I
+      "",            // J
+      "",            // K
+      "",            // L
+    ];
+
+    footerLabels.forEach((val, colIdx) => {
+      const cell = footerRow.getCell(colIdx + 1);
+      cell.value = val;
+      cell.font  = { bold: true, size: 11, name: "Arial", color: { argb: "FF1F3864" } };
+      cell.fill  = footerFill;
+      cell.border = footerBorder;
+      if (colIdx + 1 === 8) {
+        cell.numFmt = "#,##0";
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      } else if (colIdx === 0) {
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      } else {
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+      }
+    });
+
+    footerRow.height = 20;
+
+    // ── Freeze top 4 rows (header stays visible on scroll) ────────────
+    ws.views = [{ state: "frozen", xSplit: 0, ySplit: 4 }];
+
+    // ── Auto-filter on header row ──────────────────────────────────────
+    ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 12 } };
+
+    // ── Generate file name ─────────────────────────────────────────────
+    const today = dayjs().format("DD-MM-YYYY");
+    const fileName = `PurchaseInventory_${today}.xlsx`;
+
+    // ── Stream response ────────────────────────────────────────────────
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Error in download-all-excel:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate purchase inventory Excel",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : "Internal server error",
     });
   }
 });

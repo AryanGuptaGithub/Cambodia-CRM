@@ -7,7 +7,7 @@ import "./saleExcelDownload.css";
 import { showToast } from "../../utils/toast";
 import { formatDateToReadable } from "../../utils/dateUtil";
 
-const ExcelDownload = ({
+const SaleExcelDownload = ({
   type = "sales",
   modalTitle = "Download Report",
   buttonText = "Download Excel",
@@ -17,6 +17,7 @@ const ExcelDownload = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
+  const [selectedTab, setSelectedTab] = useState("all"); // 'all', 'normal', 'mr'
   const [loading, setLoading] = useState(false);
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -27,6 +28,7 @@ const ExcelDownload = ({
     setIsModalOpen(false);
     setStartDate(null);
     setEndDate(null);
+    setSelectedTab("all");
   };
 
   // Format date to YYYY-MM-DD string
@@ -57,6 +59,7 @@ const ExcelDownload = ({
       const formattedStartDate = formatDateForBackend(startDate);
       const formattedEndDate = formatDateForBackend(endDate);
       const apiEndpoint = `${backendUrl}/api/${type}/download-excel`;
+
       const response = await fetch(apiEndpoint, {
         method: "POST",
         headers: {
@@ -64,27 +67,26 @@ const ExcelDownload = ({
           Accept: "application/json",
         },
         body: JSON.stringify({
+          period: "custom",               // 👈 tell backend we're using custom dates
           startDate: formattedStartDate,
           endDate: formattedEndDate,
+          saleType: selectedTab,           // 👈 send selected tab value: 'all', 'normal', or 'mr'
         }),
       });
 
       if (!response.ok) {
-        // Try to parse error message
         let errorMessage = "Failed to download Excel file";
         try {
           const errorData = await response.json();
           errorMessage = errorData.message || errorMessage;
         } catch (e) {
-          // If response is not JSON, use status text
           errorMessage = response.statusText || errorMessage;
         }
         throw new Error(errorMessage);
       }
 
-      // Check if response is OK for Excel file
+      // Check if response is an Excel file
       const contentType = response.headers.get("content-type");
-    
       if (
         contentType &&
         contentType.includes(
@@ -135,6 +137,13 @@ const ExcelDownload = ({
     }
   };
 
+  // Tab options with display labels and corresponding backend values
+  const tabs = [
+    { label: "All", value: "all" },
+    { label: "Normal Sale", value: "normal" },
+    { label: "MR Sale", value: "mr" },
+  ];
+
   return (
     <>
       <button
@@ -158,6 +167,30 @@ const ExcelDownload = ({
               </button>
 
               <h2 className="text-lg font-semibold mb-4">{modalTitle}</h2>
+
+              {/* Tab Selection */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Sale Type
+                </label>
+                <div className="flex gap-2">
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      onClick={() => setSelectedTab(tab.value)}
+                      disabled={loading}
+                      className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-colors ${
+                        selectedTab === tab.value
+                          ? "bg-green-600 text-white"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="space-y-4">
                 {/* Start Date */}
@@ -233,4 +266,4 @@ const ExcelDownload = ({
   );
 };
 
-export default ExcelDownload;
+export default SaleExcelDownload;

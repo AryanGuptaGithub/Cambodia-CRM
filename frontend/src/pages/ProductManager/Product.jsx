@@ -34,6 +34,8 @@ import { parseExcelDateValue } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
+const isSampleDownloadFile =
+  import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
 
 // --- Axios Interceptor (auto attach token) ---
 axios.interceptors.request.use(
@@ -881,7 +883,7 @@ const Product = () => {
             >
               <Upload size={18} /> Import Product
             </button>
-            {isSampleFile && (
+            { isSampleDownloadFile  && (
               <button
                 onClick={handleDownloadAll}
                 disabled={loading}

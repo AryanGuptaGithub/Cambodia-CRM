@@ -10,6 +10,7 @@ import Product from "../../models/projectManger/product.js";
 import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import XLSX from 'xlsx'; 
 
 const router = express.Router();
 const importProgressMap = new Map();
@@ -4132,5 +4133,169 @@ router.get("/check-stock/health", async (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+
+router.post("/download-excel", async (req, res) => {
+  try {
+    const { period, startDate, endDate, search, tab, saleType } = req.body;
+
+    // Build filter conditions
+    let dateFilter = {};
+    if (period === 'custom' && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    } else {
+      const dateRange = getTableDateRanges(period);
+      if (dateRange) {
+        dateFilter = { invoiceDate: { $gte: dateRange.start, $lte: dateRange.end } };
+      }
+      // if period is 'all' or not matched, dateFilter remains {} (no date restriction)
+    }
+
+    const matchConditions = { ...dateFilter };
+
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(escapeRegexForSearch(search.trim()), 'i');
+      matchConditions.$or = [
+        { invoiceNumber: searchRegex },
+        { customerName: searchRegex },
+        { 'products.productName': searchRegex }
+      ];
+    }
+
+    if (tab && tab !== 'All') {
+      matchConditions.paymentStatus = new RegExp(`^${escapeRegexForSearch(tab)}$`, 'i');
+    }
+
+    if (saleType && saleType !== 'all') {
+      matchConditions.saleType = saleType === 'normal' ? 'Normal Sale' : 'MR Sale';
+    }
+
+    // Fetch sales data with all relevant fields
+    const sales = await SaleSummary.find(matchConditions)
+      .sort({ invoiceDate: -1 })
+      .lean();
+
+    // Transform data for Excel – flatten products if any
+    const excelData = [];
+    sales.forEach(sale => {
+      if (sale.products && sale.products.length) {
+        sale.products.forEach(product => {
+          excelData.push({
+            'Invoice Number': sale.invoiceNumber,
+            'Invoice Date': sale.invoiceDate ? new Date(sale.invoiceDate).toLocaleDateString() : '',
+            'MR Name': sale.mrName || '',
+            'Customer Name': sale.customerName || '',
+            'Customer Code': sale.customerCode || '',
+            'Payment Status': sale.paymentStatus || '',
+            'Product Name': product.productName || '',
+            'Sales Qty': product.salesQty || 0,
+            'Bonus Qty': product.bonusQty || 0,
+            'Total Qty': product.totalQty || 0,
+            'Selling Price': product.sellingPrice || 0,
+            'Discount': product.discount || 0,
+            'Net Amount': product.netSellingAmount || 0,
+            'LC': product.lc || 0,
+            'Profit/Loss': product.profitLoss || 0,
+            'Total Amount': sale.totalAmount || 0,
+            'Paid Amount': sale.paidAmount || 0,
+            'Due Amount': sale.dueAmount || 0,
+            'Cost Amount': sale.costAmount || 0,
+            'Sale Type': sale.saleType || ''
+          });
+        });
+      } else {
+        // Fallback for invoices without products (should not happen, but safe)
+        excelData.push({
+          'Invoice Number': sale.invoiceNumber,
+          'Invoice Date': sale.invoiceDate ? new Date(sale.invoiceDate).toLocaleDateString() : '',
+          'MR Name': sale.mrName || '',
+          'Customer Name': sale.customerName || '',
+          'Customer Code': sale.customerCode || '',
+          'Payment Status': sale.paymentStatus || '',
+          'Product Name': '—',
+          'Sales Qty': 0,
+          'Bonus Qty': 0,
+          'Total Qty': 0,
+          'Selling Price': 0,
+          'Discount': 0,
+          'Net Amount': 0,
+          'LC': 0,
+          'Profit/Loss': 0,
+          'Total Amount': sale.totalAmount || 0,
+          'Paid Amount': sale.paidAmount || 0,
+          'Due Amount': sale.dueAmount || 0,
+          'Cost Amount': sale.costAmount || 0,
+          'Sale Type': sale.saleType || ''
+        });
+      }
+    });
+
+    // If no data, optionally send an empty file with a message
+    if (excelData.length === 0) {
+      excelData.push({ Message: 'No sales data found for the selected filters.' });
+    }
+
+    // Create workbook and worksheet
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sales');
+
+    // Generate buffer
+    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    // Set response headers with timestamped filename
+    const timestamp = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+    res.setHeader('Content-Disposition', `attachment; filename="sales_${timestamp}.xlsx"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+    // Send the file
+    res.send(excelBuffer);
+  } catch (error) {
+    console.error('❌ Excel download error:', error);
+    res.status(500).json({ success: false, message: 'Failed to generate Excel file', error: error.message });
+  }
+});
+
+router.get("/all", async (req, res) => {
+  try {
+    const { search = "", tab = "All", saleType = "all" } = req.query;
+    const matchConditions = {};
+
+    if (search && search.trim() !== "") {
+      const searchRegex = new RegExp(escapeRegexForSearch(search.trim()), "i");
+      matchConditions.$or = [
+        { invoiceNumber: searchRegex },
+        { customerName: searchRegex },
+        { "products.productName": searchRegex },
+      ];
+    }
+
+    if (tab && tab !== "All") {
+      matchConditions.paymentStatus = new RegExp(`^${escapeRegexForSearch(tab)}$`, "i");
+    }
+
+    // Add saleType filter
+    if (saleType && saleType !== "all") {
+      if (saleType === "normal") {
+        matchConditions.saleType = "Normal Sale";
+      } else if (saleType === "mr") {
+        matchConditions.saleType = "MR Sale";
+      }
+    }
+
+    const summaries = await SaleSummary.find(matchConditions)
+      .sort({ recordingDate: -1 })
+      .select({ /* fields */ });
+
+    res.status(200).json({ summaries, count: summaries.length });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch sale summaries." });
+  }
+});
+
+
 
 export default router;
