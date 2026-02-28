@@ -8,8 +8,8 @@ const itemSchema = new mongoose.Schema({
   },
   productName: String,
   boxQuantity: { type: Number, required: true, default: 0 },
-  lc: { type: Number, required: true, default: 0 }, // Landed cost per box
-  productCost: { type: Number, default: 0 }, // Math.ceil(lc * boxQuantity)
+  lc: { type: Number, required: true, default: 0 },
+  productCost: { type: Number, default: 0 },
 });
 
 const stockTransferToMRSchema = new mongoose.Schema(
@@ -21,39 +21,34 @@ const stockTransferToMRSchema = new mongoose.Schema(
     stockTransferToMr: { type: String, default: "" },
     stockTransferFromMrToMain: { type: String, default: "" },
 
-    items: [itemSchema],
-    
-    remarks: { type: String, default: "" }, // Added remarks field
+    // ✅ FIX: mrId was missing — required by route for MR stock recompute
+    mrId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Staff",
+      default: null,
+    },
 
-    // Total cost fields
-    totalTransferCost: { type: Number, default: 0 }, // Sum of all productCost
+    items: [itemSchema],
+    remarks: { type: String, default: "" },
+    totalTransferCost: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 
-// Pre-save middleware to calculate costs
+// ── Pre-save: calculate costs ─────────────────────────────────────────────────
 stockTransferToMRSchema.pre("save", async function (next) {
   try {
     let totalCost = 0;
-
-    // Calculate cost for each item
     for (const item of this.items) {
-      // If lc is not provided, fetch it from Product
       if (!item.lc && item.productId) {
         const Product = mongoose.model("Product");
         const product = await Product.findById(item.productId);
-        if (product) {
-          item.lc = product.lc || product.costPrice || 0;
-        }
+        if (product) item.lc = product.lc || product.costPrice || 0;
       }
-
-      // Calculate product cost with Math.ceil
       const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
       item.productCost = Math.ceil(rawCost);
       totalCost += item.productCost;
     }
-
-    // Also apply Math.ceil to totalTransferCost for consistency
     this.totalTransferCost = Math.ceil(totalCost);
     next();
   } catch (error) {
@@ -61,57 +56,33 @@ stockTransferToMRSchema.pre("save", async function (next) {
   }
 });
 
-// Pre-update middleware for findOneAndUpdate operations
+// ── Pre-update: calculate costs ───────────────────────────────────────────────
 stockTransferToMRSchema.pre("findOneAndUpdate", async function (next) {
   try {
     const update = this.getUpdate();
 
-    if (update.$set && update.$set.items) {
+    const processItems = async (items) => {
       let totalCost = 0;
-
-      for (const item of update.$set.items) {
-        // If lc is not provided, fetch it from Product
+      for (const item of items) {
         if (!item.lc && item.productId) {
           const Product = mongoose.model("Product");
           const product = await Product.findById(item.productId);
-          if (product) {
-            item.lc = product.lc || product.costPrice || 0;
-          }
+          if (product) item.lc = product.lc || product.costPrice || 0;
         }
-
-        // Calculate product cost with Math.ceil
         const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
         item.productCost = Math.ceil(rawCost);
         totalCost += item.productCost;
       }
+      return Math.ceil(totalCost);
+    };
 
-      // Apply Math.ceil to totalTransferCost
-      update.$set.totalTransferCost = Math.ceil(totalCost);
+    if (update.$set?.items) {
+      update.$set.totalTransferCost = await processItems(update.$set.items);
     }
-    
-    // Also handle direct updates to items array
     if (update.items) {
-      let totalCost = 0;
-
-      for (const item of update.items) {
-        // If lc is not provided, fetch it from Product
-        if (!item.lc && item.productId) {
-          const Product = mongoose.model("Product");
-          const product = await Product.findById(item.productId);
-          if (product) {
-            item.lc = product.lc || product.costPrice || 0;
-          }
-        }
-
-        // Calculate product cost with Math.ceil
-        const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
-        item.productCost = Math.ceil(rawCost);
-        totalCost += item.productCost;
-      }
-
-      update.totalTransferCost = Math.ceil(totalCost);
+      update.totalTransferCost = await processItems(update.items);
     }
-    
+
     next();
   } catch (error) {
     next(error);

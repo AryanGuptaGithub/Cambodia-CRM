@@ -37,8 +37,8 @@ const INITIAL_PRODUCT_STATE = {
   fob: "",
   cif: "",
   profitLoss: "",
-  selectedMrId: "",        // only used when saleType === 'mr'
-  selectedMrName: "",      // only used when saleType === 'mr'
+  selectedMrId: "",
+  selectedMrName: "",
 };
 
 const INITIAL_FORM_STATE = {
@@ -46,8 +46,8 @@ const INITIAL_FORM_STATE = {
   recordingDate: "",
   invoiceNumber: "",
   invoiceDate: "",
-  mrName: "",              // only used for Normal Sale
-  mrId: "",                // only used for Normal Sale
+  mrName: "",
+  mrId: "",
   customerCode: "",
   customerId: "",
   customerName: "",
@@ -73,6 +73,12 @@ const INITIAL_FORM_STATE = {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+
+function capitalizeFirstLetter(str) {
+  if (!str) return "";
+  str = str.toString();
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
 // ------------------------------------------------
 // STOCK CALCULATION HELPERS (global & MR)
 // ------------------------------------------------
@@ -111,22 +117,24 @@ const getNearestExpiryDate = (productData) => {
 
 const hasStock = (productData) => calculateAvailableStock(productData) > 0;
 
-// --- MR‑specific stock helpers ---
+// --- MR-specific stock helpers ---
 const calculateMRStock = (mrStockData) => {
   if (!mrStockData) return 0;
-  return mrStockData.totalBoxes || 0;
+  return mrStockData.totalBoxes || mrStockData.quantity || 0;
 };
 
 const getMRNearestExpiry = (mrStockData) => {
   if (!mrStockData?.batches) return null;
-  const valid = mrStockData.batches.filter(b => b.boxes > 0 && b.expiryDate);
+  const valid = mrStockData.batches.filter((b) => b.boxes > 0 && b.expiryDate);
   if (!valid.length) return null;
-  const sorted = [...valid].sort((a,b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+  const sorted = [...valid].sort(
+    (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
+  );
   return sorted[0].expiryDate;
 };
 
 // ------------------------------------------------
-// CUSTOM HOOK – SUGGESTIONS (unchanged)
+// CUSTOM HOOK – SUGGESTIONS
 // ------------------------------------------------
 const useSuggestions = (items, filterField = "type", inputValue = "") => {
   const [isOpen, setIsOpen] = useState(false);
@@ -140,9 +148,7 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
         .filter((item) => {
           const fieldValue =
             typeof item === "string" ? item : item[filterField];
-          if (inputValue.trim() === "") {
-            return true;
-          }
+          if (inputValue.trim() === "") return true;
           return fieldValue.toLowerCase().includes(inputValue.toLowerCase());
         })
         .sort((a, b) => {
@@ -222,14 +228,14 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
 };
 
 // ------------------------------------------------
-// CUSTOM HOOK – PRODUCT SUGGESTIONS (unchanged)
+// CUSTOM HOOK – PRODUCT SUGGESTIONS
 // ------------------------------------------------
 const useProductSuggestions = (products, productNames) => {
   const [suggestionsList, setSuggestionsList] = useState([]);
   const inputRefs = useRef([]);
 
   useEffect(() => {
-    const initialSuggestions = products.map((product) => ({
+    const initialSuggestions = products.map(() => ({
       isOpen: false,
       highlightedIndex: -1,
       dropdownTop: 0,
@@ -249,12 +255,8 @@ const useProductSuggestions = (products, productNames) => {
         .filter((item) => {
           const fieldValue = typeof item === "string" ? item : item.name;
           const itemName = typeof item === "string" ? item : item.name;
-          if (selectedProductNames.includes(itemName)) {
-            return false;
-          }
-          if (product.productName.trim() === "") {
-            return true;
-          }
+          if (selectedProductNames.includes(itemName)) return false;
+          if (product.productName.trim() === "") return true;
           return fieldValue
             .toLowerCase()
             .includes(product.productName.toLowerCase());
@@ -368,7 +370,7 @@ const useProductSuggestions = (products, productNames) => {
 };
 
 // ------------------------------------------------
-// CUSTOM HOOK – SALE FORM (modified addProduct to accept saleType)
+// CUSTOM HOOK – SALE FORM
 // ------------------------------------------------
 const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
   const [form, setForm] = useState({
@@ -503,15 +505,13 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
   const handleChange = useCallback(
     (e) => {
       const { name, value } = e.target;
-      setForm((prev) => {
-        return calculateDerivedFields(name, value, prev);
-      });
+      setForm((prev) => calculateDerivedFields(name, value, prev));
     },
     [calculateDerivedFields]
   );
 
   // ------------------------------------------------
-  // DATA FETCHING (unchanged)
+  // DATA FETCHING
   // ------------------------------------------------
   const fetchMRListData = useCallback(async () => {
     try {
@@ -571,7 +571,6 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  // --- NORMAL SALE: header MR handling ---
   const handleMRChange = useCallback(
     (mrId) => {
       const selectedMR = mrList.find((mr) => mr._id === mrId);
@@ -642,51 +641,57 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     return products.some((product) => product.productName.trim() !== "");
   }, []);
 
-  // --- MODIFIED: addProduct now accepts saleType to copy MR for MR sale ---
-  const addProduct = useCallback((saleType) => {
-    setForm((prev) => {
-      let newProduct = {
-        ...INITIAL_PRODUCT_STATE,
-        totalQty: "0",
-        amount: "0.00",
-        netSellingAmount: "0.00",
-        averageUnitPrice: "0.00",
-        profitLoss: "0.00",
-        selectedMrId: "",
-        selectedMrName: "",
-      };
+  const addProduct = useCallback(
+    (saleType) => {
+      setForm((prev) => {
+        let newProduct = {
+          ...INITIAL_PRODUCT_STATE,
+          totalQty: "0",
+          amount: "0.00",
+          netSellingAmount: "0.00",
+          averageUnitPrice: "0.00",
+          profitLoss: "0.00",
+          selectedMrId: "",
+          selectedMrName: "",
+        };
 
-      // For MR sale, copy MR from the last product if any
-      if (saleType === 'mr' && prev.products.length > 0) {
-        const lastProduct = prev.products[prev.products.length - 1];
-        newProduct.selectedMrId = lastProduct.selectedMrId;
-        newProduct.selectedMrName = lastProduct.selectedMrName;
-      }
+        if (saleType === "mr" && prev.products.length > 0) {
+          const lastProduct = prev.products[prev.products.length - 1];
+          newProduct.selectedMrId = lastProduct.selectedMrId;
+          newProduct.selectedMrName = lastProduct.selectedMrName;
+        }
 
-      const newProducts = [...prev.products, newProduct];
-      const totalAmount = calculateTotalAmount(newProducts);
-      const totalNetAmount = calculateTotalNetAmount(newProducts);
-      const dueAmount = (
-        parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
-      ).toFixed(2);
-      const paymentStatus = autoSetPaymentStatus({
-        ...prev,
-        totalAmount,
-        dueAmount,
-        products: newProducts,
+        const newProducts = [...prev.products, newProduct];
+        const totalAmount = calculateTotalAmount(newProducts);
+        const totalNetAmount = calculateTotalNetAmount(newProducts);
+        const dueAmount = (
+          parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+        ).toFixed(2);
+        const paymentStatus = autoSetPaymentStatus({
+          ...prev,
+          totalAmount,
+          dueAmount,
+          products: newProducts,
+        });
+        return {
+          ...prev,
+          products: newProducts,
+          totalAmount,
+          dueAmount,
+          paymentStatus,
+        };
       });
-      return {
-        ...prev,
-        products: newProducts,
-        totalAmount,
-        dueAmount,
-        paymentStatus,
-      };
-    });
-    setExpandedProductIndex(form.products.length);
-    setMrProductStock(prev => [...prev, null]);
-    setMrAvailableProducts(prev => [...prev, []]);
-  }, [form.products.length, calculateTotalAmount, calculateTotalNetAmount, autoSetPaymentStatus]);
+      setExpandedProductIndex(form.products.length);
+      setMrProductStock((prev) => [...prev, null]);
+      setMrAvailableProducts((prev) => [...prev, []]);
+    },
+    [
+      form.products.length,
+      calculateTotalAmount,
+      calculateTotalNetAmount,
+      autoSetPaymentStatus,
+    ]
+  );
 
   const removeProduct = useCallback(
     (index) => {
@@ -712,8 +717,8 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
             paymentStatus,
           };
         });
-        setMrProductStock(prev => prev.filter((_, i) => i !== index));
-        setMrAvailableProducts(prev => prev.filter((_, i) => i !== index));
+        setMrProductStock((prev) => prev.filter((_, i) => i !== index));
+        setMrAvailableProducts((prev) => prev.filter((_, i) => i !== index));
         setExpandedProductIndex((prevIndex) => {
           if (prevIndex === index) return 0;
           if (prevIndex > index) return prevIndex - 1;
@@ -721,7 +726,12 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
         });
       }
     },
-    [form.products, calculateTotalAmount, calculateTotalNetAmount, autoSetPaymentStatus]
+    [
+      form.products,
+      calculateTotalAmount,
+      calculateTotalNetAmount,
+      autoSetPaymentStatus,
+    ]
   );
 
   const calculateProductFields = useCallback((product) => {
@@ -738,7 +748,10 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       totalQty > 0
         ? (parseFloat(netSellingAmount) / totalQty).toFixed(2)
         : "0.00";
-    const profitLoss = (parseFloat(netSellingAmount) - lc * totalQty).toFixed(2);
+    const profitLoss = (
+      parseFloat(netSellingAmount) -
+      lc * totalQty
+    ).toFixed(2);
 
     return {
       ...product,
@@ -778,25 +791,33 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
         };
       });
     },
-    [calculateTotalAmount, calculateTotalNetAmount, calculateProductFields, autoSetPaymentStatus]
+    [
+      calculateTotalAmount,
+      calculateTotalNetAmount,
+      calculateProductFields,
+      autoSetPaymentStatus,
+    ]
   );
 
   // --- STOCK VALIDATION (Normal Sale) ---
-  const validateTotalQuantity = useCallback((product, index, productsData) => {
-    if (!product.productName) return null;
-    const productData = productsData.find(
-      (p) => p.productName === product.productName
-    );
-    if (!productData) return null;
-    const availableStock = calculateAvailableStock(productData);
-    const salesQty = parseInt(product.salesQty) || 0;
-    const bonusQty = parseInt(product.bonusQty) || 0;
-    const totalQty = salesQty + bonusQty;
-    if (totalQty > availableStock) {
-      return `Total quantity (Sales + Bonus = ${totalQty}) cannot exceed available stock (${availableStock} boxes)`;
-    }
-    return null;
-  }, []);
+  const validateTotalQuantity = useCallback(
+    (product, index, productsData) => {
+      if (!product.productName) return null;
+      const productData = productsData.find(
+        (p) => p.productName === product.productName
+      );
+      if (!productData) return null;
+      const availableStock = calculateAvailableStock(productData);
+      const salesQty = parseInt(product.salesQty) || 0;
+      const bonusQty = parseInt(product.bonusQty) || 0;
+      const totalQty = salesQty + bonusQty;
+      if (totalQty > availableStock) {
+        return `Total quantity (Sales + Bonus = ${totalQty}) cannot exceed available stock (${availableStock} boxes)`;
+      }
+      return null;
+    },
+    []
+  );
 
   const hasStockIssue = useCallback((product, productsData) => {
     if (!product.productName) return false;
@@ -824,20 +845,23 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     return availableStock - totalQty;
   }, []);
 
-  // --- MR SALE: Stock validation using MR-specific stock ---
-  const validateMRTotalQuantity = useCallback((product, index, mrStock) => {
-    if (!product.productName || !product.selectedMrId) return null;
-    const stockData = mrStock[index];
-    if (!stockData) return "Stock information not loaded";
-    const availableStock = calculateMRStock(stockData);
-    const salesQty = parseInt(product.salesQty) || 0;
-    const bonusQty = parseInt(product.bonusQty) || 0;
-    const totalQty = salesQty + bonusQty;
-    if (totalQty > availableStock) {
-      return `Total quantity (Sales + Bonus = ${totalQty}) exceeds MR's available stock (${availableStock} boxes)`;
-    }
-    return null;
-  }, []);
+  // --- MR SALE: Stock validation ---
+  const validateMRTotalQuantity = useCallback(
+    (product, index, mrStock) => {
+      if (!product.productName || !product.selectedMrId) return null;
+      const stockData = mrStock[index];
+      if (!stockData) return "Stock information not loaded";
+      const availableStock = calculateMRStock(stockData);
+      const salesQty = parseInt(product.salesQty) || 0;
+      const bonusQty = parseInt(product.bonusQty) || 0;
+      const totalQty = salesQty + bonusQty;
+      if (totalQty > availableStock) {
+        return `Total quantity (Sales + Bonus = ${totalQty}) exceeds MR's available stock (${availableStock} boxes)`;
+      }
+      return null;
+    },
+    []
+  );
 
   const validateProductField = useCallback(
     (index, field, value, productsData, saleType, mrStock) => {
@@ -846,21 +870,27 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       delete newErrors[`${field}_${index}`];
 
       if (field === "productName" && !value.trim()) {
-        newErrors[`productName_${index}`] = `Product Name for item ${index + 1} is required`;
+        newErrors[`productName_${index}`] = `Product Name for item ${
+          index + 1
+        } is required`;
       }
 
       if (field === "salesQty") {
         const salesQtyStr = value?.toString().trim();
         if (!salesQtyStr || salesQtyStr === "") {
-          newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} is required`;
+          newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+            index + 1
+          } is required`;
         } else {
           const qty = Number(salesQtyStr);
           if (isNaN(qty) || qty <= 0) {
-            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} must be greater than 0`;
+            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+              index + 1
+            } must be greater than 0`;
           } else {
             if (form.products[index].productName) {
               let stockError = null;
-              if (saleType === 'mr') {
+              if (saleType === "mr") {
                 stockError = validateMRTotalQuantity(
                   { ...form.products[index], salesQty: value },
                   index,
@@ -884,17 +914,23 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       if (field === "sellingPrice") {
         const sellingPriceStr = value?.toString().trim();
         if (!sellingPriceStr || sellingPriceStr === "") {
-          newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} is required`;
+          newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+            index + 1
+          } is required`;
         } else {
           const price = Number(sellingPriceStr);
           if (isNaN(price) || price <= 0) {
-            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} must be greater than 0`;
+            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+              index + 1
+            } must be greater than 0`;
           }
         }
       }
 
-      if (saleType === 'mr' && field === 'selectedMrId' && !value) {
-        newErrors[`selectedMrId_${index}`] = `Medical Representative for item ${index + 1} is required`;
+      if (saleType === "mr" && field === "selectedMrId" && !value) {
+        newErrors[`selectedMrId_${index}`] = `Medical Representative for item ${
+          index + 1
+        } is required`;
       }
 
       setErrors(newErrors);
@@ -906,64 +942,70 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     (productsData = [], saleType, mrStock = []) => {
       const newErrors = {};
 
-      if (!form.recordingDate?.trim()) {
+      if (!form.recordingDate?.trim())
         newErrors.recordingDate = "Recording Date is required";
-      }
-      if (!form.invoiceNumber?.trim()) {
+      if (!form.invoiceNumber?.trim())
         newErrors.invoiceNumber = "Invoice Number is required";
-      }
-      if (!form.invoiceDate?.trim()) {
+      if (!form.invoiceDate?.trim())
         newErrors.invoiceDate = "Invoice Date is required";
-      }
-      if (saleType !== 'mr' && !form.mrName?.trim()) {
+      if (saleType !== "mr" && !form.mrName?.trim())
         newErrors.mrName = "Medical Representative is required";
-      }
-      if (!form.customerCode?.trim()) {
+      if (!form.customerCode?.trim())
         newErrors.customerCode = "Customer is required";
-      }
-      if (!form.paymentStatus?.trim()) {
+      if (!form.paymentStatus?.trim())
         newErrors.paymentStatus = "Payment Status is required";
-      }
 
       form.products.forEach((product, index) => {
         if (product.productName.trim()) {
           if (!product.productName.trim()) {
-            newErrors[`productName_${index}`] = `Product Name for item ${index + 1} is required`;
+            newErrors[`productName_${index}`] = `Product Name for item ${
+              index + 1
+            } is required`;
           }
-          if (saleType === 'mr' && !product.selectedMrId) {
-            newErrors[`selectedMrId_${index}`] = `Medical Representative for item ${index + 1} is required`;
+          if (saleType === "mr" && !product.selectedMrId) {
+            newErrors[`selectedMrId_${index}`] = `Medical Representative for item ${
+              index + 1
+            } is required`;
           }
 
           const salesQtyStr = product.salesQty?.toString().trim();
           if (!salesQtyStr || salesQtyStr === "") {
-            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} is required`;
+            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+              index + 1
+            } is required`;
           } else {
             const qty = Number(salesQtyStr);
             if (isNaN(qty) || qty <= 0) {
-              newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} must be greater than 0`;
+              newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+                index + 1
+              } must be greater than 0`;
             }
           }
 
           const sellingPriceStr = product.sellingPrice?.toString().trim();
           if (!sellingPriceStr || sellingPriceStr === "") {
-            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} is required`;
+            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+              index + 1
+            } is required`;
           } else {
             const price = Number(sellingPriceStr);
             if (isNaN(price) || price <= 0) {
-              newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} must be greater than 0`;
+              newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+                index + 1
+              } must be greater than 0`;
             }
           }
 
-          if (saleType === 'mr') {
+          if (saleType === "mr") {
             const stockError = validateMRTotalQuantity(product, index, mrStock);
-            if (stockError) {
-              newErrors[`salesQty_${index}`] = stockError;
-            }
+            if (stockError) newErrors[`salesQty_${index}`] = stockError;
           } else {
-            const stockError = validateTotalQuantity(product, index, productsData);
-            if (stockError) {
-              newErrors[`salesQty_${index}`] = stockError;
-            }
+            const stockError = validateTotalQuantity(
+              product,
+              index,
+              productsData
+            );
+            if (stockError) newErrors[`salesQty_${index}`] = stockError;
           }
         }
       });
@@ -971,9 +1013,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       const hasProducts = form.products.some(
         (product) => product.productName.trim() !== ""
       );
-      if (!hasProducts) {
-        newErrors.products = "At least one product is required";
-      }
+      if (!hasProducts) newErrors.products = "At least one product is required";
 
       setErrors(newErrors);
       return Object.keys(newErrors).length === 0;
@@ -981,7 +1021,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     [form, validateTotalQuantity, validateMRTotalQuantity]
   );
 
-  // --- Process products list for Normal Sale (global stock) ---
+  // --- Process products list for Normal Sale ---
   const [products, setProducts] = useState([]);
   const [productNames, setProductNames] = useState([]);
 
@@ -996,9 +1036,8 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
               const bExpiry = getNearestExpiryDate(b);
               const aDate = aExpiry ? new Date(aExpiry) : null;
               const bDate = bExpiry ? new Date(bExpiry) : null;
-              if (aDate && !isNaN(aDate) && bDate && !isNaN(bDate)) {
+              if (aDate && !isNaN(aDate) && bDate && !isNaN(bDate))
                 return aDate.getTime() - bDate.getTime();
-              }
               if (aDate && !isNaN(aDate) && (!bDate || isNaN(bDate))) return -1;
               if (bDate && !isNaN(bDate) && (!aDate || isNaN(aDate))) return 1;
               return 0;
@@ -1059,7 +1098,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
 };
 
 // ------------------------------------------------
-// UI COMPONENTS (unchanged)
+// UI COMPONENTS
 // ------------------------------------------------
 const DatePickerField = React.memo(
   ({
@@ -1224,7 +1263,7 @@ const AddSale = () => {
   const { customerCode } = location.state || {};
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-  const [saleType, setSaleType] = useState('normal');
+  const [saleType, setSaleType] = useState("normal");
 
   const {
     form,
@@ -1264,18 +1303,21 @@ const AddSale = () => {
 
   const { statuses, loading: initialLoading } = useInitialSaleData();
 
-  // ----- MR Stock List (MRs with stock) – now refetched when saleType === 'mr' -----
+  // ----- MR Stock List -----
   const [mrStockList, setMrStockList] = useState([]);
   const [mrStockListLoading, setMrStockListLoading] = useState(false);
 
   useEffect(() => {
-    if (saleType === 'mr') {
+    if (saleType === "mr") {
+      console.log('valuesof mr');
       const fetchMRStockList = async () => {
         setMrStockListLoading(true);
         try {
-          const response = await axios.get(`${backendUrl}/api/sales/mr-stock/mrs-with-stock`);
-          console.log('values of response', response);
-          if (response.data.success) {
+          const response = await axios.get(
+            `${backendUrl}/api/sales/mr-stock/mrs-with-stock`
+          );
+          console.log('values of responst 1318', response);
+          if (response.status === 200) {
             setMrStockList(response.data.data || []);
           } else {
             showToast("error", "Failed to load MR stock list");
@@ -1291,51 +1333,70 @@ const AddSale = () => {
     }
   }, [saleType, backendUrl]);
 
-  // Build dropdown options with loading/empty states
+  // Build MR dropdown options
   const mrStockOptions = useMemo(() => {
     if (mrStockListLoading) {
       return [{ value: "", label: "Loading MRs...", disabled: true }];
     }
     if (mrStockList.length === 0) {
-      return [{ value: "", label: "No MRs with stock available", disabled: true }];
+      return [
+        { value: "", label: "No MRs with stock available", disabled: true },
+      ];
     }
     return [
       { value: "", label: "Select Medical Representative" },
       ...mrStockList.map((mr) => ({
         value: mr._id,
-        label: `${mr.mrName} (${mr.totalProducts || 0} products, ${mr.totalQuantity || 0} boxes)`,
+        label: `${mr.mrName} (${mr.totalProducts || 0} products, ${
+          mr.totalQuantity || 0
+        } boxes)`,
       })),
     ];
   }, [mrStockList, mrStockListLoading]);
 
-  // --- Fetch available products for a given MR and row index ---
-  const fetchMRAvailableProducts = useCallback(async (mrId, index) => {
-    if (!mrId) return;
-    try {
-      const response = await axios.get(`${backendUrl}/api/sales/mr-stock/products/${mrId}`);
-      if (response.data.success) {
-        setMrAvailableProducts(prev => {
-          const newList = [...prev];
-          newList[index] = response.data.products;
-          return newList;
-        });
+  // --- Fetch available products for a given MR row ---
+  const fetchMRAvailableProducts = useCallback(
+    async (mrId, index) => {
+      if (!mrId) return;
+      try {
+        const response = await axios.get(
+          `${backendUrl}/api/sales/mr-stock/products/${mrId}`
+        );
+        if (response.data.success) {
+          const mrProducts = response.data.products || [];
+          setMrAvailableProducts((prev) => {
+            const newList = [...prev];
+            newList[index] = mrProducts;
+            return newList;
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch MR product list:", error);
+        showToast("error", "Could not load product list for this MR");
       }
-    } catch (error) {
-      console.error("Failed to fetch MR product list:", error);
-      showToast("error", "Could not load product list for this MR");
-    }
-  }, [backendUrl, setMrAvailableProducts]);
+    },
+    [backendUrl, setMrAvailableProducts]
+  );
 
-  // --- Automatically fetch available products for a new row when MR is set ---
+  // Auto-fetch products when new MR row is added with existing MR selected
   useEffect(() => {
-    if (saleType === 'mr' && form.products.length > 0) {
+    if (saleType === "mr" && form.products.length > 0) {
       const lastIndex = form.products.length - 1;
       const product = form.products[lastIndex];
-      if (product.selectedMrId && !mrAvailableProducts[lastIndex]?.length) {
+      if (
+        product.selectedMrId &&
+        (!mrAvailableProducts[lastIndex] ||
+          mrAvailableProducts[lastIndex].length === 0)
+      ) {
         fetchMRAvailableProducts(product.selectedMrId, lastIndex);
       }
     }
-  }, [form.products.length, saleType, mrAvailableProducts, fetchMRAvailableProducts]);
+  }, [
+    form.products.length,
+    saleType,
+    mrAvailableProducts,
+    fetchMRAvailableProducts,
+  ]);
 
   const [showUploadMessage, setShowUploadMessage] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
@@ -1354,7 +1415,7 @@ const AddSale = () => {
     productsListLoading ||
     mrStockListLoading;
 
-  // --- Normal Sale: MR options for header ---
+  // --- Normal Sale MR options ---
   const mrOptions = useMemo(() => {
     if (mrList.length === 0 && !mrListLoading) {
       return [
@@ -1377,13 +1438,7 @@ const AddSale = () => {
   // --- Customer dropdown ---
   const customerOptions = useMemo(() => {
     if (customerList.length === 0 && !customerListLoading) {
-      return [
-        {
-          value: "",
-          label: "No Customers Available",
-          disabled: true,
-        },
-      ];
+      return [{ value: "", label: "No Customers Available", disabled: true }];
     }
     return [
       { value: "", label: "Select Customer" },
@@ -1401,67 +1456,84 @@ const AddSale = () => {
     form.paymentStatus
   );
 
-  // --- Product suggestions ---
+  // --- Product suggestions (for Normal Sale) ---
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
-  // --- MR‑specific stock fetch ---
-  const fetchMRProductStock = useCallback(async (mrId, productName, index) => {
-    if (!mrId || !productName) return null;
-    try {
-      const response = await axios.get(`${backendUrl}/api/sales/mr-stock/${mrId}/${encodeURIComponent(productName)}`);
-      if (response.data.success) {
-        const stockData = response.data.stock;
-        setMrProductStock(prev => {
-          const newStock = [...prev];
-          newStock[index] = stockData;
-          return newStock;
-        });
-        return stockData;
+  // --- MR-specific stock fetch ---
+  // ✅ FIX: Only called when product name exactly matches a known MR product
+  const fetchMRProductStock = useCallback(
+    async (mrId, productName, index) => {
+      if (!mrId || !productName) return null;
+      try {
+        const response = await axios.get(
+          `${backendUrl}/api/sales/mr-stock/${mrId}/${encodeURIComponent(
+            productName
+          )}`
+        );
+        if (response.data.success) {
+          const stockData = response.data.stock;
+          setMrProductStock((prev) => {
+            const newStock = [...prev];
+            newStock[index] = stockData;
+            return newStock;
+          });
+          return stockData;
+        }
+      } catch (error) {
+        console.error("Failed to fetch MR product stock:", error);
+        showToast("error", `Could not load stock for ${productName}`);
       }
-    } catch (error) {
-      console.error("Failed to fetch MR product stock:", error);
-      showToast("error", `Could not load stock for ${productName}`);
-    }
-    return null;
-  }, [backendUrl, setMrProductStock]);
+      return null;
+    },
+    [backendUrl, setMrProductStock]
+  );
 
   // --- Normal Sale expiry info ---
-  const getProductExpiryInfo = (productName) => {
-    const productData = products.find((p) => p.productName === productName);
-    if (!productData?.batches) return null;
-    const validBatches = productData.batches
-      .filter((batch) => batch.boxes > 0 && batch.expiryDate)
-      .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
-    if (validBatches.length === 0) return null;
-    const nearestBatch = validBatches[0];
-    const today = new Date();
-    const expiryDate = new Date(nearestBatch.expiryDate);
-    const daysUntilExpiry = Math.ceil(
-      (expiryDate - today) / (1000 * 60 * 60 * 24)
-    );
-    return {
-      nearestExpiry: nearestBatch.expiryDate,
-      daysUntilExpiry,
-      isNearExpiry: daysUntilExpiry <= 30,
-      batchCount: validBatches.length,
-    };
-  };
+  const getProductExpiryInfo = useCallback(
+    (productName) => {
+      const productData = products.find((p) => p.productName === productName);
+      if (!productData?.batches) return null;
+      const validBatches = productData.batches
+        .filter((batch) => batch.boxes > 0 && batch.expiryDate)
+        .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+      if (validBatches.length === 0) return null;
+      const nearestBatch = validBatches[0];
+      const today = new Date();
+      const expiryDate = new Date(nearestBatch.expiryDate);
+      const daysUntilExpiry = Math.ceil(
+        (expiryDate - today) / (1000 * 60 * 60 * 24)
+      );
+      return {
+        nearestExpiry: nearestBatch.expiryDate,
+        daysUntilExpiry,
+        isNearExpiry: daysUntilExpiry <= 30,
+        batchCount: validBatches.length,
+      };
+    },
+    [products]
+  );
 
   // --- MR Sale expiry info ---
-  const getMRProductExpiryInfo = (mrStockData) => {
+  const getMRProductExpiryInfo = useCallback((mrStockData) => {
     if (!mrStockData?.batches) return null;
-    const valid = mrStockData.batches.filter(b => b.boxes > 0 && b.expiryDate);
+    const valid = mrStockData.batches.filter(
+      (b) => b.boxes > 0 && b.expiryDate
+    );
     if (!valid.length) return null;
-    const sorted = [...valid].sort((a,b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+    const sorted = [...valid].sort(
+      (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
+    );
     const nearest = sorted[0];
-    const days = Math.ceil((new Date(nearest.expiryDate) - new Date()) / (1000*60*60*24));
+    const days = Math.ceil(
+      (new Date(nearest.expiryDate) - new Date()) / (1000 * 60 * 60 * 24)
+    );
     return {
       nearestExpiry: nearest.expiryDate,
       daysUntilExpiry: days,
       isNearExpiry: days <= 30,
       batchCount: valid.length,
     };
-  };
+  }, []);
 
   // --- Check required master data ---
   const checkRequiredData = useCallback(() => {
@@ -1481,8 +1553,14 @@ const AddSale = () => {
       setIsFormDisabled(true);
       return false;
     }
-    if (saleType !== 'mr' && productNames.length === 0 && productsList.length > 0) {
-      setUploadMessage("All products are currently out of stock. Please add stock to products first.");
+    if (
+      saleType !== "mr" &&
+      productNames.length === 0 &&
+      productsList.length > 0
+    ) {
+      setUploadMessage(
+        "All products are currently out of stock. Please add stock to products first."
+      );
       setShowUploadMessage(true);
       setIsFormDisabled(true);
       return false;
@@ -1490,35 +1568,68 @@ const AddSale = () => {
     setShowUploadMessage(false);
     setIsFormDisabled(false);
     return true;
-  }, [productsList.length, productsListLoading, productNames.length, mrList.length, mrListLoading, customerList.length, customerListLoading, saleType]);
+  }, [
+    productsList.length,
+    productsListLoading,
+    productNames.length,
+    mrList.length,
+    mrListLoading,
+    customerList.length,
+    customerListLoading,
+    saleType,
+  ]);
 
   useEffect(() => {
     checkRequiredData();
   }, [checkRequiredData]);
 
-  // --- Get product details ---
-  const getProductDetails = (productName) => {
-    const product = products.find((p) => p.productName === productName);
-    if (!product) {
-      return { lc: "", fob: "", cif: "", sellingPrice: "" };
-    }
-    let lc = product.lc || 0;
-    let fob = product.fob || 0;
-    let cif = product.cif || 0;
-    let sellingPrice = product.sellingPrice || "";
-    if (product.batches && product.batches.length > 0) {
-      const firstBatch = product.batches[0];
-      lc = firstBatch.lc || lc;
-      fob = firstBatch.fob || fob;
-      cif = firstBatch.cif || cif;
-    }
-    return {
-      lc: lc.toString(),
-      fob: fob.toString(),
-      cif: cif.toString(),
-      sellingPrice: sellingPrice.toString(),
-    };
-  };
+  // --- getProductDetails checks MR products for lc/fob/sellingPrice ---
+  const getProductDetails = useCallback(
+    (productName, index) => {
+      if (saleType === "mr") {
+        const available = mrAvailableProducts[index];
+        if (available && available.length > 0) {
+          const found = available.find(
+            (p) =>
+              (p.productName || p.name || "").toLowerCase() ===
+              productName.toLowerCase()
+          );
+          if (found) {
+            return {
+              lc: (found.lc || 0).toString(),
+              fob: (found.fob || 0).toString(),
+              cif: "",
+              sellingPrice: (found.sellingPrice || "").toString(),
+            };
+          }
+        }
+        return { lc: "", fob: "", cif: "", sellingPrice: "" };
+      }
+
+      // Normal sale
+      const product = products.find((p) => p.productName === productName);
+      if (!product) {
+        return { lc: "", fob: "", cif: "", sellingPrice: "" };
+      }
+      let lc = product.lc || 0;
+      let fob = product.fob || 0;
+      let cif = product.cif || 0;
+      let sellingPrice = product.sellingPrice || "";
+      if (product.batches && product.batches.length > 0) {
+        const firstBatch = product.batches[0];
+        lc = firstBatch.lc || lc;
+        fob = firstBatch.fob || fob;
+        cif = firstBatch.cif || cif;
+      }
+      return {
+        lc: lc.toString(),
+        fob: fob.toString(),
+        cif: cif.toString(),
+        sellingPrice: sellingPrice.toString(),
+      };
+    },
+    [saleType, mrAvailableProducts, products]
+  );
 
   // --- Enhanced change handler for form fields ---
   const enhancedHandleChange = useCallback(
@@ -1553,22 +1664,33 @@ const AddSale = () => {
         }, 100);
       }
     },
-    [handleChange, paymentStatusSuggestions, updateFormField, form.totalAmount, form.paymentStatus, isFormDisabled]
+    [
+      handleChange,
+      paymentStatusSuggestions,
+      updateFormField,
+      form.totalAmount,
+      form.paymentStatus,
+      isFormDisabled,
+    ]
   );
 
-  // --- Filter product names per row ---
-  const getProductNamesForRow = useCallback((index) => {
-    if (saleType === 'mr') {
-      const available = mrAvailableProducts[index];
-      if (available && available.length > 0) {
-        return available;
+  // --- Returns MR-specific product names for dropdown ---
+  const getProductNamesForRow = useCallback(
+    (index) => {
+      if (saleType === "mr") {
+        const available = mrAvailableProducts[index];
+        if (available && available.length > 0) {
+          return available.map((p) => p.productName || p.name || "");
+        }
+        return [];
       }
-      return [];
-    }
-    return productNames;
-  }, [saleType, mrAvailableProducts, productNames]);
+      return productNames;
+    },
+    [saleType, mrAvailableProducts, productNames]
+  );
 
-  // --- Enhanced product change handler ---
+  // ✅ FIX: Enhanced product change handler
+  // fetchMRProductStock is ONLY called when value exactly matches a product in mrAvailableProducts
   const enhancedProductChange = useCallback(
     (index, field, value) => {
       if (isFormDisabled) return;
@@ -1576,49 +1698,88 @@ const AddSale = () => {
       updateProduct(index, field, value);
 
       if (field === "productName") {
-        const productDetails = getProductDetails(value);
+        // Get product details (lc, fob, cif, sellingPrice)
+        const productDetails = getProductDetails(value, index);
         updateProduct(index, "lc", productDetails.lc);
         updateProduct(index, "fob", productDetails.fob);
         updateProduct(index, "cif", productDetails.cif);
         if (productDetails.sellingPrice) {
           updateProduct(index, "sellingPrice", productDetails.sellingPrice);
         }
-        if (saleType === 'mr') {
+
+        if (saleType === "mr") {
           const mrId = form.products[index]?.selectedMrId;
-          if (mrId) {
+          const available = mrAvailableProducts[index] || [];
+
+          // ✅ FIX: Only fetch stock when value exactly matches a known product name
+          const isExactMatch = available.some(
+            (p) =>
+              (p.productName || p.name || "").toLowerCase() ===
+              value.toLowerCase()
+          );
+
+          if (mrId && isExactMatch) {
+            // Exact match — fetch stock for this product
             fetchMRProductStock(mrId, value, index);
+          } else {
+            // Still typing or no match — clear stock so badges don't show stale data
+            setMrProductStock((prev) => {
+              const newStock = [...prev];
+              newStock[index] = null;
+              return newStock;
+            });
           }
         }
+
         productSuggestions.setIsOpen(index, true);
         productSuggestions.setDropdownTop(index);
         productSuggestions.setHighlightedIndex(index, 0);
       }
 
-      if (saleType === 'mr' && field === 'selectedMrId') {
-        const selectedMr = mrStockList.find(mr => mr._id === value);
+      if (saleType === "mr" && field === "selectedMrId") {
+        const selectedMr = mrStockList.find((mr) => mr._id === value);
         if (selectedMr) {
-          updateProduct(index, 'selectedMrName', selectedMr.mrName);
+          updateProduct(index, "selectedMrName", selectedMr.mrName);
         }
+        // Fetch MR-specific products for this row
         fetchMRAvailableProducts(value, index);
+        // Clear product name and stock when MR changes
         if (form.products[index].productName) {
-          updateProduct(index, 'productName', '');
-          setMrProductStock(prev => {
+          updateProduct(index, "productName", "");
+          setMrProductStock((prev) => {
             const newStock = [...prev];
             newStock[index] = null;
             return newStock;
           });
         }
-        validateProductField(index, field, value, products, saleType, mrProductStock);
+        validateProductField(
+          index,
+          field,
+          value,
+          products,
+          saleType,
+          mrProductStock
+        );
       }
 
-      if (["salesQty", "bonusQty", "sellingPrice", "productName"].includes(field)) {
+      if (
+        ["salesQty", "bonusQty", "sellingPrice", "productName"].includes(field)
+      ) {
         setTimeout(() => {
-          validateProductField(index, field, value, products, saleType, mrProductStock);
+          validateProductField(
+            index,
+            field,
+            value,
+            products,
+            saleType,
+            mrProductStock
+          );
         }, 10);
       }
     },
     [
       updateProduct,
+      getProductDetails,
       productSuggestions,
       validateProductField,
       products,
@@ -1627,6 +1788,7 @@ const AddSale = () => {
       fetchMRProductStock,
       fetchMRAvailableProducts,
       mrProductStock,
+      mrAvailableProducts,
       isFormDisabled,
       form.products,
       setMrProductStock,
@@ -1698,15 +1860,15 @@ const AddSale = () => {
 
     if (!basicValidation) return false;
 
-    if (saleType === 'mr' && !currentProduct.selectedMrId) {
-      return false;
-    }
+    if (saleType === "mr" && !currentProduct.selectedMrId) return false;
 
-    if (saleType === 'mr') {
+    if (saleType === "mr") {
       const stockData = mrProductStock[form.products.length - 1];
       if (!stockData) return false;
       const available = calculateMRStock(stockData);
-      const total = (parseInt(currentProduct.salesQty)||0) + (parseInt(currentProduct.bonusQty)||0);
+      const total =
+        (parseInt(currentProduct.salesQty) || 0) +
+        (parseInt(currentProduct.bonusQty) || 0);
       if (total > available) return false;
     } else {
       const hasStockProblem = hasStockIssue(currentProduct, products);
@@ -1714,7 +1876,14 @@ const AddSale = () => {
     }
 
     return true;
-  }, [form.products, products, hasStockIssue, isFormDisabled, saleType, mrProductStock]);
+  }, [
+    form.products,
+    products,
+    hasStockIssue,
+    isFormDisabled,
+    saleType,
+    mrProductStock,
+  ]);
 
   const isAddSaleEnabled = useMemo(() => {
     return (
@@ -1772,18 +1941,23 @@ const AddSale = () => {
 
       const stockErrors = [];
       for (const product of validProducts) {
-        if (saleType === 'mr') {
-          const index = form.products.findIndex(p => p === product);
+        if (saleType === "mr") {
+          const index = form.products.findIndex((p) => p === product);
           const stockData = mrProductStock[index];
           if (!stockData) {
-            stockErrors.push(`"${product.productName}": Stock information not loaded`);
+            stockErrors.push(
+              `"${product.productName}": Stock information not loaded`
+            );
             continue;
           }
           const availableStock = calculateMRStock(stockData);
-          const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
+          const totalQty =
+            Number(product.salesQty) + Number(product.bonusQty || 0);
           if (totalQty > availableStock) {
             stockErrors.push(
-              `"${product.productName}" for MR ${product.selectedMrName || 'unknown'}: Required ${totalQty}, Available ${availableStock}`
+              `"${product.productName}" for MR ${
+                product.selectedMrName || "unknown"
+              }: Required ${totalQty}, Available ${availableStock}`
             );
           }
         } else {
@@ -1792,7 +1966,8 @@ const AddSale = () => {
           );
           if (productData) {
             const availableStock = calculateAvailableStock(productData);
-            const totalQty = Number(product.salesQty) + Number(product.bonusQty || 0);
+            const totalQty =
+              Number(product.salesQty) + Number(product.bonusQty || 0);
             if (totalQty > availableStock) {
               stockErrors.push(
                 `"${product.productName}": Required ${totalQty}, Available ${availableStock}`
@@ -1814,7 +1989,8 @@ const AddSale = () => {
       };
 
       const saleData = {
-        isMRSale: saleType === 'mr',
+        isMRSale: saleType === "mr",
+        saleType: saleType === "mr" ? "MR Sale" : "Normal Sale",
         recordingDate: safeFormatDate(form.recordingDate),
         invoiceNumber: form.invoiceNumber?.trim() || "",
         invoiceDate: safeFormatDate(form.invoiceDate),
@@ -1837,7 +2013,7 @@ const AddSale = () => {
           profitLoss: Number(product.profitLoss) || 0,
           isProductAccept: true,
           remark: product.remark || "",
-          ...(saleType === 'mr' && {
+          ...(saleType === "mr" && {
             mrId: product.selectedMrId,
             mrName: product.selectedMrName,
           }),
@@ -1852,7 +2028,7 @@ const AddSale = () => {
         remark: form.remark || "",
       };
 
-      if (saleType !== 'mr') {
+      if (saleType !== "mr") {
         saleData.mrName = form.mrName || "";
         saleData.mrId = form.mrId || null;
       } else {
@@ -1862,14 +2038,10 @@ const AddSale = () => {
         }
         const mrDistribution = {};
         validProducts.forEach((product) => {
-          const mrName = product.selectedMrName || 'Unknown';
+          const mrName = product.selectedMrName || "Unknown";
           const mrId = product.selectedMrId;
           if (!mrDistribution[mrName]) {
-            mrDistribution[mrName] = {
-              mrName,
-              mrId,
-              products: []
-            };
+            mrDistribution[mrName] = { mrName, mrId, products: [] };
           }
           mrDistribution[mrName].products.push({
             productName: product.productName,
@@ -1893,10 +2065,16 @@ const AddSale = () => {
         let errorMessage;
         if (contentType && contentType.includes("application/json")) {
           const respData = await response.json();
-          errorMessage = respData.error || respData.message || `HTTP error! status: ${response.status}`;
+          errorMessage =
+            respData.error ||
+            respData.message ||
+            `HTTP error! status: ${response.status}`;
         } else {
           const text = await response.text();
-          errorMessage = `Server returned ${response.status}: ${text.substring(0, 100)}...`;
+          errorMessage = `Server returned ${response.status}: ${text.substring(
+            0,
+            100
+          )}...`;
         }
         throw new Error(errorMessage);
       }
@@ -1922,29 +2100,31 @@ const AddSale = () => {
     );
   }
 
-  // --- RENDER ---
+  // ------------------------------------------------
+  // RENDER
+  // ------------------------------------------------
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
-      {/* TABS */}
+      {/* SALE TYPE TABS */}
       <div className="flex border-b border-gray-200 mb-6">
         <button
           type="button"
-          onClick={() => setSaleType('normal')}
+          onClick={() => setSaleType("normal")}
           className={`py-2 px-4 font-medium text-sm focus:outline-none ${
-            saleType === 'normal'
-              ? 'border-b-2 border-blue-600 text-blue-600'
-              : 'text-gray-500 hover:text-gray-700'
+            saleType === "normal"
+              ? "border-b-2 border-blue-600 text-blue-600"
+              : "text-gray-500 hover:text-gray-700"
           }`}
         >
           Normal Sale
         </button>
         <button
           type="button"
-          onClick={() => setSaleType('mr')}
+          onClick={() => setSaleType("mr")}
           className={`py-2 px-4 font-medium text-sm focus:outline-none ${
-            saleType === 'mr'
-              ? 'border-b-2 border-blue-600 text-blue-600'
-              : 'text-gray-500 hover:text-gray-700'
+            saleType === "mr"
+              ? "border-b-2 border-blue-600 text-blue-600"
+              : "text-gray-500 hover:text-gray-700"
           }`}
         >
           MR Sale
@@ -1953,24 +2133,36 @@ const AddSale = () => {
 
       {/* UPLOAD WARNING */}
       {showUploadMessage && (
-        <div className={`mb-6 p-4 rounded-lg ${
-          uploadMessage.includes("out of stock") 
-            ? "bg-yellow-50 border border-yellow-200" 
-            : "bg-red-50 border border-red-200"
-        }`}>
-          {/* ... (unchanged) ... */}
+        <div
+          className={`mb-6 p-4 rounded-lg ${
+            uploadMessage.includes("out of stock")
+              ? "bg-yellow-50 border border-yellow-200"
+              : "bg-red-50 border border-red-200"
+          }`}
+        >
+          <p
+            className={`text-sm font-medium ${
+              uploadMessage.includes("out of stock")
+                ? "text-yellow-800"
+                : "text-red-800"
+            }`}
+          >
+            {uploadMessage}
+          </p>
         </div>
       )}
 
-      {/* HEADER: Add Product button */}
+      {/* HEADER */}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-800">
-          {saleType === 'normal' ? 'Add New Sale (Normal)' : 'Add New Sale (MR)'}
+          {saleType === "normal"
+            ? "Add New Sale (Normal)"
+            : "Add New Sale (MR)"}
         </h2>
         <button
           type="button"
           disabled={!isCurrentProductValid() || isFormDisabled}
-          onClick={() => addProduct(saleType)}   // ← pass saleType
+          onClick={() => addProduct(saleType)}
           className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
             isCurrentProductValid() && !isFormDisabled
               ? "bg-green-600 text-white hover:bg-green-700"
@@ -1985,25 +2177,37 @@ const AddSale = () => {
       {/* PRODUCT ROWS */}
       <div className="mb-6">
         {form.products.map((product, index) => {
+          // ✅ FIX: Compute stock values for display
           let availableStock = 0;
           let remainingStock = null;
           let hasStockProblem = false;
           let expiryInfo = null;
+          // ✅ FIX: stockLoaded indicates whether we have stock data to display
+          let stockLoaded = false;
 
-          if (saleType === 'mr') {
+          if (saleType === "mr") {
             const stockData = mrProductStock[index];
+            // ✅ FIX: stockLoaded = true only when product is selected AND stock data was fetched
+            stockLoaded = !!product.productName && stockData !== null && stockData !== undefined;
             if (stockData) {
               availableStock = calculateMRStock(stockData);
-              const totalQty = (parseInt(product.salesQty)||0) + (parseInt(product.bonusQty)||0);
+              const totalQty =
+                (parseInt(product.salesQty) || 0) +
+                (parseInt(product.bonusQty) || 0);
               remainingStock = availableStock - totalQty;
               hasStockProblem = totalQty > availableStock;
               expiryInfo = getMRProductExpiryInfo(stockData);
             }
           } else {
-            const productData = products.find(p => p.productName === product.productName);
+            const productData = products.find(
+              (p) => p.productName === product.productName
+            );
+            stockLoaded = !!productData;
             if (productData) {
               availableStock = calculateAvailableStock(productData);
-              const totalQty = (parseInt(product.salesQty)||0) + (parseInt(product.bonusQty)||0);
+              const totalQty =
+                (parseInt(product.salesQty) || 0) +
+                (parseInt(product.bonusQty) || 0);
               remainingStock = availableStock - totalQty;
               hasStockProblem = totalQty > availableStock;
               expiryInfo = getProductExpiryInfo(product.productName);
@@ -2019,18 +2223,19 @@ const AddSale = () => {
                   </h3>
                   {product.productName && (
                     <>
-                      {availableStock > 0 && (
+                      {/* ✅ FIX: Show stock badges when stockLoaded is true (even if availableStock === 0) */}
+                      {stockLoaded && (
                         <>
                           <span
                             className={`text-sm px-3 py-2 rounded ${
-                              remainingStock < 0
+                              remainingStock !== null && remainingStock < 0
                                 ? "bg-red-100 text-red-800 border border-red-300"
-                                : remainingStock <= 10
+                                : remainingStock !== null && remainingStock <= 10
                                 ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
                                 : "bg-green-100 text-green-800 border border-green-300"
                             }`}
                           >
-                            Remaining: {remainingStock ?? 'N/A'} boxes
+                            Remaining: {remainingStock ?? "N/A"} boxes
                           </span>
                           <span className="text-sm px-2 py-1 bg-blue-100 text-blue-800 rounded border border-blue-300">
                             Available: {availableStock} boxes
@@ -2061,8 +2266,7 @@ const AddSale = () => {
                           ⚠️ Total quantity exceeds available stock
                         </span>
                       )}
-                      {/* MR badge */}
-                      {saleType === 'mr' && product.selectedMrName && (
+                      {saleType === "mr" && product.selectedMrName && (
                         <span className="text-sm px-2 py-1 bg-purple-100 text-purple-800 rounded border border-purple-300">
                           MR: {product.selectedMrName}
                         </span>
@@ -2108,13 +2312,19 @@ const AddSale = () => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* MR Sale: per‑product MR dropdown – only first row editable, others read-only */}
-                    {saleType === 'mr' && (
+                    {/* MR Sale: per-product MR dropdown */}
+                    {saleType === "mr" && (
                       <div className="relative flex flex-col">
                         {index === 0 ? (
                           <SearchableDropdown
-                            value={product.selectedMrId || ''}
-                            onChange={(mrId) => enhancedProductChange(index, 'selectedMrId', mrId)}
+                            value={product.selectedMrId || ""}
+                            onChange={(mrId) =>
+                              enhancedProductChange(
+                                index,
+                                "selectedMrId",
+                                mrId
+                              )
+                            }
                             options={mrStockOptions}
                             placeholder="Select Medical Representative"
                             required={true}
@@ -2125,11 +2335,11 @@ const AddSale = () => {
                           />
                         ) : (
                           <div>
-                            <label className="text-sm font-medium text-gray-700 mb-1">
+                            <label className="text-sm font-medium text-gray-700 mb-1 block">
                               Medical Representative
                             </label>
                             <div className="border rounded-md px-3 py-2 bg-gray-100 text-gray-700">
-                              {product.selectedMrName || 'Not set'}
+                              {product.selectedMrName || "Not set"}
                             </div>
                           </div>
                         )}
@@ -2141,7 +2351,7 @@ const AddSale = () => {
                       </div>
                     )}
 
-                    {/* Product Name (with suggestions) – filtered by MR's available products */}
+                    {/* Product Name input with dropdown */}
                     <div className="relative flex flex-col">
                       <label className="text-sm font-medium text-gray-700 mb-1">
                         Product Name
@@ -2152,7 +2362,11 @@ const AddSale = () => {
                         type="text"
                         value={product.productName}
                         onChange={(e) =>
-                          enhancedProductChange(index, "productName", e.target.value)
+                          enhancedProductChange(
+                            index,
+                            "productName",
+                            e.target.value
+                          )
                         }
                         onKeyDown={(e) => handleProductNameKeyDown(index, e)}
                         onFocus={() => handleProductNameFocus(index)}
@@ -2162,74 +2376,123 @@ const AddSale = () => {
                             150
                           )
                         }
-                        disabled={isFormDisabled || (saleType === 'mr' && !product.selectedMrId)}
+                        disabled={
+                          isFormDisabled ||
+                          (saleType === "mr" && !product.selectedMrId)
+                        }
                         className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 ${
                           errors[`productName_${index}`]
                             ? "border-red-500"
                             : "border-gray-300"
                         } ${
-                          isFormDisabled || (saleType === 'mr' && !product.selectedMrId) ? "bg-gray-100 cursor-not-allowed" : ""
+                          isFormDisabled ||
+                          (saleType === "mr" && !product.selectedMrId)
+                            ? "bg-gray-100 cursor-not-allowed"
+                            : ""
                         }`}
-                        placeholder={saleType === 'mr' && !product.selectedMrId 
-                          ? "Select MR first" 
-                          : "Type to search or click to see all options"}
+                        placeholder={
+                          saleType === "mr" && !product.selectedMrId
+                            ? "Select MR first"
+                            : "Type to search or click to see all options"
+                        }
                         autoComplete="off"
                       />
+
+                      {/* Product suggestions dropdown */}
                       {productSuggestions.suggestionsList[index]?.isOpen &&
-                        productSuggestions.filteredItems[index]?.length > 0 &&
                         !isFormDisabled && (
                           <ul
                             className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
                             style={{
-                              top: productSuggestions.suggestionsList[index]
-                                .dropdownTop,
+                              top:
+                                productSuggestions.suggestionsList[index]
+                                  .dropdownTop,
                             }}
                           >
-                            {productSuggestions.filteredItems[index].map(
-                              (item, idx) => {
-                                const allowedNames = getProductNamesForRow(index);
-                                if (saleType === 'mr' && allowedNames.length > 0 && !allowedNames.includes(typeof item === 'string' ? item : item.name)) {
-                                  return null;
-                                }
-                                return (
-                                  <li
-                                    key={
-                                      typeof item === "object"
-                                        ? item._id ?? idx
-                                        : idx
-                                    }
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() =>
-                                      productSuggestions.selectSuggestion(
-                                        index,
-                                        typeof item === "string"
-                                          ? item
-                                          : item.name,
-                                        (value) =>
-                                          enhancedProductChange(
-                                            index,
-                                            "productName",
-                                            value
-                                          )
-                                      )
-                                    }
-                                    onMouseEnter={() =>
-                                      handleProductRowHighlight(index, idx)
-                                    }
-                                    className={`cursor-pointer px-3 py-2 ${
-                                      productSuggestions.suggestionsList[index]
-                                        .highlightedIndex === idx
-                                        ? "bg-blue-600 text-white"
-                                        : "bg-white text-gray-900 hover:bg-gray-100"
-                                    }`}
-                                  >
-                                    {typeof item === "string" ? item : item.name}
-                                  </li>
-                                );
-                              }
-                            )}
+                            {saleType === "mr"
+                              ? // MR sale: filter directly from mrAvailableProducts
+                                (mrAvailableProducts[index] || [])
+                                  .filter((p) => {
+                                    const name =
+                                      p.productName || p.name || "";
+                                    return name
+                                      .toLowerCase()
+                                      .includes(
+                                        product.productName.toLowerCase()
+                                      );
+                                  })
+                                  .map((item, idx) => (
+                                    <li
+                                      key={item.productId || idx}
+                                      onMouseDown={(e) => e.preventDefault()}
+                                      onClick={() =>
+                                        enhancedProductChange(
+                                          index,
+                                          "productName",
+                                          item.productName || item.name
+                                        )
+                                      }
+                                      onMouseEnter={() =>
+                                        handleProductRowHighlight(index, idx)
+                                      }
+                                      className={`cursor-pointer px-3 py-2 ${
+                                        productSuggestions.suggestionsList[
+                                          index
+                                        ].highlightedIndex === idx
+                                          ? "bg-blue-600 text-white"
+                                          : "bg-white text-gray-900 hover:bg-gray-100"
+                                      }`}
+                                    >
+                                      <span>
+                                        {capitalizeFirstLetter(item.productName || item.name)}
+                                      </span>
+                                 
+                                    </li>
+                                  ))
+                              : // Normal sale: original suggestion logic
+                                productSuggestions.filteredItems[index]?.map(
+                                  (item, idx) => (
+                                    <li
+                                      key={
+                                        typeof item === "object"
+                                          ? item._id ?? idx
+                                          : idx
+                                      }
+                                      onMouseDown={(e) => e.preventDefault()}
+                                      onClick={() =>
+                                        productSuggestions.selectSuggestion(
+                                          index,
+                                          typeof item === "string"
+                                            ? item
+                                            : item.name,
+                                          (value) =>
+                                            enhancedProductChange(
+                                              index,
+                                              "productName",
+                                              value
+                                            )
+                                        )
+                                      }
+                                      onMouseEnter={() =>
+                                        handleProductRowHighlight(index, idx)
+                                      }
+                                      className={`cursor-pointer px-3 py-2 ${
+                                        productSuggestions.suggestionsList[
+                                          index
+                                        ].highlightedIndex === idx
+                                          ? "bg-blue-600 text-white"
+                                          : "bg-white text-gray-900 hover:bg-gray-100"
+                                      }`}
+                                    >
+                                      {typeof item === "string"
+                                        ? item
+                                        : item.name}
+                                    </li>
+                                  )
+                                )}
                           </ul>
                         )}
+
                       {errors[`productName_${index}`] && (
                         <p className="text-red-500 text-xs mt-0.5">
                           {errors[`productName_${index}`]}
@@ -2237,7 +2500,6 @@ const AddSale = () => {
                       )}
                     </div>
 
-                    {/* Other fields (unchanged) */}
                     <InputField
                       label="Sales Quantity"
                       name={`salesQty_${index}`}
@@ -2245,7 +2507,11 @@ const AddSale = () => {
                       value={product.salesQty}
                       onChange={(e) => {
                         handleNumericInputChange(e, (e) =>
-                          enhancedProductChange(index, "salesQty", e.target.value)
+                          enhancedProductChange(
+                            index,
+                            "salesQty",
+                            e.target.value
+                          )
                         );
                       }}
                       error={errors[`salesQty_${index}`]}
@@ -2259,7 +2525,11 @@ const AddSale = () => {
                       value={product.bonusQty}
                       onChange={(e) => {
                         handleNumericInputChange(e, (e) =>
-                          enhancedProductChange(index, "bonusQty", e.target.value)
+                          enhancedProductChange(
+                            index,
+                            "bonusQty",
+                            e.target.value
+                          )
                         );
                       }}
                       error={errors[`bonusQty_${index}`]}
@@ -2272,7 +2542,11 @@ const AddSale = () => {
                       value={product.sellingPrice}
                       onChange={(e) => {
                         handleNumericInputChange(e, (e) =>
-                          enhancedProductChange(index, "sellingPrice", e.target.value)
+                          enhancedProductChange(
+                            index,
+                            "sellingPrice",
+                            e.target.value
+                          )
                         );
                       }}
                       error={errors[`sellingPrice_${index}`]}
@@ -2286,7 +2560,11 @@ const AddSale = () => {
                       value={product.discount}
                       onChange={(e) => {
                         handleNumericInputChange(e, (e) =>
-                          enhancedProductChange(index, "discount", e.target.value)
+                          enhancedProductChange(
+                            index,
+                            "discount",
+                            e.target.value
+                          )
                         );
                       }}
                       error={errors[`discount_${index}`]}
@@ -2395,7 +2673,7 @@ const AddSale = () => {
           />
 
           {/* Normal Sale: header MR dropdown */}
-          {saleType !== 'mr' && (
+          {saleType !== "mr" && (
             <SearchableDropdown
               value={form.mrId}
               onChange={handleMRChange}

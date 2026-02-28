@@ -12,25 +12,30 @@ const calculateProfitLoss = (sellingPrice, lc, quantity) => {
 };
 
 // Product Subschema
-const productSchema = new Schema({
-  productName: { type: String, required: true },
-  originalProductName: { type: String },
-  salesQty: { type: Number, required: true, set: roundToTwo },
-  bonusQty: { type: Number, default: 0, set: roundToTwo },
-  totalQty: { type: Number, required: true, set: roundToTwo },
-  sellingPrice: { type: Number, required: true, min: 0, set: roundToTwo },
-  amount: { type: Number, required: true, set: roundToTwo },
-  discount: { type: Number, default: 0, min: 0, set: roundToTwo },
-  netSellingAmount: { type: Number, required: true, set: roundToTwo },
-  averageUnitPrice: { type: Number, required: true, set: roundToTwo },
-  lc: { type: Number, required: true, set: roundToTwo },
-  profitLoss: { type: Number, default: 0, set: roundToTwo },
-  isProductAccept: { type: Boolean, default: true },
-  isExchangeProduct: { type: Boolean, default: false },
-  isReturnProduct: { type: Boolean, default: false },
-}, {
-  _id: true
-});
+const productSchema = new Schema(
+  {
+    productName: { type: String, required: true },
+    originalProductName: { type: String },
+    salesQty: { type: Number, required: true, set: roundToTwo },
+    bonusQty: { type: Number, default: 0, set: roundToTwo },
+    totalQty: { type: Number, required: true, set: roundToTwo },
+    sellingPrice: { type: Number, required: true, min: 0, set: roundToTwo },
+    amount: { type: Number, required: true, set: roundToTwo },
+    discount: { type: Number, default: 0, min: 0, set: roundToTwo },
+    netSellingAmount: { type: Number, required: true, set: roundToTwo },
+    averageUnitPrice: { type: Number, required: true, set: roundToTwo },
+    lc: { type: Number, required: true, set: roundToTwo },
+    profitLoss: { type: Number, default: 0, set: roundToTwo },
+    isProductAccept: { type: Boolean, default: true },
+    isExchangeProduct: { type: Boolean, default: false },
+    isReturnProduct: { type: Boolean, default: false },
+    // 🆕 NEW: MR sale purchase price (lc * (salesQty + bonusQty))
+    mrSalePurchasePrice: { type: Number, default: 0, set: roundToTwo },
+  },
+  {
+    _id: true,
+  }
+);
 
 // Sale Summary Schema
 const saleSummarySchema = new Schema(
@@ -60,10 +65,9 @@ const saleSummarySchema = new Schema(
     totalAmount: { type: Number, required: true, set: roundToTwo },
     paymentStatus: {
       type: String,
-      enum: ["Cash", "Credit", "Partial Paid", "Paid", "Return", "Unpaid"],
+      enum: ["Cash", "Credit", "Partial", "Paid", "Return", "Unpaid"],
       default: "Credit",
     },
-    // 🆕 New field: saleType
     saleType: {
       type: String,
       enum: ["Normal Sale", "MR Sale"],
@@ -74,7 +78,6 @@ const saleSummarySchema = new Schema(
     isReturn: { type: Boolean, default: false },
     importBatchId: { type: Number },
     importStatus: { type: String, default: "pending" },
-    // Virtual field for total profit/loss
     totalProfitLoss: { type: Number, default: 0, set: roundToTwo },
   },
   {
@@ -88,10 +91,12 @@ const saleSummarySchema = new Schema(
 saleSummarySchema.pre("save", function (next) {
   if (this.products && this.products.length > 0) {
     // Calculate profit/loss for each product
-    this.products.forEach(product => {
-      if (typeof product.salesQty === 'number' && 
-          typeof product.sellingPrice === 'number' && 
-          typeof product.lc === 'number') {
+    this.products.forEach((product) => {
+      if (
+        typeof product.salesQty === "number" &&
+        typeof product.sellingPrice === "number" &&
+        typeof product.lc === "number"
+      ) {
         product.profitLoss = calculateProfitLoss(
           product.sellingPrice,
           product.lc,
@@ -99,13 +104,13 @@ saleSummarySchema.pre("save", function (next) {
         );
       }
     });
-    
+
     // Calculate total profit/loss
     this.totalProfitLoss = this.products.reduce((total, product) => {
       return total + (product.profitLoss || 0);
     }, 0);
   }
-  
+
   next();
 });
 

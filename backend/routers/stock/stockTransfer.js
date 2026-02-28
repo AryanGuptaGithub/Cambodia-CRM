@@ -513,7 +513,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       // --- FIX: Explicitly handle MR stock update ---
       const mrObjectId = new mongoose.Types.ObjectId(targetMrId);
       let mrStock = await stockInMrHands.findOne({ mrId: mrObjectId }, { session });
-      console.log('values of mrStock', mrStock);
       if (!mrStock) {
         // Create new MR stock document
         const productsInHand = validNewItems.map((item) => ({

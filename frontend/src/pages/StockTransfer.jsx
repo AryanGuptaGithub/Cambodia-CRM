@@ -330,6 +330,7 @@ const StockTransfer = () => {
         `${backendUrl}/api/stock-transfer-to-mr`,
       );
       const data = response.data || [];
+      console.log('values of data ---', data);
       const updatedData = data.map((transfer) => {
         if (!transfer.totalTransferCost || transfer.totalTransferCost === 0) {
           return {
@@ -406,6 +407,7 @@ const StockTransfer = () => {
     }));
   };
 
+  // FIXED: handleViewProducts function for MR transfers
   const handleViewProducts = async (transfer) => {
     if (activeTab === "general") {
       if (!transfer || !Array.isArray(transfer.items)) {
@@ -441,55 +443,38 @@ const StockTransfer = () => {
       return;
     }
 
-    const mrName = transfer.stockTransferToMr || transfer.mrName || "";
-    if (!mrName) {
+    // For MR transfers - show the transfer's items directly, not MR's current stock
+    if (!transfer || !Array.isArray(transfer.items)) {
       setSelectedProducts([]);
       setIsProductModalOpen(true);
       return;
     }
 
-    try {
-      setProductModalLoading(true);
-      setSelectedProducts([]);
-      setIsProductModalOpen(true);
+    // Group items from this transfer only
+    const grouped = {};
+    transfer.items.forEach((item) => {
+      const id = item.productId?._id || item.productId;
+      if (!grouped[id]) {
+        grouped[id] = {
+          _id: id,
+          productId: id,
+          productName: item.productName || "-",
+          boxQuantity: 0,
+          lc: parseFloat(item.lc) || 0,
+        };
+      }
+      grouped[id].boxQuantity += parseFloat(item.boxQuantity) || 0;
+    });
 
-      const response = await axios.get(
-        `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
-        { params: { mrName } },
-      );
+    const productsWithCost = Object.values(grouped).map((item) => ({
+      ...item,
+      productCost: parseFloat(
+        ((item.lc || 0) * (item.boxQuantity || 0)).toFixed(2),
+      ),
+    }));
 
-      const data = response.data?.data || [];
-      const grouped = {};
-
-      data.forEach((entry) => {
-        const id = entry.productId?._id || entry.productId;
-        if (!grouped[id]) {
-          grouped[id] = {
-            _id: id,
-            productId: id,
-            productName: entry.productName || "-",
-            boxQuantity: 0,
-            lc: entry.lc || 0,
-          };
-        }
-        grouped[id].boxQuantity += entry.quantity || 0;
-      });
-
-      const productsWithCost = Object.values(grouped).map((item) => ({
-        ...item,
-        productCost: parseFloat(
-          ((item.lc || 0) * (item.boxQuantity || 0)).toFixed(2),
-        ),
-      }));
-
-      setSelectedProducts(productsWithCost);
-    } catch (err) {
-      console.error("Error fetching MR stock:", err);
-      showToast("error", "Failed to fetch MR stock");
-      setSelectedProducts([]);
-    } finally {
-      setProductModalLoading(false);
-    }
+    setSelectedProducts(productsWithCost);
+    setIsProductModalOpen(true);
   };
 
   const handleAddNewItem = () => {
@@ -536,7 +521,6 @@ const StockTransfer = () => {
     }
   };
 
-  // ── KEY FIX: handleAddProductToForm now works on form.items which has ALL items ──
   const handleAddProductToForm = () => {
     if (
       !newProductForm.productId ||
@@ -585,7 +569,7 @@ const StockTransfer = () => {
         showToast("success", "Product quantity updated successfully");
         return { ...prev, items: updatedItems };
       } else {
-        // New product — append to existing items (do NOT replace!)
+        // New product — append to existing items
         const newItem = {
           productId: newProductForm.productId,
           productName: newProductForm.productName,
@@ -624,7 +608,6 @@ const StockTransfer = () => {
   const handleUpdateTransfer = async (e, formData) => {
     e.preventDefault();
 
-    // ── CRITICAL: Validate items are not empty ────────────────────────────────
     if (!formData.items || formData.items.length === 0) {
       showToast("error", "Cannot update transfer with no items");
       return;
@@ -652,7 +635,6 @@ const StockTransfer = () => {
         }
       }
 
-      // ── Map ALL items (preserving existing ones + newly added) ──────────────
       requestData.items = formData.items.map((item) => {
         const productId = item.productId?._id || item.productId || item.product?.value;
         const productName = item.productName || item.product?.label || "";
@@ -672,7 +654,6 @@ const StockTransfer = () => {
         };
       });
 
-      // Filter out any items with no productId or 0 quantity
       requestData.items = requestData.items.filter(
         (item) => item.productId && item.boxQuantity > 0
       );
@@ -970,9 +951,7 @@ const StockTransfer = () => {
     setIsViewModalOpen(true);
   };
 
-  // ── KEY FIX: handleEdit stores the COMPLETE transfer in both form and editingTransfer ──
   const handleEdit = (transfer) => {
-    // Deep-clone items to avoid reference issues
     const clonedItems = (transfer.items || []).map((item) => ({
       ...item,
       productId: item.productId?._id || item.productId,
@@ -994,7 +973,7 @@ const StockTransfer = () => {
       mrId: transfer.mrId || "",
     };
 
-    setEditingTransfer(transfer); // store original reference
+    setEditingTransfer(transfer);
     setForm(formData);
     setIsEditModalOpen(true);
 
@@ -1375,7 +1354,7 @@ const StockTransfer = () => {
                           onClick={() => handleViewProducts(item)}
                           title={
                             activeTab === "mr"
-                              ? "View Current MR Stock"
+                              ? "View Products in this Transfer"
                               : "View Products"
                           }
                         >
@@ -1647,7 +1626,6 @@ const StockTransfer = () => {
                 Edit{" "}
                 {activeTab === "general" ? "Stock Transfer" : "MR Transfer"}
               </h2>
-              {/* Item count indicator */}
               <p className="text-sm text-gray-500 mb-4">
                 Total products in this transfer:{" "}
                 <span className="font-semibold text-indigo-600">
@@ -2142,7 +2120,7 @@ const StockTransfer = () => {
               <div className="flex items-center justify-between p-6 border-b">
                 <h2 className="text-xl font-semibold text-gray-800">
                   {activeTab === "mr"
-                    ? "Current Stock in MR Hand (Live)"
+                    ? "Products in this Transfer"
                     : "Product Details with LC (Landed Cost)"}
                 </h2>
                 <button
@@ -2157,7 +2135,7 @@ const StockTransfer = () => {
                 {productModalLoading ? (
                   <div className="flex justify-center items-center h-40">
                     <div className="text-gray-500 animate-pulse">
-                      Loading MR stock...
+                      Loading...
                     </div>
                   </div>
                 ) : (
@@ -2169,9 +2147,7 @@ const StockTransfer = () => {
                             Product Name
                           </th>
                           <th className="p-3 min-w-[120px] text-sm font-medium">
-                            {activeTab === "mr"
-                              ? "Current Qty in Hand"
-                              : "Box Quantity"}
+                            Box Quantity
                           </th>
                           <th className="p-3 min-w-[120px] text-sm font-medium">
                             LC ($) Per Box
@@ -2223,9 +2199,7 @@ const StockTransfer = () => {
                         ) : (
                           <tr>
                             <td colSpan={4} className="p-4 text-center text-gray-500">
-                              {activeTab === "mr"
-                                ? "No stock currently in MR's hand"
-                                : "No products found"}
+                              No products found in this transfer
                             </td>
                           </tr>
                         )}

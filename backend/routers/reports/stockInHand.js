@@ -11,11 +11,18 @@ const filterReportsWithBatches = (reports) => {
   );
 };
 
-// FIXED: Changed from '/reports/reports-in-hand' to '/'
-// ✅ Main route - GET all reports with totalBoxes
-// ✅ Main route - GET ALL reports (for frontend client-side pagination)
+// Utility function to calculate net amount (totalAmount - totalMrSaleDeductions)
+const calculateNetAmount = (report) => {
+  const totalAmount = report.totalAmount || 0;
+  const totalMrSaleDeductions = report.totalMrSaleDeductions || 0;
+  return totalAmount - totalMrSaleDeductions;
+};
+
+// ✅ Main route - GET all reports with totalBoxes and net amount
 router.get("/", async (req, res) => {
   try {
+
+    console.log('values of first 25');
     const { search } = req.query;
 
     // Build query based on search parameter
@@ -34,22 +41,42 @@ router.get("/", async (req, res) => {
     const criticalCount = filteredReports.filter(r => r.status === "Critical").length;
     const outOfStockCount = filteredReports.filter(r => r.status === "Out of Stock").length;
     
-    // ✅ Calculate total boxes across all products
+    // Calculate total boxes across all products
     const totalBoxesSum = filteredReports.reduce((sum, report) => {
       return sum + (report.totalBoxes || 0);
     }, 0);
 
-    console.log('value sof allReports', allReports);
+    // Calculate total amount and total deductions across all products
+    const totalAmountSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalAmount || 0);
+    }, 0);
+
+    const totalDeductionsSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalMrSaleDeductions || 0);
+    }, 0);
+
+    const totalNetAmountSum = totalAmountSum - totalDeductionsSum;
+
+    // Add netAmount to each report
+    const reportsWithNetAmount = filteredReports.map(report => ({
+      ...report.toObject(),
+      netAmount: calculateNetAmount(report)
+    }));
+
+    console.log('values of allReports', allReports);
     res.status(200).json({
       success: true,
       count: filteredReports.length,
       total: filteredReports.length,
       totalBoxes: totalBoxesSum,
+      totalAmount: totalAmountSum,
+      totalDeductions: totalDeductionsSum,
+      totalNetAmount: totalNetAmountSum,
       inStockCount: inStockCount,
       lowStockCount: lowStockCount,
       criticalCount: criticalCount,
       outOfStockCount: outOfStockCount,
-      reports: filteredReports,
+      reports: reportsWithNetAmount,
     });
   } catch (error) {
     console.error("Error fetching reports in hand:", error);
@@ -61,8 +88,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports/average-price/export' to '/average-price/export'
-// ✅ New route for exporting to Excel with totalBoxes
+// ✅ Route for exporting to Excel with net amount
 router.get("/average-price/export", async (req, res) => {
   try {
     const { search } = req.query;
@@ -94,17 +120,28 @@ router.get("/average-price/export", async (req, res) => {
         ? overallTotalAveragePrice / overallValidReportsCount
         : 0;
 
-    // ✅ Calculate total boxes
+    // Calculate total boxes
     const totalBoxesSum = filteredReports.reduce((sum, report) => {
       return sum + (report.totalBoxes || 0);
     }, 0);
+
+    // Calculate total amounts
+    const totalAmountSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalAmount || 0);
+    }, 0);
+
+    const totalDeductionsSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalMrSaleDeductions || 0);
+    }, 0);
+
+    const totalNetAmountSum = totalAmountSum - totalDeductionsSum;
 
     // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Stock Report");
 
     // Add title
-    worksheet.mergeCells("A1:E1");
+    worksheet.mergeCells("A1:G1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "Stock In Hand Report";
     titleCell.font = { bold: true, size: 16 };
@@ -113,12 +150,21 @@ router.get("/average-price/export", async (req, res) => {
     // Add summary information
     let currentRow = 2;
     
-    // ✅ Add total boxes summary
+    // Add total boxes summary
     worksheet.mergeCells(`A${currentRow}:B${currentRow}`);
     const totalBoxesCell = worksheet.getCell(`A${currentRow}`);
     totalBoxesCell.value = `Total Stock Across All Products: ${totalBoxesSum.toLocaleString()} Boxes`;
     totalBoxesCell.font = { bold: true, size: 12 };
     totalBoxesCell.alignment = { horizontal: "left" };
+    
+    currentRow += 1;
+    
+    // Add total net amount summary
+    worksheet.mergeCells(`A${currentRow}:B${currentRow}`);
+    const totalNetCell = worksheet.getCell(`A${currentRow}`);
+    totalNetCell.value = `Total Net Amount Across All Products: $${totalNetAmountSum.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    totalNetCell.font = { bold: true, size: 12 };
+    totalNetCell.alignment = { horizontal: "left" };
     
     currentRow += 2;
 
@@ -127,8 +173,11 @@ router.get("/average-price/export", async (req, res) => {
     worksheet.getCell(`A${headerRowNum}`).value = "Sr.No";
     worksheet.getCell(`B${headerRowNum}`).value = "Product Name";
     worksheet.getCell(`C${headerRowNum}`).value = "Category";
-    worksheet.getCell(`D${headerRowNum}`).value = "Total Boxes"; // ✅ Added
-    worksheet.getCell(`E${headerRowNum}`).value = "Average Price ($)";
+    worksheet.getCell(`D${headerRowNum}`).value = "Total Boxes";
+    worksheet.getCell(`E${headerRowNum}`).value = "Total Amount ($)";
+    worksheet.getCell(`F${headerRowNum}`).value = "Deductions ($)";
+    worksheet.getCell(`G${headerRowNum}`).value = "Net Amount ($)";
+    worksheet.getCell(`H${headerRowNum}`).value = "Average Price ($)";
 
     // Style headers
     const headerRow = worksheet.getRow(headerRowNum);
@@ -144,13 +193,20 @@ router.get("/average-price/export", async (req, res) => {
     filteredReports.forEach((report, index) => {
       const rowNum = headerRowNum + index + 1;
       const row = worksheet.getRow(rowNum);
+      const netAmount = calculateNetAmount(report);
 
       row.getCell(1).value = index + 1; // Sr.No
       row.getCell(2).value = report.productName || "N/A";
       row.getCell(3).value = report.type || "N/A";
-      row.getCell(4).value = report.totalBoxes || 0; // ✅ Total Boxes
-      row.getCell(5).value = report.averagePrice || 0;
+      row.getCell(4).value = report.totalBoxes || 0;
+      row.getCell(5).value = report.totalAmount || 0;
       row.getCell(5).numFmt = "$#,##0.00";
+      row.getCell(6).value = report.totalMrSaleDeductions || 0;
+      row.getCell(6).numFmt = "$#,##0.00";
+      row.getCell(7).value = netAmount;
+      row.getCell(7).numFmt = "$#,##0.00";
+      row.getCell(8).value = report.averagePrice || 0;
+      row.getCell(8).numFmt = "$#,##0.00";
     });
 
     // Auto-fit columns
@@ -158,7 +214,10 @@ router.get("/average-price/export", async (req, res) => {
       { key: "srNo", width: 10 },
       { key: "productName", width: 40 },
       { key: "category", width: 20 },
-      { key: "totalBoxes", width: 15 }, // ✅ Added
+      { key: "totalBoxes", width: 15 },
+      { key: "totalAmount", width: 18 },
+      { key: "deductions", width: 18 },
+      { key: "netAmount", width: 18 },
       { key: "averagePrice", width: 18 },
     ];
 
@@ -176,12 +235,12 @@ router.get("/average-price/export", async (req, res) => {
       });
     }
 
-    // Center align serial numbers and total boxes
-    const serialNumberColumn = worksheet.getColumn(1);
-    serialNumberColumn.alignment = { horizontal: "center" };
-    
-    const totalBoxesColumn = worksheet.getColumn(4); // ✅
-    totalBoxesColumn.alignment = { horizontal: "center" };
+    // Center align specific columns
+    worksheet.getColumn(1).alignment = { horizontal: "center" }; // Sr.No
+    worksheet.getColumn(4).alignment = { horizontal: "center" }; // Total Boxes
+    worksheet.getColumn(5).alignment = { horizontal: "right" }; // Total Amount
+    worksheet.getColumn(6).alignment = { horizontal: "right" }; // Deductions
+    worksheet.getColumn(7).alignment = { horizontal: "right" }; // Net Amount
 
     // Set response headers
     const fileName = search
@@ -209,8 +268,7 @@ router.get("/average-price/export", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports-in-hand-efficient' to '/efficient'
-// ✅ Alternative: More efficient database approach with totalBoxes
+// ✅ Efficient route with aggregation
 router.get("/efficient", async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
@@ -236,24 +294,52 @@ router.get("/efficient", async (req, res) => {
             { $count: "totalCount" },
             {
               $addFields: {
-                totalBoxes: { $sum: "$totalBoxes" }, // ✅ Calculate total boxes
+                totalBoxes: { $sum: "$totalBoxes" },
+                totalAmount: { $sum: "$totalAmount" },
+                totalDeductions: { $sum: "$totalMrSaleDeductions" },
               },
             },
+            {
+              $addFields: {
+                totalNetAmount: { 
+                  $subtract: ["$totalAmount", "$totalDeductions"] 
+                }
+              }
+            }
           ],
-          data: [{ $skip: skip }, { $limit: limitNum }],
+          data: [
+            { $skip: skip }, 
+            { $limit: limitNum },
+            {
+              $addFields: {
+                netAmount: { 
+                  $subtract: [
+                    { $ifNull: ["$totalAmount", 0] }, 
+                    { $ifNull: ["$totalMrSaleDeductions", 0] }
+                  ]
+                }
+              }
+            }
+          ],
         },
       },
     ]);
 
     const totalCount = reports[0]?.metadata[0]?.totalCount || 0;
-    const totalBoxes = reports[0]?.metadata[0]?.totalBoxes || 0; // ✅
+    const totalBoxes = reports[0]?.metadata[0]?.totalBoxes || 0;
+    const totalAmount = reports[0]?.metadata[0]?.totalAmount || 0;
+    const totalDeductions = reports[0]?.metadata[0]?.totalDeductions || 0;
+    const totalNetAmount = totalAmount - totalDeductions;
     const paginatedReports = reports[0]?.data || [];
 
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
       total: totalCount,
-      totalBoxes: totalBoxes, // ✅ Include total boxes
+      totalBoxes: totalBoxes,
+      totalAmount: totalAmount,
+      totalDeductions: totalDeductions,
+      totalNetAmount: totalNetAmount,
       totalPages: Math.ceil(totalCount / limitNum),
       currentPage: pageNum,
       reports: paginatedReports,
@@ -268,23 +354,41 @@ router.get("/efficient", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports-in-hand/all' to '/all'
-// ✅ Keep existing routes for backward compatibility
+// ✅ Get all reports with net amount
 router.get("/all", async (req, res) => {
   try {
     const reports = await ReportInHand.find().sort({ createdAt: -1 });
     const filteredReports = filterReportsWithBatches(reports);
 
-    // ✅ Calculate total boxes
+    // Calculate totals
     const totalBoxesSum = filteredReports.reduce((sum, report) => {
       return sum + (report.totalBoxes || 0);
     }, 0);
 
+    const totalAmountSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalAmount || 0);
+    }, 0);
+
+    const totalDeductionsSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalMrSaleDeductions || 0);
+    }, 0);
+
+    const totalNetAmountSum = totalAmountSum - totalDeductionsSum;
+
+    // Add netAmount to each report
+    const reportsWithNetAmount = filteredReports.map(report => ({
+      ...report.toObject(),
+      netAmount: calculateNetAmount(report)
+    }));
+
     res.status(200).json({
       success: true,
       count: filteredReports.length,
-      totalBoxes: totalBoxesSum, // ✅ Include total boxes
-      reports: filteredReports,
+      totalBoxes: totalBoxesSum,
+      totalAmount: totalAmountSum,
+      totalDeductions: totalDeductionsSum,
+      totalNetAmount: totalNetAmountSum,
+      reports: reportsWithNetAmount,
     });
   } catch (error) {
     console.error("Error fetching reports in hand:", error);
@@ -296,8 +400,7 @@ router.get("/all", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports-in-hand/:id' to '/:id'
-// The rest of your existing routes remain the same
+// ✅ Get single report by ID with net amount
 router.get("/:id", async (req, res) => {
   try {
     const report = await ReportInHand.findById(req.params.id);
@@ -309,9 +412,15 @@ router.get("/:id", async (req, res) => {
       });
     }
 
+    // Add netAmount to the report
+    const reportWithNetAmount = {
+      ...report.toObject(),
+      netAmount: calculateNetAmount(report)
+    };
+
     res.status(200).json({
       success: true,
-      report: report,
+      report: reportWithNetAmount,
     });
   } catch (error) {
     console.error("Error fetching report:", error);
@@ -323,7 +432,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports-in-hand/search/:productName' to '/search/:productName'
+// ✅ Search by product name with net amount
 router.get("/search/:productName", async (req, res) => {
   try {
     const { productName } = req.params;
@@ -339,19 +448,38 @@ router.get("/search/:productName", async (req, res) => {
     const filteredReports = filterReportsWithBatches(reports);
     const paginatedReports = filteredReports.slice(skip, skip + limitNum);
 
-    // ✅ Calculate total boxes for search results
+    // Calculate totals for search results
     const totalBoxesSum = filteredReports.reduce((sum, report) => {
       return sum + (report.totalBoxes || 0);
     }, 0);
+
+    const totalAmountSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalAmount || 0);
+    }, 0);
+
+    const totalDeductionsSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalMrSaleDeductions || 0);
+    }, 0);
+
+    const totalNetAmountSum = totalAmountSum - totalDeductionsSum;
+
+    // Add netAmount to paginated reports
+    const paginatedReportsWithNetAmount = paginatedReports.map(report => ({
+      ...report.toObject(),
+      netAmount: calculateNetAmount(report)
+    }));
 
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
       total: filteredReports.length,
-      totalBoxes: totalBoxesSum, // ✅ Include total boxes
+      totalBoxes: totalBoxesSum,
+      totalAmount: totalAmountSum,
+      totalDeductions: totalDeductionsSum,
+      totalNetAmount: totalNetAmountSum,
       totalPages: Math.ceil(filteredReports.length / limitNum),
       currentPage: pageNum,
-      reports: paginatedReports,
+      reports: paginatedReportsWithNetAmount,
     });
   } catch (error) {
     console.error("Error searching reports:", error);
@@ -363,7 +491,7 @@ router.get("/search/:productName", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports-in-hand/supplier/:supplierName' to '/supplier/:supplierName'
+// ✅ Search by supplier name with net amount
 router.get("/supplier/:supplierName", async (req, res) => {
   try {
     const { supplierName } = req.params;
@@ -379,19 +507,38 @@ router.get("/supplier/:supplierName", async (req, res) => {
     const filteredReports = filterReportsWithBatches(reports);
     const paginatedReports = filteredReports.slice(skip, skip + limitNum);
 
-    // ✅ Calculate total boxes for supplier
+    // Calculate totals for supplier
     const totalBoxesSum = filteredReports.reduce((sum, report) => {
       return sum + (report.totalBoxes || 0);
     }, 0);
+
+    const totalAmountSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalAmount || 0);
+    }, 0);
+
+    const totalDeductionsSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalMrSaleDeductions || 0);
+    }, 0);
+
+    const totalNetAmountSum = totalAmountSum - totalDeductionsSum;
+
+    // Add netAmount to paginated reports
+    const paginatedReportsWithNetAmount = paginatedReports.map(report => ({
+      ...report.toObject(),
+      netAmount: calculateNetAmount(report)
+    }));
 
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
       total: filteredReports.length,
-      totalBoxes: totalBoxesSum, // ✅ Include total boxes
+      totalBoxes: totalBoxesSum,
+      totalAmount: totalAmountSum,
+      totalDeductions: totalDeductionsSum,
+      totalNetAmount: totalNetAmountSum,
       totalPages: Math.ceil(filteredReports.length / limitNum),
       currentPage: pageNum,
-      reports: paginatedReports,
+      reports: paginatedReportsWithNetAmount,
     });
   } catch (error) {
     console.error("Error fetching supplier reports:", error);
@@ -403,8 +550,7 @@ router.get("/supplier/:supplierName", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports-in-hand/summary/total-boxes' to '/summary/total-boxes'
-// ✅ NEW: Get total boxes summary
+// ✅ Summary route with net amount
 router.get("/summary/total-boxes", async (req, res) => {
   try {
     const allReports = await ReportInHand.find();
@@ -414,21 +560,35 @@ router.get("/summary/total-boxes", async (req, res) => {
       return sum + (report.totalBoxes || 0);
     }, 0);
 
+    const totalAmountSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalAmount || 0);
+    }, 0);
+
+    const totalDeductionsSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalMrSaleDeductions || 0);
+    }, 0);
+
+    const totalNetAmountSum = totalAmountSum - totalDeductionsSum;
+
     const averageBoxesPerProduct =
       filteredReports.length > 0 ? totalBoxesSum / filteredReports.length : 0;
 
+    const averageNetAmountPerProduct =
+      filteredReports.length > 0 ? totalNetAmountSum / filteredReports.length : 0;
+
     // Group by status
     const byStatus = {
-      "In Stock": 0,
-      "Low Stock": 0,
-      Critical: 0,
-      "Out of Stock": 0,
+      "In Stock": { boxes: 0, netAmount: 0 },
+      "Low Stock": { boxes: 0, netAmount: 0 },
+      Critical: { boxes: 0, netAmount: 0 },
+      "Out of Stock": { boxes: 0, netAmount: 0 },
     };
 
     filteredReports.forEach((report) => {
       const status = report.status || "Out of Stock";
       if (byStatus.hasOwnProperty(status)) {
-        byStatus[status] += report.totalBoxes || 0;
+        byStatus[status].boxes += report.totalBoxes || 0;
+        byStatus[status].netAmount += calculateNetAmount(report);
       }
     });
 
@@ -437,7 +597,11 @@ router.get("/summary/total-boxes", async (req, res) => {
       summary: {
         totalProducts: filteredReports.length,
         totalBoxes: totalBoxesSum,
+        totalAmount: totalAmountSum,
+        totalDeductions: totalDeductionsSum,
+        totalNetAmount: totalNetAmountSum,
         averageBoxesPerProduct: parseFloat(averageBoxesPerProduct.toFixed(2)),
+        averageNetAmountPerProduct: parseFloat(averageNetAmountPerProduct.toFixed(2)),
         byStatus: byStatus,
       },
     });

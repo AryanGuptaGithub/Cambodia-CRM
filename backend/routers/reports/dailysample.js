@@ -138,8 +138,6 @@ const updateStockOnAdd = async (dailySample, session = null) => {
     // Update MR stock
     const lc = 0; // you may fetch actual LC from product catalog if needed
     await updateMRStock(mrName, productName, qty, lc, session);
-
-    console.log(`✅ Stock moved: ${qty} of ${productName} from warehouse to MR ${mrName}`);
   } catch (error) {
     console.error("❌ Error in updateStockOnAdd:", error);
     throw error;

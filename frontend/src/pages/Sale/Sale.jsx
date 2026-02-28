@@ -18,18 +18,9 @@
     Download,
     CheckCircle,
     Save,
-    Calendar,
-    DollarSign,
-    ShoppingCart,
-    User,
-    ClipboardList,
-    CreditCard,
-    Truck,
-    Clock,
     PackageCheck,
   } from "lucide-react";
   import ReactDOM from "react-dom";
-  import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
   import { showToast } from "../../utils/toast";
   import axios from "axios";
   import { formatDateToReadable } from "../../utils/dateUtil";
@@ -46,15 +37,14 @@
   } from "../../pages/ProductManager/common/fetchDropdown.jsx";
   import InputField from "../../components/common/InputField";
   import LoadingOverlay from "../../components/Loading";
+  import SearchableDropdown from "../../components/common/SearchableDropdown";
   import * as XLSX from "xlsx";
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
   const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
+  const isSampleDownloadFile =
+    import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
 
-  // ✅ Read the sample download flag
-  const isSampleDownloadFile = import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
-
-  //suraj
   const getAuthHeaders = () => {
     const token = localStorage.getItem("token");
     return {
@@ -65,7 +55,40 @@
     };
   };
 
-  // Stock Validation Modal Component
+  const isMRSaleDoc = (sale) => {
+    if (sale.saleType === "MR Sale") return true;
+    if (sale.saleType === "Normal Sale") return false;
+    if (sale.isMRSale === true) return true;
+    if (sale.isMrSaleImport === true) return true;
+    if (
+      typeof sale.saleType === "string" &&
+      sale.saleType.toLowerCase().includes("mr")
+    )
+      return true;
+    return false;
+  };
+
+  // ----- Helper to compute payment status (aligned with AddSale) -----
+  const computePaymentStatus = (paid, net) => {
+    if (paid <= 0) return "Credit";
+    if (paid >= net - 0.001) return "Cash"; // fully paid -> Cash
+    return "Partial Paid";
+  };
+
+  // ----- Helper to filter numeric input (positive numbers with optional decimal) -----
+  const filterNumericInput = (value, allowDecimal = true) => {
+    let filtered = value.replace(/[^\d.]/g, "");
+    const parts = filtered.split(".");
+    if (parts.length > 2) {
+      filtered = parts[0] + "." + parts.slice(1).join("");
+    }
+    if (!allowDecimal) {
+      filtered = filtered.replace(".", "");
+    }
+    return filtered;
+  };
+
+  // ----- StockValidationModal -----
   const StockValidationModal = ({
     isOpen,
     onClose,
@@ -108,10 +131,8 @@
         const ws = XLSX.utils.json_to_sheet(excelData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
-
         const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`;
         XLSX.writeFile(wb, fileName);
-
         showToast("success", "Stock issues report downloaded");
       } catch (error) {
         console.error("Download error:", error);
@@ -120,175 +141,123 @@
     }, [stockIssues]);
 
     return ReactDOM.createPortal(
-      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
-        <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-          <div
-            className={`mb-6 ${isBlocked ? "bg-red-50 border-red-200" : "bg-yellow-50 border-yellow-200"} border-2 rounded-xl p-5`}
+      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+        <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
           >
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                {isBlocked ? (
-                  <>
-                    <AlertCircle size={24} className="text-red-800" />
-                    <span className="text-red-800">
-                      ❌ Insufficient Stock - Import Blocked
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <AlertCircle size={24} className="text-yellow-800" />
-                    <span className="text-yellow-800">
-                      ⚠️ Missing Products - Review Required
-                    </span>
-                  </>
-                )}
-              </h2>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${isBlocked ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"}`}
-                >
-                  {stockIssues.length} Stock Issues
-                </span>
-                <button
-                  onClick={downloadStockIssuesExcel}
-                  disabled={isDownloading}
-                  className="px-3 py-1 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Download as Excel"
-                >
-                  <Download size={14} /> Excel
-                </button>
-              </div>
-            </div>
+            <X size={20} />
+          </button>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">Total Required</div>
-                <div className="text-2xl font-bold text-red-800">
-                  {summary.totalRequired || 0}
-                </div>
-              </div>
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">Total Available</div>
-                <div className="text-2xl font-bold text-green-800">
-                  {summary.totalAvailable || 0}
-                </div>
-              </div>
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">Insufficient Stock</div>
-                <div className="text-2xl font-bold text-red-800">
-                  {summary.totalInsufficient || 0}
-                </div>
-              </div>
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">Missing Products</div>
-                <div className="text-2xl font-bold text-orange-800">
-                  {summary.missingProducts || 0}
-                </div>
-              </div>
-            </div>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">
+            {isBlocked ? (
+              <>❌ Insufficient Stock - Import Blocked</>
+            ) : (
+              <>⚠️ Missing Products - Review Required</>
+            )}
+          </h2>
 
-            <div
-              className={`p-3 ${isBlocked ? "bg-red-100 border-red-300" : "bg-yellow-100 border-yellow-300"} border rounded-lg`}
+          <div className="flex gap-3 mb-4">
+            <button
+              onClick={downloadStockIssuesExcel}
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm"
             >
-              <p
-                className={`text-sm font-medium ${isBlocked ? "text-red-900" : "text-yellow-900"}`}
-              >
-                {isBlocked ? (
-                  <>
-                    ⛔ <strong>IMPORT BLOCKED:</strong>{" "}
-                    {summary.totalInsufficient || 0} products have insufficient
-                    stock.
-                    <br />
-                    <br />
-                    <strong>You must:</strong>
-                    <br />
-                    1. Update your inventory to have sufficient stock
-                    <br />
-                    2. Or reduce quantities in your import file
-                    <br />
-                    3. Then try the import again
-                  </>
-                ) : (
-                  <>
-                    ⚠️ <strong>Missing Products Found:</strong>{" "}
-                    {summary.missingProducts || 0} products are not in inventory.
-                    <br />
-                    <br />
-                    <strong>These products will:</strong>
-                    <br />
-                    1. Be created automatically during import
-                    <br />
-                    2. Have zero initial stock (you'll need to add inventory
-                    later)
-                    <br />
-                    3. Appear in your product catalog
-                    <br />
-                    <br />
-                    <strong>
-                      You can proceed if you want to create these products.
-                    </strong>
-                  </>
-                )}
-              </p>
-            </div>
+              <Download size={14} />
+              {stockIssues.length} Stock Issues Excel
+            </button>
           </div>
 
-          <div className="mb-6">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-medium text-gray-700">
-                Stock Issues Details ({stockIssues.length} products)
-              </h3>
-            </div>
+          <div className="grid grid-cols-4 gap-3 mb-4">
+            {[
+              ["Total Required", summary.totalRequired || 0],
+              ["Total Available", summary.totalAvailable || 0],
+              ["Insufficient Stock", summary.totalInsufficient || 0],
+              ["Missing Products", summary.missingProducts || 0],
+            ].map(([label, val]) => (
+              <div key={label} className="bg-gray-50 p-3 rounded-lg text-center">
+                <div className="text-xs text-gray-500">{label}</div>
+                <div className="text-xl font-bold text-gray-800">{val}</div>
+              </div>
+            ))}
+          </div>
 
-            <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-[400px] overflow-y-auto">
+          <div
+            className={`p-4 rounded-lg mb-4 ${
+              isBlocked
+                ? "bg-red-50 border border-red-200"
+                : "bg-yellow-50 border border-yellow-200"
+            }`}
+          >
+            {isBlocked ? (
+              <>
+                <p className="font-semibold text-red-800">
+                  ⛔ IMPORT BLOCKED: {summary.totalInsufficient || 0} products
+                  have insufficient stock. You must:
+                </p>
+                <ol className="mt-2 text-sm text-red-700 list-decimal list-inside space-y-1">
+                  <li>Update your inventory to have sufficient stock</li>
+                  <li>Or reduce quantities in your import file</li>
+                  <li>Then try the import again</li>
+                </ol>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-yellow-800">
+                  ⚠️ Missing Products Found: {summary.missingProducts || 0}{" "}
+                  products are not in inventory. These products will:
+                </p>
+                <ol className="mt-2 text-sm text-yellow-700 list-decimal list-inside space-y-1">
+                  <li>Be created automatically during import</li>
+                  <li>
+                    Have zero initial stock (you'll need to add inventory later)
+                  </li>
+                  <li>Appear in your product catalog</li>
+                </ol>
+                <p className="mt-2 text-sm text-yellow-700">
+                  You can proceed if you want to create these products.
+                </p>
+              </>
+            )}
+          </div>
+
+          <div className="border border-gray-200 rounded-lg overflow-hidden mb-4">
+            <div className="bg-gray-50 px-4 py-2 font-medium text-sm">
+              Stock Issues Details ({stockIssues.length} products)
+            </div>
+            <div className="overflow-x-auto max-h-64">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 sticky top-0">
+                <thead className="bg-gray-100">
                   <tr>
-                    <th className="p-3 text-left">Product Name</th>
-                    <th className="p-3 text-left">Required Quantity</th>
-                    <th className="p-3 text-left">Available Stock</th>
-                    <th className="p-3 text-left">Shortage</th>
-                    <th className="p-3 text-left">Status</th>
+                    {[
+                      "Product Name",
+                      "Required Quantity",
+                      "Available Stock",
+                      "Shortage",
+                      "Status",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-3 py-2 text-left font-medium text-gray-600"
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {stockIssues.map((issue, idx) => (
-                    <tr
-                      key={idx}
-                      className={`hover:bg-gray-50 border-b ${
-                        !issue.productExists
-                          ? "bg-yellow-50"
+                    <tr key={idx} className="border-t">
+                      <td className="px-3 py-2">{issue.productName}</td>
+                      <td className="px-3 py-2">{issue.totalRequired}</td>
+                      <td className="px-3 py-2">{issue.availableStock}</td>
+                      <td className="px-3 py-2">{issue.insufficientQty || 0}</td>
+                      <td className="px-3 py-2">
+                        {!issue.productExists
+                          ? "⚠️ Missing"
                           : issue.insufficient
-                            ? "bg-red-50"
-                            : ""
-                      }`}
-                    >
-                      <td className="p-3 font-medium">{issue.productName}</td>
-                      <td className="p-3 font-bold text-red-700">
-                        {issue.totalRequired}
-                      </td>
-                      <td className="p-3 font-medium text-green-700">
-                        {issue.availableStock}
-                      </td>
-                      <td className="p-3 font-bold text-red-800">
-                        {issue.insufficientQty || 0}
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`px-2 py-1 text-xs rounded ${
-                            !issue.productExists
-                              ? "bg-yellow-100 text-yellow-800"
-                              : issue.insufficient
-                                ? "bg-red-100 text-red-800"
-                                : "bg-green-100 text-green-800"
-                          }`}
-                        >
-                          {!issue.productExists
-                            ? "⚠️ Missing"
-                            : issue.insufficient
-                              ? "❌ Insufficient"
-                              : "✅ Available"}
-                        </span>
+                            ? "❌ Insufficient"
+                            : "✅ Available"}
                       </td>
                     </tr>
                   ))}
@@ -297,36 +266,34 @@
             </div>
           </div>
 
-          <div className="flex justify-between items-center pt-4 border-t border-gray-300">
-            <div className="text-sm text-gray-600">
-              {summary.totalInvoices || 0} invoices affected
-            </div>
-            <div className="flex gap-3">
-              {isBlocked ? (
+          <p className="text-sm text-gray-500 mb-4">
+            {summary.totalInvoices || 0} invoices affected
+          </p>
+
+          <div className="flex justify-end gap-3">
+            {isBlocked ? (
+              <button
+                onClick={onCancel}
+                className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
+              >
+                Cancel Import
+              </button>
+            ) : (
+              <>
                 <button
-                  onClick={onClose}
-                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium cursor-pointer"
+                  onClick={onCancel}
+                  className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
                 >
-                  Cancel Import
+                  Cancel
                 </button>
-              ) : (
-                <>
-                  <button
-                    onClick={onCancel}
-                    className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={onProceed}
-                    className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-2 cursor-pointer"
-                  >
-                    <CheckCircle size={16} />
-                    Proceed with Missing Products
-                  </button>
-                </>
-              )}
-            </div>
+                <button
+                  onClick={onProceed}
+                  className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg"
+                >
+                  Proceed with Missing Products
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>,
@@ -334,6 +301,7 @@
     );
   };
 
+  // ----- MRValidationModal -----
   const MRValidationModal = ({
     isOpen,
     onClose,
@@ -345,112 +313,8 @@
     const { mrIssues = [], summary = {}, totalInvoices = 0 } = mrValidationResult;
 
     return ReactDOM.createPortal(
-      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
-        <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-          <div className="mb-6 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-5">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-xl font-bold text-yellow-800 flex items-center gap-2">
-                <AlertCircle size={24} />
-                ⚠️ Invalid MRs Detected
-              </h2>
-              <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-                {mrIssues.length} Invalid MRs
-              </span>
-            </div>
-
-            <div className="p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
-              <p className="text-sm text-yellow-900 font-medium">
-                ⚠️ <strong>Warning:</strong> The following MRs are not registered
-                in the Staff system.
-                <br />
-                <br />
-                <strong>These invoices will still be imported, but:</strong>
-                <br />
-                1. MR names will be saved as provided
-                <br />
-                2. You can add these MRs to Staff module later
-                <br />
-                3. Reports may show "Unknown" for unregistered MRs
-                <br />
-                <br />
-                <strong className="text-yellow-700">
-                  You can proceed with import if this is acceptable.
-                </strong>
-              </p>
-            </div>
-          </div>
-
-          <div className="mb-6">
-            <h3 className="font-medium text-gray-700 mb-3 text-lg">
-              Invalid MRs List ({mrIssues.length} MRs)
-            </h3>
-
-            <div className="overflow-x-auto border-2 border-yellow-200 rounded-lg max-h-[400px] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-yellow-100 sticky top-0">
-                  <tr>
-                    <th className="p-3 text-left font-bold">MR Name</th>
-                    <th className="p-3 text-left font-bold">Error</th>
-                    <th className="p-3 text-left font-bold">Affected Invoices</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mrIssues.map((issue, idx) => (
-                    <tr
-                      key={idx}
-                      className="hover:bg-yellow-50 border-b border-yellow-100"
-                    >
-                      <td className="p-3 font-bold text-yellow-700">
-                        {issue.mrName}
-                      </td>
-                      <td className="p-3 text-yellow-600 text-xs font-medium">
-                        {issue.message}
-                      </td>
-                      <td className="p-3">
-                        <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-bold">
-                          {issue.affectedCount} invoices
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="flex justify-between items-center pt-4 border-t-2 border-gray-300">
-            <div className="text-sm text-gray-600">
-              <strong className="text-yellow-600">Warning:</strong> MRs not found
-              in Staff module
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={onClose}
-                className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={onProceed}
-                className="px-6 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium cursor-pointer flex items-center gap-2"
-              >
-                <CheckCircle size={16} />
-                Proceed Anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>,
-      document.body,
-    );
-  };
-
-  const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
-    if (!isOpen) return null;
-
-    return ReactDOM.createPortal(
-      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[120]">
-        <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+        <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
           <button
             onClick={onClose}
             className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -458,49 +322,149 @@
             <X size={20} />
           </button>
 
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">
-            Failed Invoices ({failedInvoices.length})
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">
+            ⚠️ Invalid MRs Detected
           </h2>
+          <div className="inline-block bg-yellow-100 text-yellow-800 text-sm px-3 py-1 rounded-full mb-4">
+            {mrIssues.length} Invalid MRs
+          </div>
 
-          <div className="mb-6">
-            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4 text-sm text-yellow-800">
+            <p className="font-semibold mb-1">
+              ⚠️ Warning: The following MRs are not registered in the Staff
+              system. These invoices will still be imported, but:
+            </p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>MR names will be saved as provided</li>
+              <li>You can add these MRs to Staff module later</li>
+              <li>Reports may show "Unknown" for unregistered MRs</li>
+            </ol>
+            <p className="mt-2">
+              You can proceed with import if this is acceptable.
+            </p>
+          </div>
+
+          <div className="border border-gray-200 rounded-lg overflow-hidden mb-4">
+            <div className="bg-gray-50 px-4 py-2 font-medium text-sm">
+              Invalid MRs List ({mrIssues.length} MRs)
+            </div>
+            <div className="overflow-x-auto max-h-64">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-100">
                   <tr>
-                    <th className="p-3 text-left border-b">Row</th>
-                    <th className="p-3 text-left border-b">Invoice #</th>
-                    <th className="p-3 text-left border-b">Customer</th>
-                    <th className="p-3 text-left border-b">MR Name</th>
-                    <th className="p-3 text-left border-b">Error Message</th>
+                    {["MR Name", "Error", "Affected Invoices"].map((h) => (
+                      <th
+                        key={h}
+                        className="px-3 py-2 text-left font-medium text-gray-600"
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {failedInvoices.slice(0, 50).map((inv, idx) => (
-                    <tr key={idx} className="hover:bg-red-50 border-b">
-                      <td className="p-3 font-mono">{inv.row || idx + 1}</td>
-                      <td className="p-3 font-medium">{inv.invoiceNumber}</td>
-                      <td className="p-3">{inv.customerName || "N/A"}</td>
-                      <td className="p-3">{inv.mrName || "N/A"}</td>
-                      <td className="p-3 text-red-600 max-w-xs">
-                        {inv.error || inv.message || "Unknown error"}
+                  {mrIssues.map((issue, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="px-3 py-2">{issue.mrName}</td>
+                      <td className="px-3 py-2 text-red-600">{issue.message}</td>
+                      <td className="px-3 py-2">
+                        {issue.affectedCount} invoices
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-
-              {failedInvoices.length > 50 && (
-                <div className="p-3 text-center text-gray-500 text-sm bg-gray-50">
-                  Showing 50 of {failedInvoices.length} failed invoices
-                </div>
-              )}
             </div>
           </div>
 
-          <div className="flex justify-end border-t border-gray-300 pt-4">
+          <p className="text-xs text-gray-500 mb-4">
+            Warning: MRs not found in Staff module
+          </p>
+
+          <div className="flex justify-end gap-3">
             <button
               onClick={onClose}
-              className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+              className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onProceed}
+              className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg"
+            >
+              Proceed Anyway
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  };
+
+  // ----- FailedInvoicesModal -----
+  const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
+    if (!isOpen) return null;
+
+    return ReactDOM.createPortal(
+      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+        <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+
+          <h2 className="text-xl font-semibold text-red-700 mb-4">
+            Failed Invoices ({failedInvoices.length})
+          </h2>
+
+          <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  {[
+                    "Row",
+                    "Invoice #",
+                    "Customer",
+                    "MR Name",
+                    "Error Message",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2 text-left font-medium text-gray-600"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {failedInvoices.slice(0, 50).map((inv, idx) => (
+                  <tr key={idx} className="border-t">
+                    <td className="px-3 py-2">{inv.row || idx + 1}</td>
+                    <td className="px-3 py-2">{inv.invoiceNumber}</td>
+                    <td className="px-3 py-2">{inv.customerName || "N/A"}</td>
+                    <td className="px-3 py-2">{inv.mrName || "N/A"}</td>
+                    <td className="px-3 py-2 text-red-600">
+                      {inv.error || inv.message || "Unknown error"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {failedInvoices.length > 50 && (
+            <p className="text-sm text-gray-500 mt-2 text-center">
+              Showing 50 of {failedInvoices.length} failed invoices
+            </p>
+          )}
+
+          <div className="flex justify-end mt-4">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
             >
               Close
             </button>
@@ -540,7 +504,6 @@
     const [mrValidationResult, setMrValidationResult] = useState(null);
     const [showMRValidation, setShowMRValidation] = useState(false);
     const [isValidatingMR, setIsValidatingMR] = useState(false);
-
     const pollingIntervalRef = useRef(null);
 
     const clearPolling = useCallback(() => {
@@ -560,7 +523,6 @@
           setStockValidationResult(null);
           setMrValidationResult(null);
         }
-
         setShowParsedSection(false);
         setShowFailedInvoices(false);
         setShowStockValidation(false);
@@ -576,7 +538,6 @@
         setImportStep("");
         setIsCancelled(false);
         clearPolling();
-
         const fileInput = document.querySelector('input[type="file"]');
         if (fileInput) fileInput.value = "";
       },
@@ -610,7 +571,6 @@
       showToast("info", "Import cancelled");
     }, [clearPolling]);
 
-    // ── parseExcelDate ────────────────────────────────────────────────────────
     const parseExcelDate = useCallback((value) => {
       if (value === null || value === undefined || value === "") {
         return new Date().toISOString().split("T")[0];
@@ -653,7 +613,6 @@
       }
     }, []);
 
-    // ── parseExcelQuantity ────────────────────────────────────────────────────
     const parseExcelQuantity = useCallback((value) => {
       if (value === null || value === undefined || value === "") return 0;
       try {
@@ -670,7 +629,6 @@
       }
     }, []);
 
-    // ── parseExcelAmount ──────────────────────────────────────────────────────
     const parseExcelAmount = useCallback((value) => {
       if (value === null || value === undefined || value === "") return 0;
       try {
@@ -703,18 +661,12 @@
 
               const firstSheetName = workbook.SheetNames[0];
               const worksheet = workbook.Sheets[firstSheetName];
-
-              // Convert all rows to an array of arrays
               const rows = XLSX.utils.sheet_to_json(worksheet, {
                 header: 1,
                 defval: "",
                 raw: true,
               });
 
-              console.log("RAW EXCEL DATA - Total rows in sheet:", rows.length);
-              console.log("First 5 rows:", rows.slice(0, 5));
-
-              // ----- Find the header row -----
               const isHeaderRow = (row) => {
                 if (!Array.isArray(row) || row.length === 0) return false;
                 const rowStr = row
@@ -746,44 +698,22 @@
 
               const headerRow = rows[headerIndex];
               const allDataRows = rows.slice(headerIndex + 1);
-              console.log(`All data rows (raw) count: ${allDataRows.length}`);
-              console.log("First 5 raw data rows:", allDataRows.slice(0, 5));
-
-              // Filter out completely empty rows (all cells are empty strings, null, or undefined)
-              const dataRows = allDataRows.filter((row, idx) => {
-                const hasContent =
+              const dataRows = allDataRows.filter(
+                (row) =>
                   Array.isArray(row) &&
                   row.some(
                     (cell) =>
                       cell !== null &&
                       cell !== undefined &&
                       String(cell).trim() !== "",
-                  );
-                // Log the first few empty rows to see why they are considered empty
-                if (!hasContent && idx < 10) {
-                  console.log(`Row ${idx} considered empty:`, row);
-                }
-                return hasContent;
-              });
-
-              console.log(
-                `Header found at row ${headerIndex + 1}. ` +
-                  `Data rows available: ${dataRows.length} (total rows after header: ${allDataRows.length})`,
+                  ),
               );
 
               if (dataRows.length === 0) {
-                reject(
-                  new Error(
-                    `No data rows found. Your file has a header at row ${
-                      headerIndex + 1
-                    } but all rows below it are empty according to our check.\n` +
-                      `Here are the first 3 raw data rows for inspection:\n${JSON.stringify(allDataRows.slice(0, 3), null, 2)}`,
-                  ),
-                );
+                reject(new Error(`No data rows found after the header row.`));
                 return;
               }
 
-              // ----- Flexible column mapping (unchanged) -----
               const headerMap = {};
               headerRow.forEach((cell, idx) => {
                 if (cell !== null && cell !== undefined) {
@@ -917,7 +847,7 @@
 
               for (let ri = 0; ri < dataRows.length; ri++) {
                 const row = dataRows[ri];
-                const excelRow = headerIndex + 2 + ri; // original Excel row number
+                const excelRow = headerIndex + 2 + ri;
 
                 const invoiceNumber = getVal(row, col.invoiceNumber);
                 const invoiceDate = getVal(row, col.invoiceDate);
@@ -928,7 +858,6 @@
                 const productName = getVal(row, col.productName);
                 const paymentStatus = getVal(row, col.paymentStatus);
                 const remarks = getVal(row, col.remarks);
-
                 const salesQty = parseExcelQuantity(getVal(row, col.salesQty));
                 const bonusQty = parseExcelQuantity(getVal(row, col.bonusQty));
                 const sellingPrice = parseExcelAmount(
@@ -959,7 +888,6 @@
                 }
 
                 validRowCount++;
-
                 const netSellingAmount = sellingPrice * salesQty - discount;
 
                 if (!groupedInvoices[invoiceNumber]) {
@@ -979,6 +907,7 @@
                     paymentStatus: paymentStatus || "Credit",
                     remark: remarks || "",
                     isMrSaleImport: importSaleType === "mr",
+                    saleType: importSaleType === "mr" ? "MR Sale" : "Normal Sale",
                   };
                 }
 
@@ -1004,11 +933,6 @@
                 groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
               }
 
-              console.log(
-                `Parsing summary — data rows: ${dataRows.length}, ` +
-                  `valid: ${validRowCount}, errors: ${validationErrors.length}`,
-              );
-
               const validInvoices = Object.values(groupedInvoices).filter(
                 (inv) => inv.products && inv.products.length > 0,
               );
@@ -1020,15 +944,9 @@
                 );
               });
 
-              console.log(`Final result: ${validInvoices.length} valid invoices`);
-
               if (validInvoices.length === 0) {
                 let errorMsg = "No valid invoices found. ";
-                if (dataRows.length === 0) {
-                  errorMsg += `Your file has no data rows below the header (row ${
-                    headerIndex + 1
-                  }). Please add invoice data.`;
-                } else if (validationErrors.length > 0) {
+                if (validationErrors.length > 0) {
                   errorMsg +=
                     `${validationErrors.length} row(s) had validation errors. ` +
                     validationErrors
@@ -1055,7 +973,6 @@
       [parseExcelDate, parseExcelQuantity, parseExcelAmount, importSaleType],
     );
 
-    // Handle file upload
     const handleFileUpload = useCallback(
       async (e) => {
         const file = e.target.files[0];
@@ -1063,7 +980,6 @@
 
         const validExtensions = [".xlsx", ".xls", ".csv"];
         const fileExtension = "." + file.name.split(".").pop().toLowerCase();
-
         if (!validExtensions.includes(fileExtension)) {
           showToast(
             "error",
@@ -1071,7 +987,6 @@
           );
           return;
         }
-
         if (file.size > 20 * 1024 * 1024) {
           showToast("error", "File size too large. Maximum size is 20MB.");
           return;
@@ -1085,7 +1000,6 @@
         try {
           setImportMessage("Processing Excel data...");
           const { validInvoices, validationErrors } = await parseExcelFile(file);
-          console.log("values of validInvoices", validInvoices);
 
           if (validInvoices.length === 0) {
             throw new Error("No valid invoices found in the file");
@@ -1094,6 +1008,11 @@
           if (importSaleType === "mr") {
             validInvoices.forEach((inv) => {
               inv.isMrSaleImport = true;
+              inv.saleType = "MR Sale";
+            });
+          } else {
+            validInvoices.forEach((inv) => {
+              inv.saleType = "Normal Sale";
             });
           }
 
@@ -1211,7 +1130,6 @@
           setIsValidatingStock(true);
           setImportMessage(`Checking stock for ${invoices.length} invoices...`);
 
-          // For MR sales, skip warehouse stock validation
           if (importSaleType === "mr") {
             setIsValidatingStock(false);
             return {
@@ -1373,6 +1291,7 @@
         confirmButtonText: "Yes, Create Products",
         cancelButtonText: "Cancel",
       });
+
       if (confirmProceed.isConfirmed) {
         setShowStockValidation(false);
         await handleProductImport(parsedData);
@@ -1400,12 +1319,10 @@
         setServerProcessed(0);
         setServerTotal(dataToImport.length);
         setFailedInvoices([]);
-
         abortControllerRef.current = new AbortController();
 
         try {
           const isMrSale = importSaleType === "mr";
-
           const transformedInvoices = dataToImport.map((inv) => ({
             ...inv,
             invoiceDate:
@@ -1416,6 +1333,8 @@
             totalAmount: inv.totalAmount || 0,
             dueAmount: inv.dueAmount || 0,
             isMrSaleImport: isMrSale,
+            isMRSale: isMrSale,
+            saleType: isMrSale ? "MR Sale" : "Normal Sale",
             products: inv.products.map((product) => ({
               ...product,
               salesQty: Number(product.salesQty) || 0,
@@ -1426,7 +1345,6 @@
           }));
 
           setImportStep("Sending to server...");
-
           const response = await axios.post(
             `${backendUrl}/api/sales/import-with-stock-deduction`,
             {
@@ -1503,7 +1421,6 @@
                         );
                       }
                     }
-
                     setImportStep("Import completed");
                   }
                 }
@@ -1518,7 +1435,6 @@
         } catch (err) {
           clearPolling();
           setIsImporting(false);
-
           if (axios.isCancel(err) || isCancelled) {
             setImportStep("Import cancelled");
             showToast("info", "Import cancelled");
@@ -1560,37 +1476,38 @@
 
     return ReactDOM.createPortal(
       <>
-        <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-40">
+          <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={handleClose}
               className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              disabled={isImporting || isUploading || isProcessingFile}
             >
               <X size={20} />
             </button>
 
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
+              <Upload size={20} />
               Import Sales Data
             </h2>
 
+            {/* Sale type toggle */}
             {!isImporting && (
-              <div className="flex rounded-xl overflow-hidden border border-gray-200 mb-6">
+              <div className="flex rounded-lg overflow-hidden border border-gray-200 mb-4">
                 <button
                   onClick={() => {
                     setImportSaleType("normal");
                     resetParsedData();
                   }}
                   disabled={isImporting || isValidatingStock || isValidatingMR}
-                  className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "normal" ? "bg-indigo-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+                  className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    importSaleType === "normal"
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                  }`}
                 >
                   <Package size={16} />
                   Normal Sale
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "normal" ? "bg-indigo-500 text-white" : "bg-gray-200 text-gray-600"}`}
-                  >
-                    Warehouse Stock
-                  </span>
+                  <span className="text-xs opacity-75">Warehouse Stock</span>
                 </button>
                 <button
                   onClick={() => {
@@ -1598,22 +1515,27 @@
                     resetParsedData();
                   }}
                   disabled={isImporting || isValidatingStock || isValidatingMR}
-                  className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "mr" ? "bg-green-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+                  className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
+                    importSaleType === "mr"
+                      ? "bg-green-600 text-white"
+                      : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                  }`}
                 >
-                  <User size={16} />
+                  <UserPlus size={16} />
                   MR Sale
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${importSaleType === "mr" ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"}`}
-                  >
-                    MR Hand Stock
-                  </span>
+                  <span className="text-xs opacity-75">MR Hand Stock</span>
                 </button>
               </div>
             )}
 
+            {/* Info banner */}
             {!isImporting && (
               <div
-                className={`mb-5 p-3 rounded-lg text-sm ${importSaleType === "normal" ? "bg-indigo-50 text-indigo-800 border border-indigo-200" : "bg-green-50 text-green-800 border border-green-200"}`}
+                className={`p-3 rounded-lg mb-4 text-sm ${
+                  importSaleType === "normal"
+                    ? "bg-indigo-50 text-indigo-800"
+                    : "bg-green-50 text-green-800"
+                }`}
               >
                 {importSaleType === "normal" ? (
                   <p>
@@ -1630,169 +1552,160 @@
               </div>
             )}
 
+            {/* Upload area */}
             {!showParsedSection &&
               !isUploading &&
               !isProcessingFile &&
               !isImporting && (
-                <div className="mb-8">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-8 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-colors mb-4">
+                  <Upload size={40} className="text-gray-400 mb-3" />
+                  <p className="font-medium text-gray-700">
                     Upload Excel/CSV File
-                  </label>
-                  <div className="border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-lg p-8 text-center transition-colors">
-                    <Upload className="mx-auto text-gray-400 mb-3" size={48} />
-                    <p className="text-gray-600 mb-2">
-                      Drag & drop your file here or click to browse
-                    </p>
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      onChange={handleFileUpload}
-                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
-                      disabled={isUploading || isProcessingFile}
-                    />
-                    <p className="text-xs text-gray-500 mt-3">
-                      Supported formats: Excel (.xlsx, .xls), CSV (.csv) | Max
-                      size: 20MB
-                    </p>
-                    <SampleExcelDownloadSale />
-                  </div>
-                </div>
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Drag & drop your file here or click to browse
+                  </p>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Supported formats: Excel (.xlsx, .xls), CSV (.csv) | Max size:
+                    20MB
+                  </p>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
               )}
 
+            {/* Processing states */}
             {(isUploading || isProcessingFile) && (
-              <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
-                <div className="flex items-center justify-center gap-3 mb-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <h3 className="font-medium text-blue-800">
-                    {isUploading ? "Uploading..." : "Processing file..."}
-                  </h3>
-                </div>
-                <p className="text-center text-gray-600">{importMessage}</p>
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto mb-3" />
+                <p className="font-medium text-gray-700">
+                  {isUploading ? "Uploading..." : "Processing file..."}
+                </p>
+                <p className="text-sm text-gray-500 mt-1">{importMessage}</p>
               </div>
             )}
 
             {isValidatingMR && (
-              <div className="mb-6 bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
-                <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                  <div className="flex-1">
-                    <h3 className="font-medium text-blue-800">
-                      Validating MRs...
-                    </h3>
-                    <p className="text-sm text-blue-700 mt-1">
-                      Checking MR names for {parsedData.length} invoices...
-                    </p>
-                  </div>
-                </div>
+              <div className="text-center py-6 bg-yellow-50 rounded-lg mb-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-600 mx-auto mb-2" />
+                <p className="font-medium text-yellow-800">Validating MRs...</p>
+                <p className="text-sm text-yellow-600">
+                  Checking MR names for {parsedData.length} invoices...
+                </p>
               </div>
             )}
 
             {isValidatingStock && (
-              <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <div className="flex items-center gap-3">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-yellow-600"></div>
-                  <div>
-                    <h3 className="font-medium text-yellow-800">
-                      Checking Stock Availability
-                    </h3>
-                    <p className="text-sm text-yellow-700 mt-1">
-                      Validating stock for {parsedData.length} invoices...
-                    </p>
-                  </div>
-                </div>
+              <div className="text-center py-6 bg-blue-50 rounded-lg mb-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2" />
+                <p className="font-medium text-blue-800">
+                  Checking Stock Availability
+                </p>
+                <p className="text-sm text-blue-600">
+                  Validating stock for {parsedData.length} invoices...
+                </p>
               </div>
             )}
 
+            {/* Parsed data summary */}
             {showParsedSection && parsedData.length > 0 && (
-              <div
-                className={`mb-6 border rounded-lg p-4 ${importSaleType === "mr" ? "bg-green-50 border-green-200" : "bg-indigo-50 border-indigo-200"}`}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3
-                      className={`font-medium ${importSaleType === "mr" ? "text-green-800" : "text-indigo-800"}`}
-                    >
+              <div className="border border-green-200 bg-green-50 rounded-lg p-4 mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle size={18} className="text-green-600" />
+                    <span className="font-medium text-green-800">
                       File Successfully Parsed
-                    </h3>
-                    <p
-                      className={`text-sm ${importSaleType === "mr" ? "text-green-700" : "text-indigo-700"}`}
-                    >
-                      Found {parsedData.length} valid invoices ready for import
-                    </p>
-                    {importErrorDetails.length > 0 && (
-                      <p className="text-sm text-yellow-700 mt-1">
-                        ⚠️ {importErrorDetails.length} rows skipped due to errors
-                      </p>
-                    )}
+                    </span>
                   </div>
                   <button
                     onClick={resetParsedData}
-                    className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 border border-gray-300 rounded-lg cursor-pointer"
-                    disabled={isImporting || isValidatingStock || isValidatingMR}
+                    className="text-sm text-red-600 hover:text-red-800 flex items-center gap-1"
                   >
+                    <X size={14} />
                     Clear
                   </button>
                 </div>
-
-                <div className="grid grid-cols-3 gap-2 mt-3">
-                  <div className="bg-white p-2 rounded border text-center">
-                    <div className="text-xs text-gray-500">Total Invoices</div>
-                    <div className="font-bold text-lg">{parsedData.length}</div>
-                  </div>
-                  <div className="bg-white p-2 rounded border text-center">
-                    <div className="text-xs text-gray-500">Total Products</div>
-                    <div className="font-bold text-lg">
-                      {parsedData.reduce(
-                        (sum, inv) => sum + (inv.products?.length || 0),
-                        0,
-                      )}
-                    </div>
-                  </div>
-                  <div className="bg-white p-2 rounded border text-center">
-                    <div className="text-xs text-gray-500">Total Amount</div>
-                    <div className="font-bold text-lg">
-                      $
-                      {parsedData
-                        .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0)
-                        .toFixed(2)}
-                    </div>
-                  </div>
-                </div>
-
-                {importSaleType === "mr" && (
-                  <div className="mt-3 p-2 bg-green-100 rounded text-xs text-green-800">
-                    MRs detected in file:{" "}
-                    {[
-                      ...new Set(
-                        parsedData.map((inv) => inv.mrName).filter(Boolean),
-                      ),
-                    ].join(", ") || "None"}
+                <p className="text-sm text-green-700 mb-3">
+                  Found {parsedData.length} valid invoices ready for import
+                </p>
+                {importErrorDetails.length > 0 && (
+                  <div className="bg-yellow-100 text-yellow-800 text-sm px-3 py-1 rounded-full inline-block mb-3">
+                    ⚠️ {importErrorDetails.length} rows skipped due to errors
                   </div>
                 )}
 
-                <div className="mt-4">
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">
+                <div className="grid grid-cols-3 gap-3 mb-3">
+                  {[
+                    ["Total Invoices", parsedData.length],
+                    [
+                      "Total Products",
+                      parsedData.reduce(
+                        (s, i) => s + (i.products?.length || 0),
+                        0,
+                      ),
+                    ],
+                    [
+                      "Total Amount",
+                      `$${parsedData.reduce((s, i) => s + (i.totalAmount || 0), 0).toFixed(2)}`,
+                    ],
+                  ].map(([label, val]) => (
+                    <div
+                      key={label}
+                      className="bg-white rounded-lg p-3 text-center"
+                    >
+                      <div className="text-xs text-gray-500">{label}</div>
+                      <div className="font-bold text-gray-800">{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {importSaleType === "mr" && (
+                  <p className="text-sm text-green-700 mb-3">
+                    MRs detected in file:{" "}
+                    {[
+                      ...new Set(parsedData.map((i) => i.mrName).filter(Boolean)),
+                    ].join(", ") || "None"}
+                  </p>
+                )}
+
+                {/* Sample preview */}
+                <div>
+                  <p className="text-sm font-medium text-gray-700 mb-2">
                     Sample Data (First 3 invoices):
-                  </h4>
-                  <div className="bg-white border rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                  </p>
+                  <div className="overflow-x-auto">
                     <table className="w-full text-xs">
-                      <thead className="bg-gray-50">
+                      <thead className="bg-gray-100">
                         <tr>
-                          <th className="p-2 text-left">Invoice</th>
-                          <th className="p-2 text-left">MR</th>
-                          <th className="p-2 text-left">Products</th>
-                          <th className="p-2 text-left">Amount</th>
+                          {[
+                            "Invoice",
+                            "MR",
+                            "Products",
+                            "Amount",
+                            "Sale Type",
+                          ].map((h) => (
+                            <th key={h} className="px-2 py-1 text-left">
+                              {h}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
                         {parsedData.slice(0, 3).map((inv, idx) => (
                           <tr key={idx} className="border-t">
-                            <td className="p-2 font-mono">{inv.invoiceNumber}</td>
-                            <td className="p-2">{inv.mrName}</td>
-                            <td className="p-2">{inv.products?.length || 0}</td>
-                            <td className="p-2">
+                            <td className="px-2 py-1">{inv.invoiceNumber}</td>
+                            <td className="px-2 py-1">{inv.mrName}</td>
+                            <td className="px-2 py-1">
+                              {inv.products?.length || 0}
+                            </td>
+                            <td className="px-2 py-1">
                               ${inv.totalAmount?.toFixed(2)}
                             </td>
+                            <td className="px-2 py-1">{inv.saleType}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1802,118 +1715,115 @@
               </div>
             )}
 
+            {/* Validation errors */}
             {importErrorDetails.length > 0 &&
               showParsedSection &&
               !isImporting && (
-                <div className="mb-6 border border-yellow-200 rounded-lg overflow-hidden">
-                  <div className="bg-yellow-50 p-3 flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="text-yellow-600" size={18} />
-                      <h3 className="font-medium text-yellow-800">
-                        Validation Errors ({importErrorDetails.length})
-                      </h3>
-                    </div>
+                <div className="border border-red-200 rounded-lg mb-4 overflow-hidden">
+                  <div className="bg-red-50 px-4 py-2 font-medium text-sm text-red-800">
+                    Validation Errors ({importErrorDetails.length})
                   </div>
-                  <div className="max-h-40 overflow-y-auto bg-white">
-                    <table className="w-full text-sm">
+                  <div className="overflow-x-auto max-h-40">
+                    <table className="w-full text-xs">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="p-2 text-left border-b">Row</th>
-                          <th className="p-2 text-left border-b">Invoice #</th>
-                          <th className="p-2 text-left border-b">Product</th>
-                          <th className="p-2 text-left border-b">Error</th>
+                          {["Row", "Invoice #", "Product", "Error"].map((h) => (
+                            <th
+                              key={h}
+                              className="px-2 py-1 text-left font-medium text-gray-600"
+                            >
+                              {h}
+                            </th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
                         {importErrorDetails.slice(0, 10).map((err, i) => (
-                          <tr key={i} className="hover:bg-yellow-50 border-b">
-                            <td className="p-2 font-mono">{err.row}</td>
-                            <td className="p-2">{err.invoiceNumber}</td>
-                            <td className="p-2">{err.productName}</td>
-                            <td className="p-2 text-yellow-600 text-xs">
+                          <tr key={i} className="border-t">
+                            <td className="px-2 py-1">{err.row}</td>
+                            <td className="px-2 py-1">{err.invoiceNumber}</td>
+                            <td className="px-2 py-1">{err.productName}</td>
+                            <td className="px-2 py-1 text-red-600">
                               {err.error}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    {importErrorDetails.length > 10 && (
-                      <div className="p-2 text-center text-gray-500 text-sm">
-                        Showing 10 of {importErrorDetails.length} errors
-                      </div>
-                    )}
                   </div>
+                  {importErrorDetails.length > 10 && (
+                    <p className="text-xs text-gray-500 text-center py-1">
+                      Showing 10 of {importErrorDetails.length} errors
+                    </p>
+                  )}
                 </div>
               )}
 
+            {/* Import progress */}
             {isImporting && (
-              <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6 shadow-xl">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-2xl font-bold text-blue-900">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-medium text-blue-800">
                     Importing{" "}
                     {importSaleType === "mr" ? "MR Sale" : "Normal Sale"} Data...
-                  </h3>
-                  <span className="text-3xl font-extrabold text-indigo-700">
+                  </p>
+                  <span className="font-bold text-blue-800">
                     {serverProgress}%
                   </span>
                 </div>
-                <div className="w-full bg-gray-300 rounded-full h-12 overflow-hidden shadow-inner mb-4">
+                <div className="w-full bg-blue-200 rounded-full h-3 mb-2">
                   <div
-                    className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 h-full rounded-full transition-all duration-1000 ease-out flex items-center justify-end pr-6 shadow-lg"
+                    className="bg-blue-600 h-3 rounded-full transition-all"
                     style={{ width: `${serverProgress}%` }}
-                  >
-                    <span className="text-white text-lg font-bold drop-shadow-lg">
-                      {serverProcessed} / {serverTotal}
-                    </span>
-                  </div>
+                  />
                 </div>
-                <p className="text-center text-gray-700 font-medium text-lg mb-6">
-                  {importStep}
+                <p className="text-sm text-blue-700">
+                  {serverProcessed} / {serverTotal}
                 </p>
-                <div className="flex justify-center">
-                  <button
-                    onClick={handleCancelImport}
-                    className="px-8 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition transform hover:scale-105 cursor-pointer"
-                  >
-                    Cancel Import
-                  </button>
-                </div>
+                <p className="text-sm text-blue-600 mt-1">{importStep}</p>
+                <button
+                  onClick={handleCancelImport}
+                  className="mt-3 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded text-sm"
+                >
+                  Cancel Import
+                </button>
               </div>
             )}
 
+            {/* Action buttons */}
             {!isImporting &&
               showParsedSection &&
               parsedData.length > 0 &&
               !isValidatingStock &&
               !isValidatingMR && (
-                <div className="mb-6">
-                  <button
-                    onClick={handleImportData}
-                    className={`w-full py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer text-white ${importSaleType === "mr" ? "bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800" : "bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800"}`}
-                    disabled={isImporting || isValidatingStock || isValidatingMR}
-                  >
-                    Start {importSaleType === "mr" ? "MR Sale" : "Normal Sale"}{" "}
-                    Import ({parsedData.length} invoices)
-                  </button>
-                </div>
+                <button
+                  onClick={handleImportData}
+                  className={`w-full py-3 rounded-lg font-semibold text-white mb-3 ${
+                    importSaleType === "mr"
+                      ? "bg-green-600 hover:bg-green-700"
+                      : "bg-indigo-600 hover:bg-indigo-700"
+                  }`}
+                >
+                  Start {importSaleType === "mr" ? "MR Sale" : "Normal Sale"}{" "}
+                  Import ({parsedData.length} invoices)
+                </button>
               )}
 
-            <div className="flex justify-between pt-4 border-t border-gray-200">
-              <div>
-                {showParsedSection && parsedData.length > 0 && (
-                  <button
-                    onClick={resetParsedData}
-                    className="px-4 py-2 text-gray-600 hover:text-gray-800 cursor-pointer"
-                    disabled={isImporting || isValidatingStock || isValidatingMR}
-                  >
-                    Upload Different File
-                  </button>
-                )}
-              </div>
+            <div className="flex justify-between">
+              {showParsedSection && parsedData.length > 0 && (
+                <label className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg cursor-pointer text-sm">
+                  Upload Different File
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              )}
               <button
                 onClick={handleClose}
-                disabled={isUploading || isProcessingFile || isImporting}
-                className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg ml-auto"
               >
                 {isImporting || isUploading ? "Cancel" : "Close"}
               </button>
@@ -1930,7 +1840,6 @@
             stockValidationResult={stockValidationResult}
           />
         )}
-
         {showMRValidation && mrValidationResult && (
           <MRValidationModal
             isOpen={showMRValidation}
@@ -1939,7 +1848,6 @@
             mrValidationResult={mrValidationResult}
           />
         )}
-
         {showFailedInvoices && (
           <FailedInvoicesModal
             isOpen={showFailedInvoices}
@@ -1960,7 +1868,7 @@
   }) => {
     if (!isOpen) return null;
 
-    const calculateTotals = useCallback(() => {
+    const totals = useMemo(() => {
       return (products || []).reduce(
         (acc, product) => {
           const salesQty = Number(product.salesQty) || 0;
@@ -1971,7 +1879,6 @@
           const netAmount = Number(product.netSellingAmount) || 0;
           const lc = Number(product.lc) || 0;
           const profitLoss = netAmount - totalQty * lc;
-
           acc.totalSalesQty += salesQty;
           acc.totalBonusQty += bonusQty;
           acc.totalAmount += amount;
@@ -1991,8 +1898,6 @@
       );
     }, [products]);
 
-    const totals = calculateTotals();
-
     return ReactDOM.createPortal(
       <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
         <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
@@ -2002,18 +1907,20 @@
           >
             <X size={20} />
           </button>
-          <h2 className="text-xl font-semibold text-gray-800 mb-6">
+
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">
             {title} ({products?.length || 0} items)
           </h2>
+
           {!products || products.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               No products found
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-100">
+              <table className="w-full text-sm border-collapse">
+                <thead className="bg-gray-100">
+                  <tr>
                     {[
                       "Product Name",
                       "Sales Qty",
@@ -2029,7 +1936,7 @@
                     ].map((h) => (
                       <th
                         key={h}
-                        className="p-3 text-sm font-medium text-gray-700 border-b text-left"
+                        className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap border-b"
                       >
                         {h}
                       </th>
@@ -2046,85 +1953,68 @@
                     const avgUnitPrice = totalQty > 0 ? netAmount / totalQty : 0;
                     const profitLoss = netAmount - totalQty * lc;
                     return (
-                      <tr
-                        key={`product-${index}`}
-                        className="hover:bg-gray-50 border-b"
-                      >
-                        <td className="p-3 text-left">
-                          <span className="font-medium">
-                            {product.productName || product.name || "N/A"}
-                          </span>
+                      <tr key={index} className="border-b hover:bg-gray-50">
+                        <td className="px-3 py-2">
+                          {product.productName || product.name || "N/A"}
                         </td>
-                        <td className="p-3 text-center">{salesQty}</td>
-                        <td className="p-3 text-center">{bonusQty}</td>
-                        <td className="p-3 text-center font-medium">
-                          {totalQty}
-                        </td>
-                        <td className="p-3 text-center">
+                        <td className="px-3 py-2">{salesQty}</td>
+                        <td className="px-3 py-2">{bonusQty}</td>
+                        <td className="px-3 py-2">{totalQty}</td>
+                        <td className="px-3 py-2">
                           ${Number(product.sellingPrice || 0).toFixed(2)}
                         </td>
-                        <td className="p-3 text-center">
+                        <td className="px-3 py-2">
                           ${Number(product.amount || 0).toFixed(2)}
                         </td>
-                        <td className="p-3 text-center">
+                        <td className="px-3 py-2">
                           ${Number(product.discount || 0).toFixed(2)}
                         </td>
-                        <td className="p-3 text-center">
-                          ${netAmount.toFixed(2)}
-                        </td>
-                        <td className="p-3 text-center">
-                          ${avgUnitPrice.toFixed(2)}
-                        </td>
-                        <td className="p-3 text-center">${lc.toFixed(2)}</td>
-                        <td className="p-3 text-center">
-                          <span
-                            className={`font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                          >
-                            ${profitLoss.toFixed(2)}
-                          </span>
+                        <td className="px-3 py-2">${netAmount.toFixed(2)}</td>
+                        <td className="px-3 py-2">${avgUnitPrice.toFixed(2)}</td>
+                        <td className="px-3 py-2">${lc.toFixed(2)}</td>
+                        <td
+                          className={`px-3 py-2 font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                        >
+                          ${profitLoss.toFixed(2)}
                         </td>
                       </tr>
                     );
                   })}
-                  <tr className="bg-gray-50 font-medium">
-                    <td className="p-3 text-left">Total</td>
-                    <td className="p-3 text-center">{totals.totalSalesQty}</td>
-                    <td className="p-3 text-center">{totals.totalBonusQty}</td>
-                    <td className="p-3 text-center">
+                  {/* Totals row */}
+                  <tr className="bg-gray-100 font-semibold">
+                    <td className="px-3 py-2">Total</td>
+                    <td className="px-3 py-2">{totals.totalSalesQty}</td>
+                    <td className="px-3 py-2">{totals.totalBonusQty}</td>
+                    <td className="px-3 py-2">
                       {totals.totalSalesQty + totals.totalBonusQty}
                     </td>
-                    <td className="p-3 text-center">-</td>
-                    <td className="p-3 text-center">
+                    <td className="px-3 py-2">-</td>
+                    <td className="px-3 py-2">
                       ${totals.totalAmount.toFixed(2)}
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="px-3 py-2">
                       ${totals.totalDiscount.toFixed(2)}
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="px-3 py-2">
                       ${totals.totalNetAmount.toFixed(2)}
                     </td>
-                    <td className="p-3 text-center">-</td>
-                    <td className="p-3 text-center">-</td>
-                    <td className="p-3 text-center">
-                      <span
-                        className={
-                          totals.totalProfitLoss >= 0
-                            ? "text-green-600"
-                            : "text-red-600"
-                        }
-                      >
-                        ${totals.totalProfitLoss.toFixed(2)}
-                      </span>
+                    <td className="px-3 py-2">-</td>
+                    <td className="px-3 py-2">-</td>
+                    <td
+                      className={`px-3 py-2 ${totals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                    >
+                      ${totals.totalProfitLoss.toFixed(2)}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
           )}
-          <div className="mt-6 pt-4 border-t border-gray-300 flex justify-end">
+
+          <div className="flex justify-end mt-4">
             <button
               onClick={onClose}
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+              className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
             >
               Close
             </button>
@@ -2135,6 +2025,7 @@
     );
   };
 
+  // ================== MAIN SALES COMPONENT ==================
   const Sales = () => {
     const navigate = useNavigate();
     const [sales, setSales] = useState([]);
@@ -2150,14 +2041,16 @@
     const [selectedSaleProducts, setSelectedSaleProducts] = useState([]);
     const [selectedSale, setSelectedSale] = useState(null);
     const [mrList, setMrList] = useState([]);
+    const [mrFullList, setMrFullList] = useState([]);
     const [customerList, setCustomerList] = useState([]);
+    const [customerListLoading, setCustomerListLoading] = useState(false);
     const [hasPurchaseInventories, setHasPurchaseInventories] = useState(false);
-    const [checkingPurchaseInventories, setCheckingPurchaseInventories] = useState(true);
+    const [checkingPurchaseInventories, setCheckingPurchaseInventories] =
+      useState(true);
     const [shouldCheckPurchase, setShouldCheckPurchase] = useState(true);
     const [productsList, setProductsList] = useState([]);
     const inputRef = useRef(null);
     const { statuses, loading } = useInitialSaleData();
-
     const [saleTypeTab, setSaleTypeTab] = useState("all");
 
     const [form, setForm] = useState({
@@ -2166,6 +2059,7 @@
       invoiceNumber: "",
       invoiceDate: "",
       mrName: "",
+      mrId: "",
       customerName: "",
       customerCode: "",
       customerId: "",
@@ -2180,8 +2074,18 @@
       remark: "",
     });
 
+    // ✅ FIX: handleMRChange — always stringify _id to avoid ObjectId vs string mismatch
+    const handleMRChange = (selectedMr) => {
+      setForm((prev) => ({
+        ...prev,
+        mrId: selectedMr._id ? String(selectedMr._id) : "",
+        mrName: selectedMr.mrName,
+      }));
+    };
+
     const SALES_PER_PAGE = 9;
 
+    // ----- Fetch functions -----
     const fetchProductsList = useCallback(async () => {
       try {
         const response = await axios.get(`${backendUrl}/api/products`, {
@@ -2202,6 +2106,42 @@
       }
     }, []);
 
+    const processSalesData = useCallback((data) => {
+      const salesData = Array.isArray(data)
+        ? data
+        : data?.summaries || data?.data || [];
+      if (!Array.isArray(salesData)) {
+        setSales([]);
+        return;
+      }
+      const sortedData = [...salesData].sort(
+        (a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate),
+      );
+      setSales(sortedData);
+    }, []);
+
+    const fetchSaleSummaries = useCallback(async () => {
+      try {
+        setLoadingData(true);
+
+        const res = await fetch(`${backendUrl}/api/sales/all`, {
+          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+        });
+
+        if (!res.ok) {
+          throw new Error(`Server error: ${res.status}`);
+        }
+
+        const data = await res.json();
+        processSalesData(data.summaries);
+      } catch (error) {
+        showToast("error", error.message || "Error fetching sale summaries");
+        setSales([]);
+      } finally {
+        setLoadingData(false);
+      }
+    }, [processSalesData]);
+
     const checkPurchaseInventories = useCallback(async () => {
       try {
         setCheckingPurchaseInventories(true);
@@ -2220,6 +2160,16 @@
       setShouldCheckPurchase(true);
     }, []);
 
+    // ----- Effects -----
+    useEffect(() => {
+      fetchSaleSummaries();
+    }, [fetchSaleSummaries]);
+
+    useEffect(() => {
+      checkPurchaseInventories();
+      fetchProductsList();
+    }, [checkPurchaseInventories, fetchProductsList]);
+
     useEffect(() => {
       if (shouldCheckPurchase) {
         checkPurchaseInventories();
@@ -2228,9 +2178,14 @@
     }, [shouldCheckPurchase, checkPurchaseInventories]);
 
     useEffect(() => {
-      checkPurchaseInventories();
-      fetchProductsList();
-    }, [checkPurchaseInventories, fetchProductsList]);
+      const handleInventoryUpdated = () => {
+        fetchSaleSummaries();
+        fetchProductsList();
+      };
+      window.addEventListener("inventory-updated", handleInventoryUpdated);
+      return () =>
+        window.removeEventListener("inventory-updated", handleInventoryUpdated);
+    }, [fetchSaleSummaries, fetchProductsList]);
 
     useEffect(() => {
       const handlePurchaseInventoryAdded = () => recheckPurchaseInventories();
@@ -2245,81 +2200,42 @@
         );
     }, [recheckPurchaseInventories]);
 
-    useEffect(() => {
-      const handleInventoryUpdated = () => {
-        fetchSaleSummaries();
-        fetchProductsList();
-      };
-      window.addEventListener("inventory-updated", handleInventoryUpdated);
-      return () =>
-        window.removeEventListener("inventory-updated", handleInventoryUpdated);
-    }, [fetchProductsList]);
-
-    const processSalesData = useCallback((data) => {
-      const salesData = data.summaries || data.data || data;
-      if (!Array.isArray(salesData)) {
-        setSales([]);
-        return;
-      }
-      const sortedData = salesData.sort(
-        (a, b) => new Date(b.invoiceDate) - new Date(a.invoiceDate),
-      );
-      setSales(sortedData);
-    }, []);
-
-    const fetchSaleSummaries = useCallback(async () => {
-      try {
-        setLoadingData(true);
-        const res = await fetch(`${backendUrl}/api/sales/all`, {
-          headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          processSalesData(data);
-        } else {
-          const fallbackRes = await fetch(`${backendUrl}/api/sales`);
-          if (fallbackRes.ok) {
-            const data = await fallbackRes.json();
-            processSalesData(data);
-          } else {
-            throw new Error("Failed to fetch sale summaries");
-          }
-        }
-      } catch (error) {
-        showToast("error", error.message || "Error fetching sale summaries");
-        setSales([]);
-      } finally {
-        setLoadingData(false);
-      }
-    }, [processSalesData]);
-
-    useEffect(() => {
-      fetchSaleSummaries();
-    }, [fetchSaleSummaries]);
-
+    // ✅ FIX: Fetch dropdown data — stringify all _id values for safe comparison
     useEffect(() => {
       const fetchDropdownData = async () => {
+        setCustomerListLoading(true);
         try {
           const [mrs, customers] = await Promise.all([
             fetchMRList(),
             fetchCustomerList(),
           ]);
+
           if (mrs && mrs.success && Array.isArray(mrs.data)) {
-            const mrNames = mrs.data
-              .map((mr) => {
-                if (typeof mr === "string") return mr.trim();
-                if (mr && typeof mr === "object") {
-                  if (mr.medicalRepName) return mr.medicalRepName.trim();
-                  if (mr.name) return mr.name.trim();
-                  if (mr.fullName) return mr.fullName.trim();
+            const names = [];
+            const full = [];
+            mrs.data.forEach((mr) => {
+              if (typeof mr === "string") {
+                const trimmed = mr.trim();
+                names.push(trimmed);
+                full.push({ _id: null, mrName: trimmed });
+              } else if (mr && typeof mr === "object") {
+                const name = mr.medicalRepName || mr.name || mr.fullName;
+                // ✅ Always stringify _id so comparisons never fail due to ObjectId vs string
+                const id = mr._id ? String(mr._id) : null;
+                if (name) {
+                  const trimmedName = name.trim();
+                  names.push(trimmedName);
+                  full.push({ _id: id, mrName: trimmedName });
                 }
-                return null;
-              })
-              .filter(Boolean);
-            setMrList(mrNames);
+              }
+            });
+            setMrList(names);
+            setMrFullList(full);
           } else {
             setMrList([]);
+            setMrFullList([]);
           }
+
           if (customers && customers.success && Array.isArray(customers.data)) {
             setCustomerList(customers.data);
           } else {
@@ -2327,12 +2243,20 @@
           }
         } catch (error) {
           setMrList([]);
+          setMrFullList([]);
           setCustomerList([]);
+        } finally {
+          setCustomerListLoading(false);
         }
       };
       fetchDropdownData();
     }, []);
 
+    useEffect(() => {
+      setCurrentPage(1);
+    }, [searchTerm, selectedTab, saleTypeTab]);
+
+    // ----- Handlers for delete, view, edit, etc. -----
     const handleDeleteSelected = useCallback(async () => {
       if (selected.length === 0) return;
       const confirm = await confirmDialog({
@@ -2399,10 +2323,9 @@
       [],
     );
 
-    // Payment status tabs (All, Cash, Credit, etc.)
     const paymentStatusTabs = useMemo(() => {
-      if (!Array.isArray(sales) || sales.length === 0) return ["All", "Cash", "Credit"];
-      
+      if (!Array.isArray(sales) || sales.length === 0)
+        return ["All", "Cash", "Credit"];
       const uniqueStatuses = [
         ...new Set(
           sales
@@ -2411,54 +2334,49 @@
             .map((s) => s.trim()),
         ),
       ].sort();
-      
       const baseTabs = ["All"];
-      
       if (uniqueStatuses.includes("Cash")) baseTabs.push("Cash");
       if (uniqueStatuses.includes("Credit")) baseTabs.push("Credit");
-      
-      uniqueStatuses.forEach(status => {
-        if (!baseTabs.includes(status) && status !== "Cash" && status !== "Credit") {
+      uniqueStatuses.forEach((status) => {
+        if (
+          !baseTabs.includes(status) &&
+          status !== "Cash" &&
+          status !== "Credit"
+        ) {
           baseTabs.push(status);
         }
       });
-      
       return baseTabs;
     }, [sales]);
 
-    // Sale type tabs (Normal Sale, MR Sale)
-    const saleTypeTabs = useMemo(() => {
-      return [
+    const saleTypeTabs = useMemo(
+      () => [
         { id: "all", label: "All" },
-        { id: "normal", label: "Normal Sale"},
-        { id: "mr", label: "MR Sale"},
-      ];
-    }, []);
+        { id: "normal", label: "Normal Sale" },
+        { id: "mr", label: "MR Sale" },
+      ],
+      [],
+    );
 
-    // Filtered sales based on payment status, sale type, and search term
     const filteredSales = useMemo(() => {
       if (!Array.isArray(sales)) return [];
+
       const lowerSearch = searchTerm.trim().toLowerCase();
-      const selectedTabLower = selectedTab.toLowerCase();
-      const selectedSaleType = saleTypeTab.toLowerCase();
+      const tabStatus = selectedTab.toLowerCase();
+      const tabSaleType = saleTypeTab;
 
       return sales.filter((sale) => {
-        // Determine if this is an MR sale - check both possible fields
-        const isMRSale = sale.isMRSale === true || sale.isMrSaleImport === true;
-        
-        // Filter by payment status (All, Cash, Credit, etc.)
-        const paymentStatus = (sale.paymentStatus || "").toLowerCase();
-        if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
-          return false;
+        if (tabStatus !== "all") {
+          const ps = (sale.paymentStatus || "").toLowerCase();
+          if (ps !== tabStatus) return false;
         }
 
-        // Filter by sale type (All, Normal Sale, MR Sale)
-        if (selectedSaleType !== "all") {
-          if (selectedSaleType === "mr" && !isMRSale) return false;
-          if (selectedSaleType === "normal" && isMRSale) return false;
+        if (tabSaleType === "mr") {
+          if (!isMRSaleDoc(sale)) return false;
+        } else if (tabSaleType === "normal") {
+          if (isMRSaleDoc(sale)) return false;
         }
 
-        // Filter by search term
         if (!lowerSearch) return true;
         return [sale.invoiceNumber, sale.customerName, sale.mrName].some((f) =>
           (f ?? "").toString().toLowerCase().includes(lowerSearch),
@@ -2466,18 +2384,11 @@
       });
     }, [sales, searchTerm, selectedTab, saleTypeTab]);
 
-    // ✅ Memoized download data based on environment variable (used only for normal download)
     const downloadData = useMemo(() => {
       if (isSampleDownloadFile) {
-        // When sample download is enabled, ignore search and payment status,
-        // only filter by sale type tab (but we will handle download separately)
         if (saleTypeTab === "all") return sales;
-        if (saleTypeTab === "normal") {
-          return sales.filter(s => !s.isMRSale && !s.isMrSaleImport);
-        }
-        if (saleTypeTab === "mr") {
-          return sales.filter(s => s.isMRSale || s.isMrSaleImport);
-        }
+        if (saleTypeTab === "normal") return sales.filter((s) => !isMRSaleDoc(s));
+        if (saleTypeTab === "mr") return sales.filter((s) => isMRSaleDoc(s));
         return [];
       }
       return filteredSales;
@@ -2492,14 +2403,11 @@
       () => Math.ceil(filteredSales.length / SALES_PER_PAGE),
       [filteredSales.length],
     );
+
     const visiblePages = useMemo(
       () => getVisiblePages(currentPage, totalPages),
       [currentPage, totalPages],
     );
-
-    useEffect(() => {
-      setCurrentPage(1);
-    }, [searchTerm, selectedTab, saleTypeTab]);
 
     const getFieldValue = useCallback((sale, dbName) => {
       if (dbName === "products") return sale.products?.length || 0;
@@ -2542,17 +2450,36 @@
       setIsViewModalOpen(true);
     }, []);
 
-    const editSale = useCallback((sale) => {
-      setSelectedSale(sale);
-      setForm({
-        ...sale,
-        products: sale.products || [],
-        customerName: sale.customerName || "--",
-        customerCode: sale.customerCode || "",
-        customerId: sale.customerId || "",
-      });
-      setIsEditModalOpen(true);
-    }, []);
+    // ✅ FIX: editSale — match mrName against mrFullList to get correct _id
+    const editSale = useCallback(
+      (sale) => {
+        setSelectedSale(sale);
+
+        // Match the sale's mrName against mrFullList to find the correct _id
+        const matchedMr = mrFullList.find(
+          (mr) =>
+            mr.mrName?.toLowerCase().trim() ===
+            (sale.mrName || "").toLowerCase().trim(),
+        );
+
+        setForm({
+          ...sale,
+          products: sale.products || [],
+          customerName: sale.customerName || "--",
+          customerCode: sale.customerCode || "",
+          customerId: sale.customerId || "",
+          // ✅ Use matched MR's _id (already stringified) or fall back to sale.mrId stringified
+          mrId: matchedMr
+            ? String(matchedMr._id)
+            : sale.mrId
+              ? String(sale.mrId)
+              : "",
+          mrName: matchedMr ? matchedMr.mrName : sale.mrName || "",
+        });
+        setIsEditModalOpen(true);
+      },
+      [mrFullList],
+    );
 
     const deleteSale = useCallback(
       async (sale) => {
@@ -2569,7 +2496,9 @@
             const token = localStorage.getItem("token");
             const res = await axios.delete(
               `${backendUrl}/api/sales/${sale._id}`,
-              { headers: { Authorization: `Bearer ${token}` } },
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              },
             );
             if (res.status === 200) {
               showToast(
@@ -2610,6 +2539,116 @@
       );
     }, []);
 
+    const formTotals = useMemo(
+      () => calculateProductTotals(form.products),
+      [form.products, calculateProductTotals],
+    );
+
+    // ----- Numeric input handlers with filtering -----
+    const handlePaidChange = (e) => {
+      const rawValue = e.target.value;
+      const filtered = filterNumericInput(rawValue, true);
+      e.target.value = filtered;
+      const numericValue = parseFloat(filtered) || 0;
+
+      setForm((prev) => {
+        const net = formTotals.netAmount;
+        const clampedPaid = Math.min(Math.max(numericValue, 0), net);
+        const newDue = net - clampedPaid;
+        const isFullyPaid = Math.abs(clampedPaid - net) < 0.001;
+        const updatedCreditDays = isFullyPaid ? "" : prev.creditDays;
+        const updatedDueDate = isFullyPaid ? "" : prev.dueDate;
+
+        return {
+          ...prev,
+          paidAmount: clampedPaid,
+          dueAmount: newDue,
+          creditDays: updatedCreditDays,
+          dueDate: updatedDueDate,
+          paymentStatus: computePaymentStatus(clampedPaid, net),
+        };
+      });
+    };
+
+    const handleDueChange = (e) => {
+      const rawValue = e.target.value;
+      const filtered = filterNumericInput(rawValue, true);
+      e.target.value = filtered;
+      const numericValue = parseFloat(filtered) || 0;
+
+      setForm((prev) => {
+        const net = formTotals.netAmount;
+        const clampedDue = Math.min(Math.max(numericValue, 0), net);
+        const newPaid = net - clampedDue;
+        const isFullyPaid = Math.abs(newPaid - net) < 0.001;
+        const updatedCreditDays = isFullyPaid ? "" : prev.creditDays;
+        const updatedDueDate = isFullyPaid ? "" : prev.dueDate;
+
+        return {
+          ...prev,
+          dueAmount: clampedDue,
+          paidAmount: newPaid,
+          creditDays: updatedCreditDays,
+          dueDate: updatedDueDate,
+          paymentStatus: computePaymentStatus(newPaid, net),
+        };
+      });
+    };
+
+    const handleCreditDaysChange = (e) => {
+      const rawValue = e.target.value;
+      const filtered = filterNumericInput(rawValue, false);
+      e.target.value = filtered;
+
+      const days = filtered ? parseInt(filtered, 10) : 0;
+      let newDueDate = "";
+
+      if (days > 0) {
+        const today = new Date();
+        today.setDate(today.getDate() + days);
+        newDueDate = today.toISOString().split("T")[0];
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        creditDays: days,
+        dueDate: newDueDate,
+      }));
+    };
+
+    const handleFormChange = (e) => {
+      const { name, value } = e.target;
+      setForm((prev) => ({ ...prev, [name]: value }));
+    };
+
+    const handleCustomerChange = useCallback(
+      (customerId) => {
+        const selectedCustomer = customerList.find((c) => c._id === customerId);
+        if (selectedCustomer) {
+          setForm((prev) => ({
+            ...prev,
+            customerId,
+            customerCode: selectedCustomer.customerCode,
+            customerName: selectedCustomer.name,
+          }));
+        }
+      },
+      [customerList],
+    );
+
+    const customerOptions = useMemo(() => {
+      if (customerList.length === 0 && !customerListLoading) {
+        return [{ value: "", label: "No Customers Available", disabled: true }];
+      }
+      return [
+        { value: "", label: "Select Customer" },
+        ...customerList.map((customer) => ({
+          value: customer._id,
+          label: `${customer.customerCode} - ${customer.name}`,
+        })),
+      ];
+    }, [customerList, customerListLoading]);
+
     const handleUpdateSale = useCallback(
       async (e) => {
         e.preventDefault();
@@ -2618,9 +2657,11 @@
           const updatedForm = {
             ...form,
             totalAmount: totals.totalAmount,
-            dueAmount: (
-              totals.netAmount - parseFloat(form.paidAmount || 0)
-            ).toFixed(2),
+            dueAmount: totals.netAmount - parseFloat(form.paidAmount || 0),
+            paymentStatus: computePaymentStatus(
+              form.paidAmount,
+              totals.netAmount,
+            ),
           };
           const token = localStorage.getItem("token");
           const res = await axios.put(
@@ -2628,6 +2669,7 @@
             updatedForm,
             { headers: { Authorization: `Bearer ${token}` } },
           );
+
           if (res.status === 200) {
             showToast("success", "Sales record updated successfully");
             setIsEditModalOpen(false);
@@ -2636,23 +2678,13 @@
           }
         } catch (err) {
           const errorMessage =
-            err.response?.data?.err ||
+            err.response?.data?.error ||
             err.response?.data?.message ||
             "Failed to update sale";
           showToast("error", errorMessage);
         }
       },
-      [form, calculateProductTotals, fetchSaleSummaries],
-    );
-
-    const handleFormChange = useCallback((e) => {
-      const { name, value } = e.target;
-      setForm((prev) => ({ ...prev, [name]: value }));
-    }, []);
-
-    const formTotals = useMemo(
-      () => calculateProductTotals(form.products),
-      [form.products, calculateProductTotals],
+      [form, calculateProductTotals, fetchSaleSummaries, selectedSale],
     );
 
     const handleImportSuccess = useCallback(() => {
@@ -2692,106 +2724,91 @@
       showMRCustomerWarning,
     ]);
 
-    // ===== NEW: Helper function to download Excel from data array =====
     const downloadExcel = useCallback((data, baseFileName) => {
       if (!data || data.length === 0) {
         showToast("error", "No data to download");
         return;
       }
-
-      // Flatten products into rows
       const excelRows = [];
-      data.forEach(sale => {
-        if (sale.products && sale.products.length) {
-          sale.products.forEach(product => {
-            excelRows.push({
-              'Invoice Number': sale.invoiceNumber,
-              'Invoice Date': sale.invoiceDate ? new Date(sale.invoiceDate).toLocaleDateString() : '',
-              'MR Name': sale.mrName || '',
-              'Customer Name': sale.customerName || '',
-              'Customer Code': sale.customerCode || '',
-              'Payment Status': sale.paymentStatus || '',
-              'Product Name': product.productName || '',
-              'Sales Qty': product.salesQty || 0,
-              'Bonus Qty': product.bonusQty || 0,
-              'Total Qty': product.totalQty || 0,
-              'Selling Price': product.sellingPrice || 0,
-              'Discount': product.discount || 0,
-              'Net Amount': product.netSellingAmount || 0,
-              'LC': product.lc || 0,
-              'Profit/Loss': product.profitLoss || 0,
-              'Total Amount': sale.totalAmount || 0,
-              'Paid Amount': sale.paidAmount || 0,
-              'Due Amount': sale.dueAmount || 0,
-              'Cost Amount': sale.costAmount || 0,
-              'Sale Type': sale.saleType || (sale.isMRSale || sale.isMrSaleImport ? 'MR Sale' : 'Normal Sale')
-            });
-          });
-        } else {
-          // Fallback for invoices without products
+      data.forEach((sale) => {
+        const products =
+          sale.products && sale.products.length
+            ? sale.products
+            : [
+                {
+                  productName: "—",
+                  salesQty: 0,
+                  bonusQty: 0,
+                  totalQty: 0,
+                  sellingPrice: 0,
+                  discount: 0,
+                  netSellingAmount: 0,
+                  lc: 0,
+                  profitLoss: 0,
+                },
+              ];
+        products.forEach((product) => {
           excelRows.push({
-            'Invoice Number': sale.invoiceNumber,
-            'Invoice Date': sale.invoiceDate ? new Date(sale.invoiceDate).toLocaleDateString() : '',
-            'MR Name': sale.mrName || '',
-            'Customer Name': sale.customerName || '',
-            'Customer Code': sale.customerCode || '',
-            'Payment Status': sale.paymentStatus || '',
-            'Product Name': '—',
-            'Sales Qty': 0,
-            'Bonus Qty': 0,
-            'Total Qty': 0,
-            'Selling Price': 0,
-            'Discount': 0,
-            'Net Amount': 0,
-            'LC': 0,
-            'Profit/Loss': 0,
-            'Total Amount': sale.totalAmount || 0,
-            'Paid Amount': sale.paidAmount || 0,
-            'Due Amount': sale.dueAmount || 0,
-            'Cost Amount': sale.costAmount || 0,
-            'Sale Type': sale.saleType || (sale.isMRSale || sale.isMrSaleImport ? 'MR Sale' : 'Normal Sale')
+            "Invoice Number": sale.invoiceNumber,
+            "Invoice Date": sale.invoiceDate
+              ? new Date(sale.invoiceDate).toLocaleDateString()
+              : "",
+            "MR Name": sale.mrName || "",
+            "Customer Name": sale.customerName || "",
+            "Customer Code": sale.customerCode || "",
+            "Payment Status": sale.paymentStatus || "",
+            "Product Name": product.productName || "",
+            "Sales Qty": product.salesQty || 0,
+            "Bonus Qty": product.bonusQty || 0,
+            "Total Qty": product.totalQty || 0,
+            "Selling Price": product.sellingPrice || 0,
+            Discount: product.discount || 0,
+            "Net Amount": product.netSellingAmount || 0,
+            LC: product.lc || 0,
+            "Profit/Loss": product.profitLoss || 0,
+            "Total Amount": sale.totalAmount || 0,
+            "Paid Amount": sale.paidAmount || 0,
+            "Due Amount": sale.dueAmount || 0,
+            "Cost Amount": sale.costAmount || 0,
+            "Sale Type": isMRSaleDoc(sale) ? "MR Sale" : "Normal Sale",
           });
-        }
+        });
       });
-
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
       const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Sales');
-      const fileName = `${baseFileName}_${new Date().toISOString().slice(0,10)}.xlsx`;
-      XLSX.writeFile(workbook, fileName);
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Sales");
+      XLSX.writeFile(
+        workbook,
+        `${baseFileName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
     }, []);
 
-    // ===== NEW: Handler for sample download (two files) =====
     const handleSampleDownload = useCallback(() => {
-      const normalSales = sales.filter(s => !s.isMRSale && !s.isMrSaleImport);
-      const mrSales = sales.filter(s => s.isMRSale || s.isMrSaleImport);
+      const normalSales = sales.filter((s) => !isMRSaleDoc(s));
+      const mrSales = sales.filter((s) => isMRSaleDoc(s));
 
       if (normalSales.length === 0 && mrSales.length === 0) {
         showToast("error", "No sales data available");
         return;
       }
-
-      // Download normal sales file
       if (normalSales.length > 0) {
-        downloadExcel(normalSales, 'Normal_Sales');
+        downloadExcel(normalSales, "Normal_Sales");
       } else {
         showToast("info", "No normal sales to download");
       }
-
-      // Download MR sales file (short delay to avoid browser blocking multiple downloads)
       setTimeout(() => {
         if (mrSales.length > 0) {
-          downloadExcel(mrSales, 'MR_Sales');
+          downloadExcel(mrSales, "MR_Sales");
         } else {
           showToast("info", "No MR sales to download");
         }
       }, 500);
     }, [sales, downloadExcel]);
 
-    if (loading) return <LoadingOverlay text="Please wait..." />;
+    if (loading) return <LoadingOverlay />;
 
     return (
-      <div className="p-6">
+      <div>
         <ImportSalesModal
           isOpen={showImportModal}
           onClose={() => setShowImportModal(false)}
@@ -2800,7 +2817,6 @@
           customerList={customerList}
           productsList={productsList}
         />
-
         <ProductDetailsModal
           isOpen={isProductModalOpen}
           onClose={() => setIsProductModalOpen(false)}
@@ -2808,11 +2824,11 @@
           title="Product Details"
         />
 
-        {/* Edit Modal */}
+        {/* ── EDIT MODAL ── */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -2820,13 +2836,13 @@
                   <X size={20} />
                 </button>
                 <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-                  <Edit size={20} /> Edit Sales Record
+                  <Edit size={20} />
+                  Edit Sales Record
                 </h2>
-                <form onSubmit={handleUpdateSale} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <form onSubmit={handleUpdateSale} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <Calendar size={14} className="inline mr-1" />
                         Recording Date
                       </label>
                       <DatePicker
@@ -2850,8 +2866,7 @@
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Invoice Number
                       </label>
-                      <InputField
-                        type="text"
+                      <input
                         name="invoiceNumber"
                         value={form.invoiceNumber || ""}
                         onChange={handleFormChange}
@@ -2860,7 +2875,6 @@
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <Calendar size={14} className="inline mr-1" />
                         Invoice Date
                       </label>
                       <DatePicker
@@ -2880,57 +2894,56 @@
                         className="w-full border border-gray-300 rounded-lg px-3 py-2"
                       />
                     </div>
+
+                    {/* ✅ FIX: MR Name select — String comparison for both value and option values */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <User size={14} className="inline mr-1" />
                         MR Name
                       </label>
                       <select
-                        name="mrName"
-                        value={form.mrName || ""}
-                        onChange={handleFormChange}
+                        value={form.mrId ? String(form.mrId) : ""}
+                        onChange={(e) => {
+                          const selectedVal = e.target.value;
+                          // ✅ String-to-string comparison prevents ObjectId mismatch
+                          const selectedMr = mrFullList.find(
+                            (mr) => String(mr._id) === selectedVal,
+                          );
+                          if (selectedMr) {
+                            handleMRChange(selectedMr);
+                          }
+                        }}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2"
                       >
                         <option value="">Select MR</option>
-                        {mrList.map((mr, index) => (
-                          <option key={index} value={mr}>
-                            {mr}
+                        {mrFullList.map((mr) => (
+                          <option key={mr._id} value={String(mr._id)}>
+                            {mr.mrName}
                           </option>
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <User size={14} className="inline mr-1" />
-                        Customer Name
-                      </label>
-                      <InputField
-                        type="text"
-                        name="customerName"
-                        value={form.customerName || ""}
-                        onChange={handleFormChange}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Customer Code
-                      </label>
-                      <InputField
-                        type="text"
-                        name="customerCode"
-                        value={form.customerCode || ""}
-                        onChange={handleFormChange}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+
+                    {/* Customer dropdown */}
+                    <div className="col-span-1 md:col-span-2">
+                      <SearchableDropdown
+                        value={form.customerId}
+                        onChange={handleCustomerChange}
+                        options={customerOptions}
+                        placeholder="Select Customer"
+                        required={true}
+                        loading={customerListLoading}
+                        error={null}
+                        label="Customer"
+                        disabled={false}
                       />
                     </div>
                   </div>
 
+                  {/* Products section */}
                   <div className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-medium text-gray-700 flex items-center gap-2">
-                        <ShoppingCart size={18} /> Products (
-                        {form.products?.length || 0})
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-lg font-medium text-gray-700">
+                        Products ({form.products?.length || 0})
                       </h3>
                       <button
                         type="button"
@@ -2941,7 +2954,7 @@
                       </button>
                     </div>
                     {form.products && form.products.length > 0 ? (
-                      <div className="space-y-3">
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
                         {form.products.map((product, index) => (
                           <div
                             key={index}
@@ -2965,7 +2978,8 @@
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4">
+                  {/* Totals (read‑only) */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
                       ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
                       [
@@ -2974,95 +2988,100 @@
                       ],
                       ["Net Amount", `$${formTotals.netAmount.toFixed(2)}`],
                     ].map(([label, val]) => (
-                      <div key={label}>
-                        <label className="block text-sm font-medium text-gray-600 mb-1">
-                          {label}
-                        </label>
-                        <div className="text-lg font-semibold text-gray-800">
-                          {val}
-                        </div>
+                      <div key={label} className="bg-gray-50 p-3 rounded-lg">
+                        <div className="text-xs text-gray-500">{label}</div>
+                        <div className="font-semibold text-gray-800">{val}</div>
                       </div>
                     ))}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        Profit/Loss
-                      </label>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <div className="text-xs text-gray-500">Profit/Loss</div>
                       <div
-                        className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                        className={`font-semibold ${
+                          formTotals.totalProfitLoss >= 0
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }`}
                       >
                         ${formTotals.totalProfitLoss.toFixed(2)}
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {/* Payment related fields */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <Clock size={14} className="inline mr-1" />
-                        Credit Days
+                        Paid Amount ($)
                       </label>
-                      <InputField
-                        type="number"
-                        name="creditDays"
-                        value={form.creditDays || 0}
-                        onChange={handleFormChange}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <Calendar size={14} className="inline mr-1" />
-                        Due Date
-                      </label>
-                      <DatePicker
-                        selected={form.dueDate ? new Date(form.dueDate) : null}
-                        onChange={(date) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            dueDate: date ? date.toISOString().split("T")[0] : "",
-                          }))
-                        }
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select date"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <DollarSign size={14} className="inline mr-1" />
-                        Paid Amount
-                      </label>
-                      <InputField
-                        type="number"
-                        name="paidAmount"
-                        value={form.paidAmount || 0}
-                        onChange={handleFormChange}
-                        step="0.01"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <DollarSign size={14} className="inline mr-1" />
-                        Due Amount
-                      </label>
-                      <InputField
+                      <input
                         type="text"
-                        value={form.dueAmount || 0}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100"
-                        disabled
+                        inputMode="decimal"
+                        value={form.paidAmount || ""}
+                        onChange={handlePaidChange}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
                       />
                     </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <CreditCard size={14} className="inline mr-1" />
+                        Due Amount ($)
+                      </label>
+                      <input
+                        type="text"
+                        value={form.dueAmount?.toFixed(2) || "0.00"}
+                        disabled
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100 cursor-not-allowed"
+                      />
+                    </div>
+
+                    {form.paymentStatus !== "Cash" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Credit Days
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          name="creditDays"
+                          value={form.creditDays || ""}
+                          onChange={handleCreditDaysChange}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                        />
+                      </div>
+                    )}
+
+                    {form.paymentStatus !== "Cash" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Due Date
+                        </label>
+                        <DatePicker
+                          selected={form.dueDate ? new Date(form.dueDate) : null}
+                          onChange={(date) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              dueDate: date
+                                ? date.toISOString().split("T")[0]
+                                : "",
+                            }))
+                          }
+                          dateFormat="yyyy-MM-dd"
+                          placeholderText="Select date"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                          readOnly
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Payment Status
                       </label>
                       <select
                         name="paymentStatus"
                         value={form.paymentStatus || ""}
-                        onChange={handleFormChange}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                        disabled
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100 cursor-not-allowed"
                       >
                         <option value="">Select Status</option>
                         {statuses.map((status, index) => (
@@ -3072,9 +3091,9 @@
                         ))}
                       </select>
                     </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        <Truck size={14} className="inline mr-1" />
                         Delivery Date
                       </label>
                       <DatePicker
@@ -3098,7 +3117,6 @@
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <ClipboardList size={14} className="inline mr-1" />
                       Remarks
                     </label>
                     <textarea
@@ -3107,7 +3125,6 @@
                       onChange={handleFormChange}
                       rows={3}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      placeholder="Enter any remarks..."
                     />
                   </div>
 
@@ -3123,7 +3140,8 @@
                       type="submit"
                       className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer flex items-center gap-2"
                     >
-                      <Save size={18} /> Update Sale
+                      <Save size={18} />
+                      Update Sale
                     </button>
                   </div>
                 </form>
@@ -3132,7 +3150,7 @@
             document.body,
           )}
 
-        {/* View Modal */}
+        {/* ── View Modal ── */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
@@ -3144,8 +3162,10 @@
                   <X size={20} />
                 </button>
                 <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-                  <Eye size={20} /> View Sales Record
+                  <Eye size={20} />
+                  View Sales Record
                 </h2>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                   {[
                     ["Recording Date", formatDateToReadable(form.recordingDate)],
@@ -3165,6 +3185,7 @@
                     </div>
                   ))}
                 </div>
+
                 <div className="border border-gray-200 rounded-lg p-4 mb-6">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-medium text-gray-700">
@@ -3210,6 +3231,7 @@
                     </div>
                   )}
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4 mb-6">
                   {[
                     ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
@@ -3230,12 +3252,17 @@
                       Profit/Loss
                     </label>
                     <div
-                      className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                      className={`text-lg font-semibold ${
+                        formTotals.totalProfitLoss >= 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
                     >
                       ${formTotals.totalProfitLoss.toFixed(2)}
                     </div>
                   </div>
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                   {[
                     ["Credit Days", `${form.creditDays || 0} days`],
@@ -3258,12 +3285,21 @@
                       Payment Status
                     </label>
                     <div
-                      className={`text-sm font-medium ${form.paymentStatus === "Paid" ? "text-green-600" : form.paymentStatus === "Credit" ? "text-yellow-600" : form.paymentStatus === "Partial" ? "text-blue-600" : "text-gray-600"}`}
+                      className={`text-sm font-medium ${
+                        form.paymentStatus === "Cash"
+                          ? "text-green-600"
+                          : form.paymentStatus === "Credit"
+                            ? "text-yellow-600"
+                            : form.paymentStatus === "Partial Paid"
+                              ? "text-blue-600"
+                              : "text-gray-600"
+                      }`}
                     >
                       {form.paymentStatus || "-"}
                     </div>
                   </div>
                 </div>
+
                 <div className="border border-gray-200 rounded-lg p-4 mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Remarks
@@ -3272,6 +3308,7 @@
                     {form.remark || "No remarks provided"}
                   </div>
                 </div>
+
                 <div className="flex justify-end pt-4 border-t border-gray-200">
                   <button
                     type="button"
@@ -3286,8 +3323,9 @@
             document.body,
           )}
 
-        {/* Main Content */}
+        {/* ── Main Content ── */}
         <div className="container">
+          {/* Top action bar */}
           <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
             <div className="flex gap-3 items-center">
               <button
@@ -3296,7 +3334,8 @@
                 disabled={shouldDisableButtons}
                 title={getButtonTitle()}
               >
-                <UserPlus size={18} /> Add New Sales
+                <UserPlus size={18} />
+                Add New Sales
               </button>
               <button
                 onClick={() => setShowImportModal(true)}
@@ -3304,19 +3343,21 @@
                 disabled={shouldDisableButtons}
                 title={getButtonTitle()}
               >
-                <Upload size={18} /> Import Sales
+                <Upload size={18} />
+                Import Sales
               </button>
               {selected.length > 0 && (
                 <button
                   onClick={handleDeleteSelected}
                   className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
                 >
-                  <Trash2 size={18} /> Delete Selected
+                  <Trash2 size={18} />
+                  Delete Selected
                 </button>
               )}
             </div>
 
-            {/* ===== CONDITIONAL DOWNLOAD BUTTON ===== */}
+            {/* Download button */}
             {isSampleDownloadFile ? (
               <button
                 onClick={handleSampleDownload}
@@ -3335,6 +3376,7 @@
             )}
           </div>
 
+          {/* Warnings */}
           {!checkingPurchaseInventories && !hasPurchaseInventories && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
               <div className="flex items-start gap-3">
@@ -3386,11 +3428,11 @@
               </div>
             )}
 
+          {/* Filter tabs + search */}
           {sales.length > 0 && (
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-              {/* Left side - Payment Status + Sale Type Tabs */}
               <div className="flex gap-2 flex-wrap items-center">
-                {/* Payment Status Group */}
+                {/* Payment status */}
                 <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
                   <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
                     Payment
@@ -3414,10 +3456,9 @@
                   ))}
                 </div>
 
-                {/* Divider */}
                 <div className="w-px h-8 bg-gray-300 mx-1" />
 
-                {/* Sale Type Group */}
+                {/* Sale type */}
                 <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
                   <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
                     Sale Type
@@ -3440,7 +3481,6 @@
                           : "text-gray-600 hover:bg-gray-200"
                       }`}
                     >
-                      {/* Icon */}
                       {tab.id === "normal" ? (
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -3493,45 +3533,42 @@
                           />
                         </svg>
                       )}
-
-                      {/* Label */}
                       <span>{tab.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Right side - Total Count + Search */}
-              {sales.length > 0 && (
-                <div className="flex items-center justify-end gap-4 flex-wrap">
-                  <p className="text-lg font-semibold text-gray-700">
-                    Total Count:{" "}
-                    <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                      {filteredSales.length}
-                    </span>
-                  </p>
-                  <div className="relative w-full md:w-72">
-                    <Search
-                      className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
-                      size={16}
-                    />
-                    <input
-                      ref={inputRef}
-                      type="text"
-                      placeholder="Search invoice, MR name, Customer name..."
-                      value={searchTerm}
-                      onChange={(e) => {
-                        setSearchTerm(e.target.value);
-                        setCurrentPage(1);
-                      }}
-                      className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition"
-                    />
-                  </div>
+              {/* Right — count + search */}
+              <div className="flex items-center justify-end gap-4 flex-wrap">
+                <p className="text-lg font-semibold text-gray-700">
+                  Total Count:{" "}
+                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                    {filteredSales.length}
+                  </span>
+                </p>
+                <div className="relative w-full md:w-72">
+                  <Search
+                    className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
+                    size={16}
+                  />
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Search invoice, MR name, Customer name..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition"
+                  />
                 </div>
-              )}
+              </div>
             </div>
           )}
 
+          {/* Table */}
           <div className="overflow-x-auto shadow-lg rounded-2xl border border-gray-200">
             <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
               <thead className="bg-gray-100 text-gray-700 border-b">
@@ -3577,7 +3614,7 @@
                     >
                       {loadingData ? (
                         <div className="flex justify-center py-8">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
                         </div>
                       ) : (
                         <div className="py-8">
@@ -3594,97 +3631,104 @@
                     </td>
                   </tr>
                 ) : (
-                  currentSales.map((sale, index) => (
-                    <tr
-                      key={`sale-${sale._id || index}`}
-                      className={`hover:bg-gray-50 transition-colors ${index < currentSales.length - 1 ? "border-b" : ""}`}
-                    >
-                      {allFields
-                        .filter((item) => tableColumns.includes(item.id))
-                        .map((item) => (
-                          <td
-                            key={`cell-${sale._id}-${item.id}`}
-                            className="p-3 whitespace-nowrap min-w-[120px]"
-                          >
-                            {item.id === "invoiceNumber" ? (
-                              <div className="flex items-center gap-4">
-                                <input
-                                  type="checkbox"
-                                  checked={selected.some(
-                                    (s) => s.id === sale._id,
-                                  )}
-                                  onChange={() => toggleSelect(sale)}
-                                  className="cursor-pointer"
-                                />
-                                <span className="font-medium">
-                                  {sale.invoiceNumber}
-                                  {(sale.isMRSale || sale.isMrSaleImport) && (
-                                    <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
-                                      MR
-                                    </span>
-                                  )}
-                                </span>
-                              </div>
-                            ) : item.id === "productCount" ? (
-                              <button
-                                onClick={() => handleProductCountClick(sale)}
-                                className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
-                                title="View Products"
-                              >
-                                <Package size={14} />
-                                <span className="font-medium">
+                  currentSales.map((sale, index) => {
+                    const isMRSale = isMRSaleDoc(sale);
+
+                    return (
+                      <tr
+                        key={`sale-${sale._id || index}`}
+                        className={`hover:bg-gray-50 transition-colors ${
+                          index < currentSales.length - 1 ? "border-b" : ""
+                        }`}
+                      >
+                        {allFields
+                          .filter((item) => tableColumns.includes(item.id))
+                          .map((item) => (
+                            <td
+                              key={`cell-${sale._id}-${item.id}`}
+                              className="p-3 whitespace-nowrap min-w-[120px]"
+                            >
+                              {item.id === "invoiceNumber" ? (
+                                <div className="flex items-center gap-4">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected.some(
+                                      (s) => s.id === sale._id,
+                                    )}
+                                    onChange={() => toggleSelect(sale)}
+                                    className="cursor-pointer"
+                                  />
+                                  <span className="font-medium">
+                                    {sale.invoiceNumber}
+                                    {isMRSale && (
+                                      <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
+                                        MR
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              ) : item.id === "productCount" ? (
+                                <button
+                                  onClick={() => handleProductCountClick(sale)}
+                                  className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
+                                  title="View Products"
+                                >
+                                  <Package size={14} />
+                                  <span className="font-medium">
+                                    {getFieldValue(sale, item.dbName)}
+                                  </span>
+                                </button>
+                              ) : item.id === "actions" ? (
+                                <div className="flex items-center justify-center gap-3 min-w-[150px]">
+                                  <button
+                                    className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1"
+                                    onClick={() => handleView(sale)}
+                                    title="View"
+                                  >
+                                    <Eye size={18} />
+                                  </button>
+                                  <button
+                                    className="text-green-600 hover:text-green-800 cursor-pointer transition-colors p-1"
+                                    onClick={() => editSale(sale)}
+                                    title="Edit"
+                                  >
+                                    <Edit size={18} />
+                                  </button>
+                                  <button
+                                    className="text-red-600 hover:text-red-800 cursor-pointer transition-colors p-1"
+                                    onClick={() => deleteSale(sale)}
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </div>
+                              ) : item.id === "paymentStatus" ? (
+                                <span
+                                  className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                    sale.paymentStatus === "Cash"
+                                      ? "bg-green-100 text-green-800"
+                                      : sale.paymentStatus === "Credit"
+                                        ? "bg-yellow-100 text-yellow-800"
+                                        : sale.paymentStatus === "Partial Paid"
+                                          ? "bg-blue-100 text-blue-800"
+                                          : "bg-gray-100 text-gray-800"
+                                  }`}
+                                >
                                   {getFieldValue(sale, item.dbName)}
                                 </span>
-                              </button>
-                            ) : item.id === "actions" ? (
-                              <div className="flex items-center justify-center gap-3 min-w-[150px]">
-                                <button
-                                  className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1"
-                                  onClick={() => handleView(sale)}
-                                  title="View"
-                                >
-                                  <Eye size={18} />
-                                </button>
-                                <button
-                                  className="text-green-600 hover:text-green-800 cursor-pointer transition-colors p-1"
-                                  onClick={() => editSale(sale)}
-                                  title="Edit"
-                                >
-                                  <Edit size={18} />
-                                </button>
-                                <button
-                                  className="text-red-600 hover:text-red-800 cursor-pointer transition-colors p-1"
-                                  onClick={() => deleteSale(sale)}
-                                  title="Delete"
-                                >
-                                  <Trash2 size={18} />
-                                </button>
-                              </div>
-                            ) : item.id === "paymentStatus" ? (
-                              <span
-                                className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  sale.paymentStatus === "Paid"
-                                    ? "bg-green-100 text-green-800"
-                                    : sale.paymentStatus === "Credit"
-                                      ? "bg-yellow-100 text-yellow-800"
-                                      : sale.paymentStatus === "Partial"
-                                        ? "bg-blue-100 text-blue-800"
-                                        : "bg-gray-100 text-gray-800"
-                                }`}
-                              >
-                                {getFieldValue(sale, item.dbName)}
-                              </span>
-                            ) : (
-                              getFieldValue(sale, item.dbName)
-                            )}
-                          </td>
-                        ))}
-                    </tr>
-                  ))
+                              ) : (
+                                getFieldValue(sale, item.dbName)
+                              )}
+                            </td>
+                          ))}
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
 
+            {/* Pagination */}
             {filteredSales.length > SALES_PER_PAGE && (
               <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
                 <div className="flex items-center gap-2 flex-wrap">

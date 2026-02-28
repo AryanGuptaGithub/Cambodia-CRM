@@ -723,17 +723,12 @@ const deductMRSalePurchasePriceFromReportInHand = async (
       Math.max(0, currentAmount - mrSalePurchasePrice),
     );
 
-    // ✅ Update financial fields – quantity fields unchanged
+    // ✅ Only update financial fields – quantity fields remain unchanged
     stockItem.totalAmount = newTotalAmount;
     stockItem.averagePrice =
       stockItem.totalBoxes > 0
         ? fixPrecision(newTotalAmount / stockItem.totalBoxes)
         : 0;
-
-    // 🆕 Update cumulative MR sale deductions
-    stockItem.totalMrSaleDeductions = fixPrecision(
-      (stockItem.totalMrSaleDeductions || 0) + mrSalePurchasePrice
-    );
 
     // Update status based on new financial value (optional)
     if (newTotalAmount <= 0) {
@@ -746,6 +741,11 @@ const deductMRSalePurchasePriceFromReportInHand = async (
 
     stockItem.updatedAt = new Date();
     await stockItem.save({ session });
+
+    console.log(`✅ ReportInHand financial update: ${productName}`);
+    console.log(`   totalAmount: ${currentAmount} → ${newTotalAmount}`);
+    console.log(`   (deducted ${mrSalePurchasePrice})`);
+
     return {
       success: true,
       productName: stockItem.productName,
@@ -765,6 +765,7 @@ const deductMRSalePurchasePriceFromReportInHand = async (
     return { success: false, message: error.message, mrSalePurchasePrice: 0 };
   }
 };
+
 // ==========================================
 // restoreStockToReportInHand (unchanged)
 // ==========================================
@@ -1377,28 +1378,25 @@ async function deductStockFromMRHand(
   }
 
   const newQty = fixPrecision(currentQty - totalQty);
-  productEntry.quantity = newQty;
-  productEntry.lastUpdated = new Date();
-
-  // 🆕 NEW: Recalculate productValue (will be updated in pre-save, but we can set it now)
-  productEntry.productValue = newQty * lcValue;
-
-  // 🆕 NEW: Recalculate totalValue (will be done in pre-save)
-  // We'll just save and let the middleware handle it
-
-  await mrStock.save({ session }); // pre-save hook recalculates totalValue
+  mrStock.productsInHand[productIndex].quantity = newQty;
+  mrStock.productsInHand[productIndex].lastUpdated = new Date();
+  await mrStock.save({ session });
 
   const amountDeducted = fixPrecision(totalQty * lcValue);
 
-  const mrSalePurchasePriceResult = await deductMRSalePurchasePriceFromReportInHand(
-    productName,
-    salesQty,
-    bonusQty,
-    lcValue,
-    session,
-  );
+  const mrSalePurchasePriceResult =
+    await deductMRSalePurchasePriceFromReportInHand(
+      productName,
+      salesQty,
+      bonusQty,
+      lcValue,
+      session,
+    );
 
-  if (!mrSalePurchasePriceResult.success && !mrSalePurchasePriceResult.skipped) {
+  if (
+    !mrSalePurchasePriceResult.success &&
+    !mrSalePurchasePriceResult.skipped
+  ) {
     return {
       success: false,
       message:
@@ -1443,6 +1441,8 @@ async function getMRStockQuantity(mrId, productName, session) {
 }
 
 async function restoreStockToMRHand(mrId, productName, qty, lc, session) {
+  console.log("Inputs:", { mrId, productName, qty, lc, session: !!session });
+
   let mrStock = null;
   try {
     mrStock = await StockInMRHand.findOne({
@@ -1469,24 +1469,19 @@ async function restoreStockToMRHand(mrId, productName, qty, lc, session) {
     const newQty = fixPrecision(oldQty + qty);
     mrStock.productsInHand[productIndex].quantity = newQty;
     mrStock.productsInHand[productIndex].lastUpdated = new Date();
-    // 🆕 NEW: productValue will be recalculated on save
   } else {
     mrStock.productsInHand.push({
       productName: productName.trim(),
       quantity: fixPrecision(qty),
       lc: lc || 0,
       lastUpdated: new Date(),
-      // productValue will be set in pre-save
     });
   }
 
-  await mrStock.save({ session }); // pre-save hook recalculates all values and total
+  await mrStock.save({ session });
   return { success: true };
 }
 
-// ==========================================
-// CREATE SALE (Manual) - FIXED
-// ==========================================
 router.post("/create", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1597,7 +1592,7 @@ router.post("/create", async (req, res) => {
       }
     }
 
-    // Second pass: deduct and build products - FIXED
+    // Second pass: deduct and build products
     for (const p of data.products || []) {
       const salesQty = fixPrecision(Number(p.salesQty) || 0);
       const bonusQty = fixPrecision(Number(p.bonusQty) || 0);
@@ -1609,7 +1604,6 @@ router.post("/create", async (req, res) => {
       const discount = fixPrecision(Number(p.discount) || 0);
       const netSellingAmount = fixPrecision(amount - discount);
       let lc = 0;
-      let mrSalePurchasePrice = 0;
 
       if (isMRSale) {
         const deductionResult = await deductStockFromMRHand(
@@ -1620,17 +1614,8 @@ router.post("/create", async (req, res) => {
           session,
         );
 
-        if (!deductionResult.success) {
-          throw new Error(
-            `MR stock deduction failed for ${p.productName}: ${deductionResult.message}`,
-          );
-        }
-
         const amountDeducted = deductionResult.amountDeducted || 0;
         totalCostAmount = fixPrecision(totalCostAmount + amountDeducted);
-        mrSalePurchasePrice = deductionResult.mrSalePurchasePrice || 0;
-
-        lc = deductionResult.lc;
 
         stockDeductionResults.push({
           product: p.productName.trim(),
@@ -1638,8 +1623,13 @@ router.post("/create", async (req, res) => {
           mrName: p.mrName,
           ...deductionResult,
           amountDeducted,
-          mrSalePurchasePrice,
+          mrSalePurchasePrice: deductionResult.mrSalePurchasePrice || 0,
         });
+        if (!deductionResult.success)
+          throw new Error(
+            `MR stock deduction failed for ${p.productName}: ${deductionResult.message}`,
+          );
+        lc = deductionResult.lc;
       } else {
         const productRecord = await findProductRecordFlexible(
           p.productName,
@@ -1654,21 +1644,17 @@ router.post("/create", async (req, res) => {
           data.invoiceNumber,
           session,
         );
-
-        if (!deductionResult.success) {
-          throw new Error(
-            `Warehouse stock deduction failed for ${p.productName}: ${deductionResult.message}`,
-          );
-        }
-
         const amountDeducted = deductionResult.amountDeducted || 0;
         totalCostAmount = fixPrecision(totalCostAmount + amountDeducted);
-
         stockDeductionResults.push({
           product: p.productName.trim(),
           ...deductionResult,
           amountDeducted,
         });
+        if (!deductionResult.success)
+          throw new Error(
+            `Warehouse stock deduction failed for ${p.productName}: ${deductionResult.message}`,
+          );
       }
 
       const profitLoss = fixPrecision((sellingPrice - lc) * salesQty);
@@ -1687,14 +1673,17 @@ router.post("/create", async (req, res) => {
         lc,
         profitLoss,
         isProductAccept: true,
-        mrSalePurchasePrice: isMRSale ? mrSalePurchasePrice : 0,
       };
-
       if (isMRSale) {
         productData.mrId = p.mrId;
         productData.mrName = p.mrName;
+        // 🆕 NEW: store mrSalePurchasePrice
+        productData.mrSalePurchasePrice = fixPrecision(
+          deductionResult.mrSalePurchasePrice || 0,
+        );
+      } else {
+        productData.mrSalePurchasePrice = 0;
       }
-
       processedProducts.push(productData);
       totalAmount = fixPrecision(totalAmount + netSellingAmount);
       totalProfitLoss = fixPrecision(totalProfitLoss + profitLoss);

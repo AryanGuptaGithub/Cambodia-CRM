@@ -26,23 +26,19 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const CarryStockView = () => {
   const [allStockData, setAllStockData] = useState([]);
-  const [filteredData, setFilteredData] = useState([]);
   const [groupedData, setGroupedData] = useState([]);
   const [pagedData, setPagedData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMr, setSelectedMr] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
-
-  // View Details modal (original per-product modal)
+  const [usedTab, setUsedTab] = useState("all"); // For main table
+  const [modalUsedTab, setModalUsedTab] = useState("all"); // For modal filtering - FIX: separate state
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedStock, setSelectedStock] = useState(null);
-
-  // Products modal (package icon click → show all products for an MR)
   const [isProductsModalOpen, setIsProductsModalOpen] = useState(false);
   const [selectedMrProducts, setSelectedMrProducts] = useState([]);
   const [selectedMrName, setSelectedMrName] = useState("");
-
   const [dateFilter, setDateFilter] = useState("all");
   const [customStartDate, setCustomStartDate] = useState(null);
   const [customEndDate, setCustomEndDate] = useState(null);
@@ -53,193 +49,110 @@ const CarryStockView = () => {
 
   const ROWS_PER_PAGE = 10;
 
-  // ─── Fetch MR List ───────────────────────────────────────────────────────
+  // ─── Fetch MR List ────────────────────────────────────────────────────────
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(
-        `${backendUrl}/api/stock-transfer-to-mr/mrs`,
-      );
-      if (response.data.success) {
-        setMrList(response.data.data || []);
-      } else {
-        showToast("error", "Failed to load MR list");
-      }
-    } catch (error) {
-      console.error("Error fetching MR list:", error);
+      const res = await axios.get(`${backendUrl}/api/stock-transfer-to-mr/mrs`);
+      if (res.data.success) setMrList(res.data.data || []);
+      else showToast("error", "Failed to load MR list");
+    } catch (e) {
+      console.error(e);
       showToast("error", "Failed to load MR list");
     } finally {
       setMrListLoading(false);
     }
   }, []);
 
-  // ─── Fetch Stock Data ────────────────────────────────────────────────────
-  // const fetchStockData = useCallback(async () => {
-  //   try {
-  //     setLoading(true);
-  //     const params = {};
-  //     if (selectedMr !== "all") {
-  //       const mrValue =
-  //         typeof selectedMr === "object" ? selectedMr.value : selectedMr;
-  //       params.mrName = mrValue;
-  //     }
-  //     if (searchTerm.trim()) {
-  //       params.search = searchTerm;
-  //     }
-
-  //     const response = await axios.get(
-  //       `${backendUrl}/api/stock-transfer-to-mr/mr-hand`,
-  //       { params },
-  //     );
-
-  //     console.log("values of resposnt", response);
-  //     if (response.status === 200) {
-  //       // Determine the data array
-  //       let rawData = response.data;
-  //       // If response.data has a 'data' property that is an array, use that (common paginated response)
-  //       if (rawData && Array.isArray(rawData.data)) {
-  //         rawData = rawData.data;
-  //       } else if (!Array.isArray(rawData)) {
-  //         // If it's not an array, maybe it's an object with some other structure; fallback to empty array
-  //         console.warn("Unexpected response data format", rawData);
-  //         rawData = [];
-  //       }
-  //       const transformedData = rawData.map((item, index) => ({
-  //         id: item.id || `${item.mrName}-${item.productId}-${index}`,
-  //         mrCode: item.mrName || "N/A",
-  //         mrName: item.mrName || "N/A",
-  //         productId: item.productId || `PROD-${index}`,
-  //         productCode: item.productCode || `PROD-${index}`,
-  //         productName: item.productName || "Unknown Product",
-  //         batch: item.batch || "N/A",
-  //         expiry: item.expiry || "N/A",
-  //         assignedQty: item.assignedQty || 0,
-  //         remainingQty: item.remainingQty || item.boxQuantity || 0,
-  //         usedQty: item.usedQty || 0,
-  //         assignedDate:
-  //           item.assignedDate || new Date().toISOString().split("T")[0],
-  //         createdAt: item.createdAt || item.assignedDate,
-  //         status: (item.remainingQty || 0) > 0 ? "Active" : "Depleted",
-  //         invoiceNumbers: item.invoiceNumbers || [],
-  //         lc: item.lc || 0,
-  //         unit: item.unit || "pcs",
-  //         category: item.category || "General",
-  //         packSize: item.packSize || 0,
-  //         costPrice: item.costPrice || 0,
-  //         boxQuantity: item.boxQuantity || item.remainingQty || 0,
-  //       }));
-  //       setAllStockData(transformedData);
-  //     } else {
-  //       showToast(
-  //         "error",
-  //         response.data.message || "Failed to load carry stock data",
-  //       );
-  //       setAllStockData([]);
-  //     }
-  //   } catch (error) {
-  //     console.error("Error fetching stock data:", error);
-  //     showToast("error", "Failed to load carry stock data");
-  //     setAllStockData([]);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // }, [selectedMr, searchTerm]);
-
+  // ─── Fetch Stock Data ─────────────────────────────────────────────────────
   const fetchStockData = useCallback(async () => {
-  try {
-    setLoading(true);
-    const params = {};
-    if (selectedMr !== "all") {
-      const mrValue =
-        typeof selectedMr === "object" ? selectedMr.value : selectedMr;
-      params.mrName = mrValue;
-    }
-    if (searchTerm.trim()) {
-      params.search = searchTerm;
-    }
-
-    const response = await axios.get(
-      `${backendUrl}/api/stock-transfer-to-mr/mr-hand`,
-      { params },
-    );
-
-    console.log("API Response:", response);
-
-    if (response.status === 200) {
-      // Extract the data array – handle both direct array and { data: [...] }
-      let rawData = response.data;
-      if (rawData && Array.isArray(rawData.data)) {
-        rawData = rawData.data;
-      } else if (!Array.isArray(rawData)) {
-        console.warn("Unexpected response data format", rawData);
-        rawData = [];
+    try {
+      setLoading(true);
+      const params = {};
+      if (selectedMr !== "all") {
+        params.mrName =
+          typeof selectedMr === "object" ? selectedMr.value : selectedMr;
       }
+      if (searchTerm.trim()) params.search = searchTerm;
 
-      const transformedData = rawData.map((item, index) => {
-        // Try to find assigned quantity from common field names
-        const assignedQty =
-          item.assignedQty ??
-          item.originalQuantity ??
-          item.totalBoxes ??
-          item.quantity ??
-          item.boxes ??
-          0;
-
-        // Remaining quantity – use remainingQty or boxQuantity
-        const remainingQty = item.remainingQty ?? item.boxQuantity ?? 0;
-
-        // Used quantity – if provided, use it; otherwise compute from assigned - remaining
-        const usedQty =
-          item.usedQty ??
-          (assignedQty > 0 ? Math.max(0, assignedQty - remainingQty) : 0);
-
-        return {
-          id: item.id || `${item.mrName}-${item.productId}-${index}`,
-          mrCode: item.mrName || "N/A",
-          mrName: item.mrName || "N/A",
-          productId: item.productId || `PROD-${index}`,
-          productCode: item.productCode || `PROD-${index}`,
-          productName: item.productName || "Unknown Product",
-          batch: item.batch || "N/A",
-          expiry: item.expiry || "N/A",
-          assignedQty,
-          remainingQty,
-          usedQty,
-          assignedDate:
-            item.assignedDate || new Date().toISOString().split("T")[0],
-          createdAt: item.createdAt || item.assignedDate,
-          status: remainingQty > 0 ? "Active" : "Depleted",
-          invoiceNumbers: item.invoiceNumbers || [],
-          lc: item.lc || 0,
-          unit: item.unit || "pcs",
-          category: item.category || "General",
-          packSize: item.packSize || 0,
-          costPrice: item.costPrice || 0,
-          boxQuantity: remainingQty, // store remaining for backward compatibility
-        };
-      });
-
-      setAllStockData(transformedData);
-    } else {
-      showToast(
-        "error",
-        response.data?.message || "Failed to load carry stock data",
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfer-to-mr/mr-hand`,
+        { params },
       );
-      setAllStockData([]);
-    }
-  } catch (error) {
-    console.error("Error fetching stock data:", error);
-    showToast("error", "Failed to load carry stock data");
-    setAllStockData([]);
-  } finally {
-    setLoading(false);
-  }
-}, [selectedMr, searchTerm]);
 
-  // ─── Apply Date Filter ───────────────────────────────────────────────────
+      if (response.status === 200) {
+        let rawData = response.data;
+        if (rawData && Array.isArray(rawData.data)) rawData = rawData.data;
+        else if (!Array.isArray(rawData)) rawData = [];
+
+        const transformedData = rawData.map((item, index) => {
+          const remainingQty =
+            item.remainingQty ?? // fixed backend
+            item.quantity ?? // old backend / raw DB
+            item.boxQuantity ??
+            0;
+
+          const assignedQty =
+            item.assignedQty ?? // fixed backend sends this correctly
+            item.assignedQuantity ?? // raw DB field (old backend didn't map it)
+            remainingQty; // absolute fallback: assume nothing used yet
+
+          const usedQty = Math.max(0, assignedQty - remainingQty);
+          const utilization =
+            assignedQty > 0 ? Math.round((usedQty / assignedQty) * 100) : 0;
+
+          // Status — compute fresh (don't trust old backend's status)
+          let status = "Active";
+          if (assignedQty > 0 && remainingQty === 0) {
+            status = "Full Used";
+          } else if (usedQty > 0 && remainingQty > 0) {
+            status = "Partial Used";
+          }
+
+          return {
+            id: item.id || `${item.mrName}-${item.productId}-${index}`,
+            mrCode: item.mrName || "N/A",
+            mrName: item.mrName || "N/A",
+            productId: item.productId || `PROD-${index}`,
+            productCode: item.productCode || "",
+            productName: item.productName || "Unknown Product",
+            assignedQty,
+            remainingQty,
+            usedQty,
+            utilization,
+            status,
+            assignedDate:
+              item.assignedDate || item.lastUpdated || new Date().toISOString(),
+            createdAt: item.createdAt || item.assignedDate,
+            invoiceNumbers: item.invoiceNumbers || [],
+            lc: item.lc || 0,
+            unit: item.unit || "pcs",
+            category: item.category || "General",
+            boxQuantity: remainingQty,
+          };
+        });
+
+        setAllStockData(transformedData);
+      } else {
+        showToast(
+          "error",
+          response.data?.message || "Failed to load carry stock data",
+        );
+        setAllStockData([]);
+      }
+    } catch (error) {
+      console.error("Error fetching stock data:", error);
+      showToast("error", "Failed to load carry stock data");
+      setAllStockData([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedMr, searchTerm]);
+
+  // ─── Date Filter ─────────────────────────────────────────────────────────
   const applyDateFilter = useCallback(
     (data, filterType, startDate, endDate) => {
-      if (filterType === "all" || !data || data.length === 0) return data;
+      if (filterType === "all" || !data || !data.length) return data;
       const now = new Date();
       let dateFrom, dateTo;
       switch (filterType) {
@@ -274,45 +187,47 @@ const CarryStockView = () => {
       }
       return data.filter((item) => {
         if (!item.assignedDate) return false;
-        const itemDate = new Date(item.assignedDate);
-        return itemDate >= dateFrom && itemDate <= dateTo;
+        const d = new Date(item.assignedDate);
+        return d >= dateFrom && d <= dateTo;
       });
     },
     [],
   );
 
-  // ─── Apply All Filters + Group by MR ────────────────────────────────────
+  // ─── Filters + Group by MR ────────────────────────────────────────────────
   const applyFiltersAndGroup = useCallback(
-    (data, sterm, dateF, startD, endD, mrFilter) => {
+    (data, sterm, dateF, startD, endD, mrFilter, usedTabFilter) => {
       let filtered = [...data];
 
-      // MR filter
       if (mrFilter !== "all") {
         const mrVal =
           typeof mrFilter === "object"
             ? mrFilter.value || mrFilter.label || mrFilter.mrName
             : mrFilter;
         filtered = filtered.filter(
-          (item) => item.mrName === mrVal || item.mrCode === mrVal,
+          (i) => i.mrName === mrVal || i.mrCode === mrVal,
         );
       }
 
-      // Search
       if (sterm.trim()) {
         filtered = filtered.filter(
-          (item) =>
-            item.productName?.toLowerCase().includes(sterm.toLowerCase()) ||
-            item.productCode?.toLowerCase().includes(sterm.toLowerCase()) ||
-            item.mrName?.toLowerCase().includes(sterm.toLowerCase()) ||
-            item.mrCode?.toLowerCase().includes(sterm.toLowerCase()) ||
-            item.batch?.toLowerCase().includes(sterm.toLowerCase()),
+          (i) =>
+            i.productName?.toLowerCase().includes(sterm.toLowerCase()) ||
+            i.mrName?.toLowerCase().includes(sterm.toLowerCase()) ||
+            i.productCode?.toLowerCase().includes(sterm.toLowerCase()),
         );
       }
 
-      // Date
       filtered = applyDateFilter(filtered, dateF, startD, endD);
 
-      // Group by MR
+      if (usedTabFilter === "partial") {
+        filtered = filtered.filter((i) => i.usedQty > 0 && i.remainingQty > 0);
+      } else if (usedTabFilter === "full") {
+        filtered = filtered.filter(
+          (i) => i.assignedQty > 0 && i.remainingQty === 0,
+        );
+      }
+
       const grouped = {};
       filtered.forEach((item) => {
         const key = item.mrName;
@@ -325,7 +240,6 @@ const CarryStockView = () => {
           };
         }
         grouped[key].products.push(item);
-        // Track latest assigned date
         if (item.assignedDate > grouped[key].lastAssignedDate) {
           grouped[key].lastAssignedDate = item.assignedDate;
         }
@@ -338,31 +252,28 @@ const CarryStockView = () => {
     [applyDateFilter],
   );
 
-  // ─── Effects ─────────────────────────────────────────────────────────────
+  // ─── Effects ──────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchMRList();
   }, []);
 
   useEffect(() => {
-    if (mrList.length > 0 || selectedMr === "all") {
-      fetchStockData();
-    }
+    if (mrList.length > 0 || selectedMr === "all") fetchStockData();
   }, [selectedMr, fetchStockData]);
 
   useEffect(() => {
-    if (allStockData.length >= 0) {
-      const grouped = applyFiltersAndGroup(
-        allStockData,
-        searchTerm,
-        dateFilter,
-        customStartDate,
-        customEndDate,
-        selectedMr,
-      );
-      setGroupedData(grouped);
-      setTotalCount(grouped.length);
-      setCurrentPage(1);
-    }
+    const grouped = applyFiltersAndGroup(
+      allStockData,
+      searchTerm,
+      dateFilter,
+      customStartDate,
+      customEndDate,
+      selectedMr,
+      usedTab, // This uses the main usedTab state
+    );
+    setGroupedData(grouped);
+    setTotalCount(grouped.length);
+    setCurrentPage(1);
   }, [
     allStockData,
     searchTerm,
@@ -370,48 +281,74 @@ const CarryStockView = () => {
     customStartDate,
     customEndDate,
     selectedMr,
+    usedTab, // Main table depends on usedTab
     applyFiltersAndGroup,
   ]);
 
-  // Paginate grouped data
   useEffect(() => {
-    const startIndex = (currentPage - 1) * ROWS_PER_PAGE;
-    setPagedData(groupedData.slice(startIndex, startIndex + ROWS_PER_PAGE));
+    const start = (currentPage - 1) * ROWS_PER_PAGE;
+    setPagedData(groupedData.slice(start, start + ROWS_PER_PAGE));
   }, [currentPage, groupedData]);
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-  const calculateUtilization = (assigned, remaining) => {
-    if (!assigned || assigned === 0) return 0;
-    const used = Math.max(0, assigned - remaining);
-    return Math.round((used / assigned) * 100);
-  };
+  // ─── Tab badge counts for main table ─────────────────────────────────────
+  const tabStats = useMemo(
+    () => ({
+      all: allStockData.length,
+      partial: allStockData.filter((i) => i.usedQty > 0 && i.remainingQty > 0)
+        .length,
+      full: allStockData.filter(
+        (i) => i.assignedQty > 0 && i.remainingQty === 0,
+      ).length,
+    }),
+    [allStockData],
+  );
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return "N/A";
-      return date.toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      });
-    } catch {
-      return "N/A";
+  // ─── Filtered products for modal based on modalUsedTab ───────────────────
+  const getFilteredModalProducts = useCallback(() => {
+    if (!selectedMrProducts.length) return [];
+    
+    if (modalUsedTab === "all") {
+      return selectedMrProducts;
+    } else if (modalUsedTab === "partial") {
+      return selectedMrProducts.filter(
+        (product) => product.usedQty > 0 && product.remainingQty > 0
+      );
+    } else if (modalUsedTab === "full") {
+      return selectedMrProducts.filter(
+        (product) => product.assignedQty > 0 && product.remainingQty === 0
+      );
     }
+    return selectedMrProducts;
+  }, [selectedMrProducts, modalUsedTab]);
+
+  // ─── Modal tab stats ─────────────────────────────────────────────────────
+  const modalTabStats = useMemo(() => {
+    return {
+      all: selectedMrProducts.length,
+      partial: selectedMrProducts.filter(
+        (p) => p.usedQty > 0 && p.remainingQty > 0
+      ).length,
+      full: selectedMrProducts.filter(
+        (p) => p.assignedQty > 0 && p.remainingQty === 0
+      ).length,
+    };
+  }, [selectedMrProducts]);
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+  const calcUtil = (assigned, remaining) => {
+    if (!assigned || assigned === 0) return 0;
+    return Math.round((Math.max(0, assigned - remaining) / assigned) * 100);
   };
 
-  const formatDateTime = (dateString) => {
-    if (!dateString) return "N/A";
+  const formatDate = (ds) => {
+    if (!ds) return "N/A";
     try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return "N/A";
-      return date.toLocaleDateString(undefined, {
+      const d = new Date(ds);
+      if (isNaN(d.getTime())) return "N/A";
+      return d.toLocaleDateString(undefined, {
         year: "numeric",
         month: "short",
         day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
       });
     } catch {
       return "N/A";
@@ -419,19 +356,17 @@ const CarryStockView = () => {
   };
 
   const mrOptions = useMemo(() => {
-    const options = [{ value: "all", label: "All MRs" }];
-    mrList.forEach((mr) => {
-      options.push({ value: mr.mrName, label: mr.mrName });
-    });
-    return options;
+    const opts = [{ value: "all", label: "All MRs" }];
+    mrList.forEach((mr) => opts.push({ value: mr.mrName, label: mr.mrName }));
+    return opts;
   }, [mrList]);
 
   const totalPages = Math.ceil(totalCount / ROWS_PER_PAGE) || 1;
 
   const getVisiblePages = (current, total) => {
-    const delta = 2;
-    const range = [];
-    const rangeWithDots = [];
+    const delta = 2,
+      range = [],
+      out = [];
     let l;
     for (let i = 1; i <= total; i++) {
       if (
@@ -443,174 +378,164 @@ const CarryStockView = () => {
     }
     range.forEach((i) => {
       if (l) {
-        if (i - l === 2) rangeWithDots.push(l + 1);
-        else if (i - l !== 1) rangeWithDots.push("...");
+        if (i - l === 2) out.push(l + 1);
+        else if (i - l !== 1) out.push("...");
       }
-      rangeWithDots.push(i);
+      out.push(i);
       l = i;
     });
-    return rangeWithDots;
+    return out;
   };
   const visiblePages = getVisiblePages(currentPage, totalPages);
 
-  const handleMrChange = (selectedOption) => {
-    if (!selectedOption) {
+  const handleMrChange = (opt) => {
+    if (!opt) {
       setSelectedMr("all");
       return;
     }
-    if (typeof selectedOption === "string") {
-      setSelectedMr(selectedOption);
-      return;
-    }
-    setSelectedMr(selectedOption.value || "all");
+    setSelectedMr(typeof opt === "string" ? opt : opt.value || "all");
   };
-
-  const getCurrentMrDisplayName = () => {
+  
+  const getMrLabel = () => {
     if (selectedMr === "all") return "All MRs";
     const opt = mrOptions.find(
       (o) => o.value === selectedMr || o.label === selectedMr,
     );
     return opt ? opt.label : selectedMr;
   };
-
-  const handleDateFilterChange = (filterType) => setDateFilter(filterType);
-  const clearCustomDateRange = () => {
+  
+  const clearDates = () => {
     setCustomStartDate(null);
     setCustomEndDate(null);
     setDateFilter("all");
   };
-
-  const handleViewDetails = (stock) => {
-    setSelectedStock(stock);
+  
+  const handleViewDetails = (s) => {
+    setSelectedStock(s);
     setIsViewModalOpen(true);
   };
-
-  const handleOpenProductsModal = (mrGroup) => {
-    setSelectedMrProducts(mrGroup.products);
-    setSelectedMrName(mrGroup.mrName);
+  
+  const handleOpenProductsModal = (grp) => {
+    setSelectedMrProducts(grp.products);
+    setSelectedMrName(grp.mrName);
+    setModalUsedTab("all"); // Reset modal tab to "all" when opening modal
     setIsProductsModalOpen(true);
   };
-
+  
   const handleRefresh = () => {
     setCurrentPage(1);
     fetchStockData();
   };
 
-  // ─── Export (fixed: CSV fallback, not blob) ───────────────────────────────
+  // ─── Export ───────────────────────────────────────────────────────────────
   const handleExport = async () => {
     try {
       showToast("info", "Preparing export...");
-
-      // Build params same as view
-      const params = {};
-      if (selectedMr !== "all") {
-        const mrValue =
-          typeof selectedMr === "object"
-            ? selectedMr.value || selectedMr.label
-            : selectedMr;
-        params.mrName = mrValue;
-      }
-      if (dateFilter === "custom" && customStartDate && customEndDate) {
-        params.dateFrom = customStartDate.toISOString().split("T")[0];
-        params.dateTo = customEndDate.toISOString().split("T")[0];
-      }
-
-      // Fetch the JSON data (backend returns JSON, not xlsx blob)
-      const response = await axios.get(
-        `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
-        { params },
-      );
-
-      if (!response.data.success) {
-        showToast("error", "Failed to fetch data for export");
-        return;
-      }
-
-      const rows = response.data.data || [];
-
-      // Build CSV
+      const rows = allStockData;
       const headers = [
         "MR Name",
         "Product Name",
-        "Product Code",
-        "Category",
-        "Unit",
         "Assigned Qty",
         "Remaining Qty",
         "Used Qty",
         "Utilization %",
-        "Assigned Date",
         "Status",
-        "Invoice Numbers",
+        "Assigned Date",
       ];
-
-      const csvRows = rows.map((item) => {
-        const assignedQty = item.assignedQty || 0;
-        const remainingQty = item.remainingQty || 0;
-        const usedQty = item.usedQty || Math.max(0, assignedQty - remainingQty);
-        const utilization =
-          assignedQty > 0
-            ? Math.round(
-                (Math.max(0, assignedQty - remainingQty) / assignedQty) * 100,
-              )
-            : 0;
-        const invoices = Array.isArray(item.invoiceNumbers)
-          ? item.invoiceNumbers.join("; ")
-          : "";
-
-        return [
-          item.mrName || "",
-          item.productName || "",
-          item.productCode || "",
-          item.category || "",
-          item.unit || "",
-          assignedQty,
-          remainingQty,
-          usedQty,
-          `${utilization}%`,
+      const csvRows = rows.map((item) =>
+        [
+          item.mrName,
+          item.productName,
+          item.assignedQty,
+          item.remainingQty,
+          item.usedQty,
+          `${item.utilization}%`,
+          item.status,
           item.assignedDate || "",
-          item.status || (remainingQty > 0 ? "Active" : "Depleted"),
-          invoices,
         ]
-          .map((val) => `"${String(val).replace(/"/g, '""')}"`)
-          .join(",");
-      });
-
-      const csvContent = [
-        headers.map((h) => `"${h}"`).join(","),
-        ...csvRows,
-      ].join("\n");
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+          .map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`)
+          .join(","),
+      );
+      const csv = [headers.map((h) => `"${h}"`).join(","), ...csvRows].join(
+        "\n",
+      );
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute(
+      const a = document.createElement("a");
+      a.href = url;
+      a.setAttribute(
         "download",
         `carry-stock-${new Date().toISOString().split("T")[0]}.csv`,
       );
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       URL.revokeObjectURL(url);
-
-      showToast("success", "Export downloaded successfully!");
-    } catch (error) {
-      console.error("Error exporting data:", error);
-      showToast("error", "Failed to export data");
+      showToast("success", "Export downloaded!");
+    } catch (err) {
+      console.error(err);
+      showToast("error", "Failed to export");
     }
   };
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // ─── Sub-components ───────────────────────────────────────────────────────
+  const StatusBadge = ({ product }) => {
+    const { remainingQty, assignedQty, usedQty } = product;
+    if (assignedQty > 0 && remainingQty === 0)
+      return (
+        <span className="px-2 py-1 inline-flex text-xs font-semibold rounded-full bg-red-100 text-red-800">
+          Full Used
+        </span>
+      );
+    if (usedQty > 0 && remainingQty > 0)
+      return (
+        <span className="px-2 py-1 inline-flex text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+          Partial Used
+        </span>
+      );
+    return (
+      <span className="px-2 py-1 inline-flex text-xs font-semibold rounded-full bg-green-100 text-green-800">
+        Active
+      </span>
+    );
+  };
+
+  const UtilizationBar = ({ value }) => (
+    <div className="flex items-center gap-2 justify-center min-w-[130px]">
+      <div className="flex-1 bg-gray-200 rounded-full h-2">
+        <div
+          className={`h-2 rounded-full transition-all ${
+            value >= 100
+              ? "bg-red-500"
+              : value >= 60
+                ? "bg-yellow-500"
+                : value > 0
+                  ? "bg-green-500"
+                  : "bg-gray-300"
+          }`}
+          style={{ width: `${Math.min(value, 100)}%` }}
+        />
+      </div>
+      <span className="text-xs font-semibold text-gray-700 w-10 text-right">
+        {value}%
+      </span>
+    </div>
+  );
+
+  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading && currentPage === 1) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
           <p className="mt-4 text-gray-600">Loading carry stock data...</p>
         </div>
       </div>
     );
   }
+
+  // Get filtered products for modal display
+  const filteredModalProducts = getFilteredModalProducts();
 
   return (
     <div className="p-6">
@@ -627,8 +552,8 @@ const CarryStockView = () => {
             <div className="flex gap-2">
               <button
                 onClick={handleRefresh}
-                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2 cursor-pointer shadow-sm"
                 disabled={loading}
+                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2 cursor-pointer shadow-sm"
               >
                 <RefreshCw
                   className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
@@ -662,7 +587,7 @@ const CarryStockView = () => {
         </div>
 
         {/* ── Date Filter Tabs ── */}
-        <div className="flex flex-col gap-4 mb-6 mt-6">
+        <div className="flex flex-col gap-4 mb-6 mt-4">
           <div className="flex flex-wrap gap-2">
             {[
               { key: "all", label: "All Dates", color: "bg-blue-600" },
@@ -680,7 +605,7 @@ const CarryStockView = () => {
             ].map(({ key, label, color }) => (
               <button
                 key={key}
-                onClick={() => handleDateFilterChange(key)}
+                onClick={() => setDateFilter(key)}
                 className={`px-4 py-2 rounded-lg transition-colors cursor-pointer ${
                   dateFilter === key
                     ? `${color} text-white shadow-md`
@@ -691,7 +616,7 @@ const CarryStockView = () => {
               </button>
             ))}
             <button
-              onClick={() => handleDateFilterChange("custom")}
+              onClick={() => setDateFilter("custom")}
               className={`px-4 py-2 rounded-lg transition-colors cursor-pointer flex items-center gap-2 ${
                 dateFilter === "custom"
                   ? "bg-red-600 text-white shadow-md"
@@ -709,9 +634,9 @@ const CarryStockView = () => {
                 <span className="text-sm font-medium text-gray-700">From:</span>
                 <DatePicker
                   selected={customStartDate}
-                  onChange={(date) => {
-                    setCustomStartDate(date);
-                    if (date && customEndDate && date > customEndDate)
+                  onChange={(d) => {
+                    setCustomStartDate(d);
+                    if (d && customEndDate && d > customEndDate)
                       setCustomEndDate(null);
                   }}
                   selectsStart
@@ -727,21 +652,21 @@ const CarryStockView = () => {
                 <span className="text-sm font-medium text-gray-700">To:</span>
                 <DatePicker
                   selected={customEndDate}
-                  onChange={(date) => setCustomEndDate(date)}
+                  onChange={(d) => setCustomEndDate(d)}
                   selectsEnd
                   startDate={customStartDate}
                   endDate={customEndDate}
                   minDate={customStartDate}
                   maxDate={new Date()}
+                  disabled={!customStartDate}
                   className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholderText="Select end date"
-                  disabled={!customStartDate}
                   dateFormat="yyyy-MM-dd"
                 />
               </div>
               {(customStartDate || customEndDate) && (
                 <button
-                  onClick={clearCustomDateRange}
+                  onClick={clearDates}
                   className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 cursor-pointer text-sm"
                 >
                   Clear
@@ -750,21 +675,27 @@ const CarryStockView = () => {
             </div>
           )}
 
-          {(dateFilter !== "all" || selectedMr !== "all" || searchTerm) && (
+          {(dateFilter !== "all" ||
+            selectedMr !== "all" ||
+            searchTerm ||
+            usedTab !== "all") && (
             <div className="flex items-center gap-2 text-sm text-gray-600 flex-wrap">
               <Filter className="w-4 h-4" />
               <span>Active filters:</span>
               {dateFilter !== "all" && (
                 <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
-                  {dateFilter === "today" && "Today"}
-                  {dateFilter === "currentMonth" && "Current Month"}
-                  {dateFilter === "yearToDate" && "Year to Date"}
-                  {dateFilter === "custom" && "Custom Range"}
+                  {dateFilter === "today"
+                    ? "Today"
+                    : dateFilter === "currentMonth"
+                      ? "Current Month"
+                      : dateFilter === "yearToDate"
+                        ? "Year to Date"
+                        : "Custom Range"}
                 </span>
               )}
               {selectedMr !== "all" && (
                 <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
-                  MR: {getCurrentMrDisplayName()}
+                  MR: {getMrLabel()}
                 </span>
               )}
               {searchTerm && (
@@ -772,6 +703,7 @@ const CarryStockView = () => {
                   Search: {searchTerm}
                 </span>
               )}
+
               <button
                 onClick={() => {
                   setDateFilter("all");
@@ -779,6 +711,7 @@ const CarryStockView = () => {
                   setCustomStartDate(null);
                   setCustomEndDate(null);
                   setSearchTerm("");
+                  setUsedTab("all");
                   setCurrentPage(1);
                 }}
                 className="text-blue-600 hover:text-blue-800 underline text-xs"
@@ -799,7 +732,7 @@ const CarryStockView = () => {
                 value={
                   selectedMr === "all"
                     ? { value: "all", label: "All MRs" }
-                    : mrOptions.find((opt) => opt.value === selectedMr) || {
+                    : mrOptions.find((o) => o.value === selectedMr) || {
                         value: selectedMr,
                         label: selectedMr,
                       }
@@ -847,7 +780,7 @@ const CarryStockView = () => {
                   <td colSpan={4} className="p-8 text-center text-gray-500">
                     {loading ? (
                       <div className="flex justify-center">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
                       </div>
                     ) : (
                       <div>
@@ -856,8 +789,8 @@ const CarryStockView = () => {
                         </div>
                         <div className="text-sm text-gray-400">
                           {selectedMr !== "all"
-                            ? `No stock found for selected MR: ${getCurrentMrDisplayName()}`
-                            : "Try changing your filters or search term"}
+                            ? `No stock for: ${getMrLabel()}`
+                            : "Try changing your filters"}
                         </div>
                       </div>
                     )}
@@ -869,24 +802,15 @@ const CarryStockView = () => {
                     key={mrGroup.mrName}
                     className={`hover:bg-gray-50 ${index < pagedData.length - 1 ? "border-b" : ""}`}
                   >
-                    {/* MR Name */}
                     <td className="p-3 text-left pl-5">
                       <div className="font-semibold text-gray-900">
                         {mrGroup.mrName}
                       </div>
-                      {mrGroup.mrCode && mrGroup.mrCode !== mrGroup.mrName && (
-                        <div className="text-xs text-gray-500">
-                          {mrGroup.mrCode}
-                        </div>
-                      )}
                     </td>
-
-                    {/* Products count + package icon */}
                     <td className="p-3">
                       <button
                         onClick={() => handleOpenProductsModal(mrGroup)}
                         className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200"
-                        title={`View ${mrGroup.products.length} product(s)`}
                       >
                         <Package size={16} />
                         <span className="font-semibold">
@@ -899,15 +823,11 @@ const CarryStockView = () => {
                         </span>
                       </button>
                     </td>
-
-                    {/* Last Assigned Date */}
                     <td className="p-3 text-sm text-gray-700">
                       {formatDate(mrGroup.lastAssignedDate)}
                     </td>
-
-                    {/* Actions */}
                     <td className="p-3">
-                      <div className="flex items-center justify-center gap-2">
+                      <div className="flex items-center justify-center">
                         <button
                           onClick={() => handleOpenProductsModal(mrGroup)}
                           className="text-blue-600 hover:text-blue-800 cursor-pointer p-1 hover:bg-blue-50 rounded"
@@ -923,7 +843,6 @@ const CarryStockView = () => {
             </tbody>
           </table>
 
-          {/* Pagination */}
           {totalCount > ROWS_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
               <div className="text-sm text-gray-600">
@@ -933,28 +852,21 @@ const CarryStockView = () => {
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                   disabled={currentPage === 1 || loading}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
                 >
                   ← Prev
                 </button>
                 {visiblePages.map((page, idx) =>
                   page === "..." ? (
-                    <span
-                      key={`ellipsis-${idx}`}
-                      className="px-3 py-1 text-gray-500 select-none"
-                    >
+                    <span key={`e-${idx}`} className="px-3 py-1 text-gray-500">
                       ...
                     </span>
                   ) : (
                     <button
-                      key={`page-${page}-${idx}`}
+                      key={`p-${page}-${idx}`}
                       onClick={() => setCurrentPage(page)}
                       disabled={loading}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                        currentPage === page
-                          ? "bg-indigo-600 text-white"
-                          : "bg-gray-200 hover:bg-gray-300"
-                      }`}
+                      className={`px-3 py-1 rounded w-10 text-center cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
                     >
                       {page}
                     </button>
@@ -965,7 +877,7 @@ const CarryStockView = () => {
                     setCurrentPage((p) => Math.min(p + 1, totalPages))
                   }
                   disabled={currentPage === totalPages || loading}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
                 >
                   Next →
                 </button>
@@ -974,10 +886,9 @@ const CarryStockView = () => {
           )}
         </div>
 
-        {/* ════════════════════════════════════════════════════════════════════
-            PRODUCTS MODAL  — opens when clicking package icon / eye in table
-            Shows Product Details, Quantity, Utilization for all products of an MR
-            ════════════════════════════════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            PRODUCTS MODAL - FIXED: Now uses modalUsedTab for filtering
+        ══════════════════════════════════════════════════════════════════ */}
         {isProductsModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 flex justify-center items-center z-50">
@@ -998,85 +909,105 @@ const CarryStockView = () => {
                     Products for MR:{" "}
                     <span className="text-indigo-600">{selectedMrName}</span>
                   </h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {selectedMrProducts.length} product
-                    {selectedMrProducts.length !== 1 ? "s" : ""} in hand
-                  </p>
+                  {/* Modal filter tabs - using modalUsedTab state */}
+                  <div className="flex flex-wrap gap-2 mt-6 mb-1">
+                    {[
+                      {
+                        key: "all",
+                        label: "All",
+                        count: modalTabStats.all,
+                        active: "bg-indigo-600 text-white",
+                        badge: "bg-white text-indigo-600",
+                      },
+                      {
+                        key: "partial",
+                        label: "Partial Used",
+                        count: modalTabStats.partial,
+                        active: "bg-yellow-500 text-white",
+                        badge: "bg-white text-yellow-600",
+                      },
+                      {
+                        key: "full",
+                        label: "Full Used",
+                        count: modalTabStats.full,
+                        active: "bg-red-600 text-white",
+                        badge: "bg-white text-red-600",
+                      },
+                    ].map(({ key, label, count, active, badge }) => (
+                      <button
+                        key={key}
+                        onClick={() => setModalUsedTab(key)} // FIX: Using modalUsedTab setter
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${
+                          modalUsedTab === key // FIX: Checking modalUsedTab
+                            ? active
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                      >
+                        {label}
+                        <span
+                          className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${modalUsedTab === key ? badge : "bg-gray-300 text-gray-700"}`}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {selectedMrProducts.length === 0 ? (
+                {filteredModalProducts.length === 0 ? ( // FIX: Using filtered products
                   <div className="text-center py-12 text-gray-400">
-                    No products found.
+                    No products found for this filter.
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-xl border border-gray-200">
                     <table className="w-full text-sm border-collapse">
                       <thead className="bg-gray-100 text-gray-700">
                         <tr>
-                          <th className="px-4 py-3 text-left font-medium whitespace-nowrap">
-                            #
-                          </th>
-                          <th className="px-4 py-3 text-left font-medium whitespace-nowrap">
+                          <th className="px-4 py-3 text-left font-medium">#</th>
+                          <th className="px-4 py-3 text-left font-medium">
                             Product Details
                           </th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                          <th className="px-4 py-3 text-center font-medium">
                             Quantity
                           </th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                          <th className="px-4 py-3 text-center font-medium">
                             Utilization
                           </th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                          <th className="px-4 py-3 text-center font-medium">
                             Status
                           </th>
-                          <th className="px-4 py-3 text-center font-medium whitespace-nowrap">
+                          <th className="px-4 py-3 text-center font-medium">
                             Actions
                           </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedMrProducts.map((product, idx) => {
-                          const utilization = calculateUtilization(
-                            product.assignedQty,
-                            product.remainingQty,
-                          );
-                          const used =
-                            product.usedQty ||
-                            Math.max(
-                              0,
-                              (product.assignedQty || 0) -
-                                (product.remainingQty || 0),
-                            );
+                        {filteredModalProducts.map((product, idx) => { // FIX: Using filtered products
+                          const assignedQty = product.assignedQty ?? 0;
+                          const remainingQty = product.remainingQty ?? 0;
+                          const usedQty =
+                            product.usedQty ??
+                            Math.max(0, assignedQty - remainingQty);
+                          const utilization =
+                            product.utilization ??
+                            calcUtil(assignedQty, remainingQty);
+
                           return (
                             <tr
                               key={product.id || idx}
-                              className={`hover:bg-gray-50 ${idx < selectedMrProducts.length - 1 ? "border-b" : ""}`}
+                              className={`hover:bg-gray-50 ${idx < filteredModalProducts.length - 1 ? "border-b" : ""}`}
                             >
-                              {/* # */}
                               <td className="px-4 py-3 text-gray-500">
                                 {idx + 1}
                               </td>
 
-                              {/* Product Details */}
                               <td className="px-4 py-3 text-left">
                                 <div className="font-semibold text-gray-900">
                                   {product.productName}
                                 </div>
-                                <div className="text-xs text-gray-500">
-                                  {product.productCode}
-                                </div>
-                                {product.category && (
-                                  <div className="text-xs text-gray-400">
-                                    {product.category}
-                                  </div>
-                                )}
-                                {product.unit && (
-                                  <div className="text-xs text-indigo-500">
-                                    {product.unit}
-                                  </div>
-                                )}
                               </td>
 
-                              {/* Quantity */}
+                              {/* Assigned / Remaining / Used */}
                               <td className="px-4 py-3 text-center">
                                 <div className="inline-block text-xs space-y-0.5 min-w-[110px] text-left">
                                   <div className="flex justify-between gap-4">
@@ -1084,7 +1015,7 @@ const CarryStockView = () => {
                                       Assigned:
                                     </span>
                                     <span className="font-semibold text-gray-800">
-                                      {product.assignedQty || 0}
+                                      {assignedQty}
                                     </span>
                                   </div>
                                   <div className="flex justify-between gap-4">
@@ -1092,57 +1023,30 @@ const CarryStockView = () => {
                                       Remaining:
                                     </span>
                                     <span className="font-semibold text-green-700">
-                                      {product.remainingQty || 0}
+                                      {remainingQty}
                                     </span>
                                   </div>
                                   <div className="flex justify-between gap-4">
                                     <span className="text-gray-500">Used:</span>
-                                    <span className="font-semibold text-orange-600">
-                                      {used}
+                                    <span
+                                      className={`font-semibold ${usedQty > 0 ? "text-orange-600" : "text-gray-400"}`}
+                                    >
+                                      {usedQty}
                                     </span>
                                   </div>
                                 </div>
                               </td>
 
-                              {/* Utilization */}
+                              {/* Utilization bar */}
                               <td className="px-4 py-3 text-center">
-                                <div className="flex items-center gap-2 justify-center min-w-[120px]">
-                                  <div className="flex-1 bg-gray-200 rounded-full h-2">
-                                    <div
-                                      className={`h-2 rounded-full transition-all ${
-                                        utilization >= 80
-                                          ? "bg-green-600"
-                                          : utilization >= 50
-                                            ? "bg-yellow-500"
-                                            : "bg-red-500"
-                                      }`}
-                                      style={{
-                                        width: `${Math.min(utilization, 100)}%`,
-                                      }}
-                                    />
-                                  </div>
-                                  <span className="text-xs font-semibold text-gray-700 w-10 text-right">
-                                    {utilization}%
-                                  </span>
-                                </div>
+                                <UtilizationBar value={utilization} />
                               </td>
 
                               {/* Status */}
                               <td className="px-4 py-3 text-center">
-                                <span
-                                  className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                    (product.remainingQty || 0) > 0
-                                      ? "bg-green-100 text-green-800"
-                                      : "bg-red-100 text-red-800"
-                                  }`}
-                                >
-                                  {(product.remainingQty || 0) > 0
-                                    ? "Active"
-                                    : "Depleted"}
-                                </span>
+                                <StatusBadge product={product} />
                               </td>
 
-                              {/* Actions */}
                               <td className="px-4 py-3 text-center">
                                 <button
                                   onClick={() => {
@@ -1166,7 +1070,10 @@ const CarryStockView = () => {
                   </div>
                 )}
 
-                <div className="mt-6 flex justify-end border-t border-gray-200 pt-4">
+                <div className="mt-6 flex justify-between items-center border-t border-gray-200 pt-4">
+                  <div className="text-sm text-gray-500">
+                    Showing {filteredModalProducts.length} of {selectedMrProducts.length} products
+                  </div>
                   <button
                     onClick={() => setIsProductsModalOpen(false)}
                     className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
@@ -1179,9 +1086,9 @@ const CarryStockView = () => {
             document.body,
           )}
 
-        {/* ════════════════════════════════════════════════════════════════════
-            VIEW DETAILS MODAL  — full single-product details
-            ════════════════════════════════════════════════════════════════════ */}
+        {/* ══════════════════════════════════════════════════════════════════
+            VIEW DETAILS MODAL
+        ══════════════════════════════════════════════════════════════════ */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 flex justify-center items-center z-50">
@@ -1196,12 +1103,10 @@ const CarryStockView = () => {
                 >
                   <X size={20} />
                 </button>
-
                 <h2 className="text-xl font-semibold text-gray-800 mb-4">
                   Stock Details
                 </h2>
 
-                {/* MR Information */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-700 mb-3">
                     MR Information
@@ -1215,18 +1120,9 @@ const CarryStockView = () => {
                         {selectedStock?.mrName || "-"}
                       </p>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        MR Code
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {selectedStock?.mrCode || "-"}
-                      </p>
-                    </div>
                   </div>
                 </div>
 
-                {/* Product Information */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-700 mb-3">
                     Product Information
@@ -1240,38 +1136,19 @@ const CarryStockView = () => {
                         {selectedStock?.productName || "-"}
                       </p>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Product Code
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {selectedStock?.productCode || "-"}
-                      </p>
-                    </div>
-                    {selectedStock?.category && (
+                    {selectedStock?.lc > 0 && (
                       <div>
                         <label className="block text-sm font-medium text-gray-600">
-                          Category
+                          LC Rate
                         </label>
                         <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                          {selectedStock.category}
-                        </p>
-                      </div>
-                    )}
-                    {selectedStock?.unit && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-600">
-                          Unit
-                        </label>
-                        <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                          {selectedStock.unit}
+                          {selectedStock.lc}
                         </p>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Stock Information */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-700 mb-3">
                     Stock Information
@@ -1282,70 +1159,47 @@ const CarryStockView = () => {
                         Assigned Quantity
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
-                        {selectedStock?.assignedQty || 0}
+                        {selectedStock?.assignedQty ?? 0}
                       </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         Remaining Quantity
                       </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
-                        {selectedStock?.remainingQty ||
-                          selectedStock?.boxQuantity ||
-                          0}
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold text-green-700">
+                        {selectedStock?.remainingQty ?? 0}
                       </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         Used Quantity
                       </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
-                        {selectedStock?.usedQty ||
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold text-orange-600">
+                        {selectedStock?.usedQty ??
                           Math.max(
                             0,
-                            (selectedStock?.assignedQty || 0) -
-                              (selectedStock?.remainingQty || 0),
+                            (selectedStock?.assignedQty ?? 0) -
+                              (selectedStock?.remainingQty ?? 0),
                           )}
                       </p>
                     </div>
                     <div className="md:col-span-3">
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
                         Utilization
                       </label>
-                      <div className="flex items-center gap-2 mt-1">
-                        <div className="w-full bg-gray-200 rounded-full h-2.5">
-                          <div
-                            className={`h-2.5 rounded-full ${
-                              calculateUtilization(
-                                selectedStock?.assignedQty || 0,
-                                selectedStock?.remainingQty || 0,
-                              ) > 80
-                                ? "bg-green-600"
-                                : calculateUtilization(
-                                      selectedStock?.assignedQty || 0,
-                                      selectedStock?.remainingQty || 0,
-                                    ) > 50
-                                  ? "bg-yellow-500"
-                                  : "bg-red-600"
-                            }`}
-                            style={{
-                              width: `${calculateUtilization(selectedStock?.assignedQty || 0, selectedStock?.remainingQty || 0)}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="text-sm font-medium">
-                          {calculateUtilization(
-                            selectedStock?.assignedQty || 0,
-                            selectedStock?.remainingQty || 0,
-                          )}
-                          %
-                        </span>
-                      </div>
+                      <UtilizationBar
+                        value={
+                          selectedStock?.utilization ??
+                          calcUtil(
+                            selectedStock?.assignedQty ?? 0,
+                            selectedStock?.remainingQty ?? 0,
+                          )
+                        }
+                      />
                     </div>
                   </div>
                 </div>
 
-                {/* Additional Information */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-700 mb-3">
                     Additional Information
@@ -1367,38 +1221,26 @@ const CarryStockView = () => {
                         {selectedStock?.status || "-"}
                       </p>
                     </div>
-                    {selectedStock?.lc ? (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-600">
-                          LC Rate
-                        </label>
-                        <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                          {selectedStock.lc}
-                        </p>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
 
-                {/* Invoice Numbers */}
-                {selectedStock?.invoiceNumbers &&
-                  selectedStock.invoiceNumbers.length > 0 && (
-                    <div className="mb-6">
-                      <h3 className="text-lg font-medium text-gray-700 mb-3">
-                        Related Invoices
-                      </h3>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedStock.invoiceNumbers.map((invoice, index) => (
-                          <span
-                            key={index}
-                            className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
-                          >
-                            {invoice}
-                          </span>
-                        ))}
-                      </div>
+                {selectedStock?.invoiceNumbers?.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-medium text-gray-700 mb-3">
+                      Related Invoices
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedStock.invoiceNumbers.map((inv, i) => (
+                        <span
+                          key={i}
+                          className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                        >
+                          {inv}
+                        </span>
+                      ))}
                     </div>
-                  )}
+                  </div>
+                )}
 
                 <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
                   <button
