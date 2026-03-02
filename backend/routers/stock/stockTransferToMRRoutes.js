@@ -1,5 +1,5 @@
 import express from "express";
-import StockInMRHand from "../../models/stock/StockInMRHand.js";
+import stockInMRHand from "../../models/stock/stockInMRHand.js";
 import StockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";
@@ -145,11 +145,7 @@ const addBackToReportInHand = async (productName, qty, lc, session) => {
   await productStock.save({ session });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CORE: Recompute MR stock from scratch using ALL transfers for that MR.
-// Used in POST (create), DELETE, and now also in PUT (update).
-// This ensures StockInMRHand always reflects the true net state.
-// ─────────────────────────────────────────────────────────────────────────────
+
 const recomputeMRStock = async (mrId, mrName, session) => {
   if (!mrId && !mrName) return;
 
@@ -221,25 +217,18 @@ const recomputeMRStock = async (mrId, mrName, session) => {
     }
   }
 
-  // ── KEY FIX: Also account for MR Sale deductions ──────────────────────────
-  // If the MR has sold products (via saleSummaryRoutes deductStockFromMRHand),
-  // those are already reflected in the existing StockInMRHand document.
-  // We need to find the existing doc FIRST, then apply the transfer-computed
-  // quantities — but only for products that appear in transfers.
-  // Products NOT in any transfer retain their current StockInMRHand values.
-
   let existingMRStock = null;
   if (mrId) {
     try {
-      existingMRStock = await StockInMRHand.findOne({
+      existingMRStock = await stockInMRHand.findOne({
         mrId: new mongoose.Types.ObjectId(mrId.toString()),
       }).session(session);
     } catch {
-      existingMRStock = await StockInMRHand.findOne({ mrId }).session(session);
+      existingMRStock = await stockInMRHand.findOne({ mrId }).session(session);
     }
   }
   if (!existingMRStock && cleanedMrName) {
-    existingMRStock = await StockInMRHand.findOne({
+    existingMRStock = await stockInMRHand.findOne({
       mrName: { $regex: new RegExp(`^${cleanedMrName}$`, "i") },
     }).session(session);
   }
@@ -306,7 +295,7 @@ const recomputeMRStock = async (mrId, mrName, session) => {
 
   if (!existingMRStock) {
     if (finalProducts.length > 0) {
-      const newMRStock = new StockInMRHand({
+      const newMRStock = new stockInMRHand({
         mrId: mrId || undefined,
         mrName: cleanedMrName,
         productsInHand: finalProducts,
@@ -471,7 +460,7 @@ router.get("/mr-hand-admin", async (req, res) => {
       { $sort: { mrName: 1, productName: 1 } },
     ];
 
-    const stockResults = await StockInMRHand.aggregate(stockAggregation);
+    const stockResults = await stockInMRHand.aggregate(stockAggregation);
 
     const formattedResult = stockResults.map((item) => {
       const remainingQty = item.quantity || 0;
@@ -543,7 +532,7 @@ router.get("/mr-hand", async (req, res) => {
       filter.mrName = { $regex: new RegExp(`^${mrName.trim()}$`, "i") };
     }
 
-    const stock = await StockInMRHand.find(filter)
+    const stock = await stockInMRHand.find(filter)
       .populate({ path: "productsInHand.productId", select: "productName lc costPrice sellingPrice" })
       .sort({ mrName: 1 });
 
@@ -602,7 +591,7 @@ router.get("/mr-hand", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/mrs", async (req, res) => {
   try {
-    const mrs = await StockInMRHand.aggregate([
+    const mrs = await stockInMRHand.aggregate([
       { $match: { productsInHand: { $exists: true, $ne: [] } } },
       { $group: { _id: "$mrId", mrName: { $first: "$mrName" } } },
       { $project: { mrId: "$_id", mrName: 1, _id: 0 } },
@@ -738,13 +727,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PUT /:id — Update transfer
-// ✅ KEY FIX: Now calls recomputeMRStock (same as POST) instead of delta logic.
-// This guarantees StockInMRHand reflects ALL transfers accurately, including
-// newly added products, removed products, and quantity changes — while
-// correctly preserving sales deductions already made from MR stock.
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -885,10 +868,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       { new: true, runValidators: true, session },
     );
 
-    // ── ✅ FIXED: Use recomputeMRStock for BOTH old and new MR ────────────
-    // This replaces the old delta-based approach which failed to add new products.
-    // recomputeMRStock reads ALL transfers for the MR and rebuilds StockInMRHand
-    // from scratch — correctly handling additions, removals, and sales deductions.
+
 
     const newMrId = data.mrId;
     const newMrName = data.stockTransferToMr || data.stockTransferFromMrToMain || data.mrName || "";
@@ -1090,7 +1070,7 @@ router.post("/merge-duplicate-mr-stocks", protect, allowAdminOnly, async (req, r
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const allDocs = await StockInMRHand.find({}).session(session);
+    const allDocs = await stockInMRHand.find({}).session(session);
 
     const grouped = new Map();
     for (const doc of allDocs) {
@@ -1123,7 +1103,7 @@ router.post("/merge-duplicate-mr-stocks", protect, allowAdminOnly, async (req, r
             primary.productsInHand.push(dupProduct);
           }
         }
-        await StockInMRHand.findByIdAndDelete(dup._id).session(session);
+        await stockInMRHand.findByIdAndDelete(dup._id).session(session);
       }
 
       if (!primary.mrId && duplicates[0]?.mrId) primary.mrId = duplicates[0].mrId;

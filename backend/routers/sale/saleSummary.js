@@ -7,7 +7,7 @@ import Staff from "../../models/staffMember/staff.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import PaymentStatus from "../../models/paymentStatus.js";
 import Product from "../../models/projectManger/product.js";
-import StockInMRHand from "../../models/stock/StockInMRHand.js";
+import stockInMRHand from "../../models/stock/stockInMRHand.js";
 import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
@@ -1107,7 +1107,7 @@ const checkMRStock = async (
     }
     const mrId = mrValidation.mrData.mrId;
 
-    let query = StockInMRHand.findOne({ mrId });
+    let query = stockInMRHand.findOne({ mrId });
     if (session) query = query.session(session);
     const mrStock = await query;
 
@@ -1285,12 +1285,6 @@ const buildMatchConditions = (search, tab, saleType) => {
   return matchConditions;
 };
 
-// ==========================================
-// ✅ FIXED: deductStockFromMRHand
-// - Subtracts quantity from StockInMRHand.productsInHand[x].quantity
-// - Subtracts lc * totalQty from StockInMRHand.totalAmount
-// - Does NOT touch ReportInHand at all
-// ==========================================
 async function deductStockFromMRHand(
   mrId,
   productName,
@@ -1302,11 +1296,11 @@ async function deductStockFromMRHand(
 
   let mrStock = null;
   try {
-    mrStock = await StockInMRHand.findOne({
+    mrStock = await stockInMRHand.findOne({
       mrId: new mongoose.Types.ObjectId(mrId),
     }).session(session);
   } catch (e) {
-    mrStock = await StockInMRHand.findOne({ mrId }).session(session);
+    mrStock = await stockInMRHand.findOne({ mrId }).session(session);
   }
 
   if (!mrStock) {
@@ -1356,7 +1350,6 @@ async function deductStockFromMRHand(
     productEntry.productValue = fixPrecision(newQty * lcValue);
   }
 
-  // ✅ Recalculate StockInMRHand.totalAmount by summing all product amounts
   let newTotalAmount = 0;
   for (const p of mrStock.productsInHand) {
     newTotalAmount = fixPrecision(
@@ -1384,11 +1377,11 @@ async function deductStockFromMRHand(
 async function getMRStockQuantity(mrId, productName, session) {
   let mrStock = null;
   try {
-    mrStock = await StockInMRHand.findOne({
+    mrStock = await stockInMRHand.findOne({
       mrId: new mongoose.Types.ObjectId(mrId),
     }).session(session);
   } catch (e) {
-    mrStock = await StockInMRHand.findOne({ mrId }).session(session);
+    mrStock = await stockInMRHand.findOne({ mrId }).session(session);
   }
 
   if (!mrStock) return 0;
@@ -1406,11 +1399,11 @@ async function getMRStockQuantity(mrId, productName, session) {
 async function restoreStockToMRHand(mrId, productName, qty, lc, session) {
   let mrStock = null;
   try {
-    mrStock = await StockInMRHand.findOne({
+    mrStock = await stockInMRHand.findOne({
       mrId: new mongoose.Types.ObjectId(mrId),
     }).session(session);
   } catch (e) {
-    mrStock = await StockInMRHand.findOne({ mrId }).session(session);
+    mrStock = await stockInMRHand.findOne({ mrId }).session(session);
   }
 
   if (!mrStock) {
@@ -1524,11 +1517,11 @@ router.post("/create", async (req, res) => {
 
         let mrStock = null;
         try {
-          mrStock = await StockInMRHand.findOne({
+          mrStock = await stockInMRHand.findOne({
             mrId: new mongoose.Types.ObjectId(p.mrId),
           }).session(session);
         } catch {
-          mrStock = await StockInMRHand.findOne({ mrId: p.mrId }).session(
+          mrStock = await stockInMRHand.findOne({ mrId: p.mrId }).session(
             session,
           );
         }
@@ -1598,7 +1591,6 @@ router.post("/create", async (req, res) => {
       let mrSalePurchasePrice = 0;
 
       if (isMRSale) {
-        // ✅ MR Sale: deduct from StockInMRHand (quantity + amount)
         const deductionResult = await deductStockFromMRHand(
           p.mrId,
           p.productName.trim(),
@@ -1915,7 +1907,6 @@ const processSingleInvoiceWithMRDistribution = async (
         }
 
         if (!bypassStockCheck) {
-          // ✅ MR Sale: deduct from StockInMRHand (quantity + amount)
           const deductionResult = await deductStockFromMRHand(
             mrId,
             productName,
@@ -3718,7 +3709,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
 router.get("/mr-stock/mrs-with-stock", async (req, res) => {
   try {
-    const mrStocks = await StockInMRHand.find({
+    const mrStocks = await stockInMRHand.find({
       productsInHand: { $exists: true, $ne: [] },
     }).lean();
     const mrsWithStock = mrStocks.map((mrStock) => {
@@ -3752,11 +3743,11 @@ router.get("/mr-stock/products/:mrId", async (req, res) => {
     const { mrId } = req.params;
     let mrStock = null;
     try {
-      mrStock = await StockInMRHand.findOne({
+      mrStock = await stockInMRHand.findOne({
         mrId: new mongoose.Types.ObjectId(mrId),
       }).lean();
     } catch {
-      mrStock = await StockInMRHand.findOne({ mrId }).lean();
+      mrStock = await stockInMRHand.findOne({ mrId }).lean();
     }
 
     if (!mrStock) return res.json({ success: true, products: [] });
@@ -3808,11 +3799,11 @@ router.get("/mr-stock/:mrId/:productName", async (req, res) => {
 
     let mrStock = null;
     try {
-      mrStock = await StockInMRHand.findOne({
+      mrStock = await stockInMRHand.findOne({
         mrId: new mongoose.Types.ObjectId(mrId),
       }).lean();
     } catch {
-      mrStock = await StockInMRHand.findOne({ mrId }).lean();
+      mrStock = await stockInMRHand.findOne({ mrId }).lean();
     }
 
     if (!mrStock)

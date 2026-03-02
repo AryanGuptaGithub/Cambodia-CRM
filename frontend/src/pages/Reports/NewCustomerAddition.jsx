@@ -9,6 +9,9 @@ import {
   Users,
   MapPin,
   Calendar,
+  Eye,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import axios from "axios";
 import DatePicker from "react-datepicker";
@@ -51,10 +54,29 @@ const NewCustomerAddition = () => {
     endDate: null,
   });
 
+  // ── Customer Modal State ────────────────────────────────────────────────
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [modalCustomers, setModalCustomers] = useState([]);
+  const [modalPagination, setModalPagination] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalRecords: 0,
+    hasNext: false,
+    hasPrev: false,
+  });
+  const [modalLoading, setModalLoading] = useState(false);
+  const [selectedEntity, setSelectedEntity] = useState(null); // { type: 'mr' or 'zone', id, name }
+
   const inputRef = useRef(null);
   const visiblePages = useVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
+  );
+
+  // ✅ Modal pagination hook – called at top level (fixes the error)
+  const modalVisiblePages = useVisiblePages(
+    modalPagination.currentPage,
+    modalPagination.totalPages
   );
 
   // ── Date helpers ────────────────────────────────────────────────────────
@@ -130,9 +152,8 @@ const NewCustomerAddition = () => {
     }
   };
 
-  // ── Fetch ───────────────────────────────────────────────────────────────
+  // ── Fetch main report data ──────────────────────────────────────────────
   const fetchData = async (page = 1, search = searchTerm) => {
-    // Don't fetch for custom until both dates are chosen
     if (
       selectedDateTab === "custom" &&
       (!customDateRange.startDate || !customDateRange.endDate)
@@ -210,26 +231,70 @@ const NewCustomerAddition = () => {
     }
   };
 
-  // Refetch when tab, report type, or custom dates change
-  useEffect(() => {
-    fetchData(1);
-  }, [selectedReportType, selectedDateTab]);
+  // ── Fetch customers for modal ───────────────────────────────────────────
+  const fetchModalCustomers = async (entity, page = 1) => {
+    if (!entity) return;
+    setModalLoading(true);
+    try {
+      const dateParams = getDateParams();
+      const params = {
+        page,
+        limit: 10,
+        dateFilter: selectedDateTab,
+      };
+      if (dateParams.startDate) params.startDate = dateParams.startDate;
+      if (dateParams.endDate) params.endDate = dateParams.endDate;
 
-  useEffect(() => {
-    if (
-      selectedDateTab === "custom" &&
-      customDateRange.startDate &&
-      customDateRange.endDate
-    ) {
-      fetchData(1);
+      if (entity.type === "mr") {
+        if (entity.id) params.mrId = entity.id;
+        else params.mrName = entity.name;
+      } else if (entity.type === "zone") {
+        params.zone = entity.name;
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/reports/new-customers/customers`,
+        { params }
+      );
+
+      if (response.data.success) {
+        setModalCustomers(response.data.data || []);
+        setModalPagination(response.data.pagination || {
+          currentPage: 1,
+          totalPages: 1,
+          totalRecords: 0,
+          hasNext: false,
+          hasPrev: false,
+        });
+      } else {
+        showToast("error", response.data.message || "Failed to load customers");
+      }
+    } catch (error) {
+      console.error("Error fetching customers:", error);
+      showToast("error", "Failed to load customers");
+    } finally {
+      setModalLoading(false);
     }
-  }, [customDateRange.startDate, customDateRange.endDate]);
+  };
 
-  // Debounced search
-  useEffect(() => {
-    const t = setTimeout(() => fetchData(1, searchTerm), 500);
-    return () => clearTimeout(t);
-  }, [searchTerm]);
+  // ── Open modal for MR or Zone ───────────────────────────────────────────
+  const openCustomerModal = (entity) => {
+    setSelectedEntity(entity);
+    setIsCustomerModalOpen(true);
+    fetchModalCustomers(entity, 1);
+  };
+
+  const closeCustomerModal = () => {
+    setIsCustomerModalOpen(false);
+    setSelectedEntity(null);
+    setModalCustomers([]);
+  };
+
+  const handleModalPageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= modalPagination.totalPages) {
+      fetchModalCustomers(selectedEntity, newPage);
+    }
+  };
 
   // ── Handlers ────────────────────────────────────────────────────────────
   const handlePageChange = (page) => {
@@ -302,6 +367,26 @@ const NewCustomerAddition = () => {
       setExporting(false);
     }
   };
+
+  // ── Effects ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchData(1);
+  }, [selectedReportType, selectedDateTab]);
+
+  useEffect(() => {
+    if (
+      selectedDateTab === "custom" &&
+      customDateRange.startDate &&
+      customDateRange.endDate
+    ) {
+      fetchData(1);
+    }
+  }, [customDateRange.startDate, customDateRange.endDate]);
+
+  useEffect(() => {
+    const t = setTimeout(() => fetchData(1, searchTerm), 500);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
   // ── Active filter label ─────────────────────────────────────────────────
   const getActiveFilterLabel = () =>
@@ -378,6 +463,7 @@ const NewCustomerAddition = () => {
             <th className="p-3 text-sm font-medium">Zone</th>
             <th className="p-3 text-sm font-medium">New Customers</th>
             <th className="p-3 text-sm font-medium">Latest Date</th>
+            <th className="p-3 text-sm font-medium">Action</th>
           </tr>
         </thead>
       );
@@ -391,6 +477,7 @@ const NewCustomerAddition = () => {
           <th className="p-3 text-sm font-medium">New Customers</th>
           <th className="p-3 text-sm font-medium">Avg per MR</th>
           <th className="p-3 text-sm font-medium">Latest Date</th>
+          <th className="p-3 text-sm font-medium">Action</th>
         </tr>
       </thead>
     );
@@ -403,33 +490,42 @@ const NewCustomerAddition = () => {
           key={index}
           className={`hover:bg-gray-50 ${index < data.records.length - 1 ? "border-b" : ""}`}
         >
-          <td className="p-3 text-sm text-gray-600 font-medium">
-            {record.srNo}
-          </td>
+          <td className="p-3 text-sm text-gray-600 font-medium">{record.srNo}</td>
           <td className="p-3 text-sm font-medium text-gray-900 capitalize">
             {record.mrName}
           </td>
-          <td className="p-3 text-sm text-gray-900">
-            {record.contactNo || "N/A"}
-          </td>
-          <td className="p-3 text-sm text-gray-900 capitalize">
-            {record.zone || "N/A"}
-          </td>
+          <td className="p-3 text-sm text-gray-900">{record.contactNo || "N/A"}</td>
+          <td className="p-3 text-sm text-gray-900 capitalize">{record.zone || "N/A"}</td>
           <td className="p-3 text-sm font-semibold text-blue-600">
             {record.newCustomers?.toLocaleString() || 0}
           </td>
           <td className="p-3 text-sm text-gray-500">{record.date || "N/A"}</td>
+          <td className="p-3 text-center">
+            <button
+              onClick={() =>
+                openCustomerModal({
+                  type: "mr",
+                  id: record.mrId,
+                  name: record.mrName,
+                })
+              }
+              className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200"
+              title="View Customers"
+            >
+              <Eye size={16} />
+              <span>View</span>
+            </button>
+          </td>
         </tr>
       );
     }
+    // Zone Wise
     return (
       <tr
         key={index}
         className={`hover:bg-gray-50 ${index < data.records.length - 1 ? "border-b" : ""}`}
       >
-        <td className="p-3 text-sm text-gray-600 font-medium">
-          {record.srNo}
-        </td>
+        <td className="p-3 text-sm text-gray-600 font-medium">{record.srNo}</td>
         <td className="p-3 text-sm font-medium text-gray-900 capitalize">
           {record.zoneName}
         </td>
@@ -443,6 +539,21 @@ const NewCustomerAddition = () => {
           {record.averagePerMR?.toFixed(1) || "0.0"}
         </td>
         <td className="p-3 text-sm text-gray-500">{record.date || "N/A"}</td>
+        <td className="p-3 text-center">
+          <button
+            onClick={() =>
+              openCustomerModal({
+                type: "zone",
+                name: record.zoneName,
+              })
+            }
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200"
+            title="View Customers"
+          >
+            <Eye size={16} />
+            <span>View</span>
+          </button>
+        </td>
       </tr>
     );
   };
@@ -509,7 +620,164 @@ const NewCustomerAddition = () => {
     </button>
   );
 
-  const getColSpan = () => (selectedReportType === "MR Wise" ? 6 : 6);
+  const getColSpan = () => (selectedReportType === "MR Wise" ? 7 : 7);
+
+  // ── Customer Modal ──────────────────────────────────────────────────────
+  const renderCustomerModal = () => {
+    if (!isCustomerModalOpen || !selectedEntity) return null;
+
+    const title =
+      selectedEntity.type === "mr"
+        ? `Customers for MR: ${selectedEntity.name}`
+        : `Customers in Zone: ${selectedEntity.name}`;
+
+    return ReactDOM.createPortal(
+      <div className="fixed inset-0 flex justify-center items-center z-50">
+        <div
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          onClick={closeCustomerModal}
+        />
+        <div className="bg-white w-full max-w-5xl p-6 rounded-xl shadow-2xl relative overflow-y-auto max-h-[90vh] mx-4">
+          <button
+            onClick={closeCustomerModal}
+            className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+
+          <h2 className="text-xl font-semibold text-gray-800 mb-5">{title}</h2>
+
+          {modalLoading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+            </div>
+          ) : modalCustomers.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">
+              No customers found for this {selectedEntity.type}.
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-xl border border-gray-200">
+                <table className="w-full text-sm border-collapse">
+                  <thead className="bg-gray-100 text-gray-700">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium">#</th>
+                      <th className="px-4 py-3 text-left font-medium">Customer Name</th>
+                      <th className="px-4 py-3 text-left font-medium">Customer Code</th>
+                      <th className="px-4 py-3 text-left font-medium">Contact</th>
+                      <th className="px-4 py-3 text-left font-medium">Address</th>
+                      <th className="px-4 py-3 text-left font-medium">Province</th>
+                      <th className="px-4 py-3 text-left font-medium">Date Added</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modalCustomers.map((cust, idx) => (
+                      <tr
+                        key={cust._id || idx}
+                        className={`hover:bg-gray-50 ${
+                          idx < modalCustomers.length - 1 ? "border-b" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-3 text-gray-500">
+                          {(modalPagination.currentPage - 1) * 10 + idx + 1}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-gray-900 capitalize">
+                          {cust.name || "N/A"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {cust.customerCode || "N/A"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {cust.customerNumber || "N/A"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700 max-w-xs truncate">
+                          {cust.address || "N/A"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {cust.province || "N/A"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {cust.date
+                            ? new Date(cust.date).toLocaleDateString()
+                            : "N/A"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Modal Pagination */}
+              {modalPagination.totalPages > 1 && (
+                <div className="mt-6 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 p-4 rounded-lg">
+                  <div className="text-sm text-gray-600">
+                    Page {modalPagination.currentPage} of {modalPagination.totalPages}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleModalPageChange(modalPagination.currentPage - 1)}
+                      disabled={!modalPagination.hasPrev}
+                      className={`flex items-center gap-1 px-3 py-1 rounded-lg ${
+                        modalPagination.hasPrev
+                          ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                          : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      }`}
+                    >
+                      <ChevronLeft size={16} />
+                      Prev
+                    </button>
+                    <div className="flex gap-1">
+                      {modalVisiblePages.map((page, idx) =>
+                        page === "..." ? (
+                          <span key={`dot-${idx}`} className="px-3 py-1 text-gray-500">
+                            ...
+                          </span>
+                        ) : (
+                          <button
+                            key={page}
+                            onClick={() => handleModalPageChange(page)}
+                            className={`min-w-[40px] px-3 py-1 rounded-lg ${
+                              page === modalPagination.currentPage
+                                ? "bg-indigo-600 text-white"
+                                : "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        )
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleModalPageChange(modalPagination.currentPage + 1)}
+                      disabled={!modalPagination.hasNext}
+                      className={`flex items-center gap-1 px-3 py-1 rounded-lg ${
+                        modalPagination.hasNext
+                          ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                          : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      }`}
+                    >
+                      Next
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="mt-6 flex justify-end">
+            <button
+              onClick={closeCustomerModal}
+              className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
 
   return (
     <div className="p-6">
@@ -570,7 +838,7 @@ const NewCustomerAddition = () => {
         </div>
       </div>
 
-      {/* ── View Type Tabs (MR Wise / Zone Wise) ── */}
+      {/* View Type Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-4 border border-gray-200">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
           Report Type
@@ -592,7 +860,7 @@ const NewCustomerAddition = () => {
         </div>
       </div>
 
-      {/* ── Date Filter Tabs ── */}
+      {/* Date Filter Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
           Date Filter
@@ -652,10 +920,7 @@ const NewCustomerAddition = () => {
               data.records.map((record, index) => renderTableRow(record, index))
             ) : (
               <tr>
-                <td
-                  colSpan={getColSpan()}
-                  className="p-8 text-center text-gray-400"
-                >
+                <td colSpan={getColSpan()} className="p-8 text-center text-gray-400">
                   {selectedDateTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates for custom filter"
@@ -669,7 +934,7 @@ const NewCustomerAddition = () => {
 
       {renderPagination()}
 
-      {/* ── Custom Date Filter Modal ── */}
+      {/* Custom Date Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -752,6 +1017,9 @@ const NewCustomerAddition = () => {
           </div>,
           document.body,
         )}
+
+      {/* Customer Modal */}
+      {renderCustomerModal()}
     </div>
   );
 };

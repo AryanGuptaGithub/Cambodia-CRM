@@ -2,6 +2,7 @@ import express from "express";
 import Customer from "../../models/master/customer.js";
 import Staff from "../../models/staffMember/staff.js";
 import ExcelJS from "exceljs";
+import mongoose from "mongoose";
 
 const router = express.Router();
 
@@ -77,7 +78,6 @@ router.get("/", async (req, res) => {
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    // Base match stage – no isNew field, rely on date filter
     let matchStage = {
       enabled: true,
       ...buildDateFilter(dateFilter, startDate, endDate),
@@ -92,7 +92,6 @@ router.get("/", async (req, res) => {
     let records = [];
     let totalRecords = 0;
 
-    // ── MR Wise ───────────────────────────────────────────────────────────
     if (reportType === "MR Wise") {
       const allStaff = await Staff.find({}).lean();
       const staffMap = new Map();
@@ -177,8 +176,6 @@ router.get("/", async (req, res) => {
       });
 
       totalRecords = result?.totalCount?.[0]?.total || 0;
-
-      // ── Zone Wise ─────────────────────────────────────────────────────────
     } else {
       const allStaff = await Staff.find({ enabled: true }).lean();
       const staffMap = new Map();
@@ -268,7 +265,6 @@ router.get("/", async (req, res) => {
       totalRecords = result?.totalCount?.[0]?.total || 0;
     }
 
-    // ── Summary (always for the entire filtered set) ───────────────────────
     const [summary] = await Customer.aggregate([
       { $match: matchStage },
       {
@@ -334,6 +330,107 @@ router.get("/", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /customers — fetch customers for a specific MR or zone (with pagination)
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /customers — fetch customers for a specific MR or zone (with pagination)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/customers", async (req, res) => {
+  try {
+    const {
+      mrId,
+      mrName,
+      zone,
+      page = 1,
+      limit = 10,
+      dateFilter,
+      startDate,
+      endDate,
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    let matchStage = { enabled: true };
+
+    if (mrId) {
+      // Check if mrId is a valid MongoDB ObjectId
+      if (mongoose.Types.ObjectId.isValid(mrId)) {
+        // Use ObjectId directly
+        matchStage.medicalRepId = new mongoose.Types.ObjectId(mrId);
+      } else {
+        // Not a valid ObjectId → treat as custom MR ID (e.g., "946")
+        // Find the staff member with this custom MRId
+        const staff = await Staff.findOne({ MRId: mrId }).lean();
+        if (staff && staff._id) {
+          matchStage.medicalRepId = staff._id;
+        } else {
+          // No staff found with that custom ID → return empty result
+          return res.json({
+            success: true,
+            data: [],
+            pagination: {
+              currentPage: pageNum,
+              totalPages: 1,
+              totalRecords: 0,
+              hasNext: false,
+              hasPrev: false,
+            },
+          });
+        }
+      }
+    } else if (mrName) {
+      // Fallback to MR name (exact match, case‑insensitive)
+      matchStage.medicalRepName = {
+        $regex: new RegExp(`^${mrName.trim()}$`, "i"),
+      };
+    } else if (zone) {
+      // Zone filter
+      matchStage.zone = { $regex: new RegExp(`^${zone.trim()}$`, "i") };
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Either mrId, mrName, or zone is required",
+      });
+    }
+
+    // Apply date filter if provided
+    if (dateFilter && dateFilter !== "all") {
+      const dateFilterObj = buildDateFilter(dateFilter, startDate, endDate);
+      matchStage = { ...matchStage, ...dateFilterObj };
+    }
+
+    const customers = await Customer.find(matchStage)
+      .select(
+        "name customerCode customerNumber address province date medicalRepName",
+      )
+      .sort({ date: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const total = await Customer.countDocuments(matchStage);
+    const totalPages = Math.ceil(total / limitNum);
+    console.log('values of customers', customers);
+    res.json({
+      success: true,
+      data: customers,
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalRecords: total,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error fetching customers:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /export — Excel export with date filter
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/export", async (req, res) => {
@@ -359,7 +456,6 @@ router.get("/export", async (req, res) => {
 
     let records = [];
 
-    // ── MR Wise ───────────────────────────────────────────────────────────
     if (reportType === "MR Wise") {
       const allStaff = await Staff.find({}).lean();
       const staffMap = new Map();
@@ -427,8 +523,6 @@ router.get("/export", async (req, res) => {
             : "N/A",
         };
       });
-
-      // ── Zone Wise ─────────────────────────────────────────────────────────
     } else {
       const allStaff = await Staff.find({ enabled: true }).lean();
       const staffMap = new Map();
@@ -509,7 +603,6 @@ router.get("/export", async (req, res) => {
         .json({ success: false, message: "No data found to export" });
     }
 
-    // Summary for Excel
     const [summary] = await Customer.aggregate([
       { $match: matchStage },
       {
@@ -540,7 +633,6 @@ router.get("/export", async (req, res) => {
       },
     ]);
 
-    // ── Build Excel ───────────────────────────────────────────────────────
     const workbook = new ExcelJS.Workbook();
     const ws = workbook.addWorksheet("New Customer Report");
 

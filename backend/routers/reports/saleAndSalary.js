@@ -5,7 +5,7 @@ import Staff from "../../models/staffMember/staff.js";
 import mongoose from "mongoose";
 import ExcelJS from 'exceljs';
 import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
-import stockinmrhands from "../../models/stock/StockInMRHand.js";
+import stockinmrhands from "../../models/stock/stockInMRHand.js";
 
 const router = express.Router();
 

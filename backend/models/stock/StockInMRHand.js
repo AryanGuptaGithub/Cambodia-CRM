@@ -1,35 +1,28 @@
 import mongoose from "mongoose";
 
 const productInHandSchema = new mongoose.Schema({
-  productId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Product",
-  },
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
   productName: { type: String, default: "" },
-  quantity: { type: Number, default: 0 }, // remaining boxes with MR
-  assignedQuantity: { type: Number, default: 0 }, // total ever sent (never decrements)
-  lc: { type: Number, default: 0 }, // landing cost per box
-  amount: { type: Number, default: 0 }, // lc * quantity  (exact, e.g. 193.766)
-  productCost: { type: Number, default: 0 }, // Math.ceil(amount) (e.g. 194)
+  quantity: { type: Number, default: 0 },
+  assignedQuantity: { type: Number, default: 0 },
+  lc: { type: Number, default: 0 },
+  amount: { type: Number, default: 0 },
+  productCost: { type: Number, default: 0 },
   lastUpdated: { type: Date, default: Date.now },
 });
 
 const StockInMRHandSchema = new mongoose.Schema(
   {
-    mrId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Staff",
-      default: null,
-    },
+    mrId: { type: mongoose.Schema.Types.ObjectId, ref: "Staff", default: null },
     mrName: { type: String, default: "" },
     productsInHand: [productInHandSchema],
-    totalAmount: { type: Number, default: 0 }, // sum of all product amounts
-    totalProductCost: { type: Number, default: 0 }, // sum of all product productCosts
+    totalAmount: { type: Number, default: 0 },
+    totalProductCost: { type: Number, default: 0 },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
-// Pre-save: recalculate amount and productCost per product, then sum document totals
+// Pre-save hook to recalculate amounts
 StockInMRHandSchema.pre("save", function (next) {
   let totalAmount = 0;
   let totalProductCost = 0;
@@ -38,8 +31,8 @@ StockInMRHandSchema.pre("save", function (next) {
     const lc = product.lc || 0;
     const qty = product.quantity || 0;
 
-    product.amount = lc * qty; // exact
-    product.productCost = Math.ceil(product.amount); // ceiled
+    product.amount = lc * qty;
+    product.productCost = Math.ceil(product.amount);
 
     totalAmount += product.amount;
     totalProductCost += product.productCost;
@@ -51,9 +44,8 @@ StockInMRHandSchema.pre("save", function (next) {
   next();
 });
 
-// ✅ Safe export: use existing model if already defined
-const StockInMRHand =
-  mongoose.models.StockInMRHand ||
-  mongoose.model("StockInMRHand", StockInMRHandSchema);
+// ✅ Safe export – reuse existing model if already compiled
+const stockInMRHand =
+  mongoose.models.stockInMRHand || mongoose.model("stockInMRHand", StockInMRHandSchema);
 
-export default StockInMRHand;
+export default stockInMRHand;
