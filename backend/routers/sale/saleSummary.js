@@ -3934,7 +3934,8 @@ router.get("/credit-sale-not-received", async (req, res) => {
             { saleReturn: null },
           ],
         },
-        { paymentStatus: { $ne: "Cash" } },
+        // Exclude paymentStatus that is 'cash' or 'paid' (case-insensitive)
+        { paymentStatus: { $not: { $regex: /^(cash|paid)$/i } } },
         {
           $or: [
             { dueAmount: { $gt: 0 } },

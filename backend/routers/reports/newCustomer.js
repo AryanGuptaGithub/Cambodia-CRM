@@ -5,7 +5,62 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Build date filter on customer `date` field
+// ─────────────────────────────────────────────────────────────────────────────
+const buildDateFilter = (dateFilter, startDate, endDate) => {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
 
+  switch (dateFilter) {
+    case "today": {
+      const start = new Date(today);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(today);
+      end.setHours(23, 59, 59, 999);
+      return { date: { $gte: start, $lte: end } };
+    }
+    case "currentMonth": {
+      const start = new Date(currentYear, currentMonth, 1);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(currentYear, currentMonth + 1, 0);
+      end.setHours(23, 59, 59, 999);
+      return { date: { $gte: start, $lte: end } };
+    }
+    case "janToPreviousMonth": {
+      if (currentMonth === 0) {
+        const start = new Date(currentYear - 1, 0, 1);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(currentYear - 1, 11, 31);
+        end.setHours(23, 59, 59, 999);
+        return { date: { $gte: start, $lte: end } };
+      }
+      const start = new Date(currentYear, 0, 1);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(currentYear, currentMonth, 0);
+      end.setHours(23, 59, 59, 999);
+      return { date: { $gte: start, $lte: end } };
+    }
+    case "custom": {
+      if (startDate && endDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        return { date: { $gte: start, $lte: end } };
+      }
+      return {};
+    }
+    case "all":
+    default:
+      return {};
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET / — paginated new customer report (MR Wise or Zone Wise)
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const {
@@ -13,59 +68,61 @@ router.get("/", async (req, res) => {
       limit = 7,
       search = "",
       reportType = "MR Wise",
+      dateFilter = "all",
+      startDate,
+      endDate,
     } = req.query;
 
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    let matchStage = { isNew: true, enabled: true };
+    // Base match stage – no isNew field, rely on date filter
+    let matchStage = {
+      enabled: true,
+      ...buildDateFilter(dateFilter, startDate, endDate),
+    };
+
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
-      if (reportType === "MR Wise") {
-        matchStage.medicalRepName = searchRegex;
-      } else {
-        matchStage.zone = searchRegex;
-      }
+      matchStage[reportType === "MR Wise" ? "medicalRepName" : "zone"] =
+        searchRegex;
     }
 
     let records = [];
     let totalRecords = 0;
-    let summary = {};
 
+    // ── MR Wise ───────────────────────────────────────────────────────────
     if (reportType === "MR Wise") {
       const allStaff = await Staff.find({}).lean();
       const staffMap = new Map();
-
-      allStaff.forEach((staff, index) => {        
-        if (staff._id) {
-          const staffId = staff._id.toString();
-          staffMap.set(staffId, {
-            MRId: staff.MRId,
-            contactNo: staff.contactNo,
-            email: staff.email,
-            teamName: staff.teamName,
-            originalName: staff.medicalRepName,
-            staffId: staffId
+      allStaff.forEach((s) => {
+        if (s._id) {
+          staffMap.set(s._id.toString(), {
+            MRId: s.MRId,
+            contactNo: s.contactNo,
+            email: s.email,
+            teamName: s.teamName,
+            originalName: s.medicalRepName,
           });
-        } 
+        }
       });
 
-      const customerAggregationPipeline = [
+      const [result] = await Customer.aggregate([
         { $match: matchStage },
         {
           $group: {
-            _id: { 
+            _id: {
               $ifNull: [
-                "$medicalRepId", 
-                { $ifNull: ["$medicalRepName", "Unknown MR"] }
-              ] 
+                "$medicalRepId",
+                { $ifNull: ["$medicalRepName", "Unknown MR"] },
+              ],
             },
             mrName: { $first: "$medicalRepName" },
             medicalRepId: { $first: "$medicalRepId" },
             zone: { $first: "$zone" },
             newCustomers: { $sum: 1 },
-            latestDate: { $max: "$createdAt" },
+            latestDate: { $max: "$date" },
           },
         },
         { $sort: { newCustomers: -1 } },
@@ -75,41 +132,34 @@ router.get("/", async (req, res) => {
             totalCount: [{ $count: "total" }],
           },
         },
-      ];
+      ]);
 
-      const [result] = await Customer.aggregate(customerAggregationPipeline);
-      records = result.paginatedResults.map((item, index) => {
+      records = (result?.paginatedResults || []).map((item, index) => {
         const mrName = item.mrName || "Unknown MR";
         let staffDetails = null;
-        
+
         if (item.medicalRepId) {
-          const staffId = item.medicalRepId.toString();
-          staffDetails = staffMap.get(staffId);
-        } 
-        
-        if (!staffDetails && mrName && mrName !== "Unknown MR") {
-          const normalizedMRName = mrName.toLowerCase().trim();
-          
-          for (let [key, staff] of staffMap.entries()) {
-            if (staff.originalName && staff.originalName.toLowerCase().trim() === normalizedMRName) {
-              staffDetails = staff;
+          staffDetails = staffMap.get(item.medicalRepId.toString());
+        }
+        if (!staffDetails && mrName !== "Unknown MR") {
+          const norm = mrName.toLowerCase().trim();
+          for (const [, s] of staffMap.entries()) {
+            if (s.originalName?.toLowerCase().trim() === norm) {
+              staffDetails = s;
               break;
             }
           }
         }
 
-        // Check what MRId we should use
         let mrIdToUse = "N/A";
-        if (staffDetails?.MRId) {
-          mrIdToUse = staffDetails.MRId;
-        } else if (item.medicalRepId) {
-          mrIdToUse = item.medicalRepId.toString();
-        } else if (item._id) {
-          mrIdToUse = typeof item._id === 'object' ? item._id.toString() : item._id;
-        }
-        
-        const record = {
-          srNo: index + 1,
+        if (staffDetails?.MRId) mrIdToUse = staffDetails.MRId;
+        else if (item.medicalRepId) mrIdToUse = item.medicalRepId.toString();
+        else if (item._id)
+          mrIdToUse =
+            typeof item._id === "object" ? item._id.toString() : item._id;
+
+        return {
+          srNo: skip + index + 1,
           mrId: mrIdToUse,
           mrName: staffDetails?.originalName || mrName,
           contactNo: staffDetails?.contactNo || "N/A",
@@ -119,45 +169,44 @@ router.get("/", async (req, res) => {
           newCustomers: item.newCustomers,
           date: item.latestDate
             ? new Date(item.latestDate).toLocaleDateString()
-            : new Date().toLocaleDateString(),
-          medicalRepId: item.medicalRepId ? item.medicalRepId.toString() : "N/A"
+            : "N/A",
+          medicalRepId: item.medicalRepId
+            ? item.medicalRepId.toString()
+            : "N/A",
         };
-        return record;
       });
 
-      totalRecords = result.totalCount[0]?.total || 0;
+      totalRecords = result?.totalCount?.[0]?.total || 0;
+
+      // ── Zone Wise ─────────────────────────────────────────────────────────
     } else {
       const allStaff = await Staff.find({ enabled: true }).lean();
       const staffMap = new Map();
-      allStaff.forEach((staff) => {
-        if (staff._id) {
-          const staffId = staff._id.toString();
-          staffMap.set(staffId, {
-            MRId: staff.MRId,
-            contactNo: staff.contactNo,
-            email: staff.email,
-            teamName: staff.teamName,
-            originalName: staff.medicalRepName,
+      allStaff.forEach((s) => {
+        if (s._id) {
+          staffMap.set(s._id.toString(), {
+            contactNo: s.contactNo,
+            originalName: s.medicalRepName,
           });
         }
       });
 
-      const aggregationPipeline = [
+      const [result] = await Customer.aggregate([
         { $match: matchStage },
         {
           $group: {
             _id: { $ifNull: ["$zone", "Unknown Zone"] },
             zoneName: { $first: "$zone" },
-            totalMRs: { 
-              $addToSet: { 
+            totalMRs: {
+              $addToSet: {
                 $ifNull: [
-                  { $toString: "$medicalRepId" }, 
-                  { $ifNull: ["$medicalRepName", "Unknown MR"] }
-                ] 
-              } 
+                  { $toString: "$medicalRepId" },
+                  { $ifNull: ["$medicalRepName", "Unknown MR"] },
+                ],
+              },
             },
             newCustomers: { $sum: 1 },
-            latestDate: { $max: "$createdAt" },
+            latestDate: { $max: "$date" },
             medicalRepIds: { $addToSet: "$medicalRepId" },
           },
         },
@@ -184,62 +233,55 @@ router.get("/", async (req, res) => {
             totalCount: [{ $count: "total" }],
           },
         },
-      ];
+      ]);
 
-      const [result] = await Customer.aggregate(aggregationPipeline);
-      
-      records = result.paginatedResults.map((item, index) => {
-        let primaryContact = null;
+      records = (result?.paginatedResults || []).map((item, index) => {
         let contactMR = "N/A";
         let contactNo = "N/A";
-        
-        if (item.medicalRepIds && item.medicalRepIds.length > 0) {
-          for (const medicalRepId of item.medicalRepIds) {
-            if (medicalRepId) {
-              const staffId = medicalRepId.toString();
-              const staffDetails = staffMap.get(staffId);
-              if (staffDetails && staffDetails.contactNo) {
-                primaryContact = staffDetails;
-                contactMR = staffDetails.originalName || "N/A";
-                contactNo = staffDetails.contactNo;
-                break;
-              }
+
+        for (const id of item.medicalRepIds || []) {
+          if (id) {
+            const s = staffMap.get(id.toString());
+            if (s?.contactNo) {
+              contactMR = s.originalName || "N/A";
+              contactNo = s.contactNo;
+              break;
             }
           }
         }
 
         return {
-          srNo: index + 1,
+          srNo: skip + index + 1,
           zoneId: item._id || "N/A",
           zoneName: item.zoneName || "Unknown Zone",
           totalMRs: item.totalMRs || 0,
           newCustomers: item.newCustomers || 0,
           averagePerMR: item.averagePerMR || 0,
-          contactNo: contactNo,
-          contactMR: contactMR,
+          contactNo,
+          contactMR,
           date: item.latestDate
             ? new Date(item.latestDate).toLocaleDateString()
-            : new Date().toLocaleDateString(),
+            : "N/A",
         };
       });
 
-      totalRecords = result.totalCount[0]?.total || 0;
+      totalRecords = result?.totalCount?.[0]?.total || 0;
     }
 
-    // Get summary statistics with null handling
-    const summaryResult = await Customer.aggregate([
+    // ── Summary (always for the entire filtered set) ───────────────────────
+    const [summary] = await Customer.aggregate([
       { $match: matchStage },
       {
         $group: {
           _id: null,
           totalNewCustomers: { $sum: 1 },
-          totalMRs: { 
-            $addToSet: { 
+          totalMRs: {
+            $addToSet: {
               $ifNull: [
-                { $toString: "$medicalRepId" }, 
-                { $ifNull: ["$medicalRepName", "Unknown MR"] }
-              ] 
-            } 
+                { $toString: "$medicalRepId" },
+                { $ifNull: ["$medicalRepName", "Unknown MR"] },
+              ],
+            },
           },
           totalZones: { $addToSet: { $ifNull: ["$zone", "Unknown Zone"] } },
         },
@@ -260,31 +302,29 @@ router.get("/", async (req, res) => {
       },
     ]);
 
-    summary = summaryResult[0] || {
-      totalNewCustomers: 0,
-      totalMRs: 0,
-      totalZones: 0,
-      averageCustomersPerMR: 0,
-    };
-
-    // Pagination info
     const totalPages = Math.ceil(totalRecords / limitNum);
-    const pagination = {
-      currentPage: pageNum,
-      totalPages,
-      totalRecords,
-      hasNext: pageNum < totalPages,
-      hasPrev: pageNum > 1,
-    };   
-    // Final Response
+
     res.json({
       success: true,
-      data: { summary, records },
-      pagination,
+      data: {
+        summary: summary || {
+          totalNewCustomers: 0,
+          totalMRs: 0,
+          totalZones: 0,
+          averageCustomersPerMR: 0,
+        },
+        records,
+      },
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalRecords,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
     });
   } catch (error) {
     console.error("❌ Error fetching new customers:", error);
-    console.error("🔍 Error stack:", error.stack);
     res.status(500).json({
       success: false,
       message: "Failed to fetch new customer data",
@@ -293,140 +333,129 @@ router.get("/", async (req, res) => {
   }
 });
 
-
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /export — Excel export with date filter
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/export", async (req, res) => {
   try {
     const {
       search = "",
       reportType = "MR Wise",
+      dateFilter = "all",
+      startDate,
+      endDate,
     } = req.query;
 
-    let matchStage = { isNew: true, enabled: true };
+    let matchStage = {
+      enabled: true,
+      ...buildDateFilter(dateFilter, startDate, endDate),
+    };
+
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
-      if (reportType === "MR Wise") {
-        matchStage.medicalRepName = searchRegex;
-      } else {
-        matchStage.zone = searchRegex;
-      }
+      matchStage[reportType === "MR Wise" ? "medicalRepName" : "zone"] =
+        searchRegex;
     }
 
     let records = [];
-    let summary = {};
 
+    // ── MR Wise ───────────────────────────────────────────────────────────
     if (reportType === "MR Wise") {
       const allStaff = await Staff.find({}).lean();
       const staffMap = new Map();
-
-      allStaff.forEach((staff) => {        
-        if (staff._id) {
-          const staffId = staff._id.toString();
-          staffMap.set(staffId, {
-            MRId: staff.MRId,
-            contactNo: staff.contactNo,
-            email: staff.email,
-            teamName: staff.teamName,
-            originalName: staff.medicalRepName,
-            staffId: staffId
+      allStaff.forEach((s) => {
+        if (s._id) {
+          staffMap.set(s._id.toString(), {
+            MRId: s.MRId,
+            contactNo: s.contactNo,
+            email: s.email,
+            teamName: s.teamName,
+            originalName: s.medicalRepName,
           });
-        } 
+        }
       });
 
-      const customerAggregationPipeline = [
+      const result = await Customer.aggregate([
         { $match: matchStage },
         {
           $group: {
-            _id: { 
+            _id: {
               $ifNull: [
-                "$medicalRepId", 
-                { $ifNull: ["$medicalRepName", "Unknown MR"] }
-              ] 
+                "$medicalRepId",
+                { $ifNull: ["$medicalRepName", "Unknown MR"] },
+              ],
             },
             mrName: { $first: "$medicalRepName" },
             medicalRepId: { $first: "$medicalRepId" },
             zone: { $first: "$zone" },
             newCustomers: { $sum: 1 },
-            latestDate: { $max: "$createdAt" },
+            latestDate: { $max: "$date" },
           },
         },
         { $sort: { newCustomers: -1 } },
-      ];
+      ]);
 
-      const result = await Customer.aggregate(customerAggregationPipeline);
       records = result.map((item, index) => {
         const mrName = item.mrName || "Unknown MR";
         let staffDetails = null;
-        
-        if (item.medicalRepId) {
-          const staffId = item.medicalRepId.toString();
-          staffDetails = staffMap.get(staffId);
-        } 
-        
-        if (!staffDetails && mrName && mrName !== "Unknown MR") {
-          const normalizedMRName = mrName.toLowerCase().trim();
-          for (let [key, staff] of staffMap.entries()) {
-            if (staff.originalName && staff.originalName.toLowerCase().trim() === normalizedMRName) {
-              staffDetails = staff;
+        if (item.medicalRepId)
+          staffDetails = staffMap.get(item.medicalRepId.toString());
+        if (!staffDetails && mrName !== "Unknown MR") {
+          const norm = mrName.toLowerCase().trim();
+          for (const [, s] of staffMap.entries()) {
+            if (s.originalName?.toLowerCase().trim() === norm) {
+              staffDetails = s;
               break;
             }
           }
         }
-
         let mrIdToUse = "N/A";
-        if (staffDetails?.MRId) {
-          mrIdToUse = staffDetails.MRId;
-        } else if (item.medicalRepId) {
-          mrIdToUse = item.medicalRepId.toString();
-        } else if (item._id) {
-          mrIdToUse = typeof item._id === 'object' ? item._id.toString() : item._id;
-        }
-        
+        if (staffDetails?.MRId) mrIdToUse = staffDetails.MRId;
+        else if (item.medicalRepId) mrIdToUse = item.medicalRepId.toString();
+
         return {
-          'Sr.No': index + 1,
-          'MR ID': mrIdToUse,
-          'MR Name': staffDetails?.originalName || mrName,
-          'Contact': staffDetails?.contactNo || "N/A",
-          'Email': staffDetails?.email || "N/A",
-          'Team Name': staffDetails?.teamName || "N/A",
-          'Zone': item.zone || "N/A",
-          'New Customers': item.newCustomers,
-          'Date': item.latestDate
+          "Sr.No": index + 1,
+          "MR ID": mrIdToUse,
+          "MR Name": staffDetails?.originalName || mrName,
+          Contact: staffDetails?.contactNo || "N/A",
+          Email: staffDetails?.email || "N/A",
+          "Team Name": staffDetails?.teamName || "N/A",
+          Zone: item.zone || "N/A",
+          "New Customers": item.newCustomers,
+          Date: item.latestDate
             ? new Date(item.latestDate).toLocaleDateString()
-            : new Date().toLocaleDateString(),
+            : "N/A",
         };
       });
+
+      // ── Zone Wise ─────────────────────────────────────────────────────────
     } else {
       const allStaff = await Staff.find({ enabled: true }).lean();
       const staffMap = new Map();
-      allStaff.forEach((staff) => {
-        if (staff._id) {
-          const staffId = staff._id.toString();
-          staffMap.set(staffId, {
-            MRId: staff.MRId,
-            contactNo: staff.contactNo,
-            email: staff.email,
-            teamName: staff.teamName,
-            originalName: staff.medicalRepName,
+      allStaff.forEach((s) => {
+        if (s._id)
+          staffMap.set(s._id.toString(), {
+            contactNo: s.contactNo,
+            originalName: s.medicalRepName,
           });
-        }
       });
 
-      const aggregationPipeline = [
+      const result = await Customer.aggregate([
         { $match: matchStage },
         {
           $group: {
             _id: { $ifNull: ["$zone", "Unknown Zone"] },
             zoneName: { $first: "$zone" },
-            totalMRs: { 
-              $addToSet: { 
+            totalMRs: {
+              $addToSet: {
                 $ifNull: [
-                  { $toString: "$medicalRepId" }, 
-                  { $ifNull: ["$medicalRepName", "Unknown MR"] }
-                ] 
-              } 
+                  { $toString: "$medicalRepId" },
+                  { $ifNull: ["$medicalRepName", "Unknown MR"] },
+                ],
+              },
             },
             newCustomers: { $sum: 1 },
-            latestDate: { $max: "$createdAt" },
+            latestDate: { $max: "$date" },
             medicalRepIds: { $addToSet: "$medicalRepId" },
           },
         },
@@ -447,57 +476,50 @@ router.get("/export", async (req, res) => {
           },
         },
         { $sort: { newCustomers: -1 } },
-      ];
+      ]);
 
-      const result = await Customer.aggregate(aggregationPipeline);
-      
       records = result.map((item, index) => {
-        let primaryContact = null;
         let contactMR = "N/A";
-        
-        if (item.medicalRepIds && item.medicalRepIds.length > 0) {
-          for (const medicalRepId of item.medicalRepIds) {
-            if (medicalRepId) {
-              const staffId = medicalRepId.toString();
-              const staffDetails = staffMap.get(staffId);
-              if (staffDetails) {
-                primaryContact = staffDetails;
-                contactMR = staffDetails.originalName || "N/A";
-                break;
-              }
+        for (const id of item.medicalRepIds || []) {
+          if (id) {
+            const s = staffMap.get(id.toString());
+            if (s) {
+              contactMR = s.originalName || "N/A";
+              break;
             }
           }
         }
-
         return {
-          'Sr.No': index + 1,
-          'Zone ID': item._id || "N/A",
-          'Zone Name': item.zoneName || "Unknown Zone",
-          'Total MRs': item.totalMRs || 0,
-          'New Customers': item.newCustomers || 0,
-          'Average per MR': item.averagePerMR?.toFixed(1) || 0,
-          'Contact MR': contactMR,
-          'Date': item.latestDate
+          "Sr.No": index + 1,
+          "Zone Name": item.zoneName || "Unknown Zone",
+          "Total MRs": item.totalMRs || 0,
+          "New Customers": item.newCustomers || 0,
+          "Average per MR": item.averagePerMR?.toFixed(1) || "0.0",
+          "Contact MR": contactMR,
+          Date: item.latestDate
             ? new Date(item.latestDate).toLocaleDateString()
-            : new Date().toLocaleDateString(),
+            : "N/A",
         };
       });
     }
 
-    // Get summary statistics
-    const summaryResult = await Customer.aggregate([
+    if (records.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No data found to export" });
+    }
+
+    // Summary for Excel
+    const [summary] = await Customer.aggregate([
       { $match: matchStage },
       {
         $group: {
           _id: null,
           totalNewCustomers: { $sum: 1 },
-          totalMRs: { 
-            $addToSet: { 
-              $ifNull: [
-                { $toString: "$medicalRepId" }, 
-                { $ifNull: ["$medicalRepName", "Unknown MR"] }
-              ] 
-            } 
+          totalMRs: {
+            $addToSet: {
+              $ifNull: [{ $toString: "$medicalRepId" }, "$medicalRepName"],
+            },
           },
           totalZones: { $addToSet: { $ifNull: ["$zone", "Unknown Zone"] } },
         },
@@ -518,113 +540,97 @@ router.get("/export", async (req, res) => {
       },
     ]);
 
-    summary = summaryResult[0] || {
+    // ── Build Excel ───────────────────────────────────────────────────────
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet("New Customer Report");
+
+    ws.mergeCells("A1:I1");
+    const titleCell = ws.getCell("A1");
+    titleCell.value = `New Customer Addition — ${reportType} Report`;
+    titleCell.font = { size: 16, bold: true };
+    titleCell.alignment = { horizontal: "center" };
+
+    ws.mergeCells("A2:I2");
+    const dateLabel = ws.getCell("A2");
+    const filterLabels = {
+      today: "Filter: Today",
+      all: "Filter: All Records",
+      currentMonth: `Filter: Current Month (${new Date().toLocaleString("default", { month: "long", year: "numeric" })})`,
+      janToPreviousMonth: "Filter: Jan – Previous Month",
+      custom:
+        startDate && endDate
+          ? `Filter: ${new Date(startDate).toLocaleDateString()} – ${new Date(endDate).toLocaleDateString()}`
+          : "Filter: Custom",
+    };
+    dateLabel.value = filterLabels[dateFilter] || "Filter: All Records";
+    dateLabel.font = { size: 12, italic: true, color: { argb: "FF555555" } };
+    dateLabel.alignment = { horizontal: "center" };
+
+    ws.addRow([]);
+
+    const summaryData = summary || {
       totalNewCustomers: 0,
       totalMRs: 0,
       totalZones: 0,
       averageCustomersPerMR: 0,
     };
-
-    // Create Excel workbook
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('New Customer Report');
-
-    // Add report title
-    worksheet.mergeCells('A1:H1');
-    const titleRow = worksheet.getCell('A1');
-    titleRow.value = `New Customer Addition - ${reportType} Report`;
-    titleRow.font = { size: 16, bold: true };
-    titleRow.alignment = { horizontal: 'center' };
-
-    // Add summary section
-    worksheet.addRow([]);
-    worksheet.mergeCells('A3:H3');
-    const summaryTitle = worksheet.getCell('A3');
-    summaryTitle.value = 'Summary';
-    summaryTitle.font = { size: 14, bold: true };
-
-    const summaryRow1 = worksheet.addRow([
-      'Total New Customers', summary.totalNewCustomers,
-      reportType === 'MR Wise' ? 'Total MRs' : 'Total Zones',
-      reportType === 'MR Wise' ? summary.totalMRs : summary.totalZones,
-      `Average per ${reportType === 'MR Wise' ? 'MR' : 'Zone'}`,
-      summary.averageCustomersPerMR?.toFixed(1) || 0,
-      'Generated Date',
-      new Date().toLocaleDateString()
+    const summaryRow = ws.addRow([
+      "Total Customers",
+      summaryData.totalNewCustomers,
+      reportType === "MR Wise" ? "Total MRs" : "Total Zones",
+      reportType === "MR Wise" ? summaryData.totalMRs : summaryData.totalZones,
+      "Avg per MR",
+      summaryData.averageCustomersPerMR?.toFixed(1) || "0.0",
+      "Generated",
+      new Date().toLocaleDateString(),
     ]);
-
-    summaryRow1.eachCell((cell) => {
+    summaryRow.eachCell((cell) => {
       cell.font = { bold: true };
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
       };
     });
 
-    worksheet.addRow([]);
+    ws.addRow([]);
 
-    // Add data headers
-    if (reportType === "MR Wise") {
-      const headers = ['Sr.No', 'MR ID', 'MR Name', 'Contact', 'Email', 'Team Name', 'Zone', 'New Customers', 'Date'];
-      const headerRow = worksheet.addRow(headers);
-      headerRow.eachCell((cell) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FF4F81BD' }
-        };
-        cell.alignment = { horizontal: 'center' };
-      });
-    } else {
-      const headers = ['Sr.No', 'Zone ID', 'Zone Name', 'Total MRs', 'New Customers', 'Average per MR', 'Contact MR', 'Date'];
-      const headerRow = worksheet.addRow(headers);
-      headerRow.eachCell((cell) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FF4F81BD' }
-        };
-        cell.alignment = { horizontal: 'center' };
-      });
-    }
-
-    // Add data rows
-    records.forEach((record) => {
-      const rowData = Object.values(record);
-      worksheet.addRow(rowData);
+    const headers = Object.keys(records[0] || {});
+    const headerRow = ws.addRow(headers);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
+      };
+      cell.alignment = { horizontal: "center" };
     });
 
-    // Format columns
-    worksheet.columns.forEach((column, index) => {
-      let maxLength = 0;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const columnLength = cell.value ? cell.value.toString().length : 10;
-        if (columnLength > maxLength) {
-          maxLength = columnLength;
-        }
+    records.forEach((r) => ws.addRow(Object.values(r)));
+
+    ws.columns.forEach((col) => {
+      let max = 10;
+      col.eachCell({ includeEmpty: true }, (cell) => {
+        const len = cell.value ? cell.value.toString().length : 0;
+        if (len > max) max = len;
       });
-      column.width = Math.min(maxLength + 2, 30);
+      col.width = Math.min(max + 2, 35);
     });
 
-    // Set response headers
-    const fileName = `New_Customer_Report_${reportType.replace(' ', '_')}_${Date.now()}.xlsx`;
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-
-    // Write to response
+    const fileName = `New_Customer_${reportType.replace(" ", "_")}_${dateFilter}_${Date.now()}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     await workbook.xlsx.write(res);
     res.end();
-
   } catch (error) {
-    console.error("❌ Error exporting to Excel:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to export data to Excel",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
+    console.error("❌ Error exporting:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Export failed", error: error.message });
   }
 });
 
