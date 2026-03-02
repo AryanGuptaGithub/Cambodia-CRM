@@ -1971,11 +1971,11 @@
                         </td>
                         <td className="px-3 py-2">${netAmount.toFixed(2)}</td>
                         <td className="px-3 py-2">${avgUnitPrice.toFixed(2)}</td>
-                        <td className="px-3 py-2">${lc.toFixed(2)}</td>
+                        <td className="px-3 py-2">${lc.toFixed(3)}</td>
                         <td
                           className={`px-3 py-2 font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
                         >
-                          ${profitLoss.toFixed(2)}
+                          ${profitLoss.toFixed(3)}
                         </td>
                       </tr>
                     );

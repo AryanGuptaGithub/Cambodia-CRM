@@ -88,48 +88,51 @@ const ReportInHandSchema = new mongoose.Schema(
       type: Number,
       default: 10,
     },
-    // 🆕 Cumulative amount deducted due to MR sales (lc * (salesQty + bonusQty))
-    totalMrSaleDeductions: {
-      type: Number,
-      default: 0,
-    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Calculate totals before saving
 ReportInHandSchema.pre("save", function (next) {
-  // Total boxes from batches (real batches)
+  // Total boxes from real batches only
   const batchBoxes = this.batches
-    .filter(batch => batch.adjustmentType === "batch")
+    .filter((batch) => batch.adjustmentType === "batch")
     .reduce((sum, batch) => sum + (batch.boxes || 0), 0);
-  
+
   this.totalBoxesFromBatches = batchBoxes;
-  
+
   // Adjustment totals
   this.addStockAdjustment = this.batches
-    .filter(batch => batch.adjustmentType === "add")
+    .filter((batch) => batch.adjustmentType === "add")
     .reduce((sum, batch) => sum + (batch.boxes || 0), 0);
-    
+
   this.removeStockAdjustment = this.batches
-    .filter(batch => batch.adjustmentType === "remove")
+    .filter((batch) => batch.adjustmentType === "remove")
     .reduce((sum, batch) => sum + (batch.boxes || 0), 0);
-  
-  // Total boxes (including adjustments)
-  this.totalBoxes = this.totalBoxesFromBatches + 
-                    this.addStockAdjustment - 
-                    this.removeStockAdjustment;
-  
-  // Total amount from real batches only
-  const batchEntries = this.batches.filter(batch => batch.adjustmentType === "batch");
-  const totalBatchAmount = batchEntries.reduce((sum, batch) => sum + (batch.amount || 0), 0);
-  const totalBatchBoxes = batchEntries.reduce((sum, batch) => sum + (batch.boxes || 0), 0);
-  
+
+  // Total boxes (batches + add adjustments − remove adjustments)
+  this.totalBoxes =
+    this.totalBoxesFromBatches +
+    this.addStockAdjustment -
+    this.removeStockAdjustment;
+
+  // Total amount and average price from real batches only
+  const batchEntries = this.batches.filter(
+    (batch) => batch.adjustmentType === "batch",
+  );
+  const totalBatchAmount = batchEntries.reduce(
+    (sum, batch) => sum + (batch.amount || 0),
+    0,
+  );
+  const totalBatchBoxes = batchEntries.reduce(
+    (sum, batch) => sum + (batch.boxes || 0),
+    0,
+  );
+
   this.totalAmount = totalBatchAmount;
-  this.averagePrice = totalBatchBoxes > 0 ? totalBatchAmount / totalBatchBoxes : 0;
-  
-  // totalMrSaleDeductions is updated separately during MR sales, not here.
-  
+  this.averagePrice =
+    totalBatchBoxes > 0 ? totalBatchAmount / totalBatchBoxes : 0;
+
   next();
 });
 

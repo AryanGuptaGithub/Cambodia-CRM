@@ -7,8 +7,6 @@ import {
   DollarSign,
   AlertCircle,
   CreditCard,
-  Calendar,
-  X,
 } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
 
@@ -38,20 +36,18 @@ const DashboardCard = ({
 
   const colors = colorClasses[color] || colorClasses.blue;
 
-  // Cards that should show date filter
-  const showDateFilterButton = ["Total Sales", "Outstanding", "Total Expense", "Total Payroll"].includes(title);
-  
-  // Format date range for display
+  const showDateFilterButton = [
+    "Total Sales",
+    "Outstanding",
+    "Total Expense",
+    "Total Payroll",
+  ].includes(title);
+
   const formatDateRange = () => {
-    if (!isCustomDateActive || !customDateRanges[title]) {
-      return null;
-    }
-    
+    if (!isCustomDateActive || !customDateRanges[title]) return null;
     const start = customDateRanges[title]?.start;
     const end = customDateRanges[title]?.end;
-    
     if (!start || !end) return null;
-    
     const formatDate = (dateString) => {
       const date = new Date(dateString);
       return date.toLocaleDateString("en-US", {
@@ -59,16 +55,13 @@ const DashboardCard = ({
         month: "short",
       });
     };
-    
     return `${formatDate(start)} - ${formatDate(end)}`;
   };
 
   const customDateText = formatDateRange();
 
-  // Handle date filter button click
   const handleDateFilterButtonClick = (e) => {
-    e.stopPropagation(); // Prevent triggering the card click
-    
+    e.stopPropagation();
     if (isCustomDateActive && onClearDateFilter) {
       onClearDateFilter(title, e);
     } else if (onDateFilterClick) {
@@ -83,8 +76,6 @@ const DashboardCard = ({
       }`}
       onClick={onClick}
     >
-   
-
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -95,7 +86,6 @@ const DashboardCard = ({
             ${formatCurrency(amount || 0)}
           </p>
           <div className="text-xs text-gray-500 mt-1">
-            {/* Show custom date range in a yellow rounded box if active */}
             {isCustomDateActive && customDateText ? (
               <>
                 <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
@@ -103,7 +93,9 @@ const DashboardCard = ({
                 </span>
                 {growth !== undefined && " • "}
                 {growth !== undefined && (
-                  <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
+                  <span
+                    className={growth >= 0 ? "text-green-600" : "text-red-600"}
+                  >
                     {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
                   </span>
                 )}
@@ -113,7 +105,9 @@ const DashboardCard = ({
                 {subtitle}
                 {growth !== undefined && " • "}
                 {growth !== undefined && (
-                  <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
+                  <span
+                    className={growth >= 0 ? "text-green-600" : "text-red-600"}
+                  >
                     {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
                   </span>
                 )}
@@ -154,38 +148,23 @@ export const DashboardCards = ({
   isCustomDateActive = {},
   customDateRanges = {},
 }) => {
-  // State to track the highest payroll value seen
   const [highestPayrollValue, setHighestPayrollValue] = useState(0);
   const [hasPayrollDataLoaded, setHasPayrollDataLoaded] = useState(false);
 
-  // Update highest payroll value when totalPayroll changes
   useEffect(() => {
-    if (totalPayroll > highestPayrollValue) {
+    if (totalPayroll > highestPayrollValue)
       setHighestPayrollValue(totalPayroll);
-    }
-    
-    // Mark that payroll data has been loaded at least once
-    if (totalPayroll > 0 && !hasPayrollDataLoaded) {
+    if (totalPayroll > 0 && !hasPayrollDataLoaded)
       setHasPayrollDataLoaded(true);
-    }
   }, [totalPayroll]);
 
-  // Helper function to safely get numeric values
-  const getSafeNumber = (value) => {
-    return typeof value === 'number' ? value : 0;
-  };
+  const getSafeNumber = (value) => (typeof value === "number" ? value : 0);
 
-  // Helper function to get date range text for subtitle
   const getDateRangeText = (cardId) => {
-    if (!isCustomDateActive[cardId] || !customDateRanges[cardId]) {
-      return null;
-    }
-    
+    if (!isCustomDateActive[cardId] || !customDateRanges[cardId]) return null;
     const start = customDateRanges[cardId]?.start;
     const end = customDateRanges[cardId]?.end;
-    
     if (!start || !end) return null;
-    
     const formatDate = (dateString) => {
       const date = new Date(dateString);
       return date.toLocaleDateString("en-US", {
@@ -193,18 +172,16 @@ export const DashboardCards = ({
         month: "short",
       });
     };
-    
     return `${formatDate(start)} - ${formatDate(end)}`;
   };
 
   const getCurrentSalesAmount = () => {
     if (!salesData) return 0;
-    
-    // If custom date is active, use custom sales data
-    if (isCustomDateActive["Total Sales"] && salesData.customSales !== undefined) {
+    if (
+      isCustomDateActive["Total Sales"] &&
+      salesData.customSales !== undefined
+    )
       return getSafeNumber(salesData.customSales);
-    }
-    
     switch (activeSalesSubTab) {
       case "Today":
         return getSafeNumber(salesData.todaySales);
@@ -229,12 +206,11 @@ export const DashboardCards = ({
 
   const getCurrentGrowth = () => {
     if (!salesData) return 0;
-    
-    // If custom date is active, use custom growth
-    if (isCustomDateActive["Total Sales"] && salesData.customGrowth !== undefined) {
+    if (
+      isCustomDateActive["Total Sales"] &&
+      salesData.customGrowth !== undefined
+    )
       return getSafeNumber(salesData.customGrowth);
-    }
-    
     switch (activeSalesSubTab) {
       case "Today":
         return getSafeNumber(salesData.todayGrowth);
@@ -253,12 +229,11 @@ export const DashboardCards = ({
 
   const getCurrentOutstandingAmount = () => {
     if (!outstandingData) return 0;
-    
-    // If custom date is active, use custom outstanding data
-    if (isCustomDateActive["Outstanding"] && outstandingData.customOutstanding !== undefined) {
+    if (
+      isCustomDateActive["Outstanding"] &&
+      outstandingData.customOutstanding !== undefined
+    )
       return getSafeNumber(outstandingData.customOutstanding);
-    }
-    
     switch (activeOutstandingSubTab) {
       case "Today":
         return getSafeNumber(outstandingData.todayOutstanding);
@@ -283,12 +258,11 @@ export const DashboardCards = ({
 
   const getCurrentOutstandingGrowth = () => {
     if (!outstandingData) return 0;
-    
-    // If custom date is active, use custom growth
-    if (isCustomDateActive["Outstanding"] && outstandingData.customGrowth !== undefined) {
+    if (
+      isCustomDateActive["Outstanding"] &&
+      outstandingData.customGrowth !== undefined
+    )
       return getSafeNumber(outstandingData.customGrowth);
-    }
-    
     switch (activeOutstandingSubTab) {
       case "Today":
         return getSafeNumber(outstandingData.todayGrowth);
@@ -307,15 +281,12 @@ export const DashboardCards = ({
 
   const getCurrentExpenseAmount = () => {
     if (!expenseData) return 0;
-    
-    // If custom date is active, use custom expense data
-    if (isCustomDateActive["Total Expense"] && expenseData.customExpenseTotal !== undefined) {
+    if (
+      isCustomDateActive["Total Expense"] &&
+      expenseData.customExpenseTotal !== undefined
+    )
       return getSafeNumber(expenseData.customExpenseTotal);
-    }
-    
-    if (!expenseData.latestExpenses) {
-      return 0;
-    }
+    if (!expenseData.latestExpenses) return 0;
 
     const currentDate = new Date();
     let filteredExpenses = [];
@@ -330,45 +301,38 @@ export const DashboardCards = ({
           );
         });
         break;
-
       case "Year":
         filteredExpenses = expenseData.latestExpenses.filter((expense) => {
           const expenseDate = new Date(expense.date);
           return expenseDate.getFullYear() === currentDate.getFullYear();
         });
         break;
-
       case "Pending":
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          return expense.status === "Pending";
-        });
+        filteredExpenses = expenseData.latestExpenses.filter(
+          (expense) => expense.status === "Pending",
+        );
         break;
-
       case "Approved":
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          return expense.status === "Approved";
-        });
+        filteredExpenses = expenseData.latestExpenses.filter(
+          (expense) => expense.status === "Approved",
+        );
         break;
-
       case "Rejected":
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          return expense.status === "Rejected";
-        });
+        filteredExpenses = expenseData.latestExpenses.filter(
+          (expense) => expense.status === "Rejected",
+        );
         break;
-
       case "Overdue":
         filteredExpenses = expenseData.latestExpenses.filter((expense) => {
           const dueDate = new Date(expense.dueDate || expense.date);
           return dueDate < currentDate && expense.status !== "Paid";
         });
         break;
-
       case "Unreceive_Payment":
         filteredExpenses = expenseData.latestExpenses.filter((expense) => {
           return expense.status === "Pending" || expense.status === "Unpaid";
         });
         break;
-
       default:
         filteredExpenses = expenseData.latestExpenses.filter((expense) => {
           const expenseDate = new Date(expense.date);
@@ -381,24 +345,19 @@ export const DashboardCards = ({
 
     return filteredExpenses.reduce(
       (sum, expense) => sum + getSafeNumber(expense.amount),
-      0
+      0,
     );
   };
 
   const getCurrentPayrollAmount = () => {
-    // Special handling for the "Prev Month" subtab
-    if (activePayrollSubTab === "Prev Month" && !isCustomDateActive["Total Payroll"]) {
-      // If we have a valid totalPayroll value, use it
-      if (getSafeNumber(totalPayroll) > 0) {
-        return getSafeNumber(totalPayroll);
-      }
-   
+    if (
+      activePayrollSubTab === "Prev Month" &&
+      !isCustomDateActive["Total Payroll"]
+    ) {
+      if (getSafeNumber(totalPayroll) > 0) return getSafeNumber(totalPayroll);
       return highestPayrollValue > 0 ? highestPayrollValue : 0;
     }
-    
-  
     let amount = 0;
-    
     switch (activePayrollSubTab) {
       case "YTD":
         amount = getSafeNumber(payrollYTDTotal);
@@ -416,76 +375,61 @@ export const DashboardCards = ({
         amount = getSafeNumber(expenseData?.unpaidPayroll);
         break;
       default:
-        // For Custom date or default, use currentPayrollTotal
         amount = getSafeNumber(totalPayroll);
     }
-
     return amount;
   };
 
+  // **UPDATED**: getCurrentStockAmount uses activeStockSubTab to pick correct value
   const getCurrentStockAmount = () => {
     if (!stockData) return 0;
-    
     switch (activeStockSubTab) {
-      case "Today":
-        return getSafeNumber(stockData.stockValue);
-      case "Low Stock":
-        return getSafeNumber(stockData.lowStockValue);
-      case "Expiring":
-        return getSafeNumber(stockData.expiringStockValue);
-      case "All":
+      case "all":
         return getSafeNumber(stockData.totalStockValue);
-      case "Overdue":
-        return getSafeNumber(stockData.overdueStockValue);
-      case "Unreceive_Payment":
-        return getSafeNumber(stockData.unreceivedStockValue);
+      case "mr":
+        return getSafeNumber(stockData.mrStockValue);
+      case "warehouse":
+        return getSafeNumber(stockData.warehouseStockValue);
       default:
-        return getSafeNumber(stockData.stockValue);
+        return getSafeNumber(stockData.totalStockValue);
     }
   };
 
-  // Get overdue amount using actual overdueTableData
   const getOverdueAmount = () => {
     if (overdueTableData && overdueTableData.length > 0) {
-      // Calculate from actual overdue data
       return overdueTableData.reduce((sum, invoice) => {
         const overdueAmount = getSafeNumber(
           invoice.overdueAmount ||
-          (invoice.dueAmount > 0
-            ? invoice.dueAmount
-            : Math.max(0, getSafeNumber(invoice.totalAmount) - getSafeNumber(invoice.paidAmount)))
+            (invoice.dueAmount > 0
+              ? invoice.dueAmount
+              : Math.max(
+                  0,
+                  getSafeNumber(invoice.totalAmount) -
+                    getSafeNumber(invoice.paidAmount),
+                )),
         );
         return sum + overdueAmount;
       }, 0);
     }
-
-    // Fallback to salesData.overdueAmount
     return getSafeNumber(salesData?.overdueAmount);
   };
 
-  // Get credit sale cash not received amount
   const getCreditSaleCashNotReceived = () => {
-    // First, try to calculate from creditSaleTableData
     if (creditSaleTableData && creditSaleTableData.length > 0) {
       return creditSaleTableData.reduce((total, invoice) => {
-        return total + getSafeNumber(invoice.outstandingAmount || invoice.dueAmount);
+        return (
+          total + getSafeNumber(invoice.outstandingAmount || invoice.dueAmount)
+        );
       }, 0);
     }
-    
-    // Fallback to salesData if creditSaleTableData is not available
     return getSafeNumber(salesData?.unreceivePayment || salesData?.creditSale);
   };
 
-  // Update getSubtitle to show custom date range or default subtab
   const getSubtitle = (cardId) => {
-    // Check if custom date is active for this card
     if (isCustomDateActive[cardId]) {
       const customRange = getDateRangeText(cardId);
-      if (customRange) {
-        return customRange;
-      }
+      if (customRange) return customRange;
     }
-    
     switch (cardId) {
       case "Total Sales":
         return activeSalesSubTab;
@@ -496,6 +440,9 @@ export const DashboardCards = ({
       case "Total Payroll":
         return activePayrollSubTab;
       case "Stock in Hands":
+        if (activeStockSubTab === "all") return "All Stock";
+        if (activeStockSubTab === "mr") return "MR Stock";
+        if (activeStockSubTab === "warehouse") return "Warehouse Stock";
         return activeStockSubTab;
       case "Overdue":
         return "Total Overdue";
@@ -506,16 +453,15 @@ export const DashboardCards = ({
     }
   };
 
-  // Map card titles to activeTab values for consistent comparison
+  // **FIXED**: Remove mapping for "Stock in Hands"
   const getActiveTabForCard = (cardTitle) => {
     const mapping = {
       "Total Sales": "Sales",
-      "Total Expense": "Expenses", 
+      "Total Expense": "Expenses",
       "Total Payroll": "Total Payroll",
       "Pending Collection": "Credit Sale Cash Not Receive",
+      // "Stock in Hands" intentionally omitted → returns itself
     };
-    
-    // Return mapped value or original title if not in mapping
     return mapping[cardTitle] || cardTitle;
   };
 
@@ -557,7 +503,7 @@ export const DashboardCards = ({
     {
       id: "Total Payroll",
       title: "Total Payroll",
-      amount: getCurrentPayrollAmount(), 
+      amount: getCurrentPayrollAmount(),
       icon: DollarSign,
       color: "purple",
       subtitle: getSubtitle("Total Payroll"),
@@ -574,7 +520,7 @@ export const DashboardCards = ({
     {
       id: "Pending Collection",
       title: "Pending Collection",
-      amount: getCreditSaleCashNotReceived(), 
+      amount: getCreditSaleCashNotReceived(),
       icon: CreditCard,
       color: "indigo",
       subtitle: getSubtitle("Pending Collection"),
@@ -582,13 +528,11 @@ export const DashboardCards = ({
     },
   ];
 
-  // Split cards into first row (4 cards) and second row (3 cards + 1 empty space)
   const firstRowCards = cards.slice(0, 4);
-  const secondRowCards = cards.slice(4); // This will have 3 cards
+  const secondRowCards = cards.slice(4);
 
   return (
     <div className="space-y-6 mb-8">
-      {/* First row with 4 boxes */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {firstRowCards.map((card) => (
           <DashboardCard
@@ -603,7 +547,6 @@ export const DashboardCards = ({
           />
         ))}
       </div>
-      
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {secondRowCards.map((card) => (
           <DashboardCard
@@ -617,9 +560,8 @@ export const DashboardCards = ({
             customDateRanges={customDateRanges}
           />
         ))}
-        {/* Empty space for the 4th position in the second row */}
         <div className="hidden lg:block"></div>
       </div>
     </div>
   );
-};  
+};

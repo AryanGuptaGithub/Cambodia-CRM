@@ -1,338 +1,788 @@
-import React, { useState, useMemo, useEffect } from "react";
-import { DataTable } from "./DataTable";
-import { formatCurrency } from "./DashboardUtil";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Warehouse,
+  Users,
+  Package,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  Box,
+  DollarSign,
+  RefreshCw,
+  X,
+  Eye,
+} from "lucide-react";
 
-export const StockTable = ({
-  stockTableData,
-  loadingStockData,
-  activeStockSubTab,
-  dateRanges,
-  onViewStockDetails,
-}) => {
-  const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 5;
+// Utility functions
+const fmt = (n) =>
+  n == null
+    ? "0"
+    : Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
-  console.log('values of stockTableData', stockTableData);
+const fmtCurrency = (n) =>
+  n == null
+    ? "$0.00"
+    : "$" +
+      Number(n).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
 
-  const totalRows = stockTableData?.length || 0;
-  const totalPages = Math.ceil(totalRows / rowsPerPage);
+const TABS = [
+  { key: "all", label: "All Stock", icon: Package },
+  { key: "mr", label: "MR Stock", icon: Users },
+  { key: "warehouse", label: "Warehouse Stock", icon: Warehouse },
+];
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [activeStockSubTab, stockTableData]);
+const ROWS_PER_PAGE = 10;
+const MODAL_ROWS_PER_PAGE = 5; // For MR breakdown modal
 
-  const paginatedData = useMemo(() => {
-    if (!stockTableData || stockTableData.length === 0) return [];
-    const startIndex = (currentPage - 1) * rowsPerPage;
-    const endIndex = startIndex + rowsPerPage;
-    return stockTableData.slice(startIndex, endIndex);
-  }, [stockTableData, currentPage]);
+// Summary Card Component
+const SummaryCard = ({ icon: Icon, label, value, sub, color }) => (
+  <div
+    className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-4"
+    style={{ borderLeft: `4px solid ${color}` }}
+  >
+    <div
+      className="rounded-lg p-2.5 flex-shrink-0"
+      style={{ background: color + "18" }}
+    >
+      <Icon size={20} style={{ color }} />
+    </div>
+    <div className="min-w-0">
+      <div className="text-xs text-gray-500 font-medium uppercase tracking-wide truncate">
+        {label}
+      </div>
+      <div className="text-xl font-bold text-gray-800 truncate">{value}</div>
+      {sub && <div className="text-xs text-gray-400 truncate">{sub}</div>}
+    </div>
+  </div>
+);
 
-  const handlePageChange = (page) => {
-    if (page >= 1 && page <= totalPages) setCurrentPage(page);
-  };
+// Status Badge Component
+const StatusBadge = ({ boxes, minStock }) => {
+  const isOut = boxes === 0;
+  const isLow = !isOut && boxes < (minStock || 0);
+  return (
+    <span
+      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+        isOut
+          ? "bg-red-100 text-red-700"
+          : isLow
+          ? "bg-amber-100 text-amber-700"
+          : "bg-emerald-100 text-emerald-700"
+      }`}
+    >
+      {isOut ? "Out of Stock" : isLow ? "Low Stock" : "In Stock"}
+    </span>
+  );
+};
 
-  const getPageNumbers = () => {
-    const pages = [];
-    const maxVisiblePages = 5;
-    if (totalPages <= maxVisiblePages) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else {
-      if (currentPage <= 3) {
-        for (let i = 1; i <= 4; i++) pages.push(i);
-        pages.push('...');
-        pages.push(totalPages);
-      } else if (currentPage >= totalPages - 2) {
-        pages.push(1);
-        pages.push('...');
-        for (let i = totalPages - 3; i <= totalPages; i++) pages.push(i);
-      } else {
-        pages.push(1);
-        pages.push('...');
-        for (let i = currentPage - 1; i <= currentPage + 1; i++) pages.push(i);
-        pages.push('...');
-        pages.push(totalPages);
-      }
-    }
-    return pages;
-  };
+// Pagination Component (reusable)
+const Pagination = ({ current, total, onChange }) => {
+  if (total <= 1) return null;
 
-  // ✅ Use totalAmount from backend for accurate totals
-  const stockStats = useMemo(() => {
-    if (!stockTableData || stockTableData.length === 0) {
-      return { totalValue: 0, totalProducts: 0, totalBoxes: 0, lowStockCount: 0 };
-    }
-
-    let totalValue = 0;
-    let totalBoxes = 0;
-    let lowStockCount = 0;
-
-    stockTableData.forEach((item) => {
-      const currentStock = item.batches?.reduce(
-        (sum, batch) => sum + (batch.boxes || 0), 0
-      ) || 0;
-      
-      // ✅ Use item.totalAmount (already rounded)
-      totalValue += item.totalAmount || 0;
-      totalBoxes += currentStock;
-      
-      const minStockLevel = item.minStockLevel || 0;
-      if (currentStock < minStockLevel) lowStockCount++;
-    });
-
-    return {
-      totalValue,
-      totalProducts: stockTableData.length,
-      totalBoxes,
-      lowStockCount,
-    };
-  }, [stockTableData]);
-
-  const columns = [
-    {
-      header: "Product Name",
-      accessor: "productName",
-      render: (item) => (
-        <div className="flex flex-col">
-          <span className="text-gray-800 font-medium">{item.productName}</span>
-          <span className="text-xs text-gray-500">
-            Code: {item.productCode || "N/A"}
-          </span>
-        </div>
-      ),
-    },
-    {
-      header: "Supplier",
-      accessor: "supplierName",
-      render: (item) => (
-        <span className="text-gray-700">{item.supplierName || "N/A"}</span>
-      ),
-    },
-    {
-      header: "Quantity (Boxes)",
-      render: (item) => {
-        const totalBoxes = item.batches?.reduce(
-          (sum, batch) => sum + (batch.boxes || 0), 0
-        ) || 0;
-        const minStockLevel = item.minStockLevel || 0;
-        const isLowStock = totalBoxes < minStockLevel;
-        
-        return (
-          <div className="flex flex-col">
-            <span className={`font-medium ${isLowStock ? "text-red-600" : "text-gray-800"}`}>
-              {totalBoxes.toLocaleString()}
-            </span>
-            {minStockLevel > 0 && (
-              <span className="text-xs text-gray-500">Min: {minStockLevel}</span>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      header: "LC Price ($)",
-      render: (item) => {
-        const totalBoxes = item.batches?.reduce(
-          (sum, batch) => sum + (batch.boxes || 0), 0
-        ) || 0;
-        const totalLC = item.batches?.reduce(
-          (sum, batch) => sum + (batch.lc || 0) * (batch.boxes || 0), 0
-        ) || 0;
-        const avgLC = totalBoxes ? totalLC / totalBoxes : 0;
-        
-        return (
-          <div className="flex flex-col">
-            <span className="font-medium text-blue-600">
-              ${avgLC.toFixed(3)}
-            </span>
-            <span className="text-xs text-gray-500">
-              {item.batches?.length || 0} batch{item.batches?.length !== 1 ? 'es' : ''}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      header: "Stock Value ($)",
-      // ✅ Use item.totalAmount instead of recomputing
-      render: (item) => {
-        const value = item.totalAmount || 0;
-        return (
-          <div className="flex flex-col">
-            <span className="text-green-600 font-semibold">
-              ${formatCurrency(value)}
-            </span>
-            <span className="text-xs text-gray-500">
-              {formatCurrency(value / 1000)}k
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      header: "Status",
-      render: (item) => {
-        const currentStock = item.batches?.reduce(
-          (sum, batch) => sum + (batch.boxes || 0), 0
-        ) || 0;
-        const minStockLevel = item.minStockLevel || 0;
-        const isLowStock = currentStock < minStockLevel;
-
-        return (
-          <span
-            className={`px-3 py-1.5 rounded-full text-xs font-medium ${
-              isLowStock
-                ? "bg-red-100 text-red-800"
-                : "bg-green-100 text-green-800"
-            }`}
-          >
-            {isLowStock ? "Low Stock" : "In Stock"}
-          </span>
-        );
-      },
-      className: "text-center",
-    },
-    {
-      header: "Action",
-      render: (item) => (
-        <button
-          className="bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
-          onClick={() => onViewStockDetails(item.productName, item.batches)}
-          title="View batch details"
-        >
-          View Details
-        </button>
-      ),
-      className: "text-center",
-    },
-  ];
-
-  const getTableTitle = () => {
-    if (!dateRanges) return `Stock Details - ${activeStockSubTab || 'Stock'}`;
-    switch (activeStockSubTab) {
-      case "Today": return `Stock Details - ${dateRanges.today?.label || 'Today'}`;
-      case "Low Stock": return "Low Stock Alert - Products Below Minimum Level";
-      case "Expiring": return "Expiring Soon - Products Near Expiry Date";
-      case "All": return "Complete Stock Inventory";
-      case "Overdue": return "Overdue Stock - Past Expiry Date";
-      case "Unreceive_Payment": return "Pending Receipt Stock";
-      default: return `Stock Details - ${activeStockSubTab || 'Stock'}`;
-    }
-  };
+  const pages = [];
+  if (total <= 7) {
+    for (let i = 1; i <= total; i++) pages.push(i);
+  } else if (current <= 4) {
+    for (let i = 1; i <= 5; i++) pages.push(i);
+    pages.push("…");
+    pages.push(total);
+  } else if (current >= total - 3) {
+    pages.push(1);
+    pages.push("…");
+    for (let i = total - 4; i <= total; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    pages.push("…");
+    for (let i = current - 1; i <= current + 1; i++) pages.push(i);
+    pages.push("…");
+    pages.push(total);
+  }
 
   return (
-    <div className="space-y-6">
-      {!loadingStockData && stockStats.totalProducts > 0 && (
-        <div className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-gray-800">
-                {stockStats.totalProducts}
-              </div>
-              <div className="text-sm text-gray-600">Total Products</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">
-                ${formatCurrency(stockStats.totalValue)}
-              </div>
-              <div className="text-sm text-gray-600">Total Value</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">
-                {stockStats.totalBoxes.toLocaleString()}
-              </div>
-              <div className="text-sm text-gray-600">Total Boxes</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-red-600">
-                {stockStats.lowStockCount}
-              </div>
-              <div className="text-sm text-gray-600">Low Stock Items</div>
-            </div>
-          </div>
-        </div>
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={() => onChange(current - 1)}
+        disabled={current === 1}
+        className="p-1.5 rounded-md border border-gray-200 text-gray-500 disabled:opacity-40 hover:bg-gray-50 transition-colors"
+      >
+        <ChevronLeft size={16} />
+      </button>
+      {pages.map((p, i) =>
+        p === "…" ? (
+          <span key={`e${i}`} className="px-1 text-gray-400 text-sm">
+            …
+          </span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onChange(p)}
+            className={`min-w-[32px] h-8 rounded-md text-sm font-medium transition-colors ${
+              p === current
+                ? "bg-blue-600 text-white"
+                : "border border-gray-200 text-gray-600 hover:bg-gray-50"
+            }`}
+          >
+            {p}
+          </button>
+        )
       )}
-
-      <DataTable
-        title={getTableTitle()}
-        loading={loadingStockData}
-        loadingText="Loading stock data..."
-        emptyText={`No stock data found for ${activeStockSubTab}`}
-        columns={columns}
-        data={paginatedData}
-      />
-
-      {totalRows > 0 && totalPages > 1 && (
-        <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0">
-            <div className="text-sm text-gray-700">
-              <span className="font-medium">Page {currentPage} of {totalPages}</span>
-              <span className="mx-2">•</span>
-              <span>
-                Showing <span className="font-medium">{(currentPage - 1) * rowsPerPage + 1}</span> to{" "}
-                <span className="font-medium">
-                  {Math.min(currentPage * rowsPerPage, totalRows)}
-                </span>{" "}
-                of <span className="font-medium">{totalRows}</span> products
-              </span>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
-                className={`inline-flex items-center justify-center p-2 rounded-md ${
-                  currentPage === 1
-                    ? "text-gray-400 cursor-not-allowed bg-gray-100"
-                    : "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
-                }`}
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-
-              {getPageNumbers().map((page, index) => (
-                <button
-                  key={index}
-                  onClick={() => typeof page === 'number' ? handlePageChange(page) : null}
-                  className={`min-w-[36px] h-9 px-3 rounded-md text-sm font-medium ${
-                    page === currentPage
-                      ? "bg-blue-600 text-white"
-                      : typeof page === 'number'
-                      ? "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
-                      : "text-gray-500 cursor-default"
-                  }`}
-                  disabled={typeof page !== 'number'}
-                  aria-label={typeof page === 'number' ? `Page ${page}` : 'More pages'}
-                  aria-current={page === currentPage ? 'page' : undefined}
-                >
-                  {page}
-                </button>
-              ))}
-
-              <button
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
-                className={`inline-flex items-center justify-center p-2 rounded-md ${
-                  currentPage === totalPages
-                    ? "text-gray-400 cursor-not-allowed bg-gray-100"
-                    : "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
-                }`}
-                aria-label="Next page"
-              >
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {totalRows > 0 && totalPages === 1 && (
-        <div className="text-sm text-gray-500 text-center py-2 bg-white border border-gray-200 rounded-lg px-4">
-          Showing all {totalRows} products (Page 1 of 1)
-        </div>
-      )}
+      <button
+        onClick={() => onChange(current + 1)}
+        disabled={current === total}
+        className="p-1.5 rounded-md border border-gray-200 text-gray-500 disabled:opacity-40 hover:bg-gray-50 transition-colors"
+      >
+        <ChevronRight size={16} />
+      </button>
     </div>
   );
 };
+
+// MR Breakdown Modal Component
+const MRBreakdownModal = ({ isOpen, onClose, productName, mrBreakdown }) => {
+  const [modalPage, setModalPage] = useState(1);
+  const totalModalPages = Math.ceil((mrBreakdown?.length || 0) / MODAL_ROWS_PER_PAGE);
+  const paginatedMRs = mrBreakdown?.slice(
+    (modalPage - 1) * MODAL_ROWS_PER_PAGE,
+    modalPage * MODAL_ROWS_PER_PAGE
+  ) || [];
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-900">
+            MR Breakdown - {productName}
+          </h3>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="flex-1 overflow-auto px-6 py-4">
+          {paginatedMRs.length === 0 ? (
+            <p className="text-center text-gray-500 py-8">No MR data available</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">MR Name</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Boxes</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Amount</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Assigned</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paginatedMRs.map((mr) => (
+                  <tr key={mr.mrId} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-800">{mr.mrName}</td>
+                    <td className="px-4 py-2 text-right">{fmt(mr.boxes)}</td>
+                    <td className="px-4 py-2 text-right">{fmtCurrency(mr.amount)}</td>
+                    <td className="px-4 py-2 text-right">{fmt(mr.assignedQuantity)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Modal Footer with Pagination */}
+        {totalModalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-3 border-t border-gray-200 bg-gray-50">
+            <span className="text-xs text-gray-500">
+              Showing {(modalPage - 1) * MODAL_ROWS_PER_PAGE + 1} – {Math.min(modalPage * MODAL_ROWS_PER_PAGE, mrBreakdown?.length || 0)} of {mrBreakdown?.length || 0}
+            </span>
+            <Pagination
+              current={modalPage}
+              total={totalModalPages}
+              onChange={setModalPage}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Main Component – now accepts activeTab and onTabChange as props
+export const CombinedStockTable = ({
+  apiBaseUrl = "http://localhost:3001",
+  activeTab,        // from parent: "all", "mr", or "warehouse"
+  onTabChange,      // function to update parent when tab changes
+}) => {
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+
+  // Raw data from API
+  const [allData, setAllData] = useState(null); // combined-stock
+  const [mrData, setMrData] = useState(null);   // mr-stock-summary
+
+  // Fetch data
+  const fetchData = async (searchVal = "") => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = searchVal ? `?search=${encodeURIComponent(searchVal)}` : "";
+
+      const [combinedRes, mrRes] = await Promise.all([
+        fetch(`${apiBaseUrl}/api/stock-in-hand/combined-stock${qs}`),
+        fetch(`${apiBaseUrl}/api/stock-in-hand/mr-stock-summary${qs}`),
+      ]);
+
+      if (!combinedRes.ok) {
+        const errorText = await combinedRes.text();
+        throw new Error(`Combined stock fetch failed: ${combinedRes.status} ${combinedRes.statusText}`);
+      }
+      if (!mrRes.ok) {
+        const errorText = await mrRes.text();
+        throw new Error(`MR stock summary fetch failed: ${mrRes.status} ${mrRes.statusText}`);
+      }
+
+      const contentTypeCombined = combinedRes.headers.get('content-type');
+      const contentTypeMr = mrRes.headers.get('content-type');
+      
+      if (!contentTypeCombined || !contentTypeCombined.includes('application/json')) {
+        const text = await combinedRes.text();
+        throw new Error(`Expected JSON from combined-stock but received ${contentTypeCombined}`);
+      }
+      if (!contentTypeMr || !contentTypeMr.includes('application/json')) {
+        const text = await mrRes.text();
+        throw new Error(`Expected JSON from mr-stock-summary but received ${contentTypeMr}`);
+      }
+
+      const [combined, mr] = await Promise.all([
+        combinedRes.json(),
+        mrRes.json(),
+      ]);
+
+      setAllData(combined);
+      setMrData(mr);
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initial fetch
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Debounced search
+  useEffect(() => {
+    const t = setTimeout(() => fetchData(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Reset page on tab/data change
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, allData, mrData]);
+
+  // Derived data per tab
+  const { products, summary } = useMemo(() => {
+    if (activeTab === "all") {
+      return {
+        products: allData?.products || [],
+        summary: allData?.summary || {},
+      };
+    }
+    if (activeTab === "mr") {
+      return {
+        products: mrData?.products || [],
+        summary: mrData?.summary || {},
+      };
+    }
+    // warehouse tab
+    const warehouseProducts = (allData?.products || [])
+      .filter((p) => p.warehouseBoxes > 0)
+      .map((p) => ({
+        ...p,
+        displayBoxes: p.warehouseBoxes,
+        displayAmount: p.warehouseAmount,
+      }));
+    return {
+      products: warehouseProducts,
+      summary: {
+        totalBoxes: allData?.summary?.totalWarehouseBoxes || 0,
+        totalAmount: allData?.summary?.totalWarehouseAmount || 0,
+      },
+    };
+  }, [activeTab, allData, mrData]);
+
+  const totalPages = Math.ceil(products.length / ROWS_PER_PAGE);
+  const pageProducts = products.slice(
+    (page - 1) * ROWS_PER_PAGE,
+    page * ROWS_PER_PAGE
+  );
+
+  // Summary cards config
+  const summaryCards = useMemo(() => {
+    if (activeTab === "all") {
+      const s = allData?.summary || {};
+      return [
+        {
+          icon: Package,
+          label: "Total Products",
+          value: fmt(allData?.count || 0),
+          color: "#6366f1",
+        },
+        {
+          icon: Box,
+          label: "Total Boxes",
+          value: fmt(s.totalBoxes),
+          sub: `WH: ${fmt(s.totalWarehouseBoxes)} | MR: ${fmt(s.totalMrBoxes)}`,
+          color: "#0ea5e9",
+        },
+        {
+          icon: DollarSign,
+          label: "Total Value",
+          value: fmtCurrency(s.totalAmount),
+          sub: `WH: ${fmtCurrency(s.totalWarehouseAmount)}`,
+          color: "#10b981",
+        },
+        {
+          icon: Users,
+          label: "MR Value",
+          value: fmtCurrency(s.totalMrAmount),
+          color: "#f59e0b",
+        },
+      ];
+    }
+    if (activeTab === "mr") {
+      const s = mrData?.summary || {};
+      return [
+        {
+          icon: Users,
+          label: "Products with MR",
+          value: fmt(mrData?.count || 0),
+          color: "#6366f1",
+        },
+        {
+          icon: Box,
+          label: "Total MR Boxes",
+          value: fmt(s.totalMrBoxes),
+          color: "#0ea5e9",
+        },
+        {
+          icon: DollarSign,
+          label: "Total MR Value",
+          value: fmtCurrency(s.totalMrAmount),
+          color: "#10b981",
+        },
+      ];
+    }
+    // warehouse
+    const s = allData?.summary || {};
+    return [
+      {
+        icon: Warehouse,
+        label: "Warehouse Products",
+        value: fmt(products.length),
+        color: "#6366f1",
+      },
+      {
+        icon: Box,
+        label: "Warehouse Boxes",
+        value: fmt(s.totalWarehouseBoxes),
+        color: "#0ea5e9",
+      },
+      {
+        icon: DollarSign,
+        label: "Warehouse Value",
+        value: fmtCurrency(s.totalWarehouseAmount),
+        color: "#10b981",
+      },
+    ];
+  }, [activeTab, allData, mrData, products.length]);
+
+  // Column definitions per tab
+  const columns = useMemo(() => {
+    const base = [
+      {
+        header: "#",
+        render: (_, idx) => (
+          <span className="text-gray-400 text-xs">
+            {(page - 1) * ROWS_PER_PAGE + idx + 1}
+          </span>
+        ),
+        width: "w-10",
+      },
+      {
+        header: "Product Name",
+        render: (p) => (
+          <div>
+            <div className="font-semibold text-gray-800 text-sm">
+              {p.productName}
+            </div>
+            {p.lc > 0 && (
+              <div className="text-xs text-gray-400">
+                LC: {fmtCurrency(p.lc)}
+              </div>
+            )}
+          </div>
+        ),
+      },
+    ];
+
+    if (activeTab === "all") {
+      return [
+        ...base,
+        {
+          header: "Warehouse Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-semibold text-gray-800">
+                {fmt(p.warehouseBoxes)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {fmtCurrency(p.warehouseAmount)}
+              </div>
+            </div>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "MR Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-semibold text-blue-700">
+                {fmt(p.mrBoxes)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {fmtCurrency(p.mrAmount)}
+              </div>
+            </div>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "Total Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-bold text-gray-900 text-base">
+                {fmt(p.totalBoxes)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {fmtCurrency(p.totalAmount)}
+              </div>
+            </div>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "Status",
+          render: (p) => (
+            <StatusBadge boxes={p.warehouseBoxes} minStock={p.minStockLevel} />
+          ),
+          className: "text-center",
+        },
+      ];
+    }
+
+    if (activeTab === "mr") {
+      return [
+        ...base,
+        {
+          header: "Total MR Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-bold text-blue-700 text-base">
+                {fmt(p.totalMrBoxes)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {fmtCurrency(p.totalMrAmount)}
+              </div>
+            </div>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "MR Details",
+          render: (p) => (
+            <div className="flex justify-center">
+              <button
+                onClick={() => {
+                  setSelectedProduct(p);
+                  setModalOpen(true);
+                }}
+                className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium"
+              >
+                <Eye size={14} />
+                View MRs ({p.mrBreakdown?.length || 0})
+              </button>
+            </div>
+          ),
+          className: "text-center",
+        },
+        {
+          header: "No. of MRs",
+          render: (p) => (
+            <div className="text-center">
+              <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
+                {p.mrBreakdown?.length || 0}
+              </span>
+            </div>
+          ),
+          className: "text-center",
+        },
+      ];
+    }
+
+    // warehouse tab
+    return [
+      ...base,
+      {
+        header: "Quantity (Boxes)",
+        render: (p) => (
+          <div className="text-right">
+            <div
+              className={`font-bold text-base ${
+                p.warehouseBoxes === 0
+                  ? "text-red-600"
+                  : p.warehouseBoxes < (p.minStockLevel || 0)
+                  ? "text-amber-600"
+                  : "text-gray-900"
+              }`}
+            >
+              {fmt(p.warehouseBoxes)}
+            </div>
+            {p.minStockLevel > 0 && (
+              <div className="text-xs text-gray-400">
+                Min: {p.minStockLevel}
+              </div>
+            )}
+          </div>
+        ),
+        className: "text-right",
+      },
+      {
+        header: "Stock Value",
+        render: (p) => (
+          <div className="text-right font-semibold text-emerald-700">
+            {fmtCurrency(p.warehouseAmount)}
+          </div>
+        ),
+        className: "text-right",
+      },
+      {
+        header: "Status",
+        render: (p) => (
+          <StatusBadge boxes={p.warehouseBoxes} minStock={p.minStockLevel} />
+        ),
+        className: "text-center",
+      },
+    ];
+  }, [activeTab, page]);
+
+  // Render
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans">
+      {/* Modal */}
+      <MRBreakdownModal
+        isOpen={modalOpen}
+        onClose={() => {
+          setModalOpen(false);
+          setSelectedProduct(null);
+        }}
+        productName={selectedProduct?.productName}
+        mrBreakdown={selectedProduct?.mrBreakdown}
+      />
+
+      {/* Header */}
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Stock Overview</h1>
+        <p className="text-gray-500 text-sm mt-0.5">
+          Combined view of warehouse and MR stock, product-wise
+        </p>
+      </div>
+
+      {/* Tabs – now using props */}
+      <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1 mb-6 w-fit shadow-sm">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => onTabChange(key)}   // call parent's onTabChange
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === key
+                ? "bg-blue-600 text-white shadow"
+                : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
+            }`}
+          >
+            <Icon size={15} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Summary Cards */}
+      {!loading && !error && (
+        <div
+          className={`grid gap-4 mb-6 ${
+            summaryCards.length === 4
+              ? "grid-cols-2 md:grid-cols-4"
+              : "grid-cols-1 sm:grid-cols-3"
+          }`}
+        >
+          {summaryCards.map((card, i) => (
+            <SummaryCard key={i} {...card} />
+          ))}
+        </div>
+      )}
+
+      {/* Table Card */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        {/* Table toolbar */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
+          <div className="font-semibold text-gray-700 text-sm">
+            {/* Removed descriptive labels */}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search
+                size={14}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <input
+                type="text"
+                placeholder="Search product…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 w-48"
+              />
+            </div>
+            <button
+              onClick={() => fetchData(search)}
+              className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
+              title="Refresh"
+            >
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
+        </div>
+
+        {/* Loading */}
+        {loading && (
+          <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
+            <RefreshCw size={18} className="animate-spin mr-2" /> Loading
+            stock data…
+          </div>
+        )}
+
+        {/* Error */}
+        {!loading && error && (
+          <div className="flex flex-col items-center justify-center py-16 text-red-500 text-sm gap-2">
+            <span>⚠ {error}</span>
+            <button
+              className="text-blue-600 underline text-xs"
+              onClick={() => fetchData(search)}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Table */}
+        {!loading && !error && (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    {columns.map((col, i) => (
+                      <th
+                        key={i}
+                        className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${
+                          col.className || "text-left"
+                        } ${col.width || ""}`}
+                      >
+                        {col.header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {pageProducts.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={columns.length}
+                        className="text-center py-16 text-gray-400"
+                      >
+                        No products found
+                        {search ? ` for "${search}"` : ""}
+                      </td>
+                    </tr>
+                  ) : (
+                    pageProducts.map((product, idx) => (
+                      <tr
+                        key={product.productName + idx}
+                        className="hover:bg-blue-50/40 transition-colors"
+                      >
+                        {columns.map((col, ci) => (
+                          <td
+                            key={ci}
+                            className={`px-4 py-3 ${col.className || ""}`}
+                          >
+                            {col.render(product, idx)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer / Pagination */}
+            {products.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
+                <span className="text-xs text-gray-500">
+                  Showing{" "}
+                  <span className="font-medium text-gray-700">
+                    {Math.min(
+                      (page - 1) * ROWS_PER_PAGE + 1,
+                      products.length
+                    )}
+                  </span>{" "}
+                  –{" "}
+                  <span className="font-medium text-gray-700">
+                    {Math.min(page * ROWS_PER_PAGE, products.length)}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-medium text-gray-700">
+                    {products.length}
+                  </span>{" "}
+                  products
+                </span>
+                <Pagination
+                  current={page}
+                  total={totalPages}
+                  onChange={setPage}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default CombinedStockTable;

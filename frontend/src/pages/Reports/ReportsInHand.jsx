@@ -1,647 +1,703 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Search, Download, X } from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import {
+  Warehouse,
+  Users,
+  Package,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  Box,
+  DollarSign,
+  RefreshCw,
+  X,
+  Eye,
+  Download,
+  CheckCircle,
+  AlertTriangle,
+  AlertCircle,
+  XCircle,
+} from "lucide-react";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const productsPerPage = 7;
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const fmt = (n) =>
+  n == null
+    ? "0"
+    : Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
+const fmtCurrency = (n) =>
+  n == null
+    ? "$0.00"
+    : "$" +
+      Number(n).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+const ROWS_PER_PAGE =5;
+const MODAL_ROWS_PER_PAGE = 6;
+
+const TABS = [
+  { key: "all",       label: "All Stock",       icon: Package   },
+  { key: "mr",        label: "MR Stock",         icon: Users     },
+  { key: "warehouse", label: "Warehouse Stock",  icon: Warehouse },
+];
+
+// ── Summary Card ──────────────────────────────────────────────────────────────
+const SummaryCard = ({ icon: Icon, label, value, sub, color }) => (
+  <div
+    className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3"
+    style={{ borderLeft: `4px solid ${color}` }}
+  >
+    <div className="rounded-lg p-2.5 flex-shrink-0" style={{ background: color + "18" }}>
+      <Icon size={20} style={{ color }} />
+    </div>
+    <div className="min-w-0">
+      <div className="text-xs text-gray-500 font-medium uppercase tracking-wide truncate">{label}</div>
+      <div className="text-xl font-bold text-gray-800 truncate">{value}</div>
+      {sub && <div className="text-xs text-gray-400 truncate">{sub}</div>}
+    </div>
+  </div>
+);
+
+// ── Status Badge ──────────────────────────────────────────────────────────────
+const StatusBadge = ({ status }) => {
+  const map = {
+    "In Stock":     "bg-emerald-100 text-emerald-700",
+    "Low Stock":    "bg-amber-100 text-amber-700",
+    "Critical":     "bg-red-100 text-red-700",
+    "Out of Stock": "bg-gray-100 text-gray-600",
+  };
+  return (
+    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${map[status] || map["Out of Stock"]}`}>
+      {status || "Out of Stock"}
+    </span>
+  );
+};
+
+// ── Pagination ────────────────────────────────────────────────────────────────
+const Pagination = ({ current, total, onChange }) => {
+  if (total <= 1) return null;
+  const pages = [];
+  if (total <= 7) {
+    for (let i = 1; i <= total; i++) pages.push(i);
+  } else if (current <= 4) {
+    for (let i = 1; i <= 5; i++) pages.push(i);
+    pages.push("…");
+    pages.push(total);
+  } else if (current >= total - 3) {
+    pages.push(1); pages.push("…");
+    for (let i = total - 4; i <= total; i++) pages.push(i);
+  } else {
+    pages.push(1); pages.push("…");
+    for (let i = current - 1; i <= current + 1; i++) pages.push(i);
+    pages.push("…"); pages.push(total);
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      <button onClick={() => onChange(current - 1)} disabled={current === 1}
+        className="p-1.5 rounded-md border border-gray-200 text-gray-500 disabled:opacity-40 hover:bg-gray-50 transition-colors">
+        <ChevronLeft size={16} />
+      </button>
+      {pages.map((p, i) =>
+        p === "…" ? (
+          <span key={`e${i}`} className="px-1 text-gray-400 text-sm">…</span>
+        ) : (
+          <button key={p} onClick={() => onChange(p)}
+            className={`min-w-[32px] h-8 rounded-md text-sm font-medium transition-colors ${
+              p === current ? "bg-indigo-600 text-white" : "border border-gray-200 text-gray-600 hover:bg-gray-50"
+            }`}>
+            {p}
+          </button>
+        )
+      )}
+      <button onClick={() => onChange(current + 1)} disabled={current === total}
+        className="p-1.5 rounded-md border border-gray-200 text-gray-500 disabled:opacity-40 hover:bg-gray-50 transition-colors">
+        <ChevronRight size={16} />
+      </button>
+    </div>
+  );
+};
+
+// ── MR Breakdown Modal ────────────────────────────────────────────────────────
+const MRBreakdownModal = ({ isOpen, onClose, productName, mrBreakdown }) => {
+  const [modalPage, setModalPage] = useState(1);
+
+  useEffect(() => { setModalPage(1); }, [productName]);
+
+  if (!isOpen) return null;
+
+  const totalModalPages = Math.ceil((mrBreakdown?.length || 0) / MODAL_ROWS_PER_PAGE);
+  const paginatedMRs = (mrBreakdown || []).slice(
+    (modalPage - 1) * MODAL_ROWS_PER_PAGE,
+    modalPage * MODAL_ROWS_PER_PAGE
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">MR Breakdown</h3>
+            <p className="text-sm text-gray-500 capitalize">{productName}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+            <X size={20} className="text-gray-500" />
+          </button>
+        </div>
+        {/* Body */}
+        <div className="flex-1 overflow-auto px-6 py-4">
+          {paginatedMRs.length === 0 ? (
+            <p className="text-center text-gray-500 py-8">No MR data available</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">#</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">MR Name</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Boxes</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Amount</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Assigned</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paginatedMRs.map((mr, i) => (
+                  <tr key={mr.mrId} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 text-gray-400 text-xs">{(modalPage - 1) * MODAL_ROWS_PER_PAGE + i + 1}</td>
+                    <td className="px-4 py-2.5 font-medium text-gray-800">{mr.mrName}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-blue-700">{fmt(mr.boxes)}</td>
+                    <td className="px-4 py-2.5 text-right text-emerald-700">{fmtCurrency(mr.amount)}</td>
+                    <td className="px-4 py-2.5 text-right text-gray-600">{fmt(mr.assignedQuantity)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {/* Footer */}
+        {totalModalPages > 1 && (
+          <div className="flex items-center justify-between px-6 py-3 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+            <span className="text-xs text-gray-500">
+              {(modalPage - 1) * MODAL_ROWS_PER_PAGE + 1}–
+              {Math.min(modalPage * MODAL_ROWS_PER_PAGE, mrBreakdown?.length || 0)} of {mrBreakdown?.length || 0}
+            </span>
+            <Pagination current={modalPage} total={totalModalPages} onChange={setModalPage} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── Main Component ────────────────────────────────────────────────────────────
 const ReportsInHand = () => {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [activeTab, setActiveTab] = useState("warehouse");
+  const [search,    setSearch]    = useState("");
+  const [page,      setPage]      = useState(1);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState(null);
+
+  // Modal state
+  const [modalOpen,       setModalOpen]       = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+
+  // Raw API data
+  const [allData, setAllData] = useState(null); // /combined-stock
+  const [mrData,  setMrData]  = useState(null); // /mr-stock-summary
+
   const inputRef = useRef(null);
 
-  // Fetch data from API
-  const fetchReportsInHand = async () => {
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  const fetchData = async (searchVal = "") => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      const response = await fetch(`${backendUrl}/api/reports/stock-in-hand`);
-      if (!response.ok) {
-        throw new Error("Failed to fetch data");
-      }
-
-      const data = await response.json();
-
-      if (data.success) {
-        const transformedProducts = data.reports.map((product, index) => {
-          const latestBatch =
-            product.batches && product.batches.length > 0
-              ? product.batches[product.batches.length - 1]
-              : null;
-
-          return {
-            id: product._id || index + 1,
-            name: product.productName,
-            currentStock: product.totalBoxes || 0, // ✅ Use totalBoxes from API
-            boxes: product.totalBoxes || 0, // ✅ Use totalBoxes from API
-            piecesPerBox: 0, // Not available in API
-            minStock: product.minStockLevel || 10,
-            status: product.status || "Out of Stock",
-            pricePerPiece: latestBatch?.lc || 0, // Use LC from latest batch
-            lc: latestBatch?.lc || 0, // Use LC from latest batch
-            fob: latestBatch?.fob || 0, // Use FOB from latest batch
-            cif: latestBatch?.cif || 0, // Use CIF from latest batch
-            totalPrice: product.totalAmount || 0, // Use totalAmount from API
-            supplierName: product.supplierName,
-            lastUpdated: new Date(product.updatedAt || product.createdAt)
-              .toISOString()
-              .split("T")[0],
-          };
-        });
-
-        setProducts(transformedProducts);
-      } else {
-        throw new Error(data.message || "Failed to fetch data");
-      }
+      const qs = searchVal ? `?search=${encodeURIComponent(searchVal)}` : "";
+      const [combinedRes, mrRes] = await Promise.all([
+        fetch(`${backendUrl}/api/stock-in-hand/combined-stock${qs}`),
+        fetch(`${backendUrl}/api/stock-in-hand/mr-stock-summary${qs}`),
+      ]);
+      if (!combinedRes.ok) throw new Error(`Combined stock: ${combinedRes.status}`);
+      if (!mrRes.ok)       throw new Error(`MR summary: ${mrRes.status}`);
+      const [combined, mr] = await Promise.all([combinedRes.json(), mrRes.json()]);
+      setAllData(combined);
+      setMrData(mr);
     } catch (err) {
-      console.error("Error fetching reports:", err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchReportsInHand();
-  }, []);
-
-  // Refresh data
-  const handleRefresh = () => {
-    fetchReportsInHand();
-  };
-
-  // Clear search
-  const handleClearSearch = () => {
-    setSearchTerm("");
-  };
-
-  const handleIconClick = () => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.classList.add("highlight");
-      setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
-      }, 1000);
-    }
-  };
+  useEffect(() => { fetchData(); }, []);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
+    const t = setTimeout(() => fetchData(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const filteredProducts = products.filter(
-    (product) =>
-      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (product.supplierName &&
-        product.supplierName
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase())) ||
-      (product.category &&
-        product.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      product.status.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  useEffect(() => { setPage(1); }, [activeTab, allData, mrData]);
 
-  // Pagination calculations
-  const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
-  const currentProducts = filteredProducts.slice(
-    (currentPage - 1) * productsPerPage,
-    currentPage * productsPerPage
-  );
-
-  function getVisiblePages(currentPage, totalPages) {
-    if (totalPages <= 5) {
-      return Array.from({ length: totalPages }, (_, i) => i + 1);
+  // ── Derived data ──────────────────────────────────────────────────────────
+  const { products } = useMemo(() => {
+    if (activeTab === "all") {
+      return { products: allData?.products || [] };
     }
-
-    if (currentPage <= 3) {
-      return [1, 2, 3, "...", totalPages];
+    if (activeTab === "mr") {
+      return { products: mrData?.products || [] };
     }
+    // warehouse — only products with warehouse stock
+    return {
+      products: (allData?.products || []).filter((p) => p.warehouseBoxes > 0),
+    };
+  }, [activeTab, allData, mrData]);
 
-    if (currentPage >= totalPages - 2) {
-      return [1, "...", totalPages - 2, totalPages - 1, totalPages];
+  // Status counts for warehouse / all tabs
+  const statusCounts = useMemo(() => {
+    const base = { "In Stock": 0, "Low Stock": 0, "Critical": 0, "Out of Stock": 0 };
+    const src  = activeTab === "mr" ? [] : (allData?.products || []).filter((p) =>
+      activeTab === "warehouse" ? p.warehouseBoxes > 0 : true
+    );
+    src.forEach((p) => {
+      const s = p.status || "Out of Stock";
+      if (s in base) base[s]++;
+    });
+    return base;
+  }, [activeTab, allData]);
+
+  const totalPages   = Math.ceil(products.length / ROWS_PER_PAGE);
+  const pageProducts = products.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE);
+
+  // ── Summary cards ──────────────────────────────────────────────────────────
+  const summaryCards = useMemo(() => {
+    if (activeTab === "mr") {
+      const s = mrData?.summary || {};
+      return [
+        { icon: Users,      label: "Products with MR",  value: fmt(mrData?.count || 0),       color: "#6366f1" },
+        { icon: Box,        label: "Total MR Boxes",     value: fmt(s.totalMrBoxes),             color: "#0ea5e9" },
+        { icon: DollarSign, label: "Total MR Value",     value: fmtCurrency(s.totalMrAmount),   color: "#10b981" },
+      ];
     }
+    if (activeTab === "all") {
+      const s = allData?.summary || {};
+      return [
+        { icon: Package,    label: "Total Products", value: fmt(allData?.count || 0),           color: "#6366f1" },
+        { icon: Box,        label: "Total Boxes",    value: fmt(s.totalBoxes),
+          sub: `WH: ${fmt(s.totalWarehouseBoxes)} | MR: ${fmt(s.totalMrBoxes)}`,                color: "#0ea5e9" },
+        { icon: DollarSign, label: "Total Value",    value: fmtCurrency(s.totalAmount),
+          sub: `WH: ${fmtCurrency(s.totalWarehouseAmount)}`,                                     color: "#10b981" },
+        { icon: Users,      label: "MR Value",       value: fmtCurrency(s.totalMrAmount),       color: "#f59e0b" },
+      ];
+    }
+    // warehouse — show status + totals
+    const s = allData?.summary || {};
+    return [
+      { icon: CheckCircle,   label: "In Stock",      value: statusCounts["In Stock"],           color: "#10b981" },
+      { icon: AlertTriangle, label: "Low Stock",     value: statusCounts["Low Stock"],          color: "#f59e0b" },
+      { icon: AlertCircle,   label: "Critical",      value: statusCounts["Critical"],           color: "#ef4444" },
+      { icon: XCircle,       label: "Out of Stock",  value: statusCounts["Out of Stock"],       color: "#6b7280" },
+      { icon: Box,           label: "Total Boxes",   value: fmt(s.totalWarehouseBoxes),         color: "#6366f1" },
+      { icon: DollarSign,    label: "Total Value",   value: fmtCurrency(s.totalWarehouseAmount),color: "#0ea5e9" },
+    ];
+  }, [activeTab, allData, mrData, statusCounts]);
 
-    return [1, "...", currentPage, "...", totalPages];
-  }
-
-  const getStatusBadge = (status) => {
-    const statusStyles = {
-      "In Stock": "bg-green-100 text-green-600 px-3 py-1 rounded-full text-sm",
-      "Low Stock":
-        "bg-yellow-100 text-yellow-600 px-3 py-1 rounded-full text-sm",
-      Critical: "bg-red-100 text-red-600 px-3 py-1 rounded-full text-sm",
-      "Out of Stock":
-        "bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm",
+  // ── Columns ───────────────────────────────────────────────────────────────
+  const columns = useMemo(() => {
+    const srCol = {
+      header: "#",
+      render: (_, idx) => (
+        <span className="text-gray-400 text-xs">{(page - 1) * ROWS_PER_PAGE + idx + 1}</span>
+      ),
+      width: "w-10",
     };
 
-    return (
-      <span
-        className={
-          statusStyles[status] ||
-          "bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm"
-        }
-      >
-        {status}
-      </span>
-    );
-  };
+    const nameCol = {
+      header: "Product Name",
+      render: (p) => (
+        <div>
+          <div className="font-semibold text-gray-800 text-sm capitalize">{p.productName}</div>
+          {p.supplierName && <div className="text-xs text-gray-400">{p.supplierName}</div>}
+          {p.lc > 0 && <div className="text-xs text-gray-400">LC: {fmtCurrency(p.lc)}</div>}
+        </div>
+      ),
+    };
 
-  // ✅ Calculate summary statistics using totalBoxes
-  const inStockCount = products.filter((p) => p.status === "In Stock").length;
-  const lowStockCount = products.filter((p) => p.status === "Low Stock").length;
-  const criticalCount = products.filter((p) => p.status === "Critical").length;
-  const outOfStockCount = products.filter(
-    (p) => p.status === "Out of Stock"
-  ).length;
-  
-  // ✅ Calculate total boxes across all products
-  const totalBoxesSum = products.reduce((sum, product) => sum + (product.boxes || 0), 0);
-
-  if (loading) {
-    return (
-      <div className="p-6 flex justify-center items-center h-64">
-        <div className="text-lg">Loading product data...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <svg
-                className="h-5 w-5 text-red-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                  clipRule="evenodd"
-                />
-              </svg>
+    // ── All Stock columns ──────────────────────────────────────────────────
+    if (activeTab === "all") {
+      return [
+        srCol,
+        nameCol,
+        {
+          header: "Warehouse Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-semibold text-gray-800">{fmt(p.warehouseBoxes)}</div>
+              <div className="text-xs text-gray-400">{fmtCurrency(p.warehouseAmount)}</div>
             </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">
-                Error loading data
-              </h3>
-              <p className="text-sm text-red-600 mt-1">{error}</p>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "MR Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-semibold text-blue-700">{fmt(p.mrBoxes)}</div>
+              <div className="text-xs text-gray-400">{fmtCurrency(p.mrAmount)}</div>
+            </div>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "Total Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-bold text-gray-900 text-base">{fmt(p.totalBoxes)}</div>
+              <div className="text-xs text-gray-400">{fmtCurrency(p.totalAmount)}</div>
+            </div>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "Status",
+          render: (p) => <StatusBadge status={p.status} />,
+          className: "text-center",
+        },
+      ];
+    }
+
+    // ── MR Stock columns ───────────────────────────────────────────────────
+    if (activeTab === "mr") {
+      return [
+        srCol,
+        nameCol,
+        {
+          header: "Total MR Boxes",
+          render: (p) => (
+            <div className="text-right">
+              <div className="font-bold text-blue-700 text-base">{fmt(p.totalMrBoxes)}</div>
+              <div className="text-xs text-gray-400">{fmtCurrency(p.totalMrAmount)}</div>
+            </div>
+          ),
+          className: "text-right",
+        },
+        {
+          header: "No. of MRs",
+          render: (p) => (
+            <div className="flex justify-center">
+              <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
+                {p.mrBreakdown?.length || 0}
+              </span>
+            </div>
+          ),
+          className: "text-center",
+        },
+        {
+          header: "MR Details",
+          render: (p) => (
+            <div className="flex justify-center">
               <button
-                onClick={handleRefresh}
-                className="mt-2 bg-red-100 text-red-700 px-3 py-1 rounded text-sm hover:bg-red-200 cursor-pointer"
+                onClick={() => { setSelectedProduct(p); setModalOpen(true); }}
+                className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium"
               >
-                Retry
+                <Eye size={13} />
+                View MRs
               </button>
             </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+          ),
+          className: "text-center",
+        },
+      ];
+    }
 
+    // ── Warehouse Stock columns ────────────────────────────────────────────
+    return [
+      srCol,
+      nameCol,
+      {
+        header: "Qty (Boxes)",
+        render: (p) => (
+          <div className="text-right">
+            <span className={`font-bold text-base px-3 py-0.5 rounded-full inline-block ${
+              p.warehouseBoxes === 0
+                ? "bg-red-50 text-red-700"
+                : p.warehouseBoxes < (p.minStockLevel || 0)
+                ? "bg-amber-50 text-amber-700"
+                : "bg-indigo-50 text-indigo-900"
+            }`}>
+              {fmt(p.warehouseBoxes)}
+            </span>
+            {p.minStockLevel > 0 && (
+              <div className="text-xs text-gray-400 mt-0.5">Min: {p.minStockLevel}</div>
+            )}
+          </div>
+        ),
+        className: "text-right",
+      },
+      {
+        header: "LC Price ($)",
+        render: (p) => (
+          <div className="text-right text-sm text-gray-700">{Number(p.lc || 0).toFixed(3)}</div>
+        ),
+        className: "text-right",
+      },
+      {
+        header: "FOB Price ($)",
+        render: (p) => (
+          <div className="text-right text-sm text-gray-700">{Number(p.fob || 0).toFixed(3)}</div>
+        ),
+        className: "text-right",
+      },
+      {
+        header: "Total Amount ($)",
+        render: (p) => (
+          <div className="text-right font-semibold text-emerald-700">
+            {fmtCurrency(p.warehouseAmount)}
+          </div>
+        ),
+        className: "text-right",
+      },
+      {
+        header: "Status",
+        render: (p) => <StatusBadge status={p.status} />,
+        className: "text-center",
+      },
+    ];
+  }, [activeTab, page]);
+
+  // ── Export ────────────────────────────────────────────────────────────────
   const exportToExcel = () => {
     try {
-      // ✅ Convert your data with totalBoxes
-      const excelData = products.map((item, index) => ({
-        "Sr No.": index + 1,
-        Product: item.name,
-        Supplier: item.supplierName,
-        "Total Boxes": item.boxes, // ✅ Show totalBoxes
-        "Min Stock": item.minStock,
-        Status: item.status,
-        "LC Price ($)": item.lc?.toFixed(3) || "0.000",
-        "FOB Price ($)": item.fob?.toFixed(3) || "0.000",
-        "Total Amount ($)": item.totalPrice?.toFixed(3) || "0.000",
-        "Last Updated": item.lastUpdated,
-      }));
+      let excelData = [];
+      let sheetName = "Stock Report";
 
-      // Create sheet & book
+      if (activeTab === "warehouse") {
+        sheetName = "Warehouse Stock";
+        excelData = products.map((p, i) => ({
+          "Sr No.":           i + 1,
+          "Product":          p.productName,
+          "Supplier":         p.supplierName || "",
+          "Total Boxes":      p.warehouseBoxes,
+          "Min Stock":        p.minStockLevel || 0,
+          "Status":           p.status || "",
+          "LC Price ($)":     Number(p.lc  || 0).toFixed(3),
+          "FOB Price ($)":    Number(p.fob || 0).toFixed(3),
+          "Total Amount ($)": Number(p.warehouseAmount || 0).toFixed(2),
+        }));
+      } else if (activeTab === "mr") {
+        sheetName = "MR Stock";
+        excelData = products.map((p, i) => ({
+          "Sr No.":              i + 1,
+          "Product":             p.productName,
+          "LC ($)":              Number(p.lc || 0).toFixed(3),
+          "Total MR Boxes":      p.totalMrBoxes,
+          "Total MR Amount ($)": Number(p.totalMrAmount || 0).toFixed(2),
+          "No. of MRs":          p.mrBreakdown?.length || 0,
+        }));
+      } else {
+        sheetName = "All Stock";
+        excelData = products.map((p, i) => ({
+          "Sr No.":               i + 1,
+          "Product":              p.productName,
+          "Supplier":             p.supplierName || "",
+          "Warehouse Boxes":      p.warehouseBoxes,
+          "MR Boxes":             p.mrBoxes,
+          "Total Boxes":          p.totalBoxes,
+          "Warehouse Amount ($)": Number(p.warehouseAmount || 0).toFixed(2),
+          "MR Amount ($)":        Number(p.mrAmount       || 0).toFixed(2),
+          "Total Amount ($)":     Number(p.totalAmount    || 0).toFixed(2),
+          "Status":               p.status || "",
+        }));
+      }
+
       const worksheet = XLSX.utils.json_to_sheet(excelData);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Stock Report");
+      const workbook  = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
 
-      // Column widths
-      const colWidths = [
-        { wch: 7 },  // Sr No
-        { wch: 20 }, // Product
-        { wch: 20 }, // Supplier
-        { wch: 12 }, // Total Boxes ✅
-        { wch: 10 }, // Min Stock
-        { wch: 12 }, // Status
-        { wch: 15 }, // LC Price ($)
-        { wch: 12 }, // FOB Price ($)
-        { wch: 14 }, // Total Amount ($)
-        { wch: 15 }, // Last Updated
-      ];
-      worksheet["!cols"] = colWidths;
-
-      // Center header cells (row 1)
-      const headerRange = XLSX.utils.decode_range(worksheet["!ref"]);
-      for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
-        const cell = worksheet[cellAddress];
-        if (cell) {
-          cell.s = {
-            alignment: { horizontal: "center", vertical: "center" },
-            font: { bold: true, color: { rgb: "000000" } },
-            fill: { fgColor: { rgb: "D9E1F2" } }, // light gray-blue background
-          };
-        }
+      const range = XLSX.utils.decode_range(worksheet["!ref"]);
+      for (let C = range.s.c; C <= range.e.c; C++) {
+        const cell = worksheet[XLSX.utils.encode_cell({ r: 0, c: C })];
+        if (cell) cell.s = { font: { bold: true }, fill: { fgColor: { rgb: "D9E1F2" } }, alignment: { horizontal: "center" } };
       }
 
-      // Center all other cells
-      for (let R = 1; R <= headerRange.e.r; R++) {
-        for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
-          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-          const cell = worksheet[cellAddress];
-          if (cell) {
-            cell.s = {
-              alignment: { horizontal: "center", vertical: "center" },
-            };
-          }
-        }
-      }
-
-      // Export file
-      const excelBuffer = XLSX.write(workbook, {
-        bookType: "xlsx",
-        type: "array",
-        cellStyles: true, // ✅ important for styles
-      });
-
-      const fileData = new Blob([excelBuffer], {
-        type: "application/octet-stream",
-      });
-
+      const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array", cellStyles: true });
       saveAs(
-        fileData,
-        `Stock_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
+        new Blob([buffer], { type: "application/octet-stream" }),
+        `Stock_${sheetName.replace(" ", "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`
       );
-    } catch (error) {
-      console.error("❌ Error exporting Excel:", error);
+    } catch (err) {
+      console.error("Export error:", err);
     }
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        {/* 🔹 Left Section — Title */}
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-800">
-            Stock In Hands Reports
-          </h1>
+    <div className="p-4 md:p-6 bg-gray-50 min-h-screen">
+
+      {/* MR Breakdown Modal */}
+      <MRBreakdownModal
+        isOpen={modalOpen}
+        onClose={() => { setModalOpen(false); setSelectedProduct(null); }}
+        productName={selectedProduct?.productName}
+        mrBreakdown={selectedProduct?.mrBreakdown}
+      />
+
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">Stock In Hand Reports</h1>
+          <p className="text-gray-500 text-sm mt-0.5">
+            Combined view of warehouse and MR stock, product-wise
+          </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Search Box */}
+        <div className="flex items-center gap-2">
+          {/* Search */}
           <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               ref={inputRef}
               type="text"
-              placeholder="Search by product or supplier..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg 
-                   focus:outline-none focus:ring-2 focus:ring-indigo-500 
-                   focus:border-transparent w-64"
+              placeholder="Search product…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-56"
             />
-
-            <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={18}
-              onClick={() => inputRef.current?.focus()}
-            />
-
-            {searchTerm && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 
-                     text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <X size={16} />
+            {search && (
+              <button onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X size={14} />
               </button>
             )}
           </div>
 
-          {/* Export Button */}
-          <button
-            onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 
-                 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Download size={18} />
+          {/* Refresh */}
+          <button onClick={() => fetchData(search)} title="Refresh"
+            className="p-2 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors">
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          </button>
+
+          {/* Export */}
+          <button onClick={exportToExcel}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-sm text-sm font-medium transition-colors">
+            <Download size={15} />
             Export Excel
           </button>
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1 mb-6 w-fit shadow-sm">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button key={key} onClick={() => setActiveTab(key)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              activeTab === key
+                ? "bg-indigo-600 text-white shadow"
+                : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
+            }`}>
+            <Icon size={15} />
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-        <div className="bg-white rounded-lg p-4 shadow-sm border">
-          <div className="flex items-center">
-            <div className="bg-green-100 p-3 rounded-lg">
-              <svg
-                className="w-6 h-6 text-green-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">In Stock</p>
-              <p className="text-2xl font-bold text-gray-900">{inStockCount}</p>
+      {!loading && !error && (
+        <div className={`grid gap-4 mb-6 ${
+          summaryCards.length === 6 ? "grid-cols-2 md:grid-cols-3 lg:grid-cols-6"
+          : summaryCards.length === 4 ? "grid-cols-2 md:grid-cols-4"
+          : "grid-cols-1 sm:grid-cols-3"
+        }`}>
+          {summaryCards.map((card, i) => <SummaryCard key={i} {...card} />)}
+        </div>
+      )}
+
+      {/* Table Card */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        {/* Loading state */}
+        {loading && (
+          <div className="flex items-center justify-center py-24 text-gray-400 text-sm">
+            <RefreshCw size={18} className="animate-spin mr-2" />
+            Loading stock data…
+          </div>
+        )}
+
+        {/* Error state */}
+        {!loading && error && (
+          <div className="flex flex-col items-center justify-center py-20 gap-2">
+            <div className="bg-red-50 border border-red-200 rounded-lg px-6 py-5 text-center max-w-sm">
+              <p className="text-red-600 text-sm font-medium mb-1">Failed to load data</p>
+              <p className="text-red-400 text-xs mb-3">{error}</p>
+              <button onClick={() => fetchData(search)}
+                className="bg-red-100 text-red-700 px-4 py-1.5 rounded text-sm hover:bg-red-200 transition-colors">
+                Retry
+              </button>
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="bg-white rounded-lg p-4 shadow-sm border">
-          <div className="flex items-center">
-            <div className="bg-yellow-100 p-3 rounded-lg">
-              <svg
-                className="w-6 h-6 text-yellow-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
-                />
-              </svg>
+        {/* Table */}
+        {!loading && !error && (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    {columns.map((col, i) => (
+                      <th key={i}
+                        className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${col.className || "text-left"} ${col.width || ""}`}>
+                        {col.header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {pageProducts.length === 0 ? (
+                    <tr>
+                      <td colSpan={columns.length} className="text-center py-16 text-gray-400">
+                        No products found{search ? ` for "${search}"` : ""}
+                      </td>
+                    </tr>
+                  ) : (
+                    pageProducts.map((product, idx) => (
+                      <tr key={product.productName + idx}
+                        className="hover:bg-indigo-50/30 transition-colors">
+                        {columns.map((col, ci) => (
+                          <td key={ci} className={`px-4 py-3 ${col.className || ""}`}>
+                            {col.render(product, idx)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Low Stock</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {lowStockCount}
-              </p>
-            </div>
-          </div>
-        </div>
 
-        <div className="bg-white rounded-lg p-4 shadow-sm border">
-          <div className="flex items-center">
-            <div className="bg-red-100 p-3 rounded-lg">
-              <svg
-                className="w-6 h-6 text-red-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Critical</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {criticalCount}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg p-4 shadow-sm border">
-          <div className="flex items-center">
-            <div className="bg-gray-100 p-3 rounded-lg">
-              <svg
-                className="w-6 h-6 text-gray-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2M4 13h2m8-8V4a1 1 0 00-1-1h-2a1 1 0 00-1 1v1M9 7h6"
-                />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Out of Stock</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {outOfStockCount}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg p-4 shadow-sm border">
-          <div className="flex items-center">
-            <div className="bg-blue-100 p-3 rounded-lg">
-              <svg
-                className="w-6 h-6 text-blue-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2M4 13h2m8-8V4a1 1 0 00-1-1h-2a1 1 0 00-1 1v1M9 7h6"
-                />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">
-                Total Products
-              </p>
-              <p className="text-2xl font-bold text-gray-900">
-                {products.length}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ✅ Optional: Add Total Boxes Summary Card */}
-      <div className="mb-6">
-        <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg p-4 shadow-sm border border-indigo-200">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <div className="bg-indigo-100 p-3 rounded-lg">
-                <svg
-                  className="w-6 h-6 text-indigo-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                  />
-                </svg>
+            {/* Pagination Footer */}
+            {products.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
+                {/* <span className="text-xs text-gray-500">
+                  Showing{" "}
+                  <span className="font-medium text-gray-700">
+                    {Math.min((page - 1) * ROWS_PER_PAGE + 1, products.length)}
+                  </span>
+                  {" "}–{" "}
+                  <span className="font-medium text-gray-700">
+                    {Math.min(page * ROWS_PER_PAGE, products.length)}
+                  </span>
+                  {" "}of{" "}
+                  <span className="font-medium text-gray-700">{products.length}</span>
+                  {" "}products
+                </span> */}
+                <Pagination current={page} total={totalPages} onChange={setPage} />
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Stock (All Products)</p>
-                <p className="text-3xl font-bold text-indigo-900">{totalBoxesSum.toLocaleString()} Boxes</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-500">Across {products.length} products</p>
-              <p className="text-sm text-gray-600 mt-1">
-                Average: {products.length > 0 ? (totalBoxesSum / products.length).toFixed(2) : 0} boxes/product
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-sm font-medium w-16">Sr No.</th>
-              <th className="p-3 text-sm font-medium">Date</th>
-              <th className="p-3 text-sm font-medium">Product</th>
-              <th className="p-3 text-sm font-medium">Supplier</th>
-              <th className="p-3 text-sm font-medium">Total Boxes</th>
-              <th className="p-3 text-sm font-medium">Min Stock</th>
-              <th className="p-3 text-sm font-medium">Status</th>
-              <th className="p-3 text-sm font-medium">LC Price ($)</th>
-              <th className="p-3 text-sm font-medium">FOB Price ($)</th>
-              <th className="p-3 text-sm font-medium">Total Amount ($)</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {currentProducts.length > 0 ? (
-              currentProducts.map((product, index) => (
-                <tr
-                  key={product.id}
-                  className={`hover:bg-gray-50 ${
-                    (index + 1) % productsPerPage === 0 ||
-                    index + 1 === currentProducts.length
-                      ? ""
-                      : "border-b"
-                  }`}
-                >
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900">
-                      {(currentPage - 1) * productsPerPage + index + 1}
-                    </div>
-                  </td>
-                  <td className="p-3 text-sm text-gray-500">
-                    {formatDateToReadable(product.lastUpdated)}
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900 capitalize">
-                      {product.name}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900 capitalize">
-                      {product.supplierName}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm font-bold text-indigo-900 bg-indigo-50 px-3 py-1 rounded-full inline-block">
-                      {product.boxes.toLocaleString()}
-                    </div>
-                  </td>
-
-                  <td className="p-3">
-                    <div className="text-sm text-gray-900">
-                      {product.minStock}
-                    </div>
-                  </td>
-                  <td className="p-3">{getStatusBadge(product.status)}</td>
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900">
-                      {product.lc.toFixed(3)}
-                    </div>
-                  </td>
-
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900">
-                      {product.fob.toFixed(3)}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900">
-                      {product.totalPrice.toFixed(2)}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={10} className="p-3 text-center">
-                  No products found in inventory
-                </td>
-              </tr>
             )}
-          </tbody>
-        </table>
-        {currentProducts.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Prev
-            </button>
-            {visiblePages.map((page, idx) =>
-              page === "..." ? (
-                <span
-                  key={`ellipsis-${idx}`}
-                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                >
-                  ...
-                </span>
-              ) : (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                    currentPage === page
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                >
-                  {page}
-                </button>
-              )
-            )}
-            <button
-              onClick={() => {
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
-          </div>
+          </>
         )}
       </div>
     </div>

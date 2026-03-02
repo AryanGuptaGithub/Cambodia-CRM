@@ -9,6 +9,8 @@ const itemSchema = new mongoose.Schema({
   productName: String,
   boxQuantity: { type: Number, required: true, default: 0 },
   lc: { type: Number, required: true, default: 0 },
+  // amount = lc * boxQuantity (auto-calculated in pre-save hooks)
+  amount: { type: Number, default: 0 },
   productCost: { type: Number, default: 0 },
 });
 
@@ -21,7 +23,6 @@ const stockTransferToMRSchema = new mongoose.Schema(
     stockTransferToMr: { type: String, default: "" },
     stockTransferFromMrToMain: { type: String, default: "" },
 
-    // ✅ FIX: mrId was missing — required by route for MR stock recompute
     mrId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Staff",
@@ -35,52 +36,67 @@ const stockTransferToMRSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ── Pre-save: calculate costs ─────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Calculate costs for a list of items.
+// Sets item.lc (from Product if missing), item.amount = lc * boxQuantity,
+// item.productCost = ceil(amount), and returns the total transfer cost.
+// ─────────────────────────────────────────────────────────────────────────────
+const calculateItemCosts = async (items) => {
+  let totalCost = 0;
+
+  for (const item of items) {
+    // Resolve LC from Product if not already set
+    if (!item.lc && item.productId) {
+      const Product = mongoose.model("Product");
+      const product = await Product.findById(item.productId);
+      if (product) {
+        item.lc = product.lc || product.costPrice || 0;
+      }
+    }
+
+    const lc = item.lc || 0;
+    const qty = item.boxQuantity || 0;
+
+    // amount = lc * boxQuantity (exact, not rounded)
+    item.amount = lc * qty;
+
+    // productCost = ceil(amount) for display/totalling
+    item.productCost = Math.ceil(item.amount);
+
+    totalCost += item.productCost;
+  }
+
+  return Math.ceil(totalCost);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pre-save hook
+// ─────────────────────────────────────────────────────────────────────────────
 stockTransferToMRSchema.pre("save", async function (next) {
   try {
-    let totalCost = 0;
-    for (const item of this.items) {
-      if (!item.lc && item.productId) {
-        const Product = mongoose.model("Product");
-        const product = await Product.findById(item.productId);
-        if (product) item.lc = product.lc || product.costPrice || 0;
-      }
-      const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
-      item.productCost = Math.ceil(rawCost);
-      totalCost += item.productCost;
-    }
-    this.totalTransferCost = Math.ceil(totalCost);
+    this.totalTransferCost = await calculateItemCosts(this.items);
     next();
   } catch (error) {
     next(error);
   }
 });
 
-// ── Pre-update: calculate costs ───────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Pre-findOneAndUpdate hook – handles both $set operators and direct updates
+// ─────────────────────────────────────────────────────────────────────────────
 stockTransferToMRSchema.pre("findOneAndUpdate", async function (next) {
   try {
     const update = this.getUpdate();
 
-    const processItems = async (items) => {
-      let totalCost = 0;
-      for (const item of items) {
-        if (!item.lc && item.productId) {
-          const Product = mongoose.model("Product");
-          const product = await Product.findById(item.productId);
-          if (product) item.lc = product.lc || product.costPrice || 0;
-        }
-        const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
-        item.productCost = Math.ceil(rawCost);
-        totalCost += item.productCost;
-      }
-      return Math.ceil(totalCost);
-    };
-
+    // If the update uses $set (e.g., { $set: { items: [...] } })
     if (update.$set?.items) {
-      update.$set.totalTransferCost = await processItems(update.$set.items);
+      update.$set.totalTransferCost = await calculateItemCosts(
+        update.$set.items
+      );
     }
-    if (update.items) {
-      update.totalTransferCost = await processItems(update.items);
+    // If the update directly sets the items field (e.g., { items: [...] })
+    else if (update.items) {
+      update.totalTransferCost = await calculateItemCosts(update.items);
     }
 
     next();

@@ -32,9 +32,9 @@ export const useDashboardData = () => {
     todayPrevious: 0,
     monthlyPrevious: 0,
     yearPrevious: 0,
-    overdueAmount: 0, // Added overdue amount
-    creditSale: 0, // Added credit sale amount
-    unreceivePayment: 0, // Added credit sale cash not received
+    overdueAmount: 0,
+    creditSale: 0,
+    unreceivePayment: 0,
   });
 
   const [outstandingData, setOutstandingData] = useState({
@@ -49,15 +49,20 @@ export const useDashboardData = () => {
     monthlyPrevious: 0,
     yearPrevious: 0,
     mrWiseOutstanding: [],
-    overdueAmount: 0, // Added overdue amount for outstanding
+    overdueAmount: 0,
   });
 
+  // Stock data now includes separate fields for warehouse, MR, and combined
   const [stockData, setStockData] = useState({
+    warehouseStockValue: 0, // from warehouse only
+    mrStockValue: 0, // from MR only
+    totalStockValue: 0, // combined total
+    lowStockItems: [],
+    overdueStockValue: 0,
+    unreceivedStockValue: 0,
+    // Keep old fields for backward compatibility if needed
     totalStock: 0,
     stockValue: 0,
-    lowStockItems: [],
-    overdueStockValue: 0, // Added overdue stock value
-    unreceivedStockValue: 0, // Added unreceived stock value
   });
 
   const [expenseData, setExpenseData] = useState({
@@ -67,176 +72,11 @@ export const useDashboardData = () => {
     yearExpense: 0,
     previousMonthExpense: 0,
     latestExpenses: [],
-    overduePayroll: 0, // Added overdue payroll
-    unpaidPayroll: 0, // Added unpaid payroll
+    overduePayroll: 0,
+    unpaidPayroll: 0,
   });
 
-  // --- NEW: Fetch overdue data from salesummaries ---
-  const fetchOverdueData = async () => {
-    try {
-      const response = await axios.get(
-        `${backendUrl}/api/salesummaries/overdue`
-      );
-
-      if (response.data.success) {
-        const overdueData = response.data.data || [];
-
-        // Calculate total overdue amount
-        const totalOverdue = overdueData.reduce((sum, invoice) => {
-          // Calculate overdue amount based on your business logic
-          // If dueAmount exists, use it, otherwise calculate from totalAmount - paidAmount
-          const overdueAmount =
-            invoice.dueAmount > 0
-              ? invoice.dueAmount
-              : invoice.totalAmount - invoice.paidAmount;
-          return sum + (overdueAmount || 0);
-        }, 0);
-
-        // Update sales data with overdue amount
-        setSalesData((prev) => ({
-          ...prev,
-          overdueAmount: totalOverdue,
-        }));
-
-        return {
-          totalOverdue,
-          overdueInvoices: overdueData,
-        };
-      }
-      return { totalOverdue: 0, overdueInvoices: [] };
-    } catch (error) {
-      console.error("Error fetching overdue data:", error);
-      return { totalOverdue: 0, overdueInvoices: [] };
-    }
-  };
-
-  // --- NEW: Fetch credit sale cash not received ---
-  const fetchCreditSaleCashNotReceived = async () => {
-    try {
-      const response = await axios.get(
-        `${backendUrl}/api/salesummaries/credit-sale-cash-not-receive`
-      );
-
-      if (response.data.success) {
-        const creditSales = response.data.data || [];
-
-        // Calculate total credit sale cash not received
-        const totalCreditSaleCashNotReceived = creditSales.reduce(
-          (sum, invoice) => {
-            // Calculate unpaid amount for credit sales
-            // Only include credit sales (paymentStatus: 'Credit') with unpaid amounts
-            if (
-              invoice.paymentStatus === "Credit" ||
-              invoice.paymentStatus === "Credit Sale"
-            ) {
-              const unpaidAmount =
-                invoice.dueAmount > 0
-                  ? invoice.dueAmount
-                  : invoice.totalAmount - invoice.paidAmount;
-              return sum + (unpaidAmount || 0);
-            }
-            return sum;
-          },
-          0
-        );
-
-        // Update sales data with credit sale cash not received
-        setSalesData((prev) => ({
-          ...prev,
-          creditSale: totalCreditSaleCashNotReceived,
-          unreceivePayment: totalCreditSaleCashNotReceived,
-        }));
-
-        return {
-          totalCreditSaleCashNotReceived,
-          creditSaleInvoices: creditSales,
-        };
-      }
-      return { totalCreditSaleCashNotReceived: 0, creditSaleInvoices: [] };
-    } catch (error) {
-      console.error("Error fetching credit sale cash not received:", error);
-      return { totalCreditSaleCashNotReceived: 0, creditSaleInvoices: [] };
-    }
-  };
-
-  // --- NEW: Fetch overdue invoices with date check ---
-  const fetchOverdueInvoices = async () => {
-    try {
-      const currentDate = new Date();
-
-      // Get all sales summaries that are NOT sale returns
-      const response = await axios.get(
-        `${backendUrl}/api/overdue`,
-        {
-          params: {
-            currentDate: currentDate.toISOString(), // Pass current date to backend
-          },
-        }
-      );
-
-      if (response.data.success) {
-        // Backend should already filter and return overdue invoices
-        const overdueInvoices = response.data.data || [];
-        const totalOverdueAmount = response.data.totalOverdueAmount || 0;
-
-        return {
-          overdueInvoices,
-          totalOverdueAmount,
-        };
-      }
-
-      return { overdueInvoices: [], totalOverdueAmount: 0 };
-    } catch (error) {
-      console.error("Error fetching overdue invoices:", error);
-      return { overdueInvoices: [], totalOverdueAmount: 0 };
-    }
-  };
-  // --- NEW: Fetch credit sale invoices with cash not received ---
-  const fetchCreditSaleInvoices = async () => {
-    try {
-      const response = await axios.get(
-        `${backendUrl}/api/sales/credit-sale-not-received`
-      );
-
-      if (response.data.success) {
-        const creditSaleInvoices = response.data.data || [];
-
-        // Filter for credit sales where cash is not fully received
-        const unpaidCreditSales = creditSaleInvoices.filter((invoice) => {
-          const isCreditSale =
-            invoice.paymentStatus === "Credit" ||
-            invoice.paymentStatus === "Credit Sale" ||
-            invoice.creditDays > 0;
-
-          if (!isCreditSale) return false;
-
-          // Check if cash is not fully received
-          const isPaid = invoice.paidAmount >= invoice.totalAmount;
-          return !isPaid;
-        });
-
-        // Calculate total unpaid amount
-        const totalUnpaidAmount = unpaidCreditSales.reduce((sum, invoice) => {
-          const unpaidAmount =
-            invoice.dueAmount > 0
-              ? invoice.dueAmount
-              : Math.max(0, invoice.totalAmount - invoice.paidAmount);
-          return sum + (unpaidAmount || 0);
-        }, 0);
-
-        return {
-          creditSaleInvoices: unpaidCreditSales,
-          totalUnpaidAmount,
-        };
-      }
-      return { creditSaleInvoices: [], totalUnpaidAmount: 0 };
-    } catch (error) {
-      console.error("Error fetching credit sale invoices:", error);
-      return { creditSaleInvoices: [], totalUnpaidAmount: 0 };
-    }
-  };
-
-  // --- Helper functions (keep existing) ---
+  // --- Existing helper functions (unchanged) ---
   const fetchCustomRangeSales = async (startDate, endDate) => {
     try {
       const response = await axios.get(
@@ -246,7 +86,7 @@ export const useDashboardData = () => {
             startDate: startDate.toISOString(),
             endDate: endDate.toISOString(),
           },
-        }
+        },
       );
       return response.data.totalSales || 0;
     } catch (error) {
@@ -264,7 +104,7 @@ export const useDashboardData = () => {
             startDate: startDate.toISOString(),
             endDate: endDate.toISOString(),
           },
-        }
+        },
       );
       return response.data || { totalOutstanding: 0, outstandingData: [] };
     } catch (error) {
@@ -284,7 +124,7 @@ export const useDashboardData = () => {
         });
         return filteredExpenses.reduce(
           (sum, exp) => sum + (exp.amount || 0),
-          0
+          0,
         );
       }
       return 0;
@@ -319,7 +159,7 @@ export const useDashboardData = () => {
           23,
           59,
           59,
-          999
+          999,
         );
         break;
       default:
@@ -345,7 +185,7 @@ export const useDashboardData = () => {
         const lastDayPrevMonth = new Date(
           previousEnd.getFullYear(),
           previousEnd.getMonth() + 1,
-          0
+          0,
         ).getDate();
         previousEnd.setDate(Math.min(previousEnd.getDate(), lastDayPrevMonth));
         break;
@@ -388,7 +228,7 @@ export const useDashboardData = () => {
       const previousData = await fetchPreviousPeriodOutstanding(
         subTab,
         start,
-        end
+        end,
       );
 
       return {
@@ -396,7 +236,7 @@ export const useDashboardData = () => {
         previousOutstanding: previousData.totalOutstanding || 0,
         growth: calculateGrowth(
           data.totalOutstanding,
-          previousData.totalOutstanding || 0
+          previousData.totalOutstanding || 0,
         ),
         outstandingInvoices: data.outstandingData || [],
       };
@@ -411,17 +251,17 @@ export const useDashboardData = () => {
     }
   };
 
-  // --- Existing fetch functions ---
+  // --- Existing fetch functions (updated fetchStockData) ---
   const fetchPayrollData = async () => {
     try {
       const currentDate = new Date();
       const previousMonth = new Date(
         currentDate.getFullYear(),
         currentDate.getMonth() - 1,
-        1
+        1,
       );
       const period = `${previousMonth.getFullYear()}-${String(
-        previousMonth.getMonth() + 1
+        previousMonth.getMonth() + 1,
       ).padStart(2, "0")}`;
       const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
         params: { period },
@@ -431,7 +271,7 @@ export const useDashboardData = () => {
       setPayrollData(payrolls);
       const total = payrolls.reduce(
         (sum, item) => sum + (item.netSalary || 0),
-        0
+        0,
       );
 
       setTotalPayroll(total);
@@ -453,16 +293,33 @@ export const useDashboardData = () => {
     }
   };
 
+  // UPDATED: fetchStockData now extracts warehouse, MR, and combined totals
   const fetchStockData = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/reports/stock-in-hand`);
+      const response = await axios.get(
+        `${backendUrl}/api/reports/stock-in-hand`,
+      );
+      console.log("Stock API response:", response.data);
 
+      // The API returns combined product list in 'reports' and summary fields
       const stockItems = Array.isArray(response.data.reports)
         ? response.data.reports
         : [];
 
-      const totalStockValue = calculateStockValue(stockItems);
-      const lowStockItems = getLowStockItems(stockItems);
+      // Use the summary fields from the API response
+      const warehouseStockValue = response.data.totalAmount || 0; // warehouse total
+      const mrStockValue = response.data.totalMrAmount || 0; // MR total
+      const totalStockValue = response.data.grandTotalAmount || 0; // combined total
+
+      // Calculate low stock items (if needed)
+      const lowStockItems = stockItems.filter((item) => {
+        // You can implement your low stock logic here
+        // Example: item.warehouseBoxes < item.minStockLevel
+        return (
+          item.warehouseBoxes > 0 &&
+          item.warehouseBoxes < (item.minStockLevel || 0)
+        );
+      });
 
       // Calculate overdue stock value (example logic)
       const currentDate = new Date();
@@ -473,15 +330,19 @@ export const useDashboardData = () => {
         })
         .reduce(
           (sum, item) => sum + (item.costPrice || 0) * (item.availableQty || 0),
-          0
+          0,
         );
 
       setStockData({
+        warehouseStockValue,
+        mrStockValue,
+        totalStockValue,
+        lowStockItems,
+        overdueStockValue,
+        unreceivedStockValue: 0, // You can add logic for this
+        // Keep old fields for backward compatibility
         totalStock: totalStockValue,
         stockValue: totalStockValue,
-        lowStockItems: lowStockItems,
-        overdueStockValue: overdueStockValue,
-        unreceivedStockValue: 0, // You can add logic for this
       });
     } catch (error) {
       console.error("Error fetching stock data:", error);
@@ -500,12 +361,12 @@ export const useDashboardData = () => {
         // Calculate totals
         const totalExpense = expenses.reduce(
           (sum, exp) => sum + (exp.amount || 0),
-          0
+          0,
         );
 
         const todayExpense = expenses
           .filter(
-            (exp) => new Date(exp.date).toDateString() === today.toDateString()
+            (exp) => new Date(exp.date).toDateString() === today.toDateString(),
           )
           .reduce((sum, exp) => sum + (exp.amount || 0), 0);
 
@@ -523,7 +384,7 @@ export const useDashboardData = () => {
         const previousMonth = new Date(
           today.getFullYear(),
           today.getMonth() - 1,
-          1
+          1,
         );
         const previousMonthExpense = expenses
           .filter((exp) => {
@@ -543,7 +404,7 @@ export const useDashboardData = () => {
 
         const overduePayroll = overdueExpenses.reduce(
           (sum, exp) => sum + (exp.amount || 0),
-          0
+          0,
         );
 
         // Calculate unpaid expenses
@@ -553,7 +414,7 @@ export const useDashboardData = () => {
 
         const unpaidPayroll = unpaidExpenses.reduce(
           (sum, exp) => sum + (exp.amount || 0),
-          0
+          0,
         );
 
         setExpenseData({
@@ -583,6 +444,71 @@ export const useDashboardData = () => {
     }
   };
 
+  // --- Overdue and credit sale fetching (unchanged) ---
+  const fetchOverdueInvoices = async () => {
+    try {
+      const currentDate = new Date();
+      const response = await axios.get(`${backendUrl}/api/overdue`, {
+        params: {
+          currentDate: currentDate.toISOString(),
+        },
+      });
+
+      if (response.data.success) {
+        const overdueInvoices = response.data.data || [];
+        const totalOverdueAmount = response.data.totalOverdueAmount || 0;
+        return {
+          overdueInvoices,
+          totalOverdueAmount,
+        };
+      }
+      return { overdueInvoices: [], totalOverdueAmount: 0 };
+    } catch (error) {
+      console.error("Error fetching overdue invoices:", error);
+      return { overdueInvoices: [], totalOverdueAmount: 0 };
+    }
+  };
+
+  const fetchCreditSaleInvoices = async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/sales/credit-sale-not-received`,
+      );
+
+      if (response.data.success) {
+        const creditSaleInvoices = response.data.data || [];
+        const unpaidCreditSales = creditSaleInvoices.filter((invoice) => {
+          const isCreditSale =
+            invoice.paymentStatus === "Credit" ||
+            invoice.paymentStatus === "Credit Sale" ||
+            invoice.creditDays > 0;
+
+          if (!isCreditSale) return false;
+
+          const isPaid = invoice.paidAmount >= invoice.totalAmount;
+          return !isPaid;
+        });
+
+        const totalUnpaidAmount = unpaidCreditSales.reduce((sum, invoice) => {
+          const unpaidAmount =
+            invoice.dueAmount > 0
+              ? invoice.dueAmount
+              : Math.max(0, invoice.totalAmount - invoice.paidAmount);
+          return sum + (unpaidAmount || 0);
+        }, 0);
+
+        return {
+          creditSaleInvoices: unpaidCreditSales,
+          totalUnpaidAmount,
+        };
+      }
+      return { creditSaleInvoices: [], totalUnpaidAmount: 0 };
+    } catch (error) {
+      console.error("Error fetching credit sale invoices:", error);
+      return { creditSaleInvoices: [], totalUnpaidAmount: 0 };
+    }
+  };
+
   // --- Initialize dashboard ---
   const initializeDashboardData = async () => {
     setLoading(true);
@@ -597,11 +523,10 @@ export const useDashboardData = () => {
       await Promise.all([
         fetchPayrollData(),
         fetchTeams(),
-        fetchStockData(),
+        fetchStockData(), // now fetches combined totals
         fetchExpenseData(),
       ]);
 
-      // Fetch overdue and credit sale data
       const [overdueResult, creditSaleResult] = await Promise.all([
         fetchOverdueInvoices(),
         fetchCreditSaleInvoices(),
@@ -675,8 +600,8 @@ export const useDashboardData = () => {
     expenseData,
     fetchSalesBySubTab,
     fetchOutstandingBySubTab,
-    fetchOverdueInvoices, // Export new function
-    fetchCreditSaleInvoices, // Export new function
+    fetchOverdueInvoices,
+    fetchCreditSaleInvoices,
     setSalesData,
     setOutstandingData,
     setMrList,

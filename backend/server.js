@@ -4,6 +4,7 @@ import cors from "cors";
 import connectDB from "./utils/db.js";
 import bodyParser from "body-parser";
 
+// Import all routes
 import customerRoutes from "./routers/master/customers.js";
 import suppilerRoutes from "./routers/master/supplier.js";
 import product from "./routers/projectManager/product.js";
@@ -67,6 +68,9 @@ import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js";
 import outstanding from "./routers/sale/outstanding.js";
 import averagePrice from "./routers/reports/averagePrice.js";
 
+// Import StockInHand routes
+import stockInHandRoutes from "./routers/reports/stockInHand.js";
+
 dotenv.config();
 
 const app = express();
@@ -94,17 +98,19 @@ app.use(
       }
     },
     credentials: true,
-  })
+  }),
 );
 
 connectDB(process.env.MONGODB_URI);
 app.use(express.json());
 
-// Debugging middleware (optional - remove in production)
+// Debugging middleware
 app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
   next();
 });
 
+// Routes
 app.use("/api", authRoutes);
 
 // Master Data Routes
@@ -139,6 +145,9 @@ app.use("/api/stock-transfer", stockTransfer);
 app.use("/api/stock-transfer-to-mr", stockTransferToMR);
 app.use("/api/stock-return", StockReturn);
 app.use("/api/order-status", orderStatus);
+
+// Stock In Hand Routes - CRITICAL FOR YOUR ERROR
+app.use("/api/stock-in-hand", stockInHandRoutes);
 
 // Accounts Routes
 app.use("/api/accounts", Accounts);
@@ -186,14 +195,13 @@ app.use("/api/hrm/holidays", Holiday);
 app.use("/api/hrm/payroll-export", payrollExport);
 app.use("/api/hrm/payroll", Payroll);
 app.use("/api/hrm/dashboard", hrmDashboard);
-
 app.use("/api/hrm/leaves", leaves);
 app.use("/api/hrm/mr-basic-payrolls", mrBasicPayrollRoutes);
 
 // Other Routes
 app.use("/api/overdue", overdue);
 
-// 404 Handler - This should be LAST
+// 404 Handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,

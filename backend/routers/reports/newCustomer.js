@@ -5,11 +5,7 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-/**
- * GET /
- * Get new customers report
- * Accessible at: /api/reports/new-customers
- */
+
 router.get("/", async (req, res) => {
   try {
     const {
@@ -297,11 +293,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-/**
- * GET /export
- * Excel Export Endpoint
- * Accessible at: /api/reports/new-customers/export
- */
+
 router.get("/export", async (req, res) => {
   try {
     const {
