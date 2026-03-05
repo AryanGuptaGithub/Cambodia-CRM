@@ -5,11 +5,10 @@ const customerSchema = new mongoose.Schema(
     customerCode: {
       type: String,
       required: true,
-      unique: true,
+      unique: true,        // Keep this – it's your business identifier
       trim: true,
       index: true,
       default: function() {
-        // This will be overridden by the backend logic
         return "00001";
       }
     },
@@ -43,8 +42,8 @@ const customerSchema = new mongoose.Schema(
     customerNumber: {
       type: String,
       trim: true,
-      unique: true,
-      sparse: true
+      // unique: true,   // <-- REMOVED – this was causing duplicate null errors
+      //sparse: true      // optional – can stay
     },
     address: {
       type: String,
@@ -82,7 +81,7 @@ const customerSchema = new mongoose.Schema(
   }
 );
 
-// Add compound index for better query performance
+// Compound indexes for performance
 customerSchema.index({ name: 1, customerNumber: 1 });
 customerSchema.index({ province: 1, zone: 1 });
 customerSchema.index({ medicalRepName: 1 });
@@ -92,33 +91,25 @@ customerSchema.index({ enabled: 1 });
 customerSchema.pre("save", async function(next) {
   if (this.isNew && !this.customerCode) {
     try {
-      // Find the highest customer code
       const lastCustomer = await this.constructor.findOne({})
         .sort({ customerCode: -1 })
         .select("customerCode");
 
       let nextCode = 1;
       if (lastCustomer && lastCustomer.customerCode) {
-        // Extract numeric part (handles "00001", "CUST00001", etc.)
         const codeMatch = lastCustomer.customerCode.match(/\d+/);
         if (codeMatch) {
           const parsed = parseInt(codeMatch[0], 10);
-          if (!isNaN(parsed)) {
-            nextCode = parsed + 1;
-          }
+          if (!isNaN(parsed)) nextCode = parsed + 1;
         }
       }
-
-      // Format as 5-digit string
       this.customerCode = nextCode.toString().padStart(5, "0");
     } catch (error) {
       console.error("Error generating customer code:", error);
-      // Fallback to timestamp-based code
       this.customerCode = Date.now().toString().slice(-5).padStart(5, "0");
     }
   }
   
-  // Ensure customerCode is exactly 5 digits
   if (this.customerCode && /^\d+$/.test(this.customerCode)) {
     this.customerCode = this.customerCode.padStart(5, "0");
   }
@@ -127,5 +118,4 @@ customerSchema.pre("save", async function(next) {
 });
 
 const Customer = mongoose.model("Customer", customerSchema);
-
 export default Customer;

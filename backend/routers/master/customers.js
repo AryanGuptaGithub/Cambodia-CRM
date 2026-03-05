@@ -279,17 +279,13 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /import – Bulk import
-// ✅ NEW: Accepts { customers: [], importWithCode: bool } body
-//         When importWithCode=true, uses customerCode from file instead of auto-generating
-// ─────────────────────────────────────────────────────────────────────────────
+
+// ... (other imports and helper functions remain the same)
+
 router.post("/import", async (req, res) => {
   try {
-    // ✅ Support both old format (array) and new format ({ customers, importWithCode })
     let customers, importWithCode;
     if (Array.isArray(req.body)) {
-      // backward compat: old frontend sent array directly
       customers = req.body;
       importWithCode = false;
     } else {
@@ -298,18 +294,14 @@ router.post("/import", async (req, res) => {
     }
 
     if (!Array.isArray(customers) || customers.length === 0) {
-      return res
-        .status(400)
-        .json({
-          message: "No customers found in the uploaded file.",
-          ok: false,
-        });
+      return res.status(400).json({
+        message: "No customers found in the uploaded file.",
+        ok: false,
+      });
     }
 
-    // 1. Fetch all MRs
-    const mrList = await MedicalRep.find().select(
-      "medicalRepName staffName userId",
-    );
+    // Fetch all MRs for mapping
+    const mrList = await MedicalRep.find().select("medicalRepName staffName userId");
     const mrMap = new Map();
     mrList.forEach((mr) => {
       const rep = safeStr(mr.medicalRepName).toLowerCase();
@@ -318,14 +310,14 @@ router.post("/import", async (req, res) => {
       if (staff) mrMap.set(staff, mr.userId?.toString());
     });
 
-    // 2. Get last customer code (only needed when NOT importing with code)
+    // Get the highest existing customer code for auto‑generation
     let nextCode = 1;
     if (!importWithCode) {
-      const lastCustomer = await Customer.findOne({})
-        .sort({ createdAt: -1 })
+      const highest = await Customer.findOne({})
+        .sort({ customerCode: -1 })
         .select("customerCode");
-      if (lastCustomer?.customerCode) {
-        const match = lastCustomer.customerCode.match(/\d+/);
+      if (highest?.customerCode) {
+        const match = highest.customerCode.match(/\d+/);
         if (match) {
           const parsed = parseInt(match[0], 10);
           if (!isNaN(parsed)) nextCode = parsed + 1;
@@ -333,7 +325,7 @@ router.post("/import", async (req, res) => {
       }
     }
 
-    // 3. Load existing customers for duplicate check
+    // Load existing customers for duplicate checks
     const allExistingCustomers = await Customer.find(
       {},
       {
@@ -346,28 +338,18 @@ router.post("/import", async (req, res) => {
         zone: 1,
         province: 1,
         remark: 1,
-      },
+        customerCode: 1,
+      }
     ).lean();
 
     const existingCustomerKeys = new Set();
-    allExistingCustomers.forEach((cust) =>
-      existingCustomerKeys.add(generateCustomerKey(cust)),
-    );
+    const existingCodeSet = new Set();
+    allExistingCustomers.forEach((cust) => {
+      existingCustomerKeys.add(generateCustomerKey(cust));
+      if (cust.customerCode) existingCodeSet.add(cust.customerCode.toLowerCase());
+    });
 
-    // ✅ If importWithCode=true, also collect existing codes to check for duplicates
-    let existingCodeSet = new Set();
-    if (importWithCode) {
-      const existingWithCodes = await Customer.find(
-        {},
-        { customerCode: 1 },
-      ).lean();
-      existingWithCodes.forEach((c) => {
-        if (c.customerCode)
-          existingCodeSet.add(c.customerCode.trim().toLowerCase());
-      });
-    }
-
-    // 4. Intra-batch duplicate detection
+    // Intra‑batch duplicate detection (full row)
     const rowKeyMap = new Map();
     const batchDuplicateIndices = new Set();
     customers.forEach((item, idx) => {
@@ -380,7 +362,7 @@ router.post("/import", async (req, res) => {
       }
     });
 
-    // ✅ Intra-batch duplicate code detection (when importWithCode=true)
+    // Intra‑batch duplicate code detection (when importWithCode)
     const batchCodeMap = new Map();
     if (importWithCode) {
       customers.forEach((item, idx) => {
@@ -396,7 +378,7 @@ router.post("/import", async (req, res) => {
       });
     }
 
-    const newCustomers = [];
+    const docsToInsert = [];
     const errors = [];
     const duplicates = [];
 
@@ -420,8 +402,7 @@ router.post("/import", async (req, res) => {
             row: rowNumber,
             name: item.name,
             customerNumber,
-            reason:
-              "Exactly the same customer already exists in database (all fields match)",
+            reason: "Exactly the same customer already exists in database (all fields match)",
           });
           continue;
         }
@@ -437,17 +418,14 @@ router.post("/import", async (req, res) => {
           continue;
         }
 
-        // ✅ Customer code handling
+        // Customer code handling
         let customerCode;
         if (importWithCode) {
           customerCode = safeStr(item.customerCode);
           if (!customerCode) {
-            errors.push(
-              `Row ${rowNumber}: Customer code is required when importing with code`,
-            );
+            errors.push(`Row ${rowNumber}: Customer code is required when importing with code`);
             continue;
           }
-          // Check if code already exists in DB
           if (existingCodeSet.has(customerCode.toLowerCase())) {
             duplicates.push({
               row: rowNumber,
@@ -457,11 +435,19 @@ router.post("/import", async (req, res) => {
             });
             continue;
           }
+          // Reserve this code for this batch
+          existingCodeSet.add(customerCode.toLowerCase());
         } else {
-          // Auto-generate code
-          customerCode = (nextCode + newCustomers.length)
-            .toString()
-            .padStart(5, "0");
+          // Auto-generate code, ensuring it doesn't clash with DB or previously assigned codes in this batch
+          let candidate = nextCode.toString().padStart(5, "0");
+          while (existingCodeSet.has(candidate.toLowerCase())) {
+            nextCode++;
+            candidate = nextCode.toString().padStart(5, "0");
+          }
+          customerCode = candidate;
+          // Reserve this code for this batch
+          existingCodeSet.add(customerCode.toLowerCase());
+          nextCode++; // prepare for next auto-generated code
         }
 
         // MR lookup
@@ -481,79 +467,94 @@ router.post("/import", async (req, res) => {
           }
         }
 
-        newCustomers.push({
+        docsToInsert.push({
           customerCode,
           date: parseCustomerDate(item.date),
           medicalRepName: mrName,
           medicalRepId,
           name,
-          typeOfBusiness:
-            safeStr(item.typeOfBusiness).toLowerCase() || "not provided",
+          typeOfBusiness: safeStr(item.typeOfBusiness).toLowerCase() || "not provided",
           customerNumber: customerNumber || "",
-          address:
-            safeStr(item.customerAddress).toLowerCase() || "not provided",
+          address: safeStr(item.customerAddress || item.address).toLowerCase() || "not provided",
           zone: safeStr(item.zone).toLowerCase() || "not provided",
           province: safeStr(item.province).toLowerCase() || "not provided",
           remark: safeStr(item.remark).toLowerCase() || "not provided",
           enabled: true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
         });
       } catch (error) {
         errors.push(`Row ${rowNumber}: ${error.message}`);
       }
     }
 
-    if (newCustomers.length === 0) {
-      return res
-        .status(400)
-        .json({
-          message: "No valid customers to import.",
-          errors,
-          duplicates: duplicates.slice(0, 20),
-          ok: false,
-        });
+    if (docsToInsert.length === 0) {
+      return res.status(400).json({
+        message: "No valid customers to import.",
+        errors,
+        duplicates: duplicates.slice(0, 20),
+        ok: false,
+      });
     }
 
-    const inserted = await Customer.insertMany(newCustomers, {
-      ordered: false,
-    });
+    // Prepare bulk operations
+    const bulkOps = docsToInsert.map((doc) => ({
+      insertOne: { document: doc },
+    }));
 
-    let message = `Successfully imported ${inserted.length} customer(s).`;
-    if (errors.length) message += ` ${errors.length} error(s) encountered.`;
-    if (duplicates.length)
-      message += ` ${duplicates.length} duplicate(s) skipped.`;
+    let insertedCount = 0;
+    let duplicateErrors = [];
+
+    try {
+      const result = await Customer.bulkWrite(bulkOps, { ordered: false });
+      insertedCount = result.insertedCount;
+    } catch (err) {
+      if (err.name === 'BulkWriteError' && err.writeErrors) {
+        // Partial success – some documents were inserted, others failed
+        insertedCount = bulkOps.length - err.writeErrors.length;
+        duplicateErrors = err.writeErrors.map((we) => ({
+          row: we.index + 1, // approximate row in the batch (not original file)
+          message: we.errmsg,
+        }));
+      } else {
+        // Unexpected error – rethrow to be caught by outer catch
+        throw err;
+      }
+    }
+
+    // Combine all error reports
+    let message = `Successfully imported ${insertedCount} customer(s).`;
+    if (errors.length) message += ` ${errors.length} validation error(s) encountered.`;
+    if (duplicates.length) message += ` ${duplicates.length} duplicate(s) skipped.`;
+    if (duplicateErrors.length) message += ` ${duplicateErrors.length} database error(s) (e.g., duplicate customer numbers).`;
 
     res.status(200).json({
       message,
-      importedCount: inserted.length,
+      importedCount: insertedCount,
       errorCount: errors.length,
       duplicateCount: duplicates.length,
+      dbErrorCount: duplicateErrors.length,
       errors: errors.slice(0, 10),
       duplicates: duplicates.slice(0, 20),
+      dbErrors: duplicateErrors.slice(0, 10),
       ok: true,
     });
   } catch (err) {
     console.error("Import error:", err);
     if (err.code === 11000) {
-      if (err.keyPattern?.customerNumber)
-        return res
-          .status(400)
-          .json({
-            message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
-            duplicateNumber: err.keyValue.customerNumber,
-            ok: false,
-          });
+      if (err.keyPattern?.customerNumber) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
+          duplicateNumber: err.keyValue.customerNumber,
+          ok: false,
+        });
+      }
       return handleDuplicateError(res, err);
     }
     if (err.name === "ValidationError") {
       const field = Object.keys(err.errors)[0];
-      return res
-        .status(400)
-        .json({
-          message: `Validation failed: ${err.errors[field].message}`,
-          ok: false,
-        });
+      return res.status(400).json({
+        message: `Validation failed: ${err.errors[field].message}`,
+        ok: false,
+      });
     }
     handleServerError(res, err, "Failed to import customers");
   }
