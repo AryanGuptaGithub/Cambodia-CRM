@@ -73,11 +73,30 @@ const NewCustomerAddition = () => {
     pagination.totalPages,
   );
 
-  // ✅ Modal pagination hook – called at top level (fixes the error)
   const modalVisiblePages = useVisiblePages(
     modalPagination.currentPage,
-    modalPagination.totalPages
+    modalPagination.totalPages,
   );
+
+  // ── Helper: Format Date object to YYYY-MM-DD (local) ────────────────────
+  const formatDateLocal = (date) => {
+    if (!date) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  // ── Helper: Format date string (YYYY-MM-DD) to "4 March 2026" ───────────
+  const formatDateReadable = (dateStr) => {
+    if (!dateStr || dateStr === "N/A") return "N/A";
+    const d = new Date(dateStr + "T00:00:00"); // treat as local midnight
+    return d.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+  };
 
   // ── Date helpers ────────────────────────────────────────────────────────
   const getCurrentMonthName = () =>
@@ -102,7 +121,7 @@ const NewCustomerAddition = () => {
     const end = new Date(currentYear, currentMonth, 0);
     return {
       startDate: `${currentYear}-01-01`,
-      endDate: end.toISOString().split("T")[0],
+      endDate: formatDateLocal(end),
       label: `Jan – ${getPreviousMonthName()} ${currentYear}`,
     };
   };
@@ -115,8 +134,8 @@ const NewCustomerAddition = () => {
     switch (selectedDateTab) {
       case "today":
         return {
-          startDate: today.toISOString().split("T")[0],
-          endDate: today.toISOString().split("T")[0],
+          startDate: formatDateLocal(today),
+          endDate: formatDateLocal(today),
           displayLabel: "Today",
         };
       case "all":
@@ -125,8 +144,8 @@ const NewCustomerAddition = () => {
         const first = new Date(currentYear, currentMonth, 1);
         const last = new Date(currentYear, currentMonth + 1, 0);
         return {
-          startDate: first.toISOString().split("T")[0],
-          endDate: last.toISOString().split("T")[0],
+          startDate: formatDateLocal(first),
+          endDate: formatDateLocal(last),
           displayLabel: `${getCurrentMonthName()} ${getCurrentYear()}`,
         };
       }
@@ -141,9 +160,9 @@ const NewCustomerAddition = () => {
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
           return {
-            startDate: customDateRange.startDate.toISOString().split("T")[0],
-            endDate: customDateRange.endDate.toISOString().split("T")[0],
-            displayLabel: `${customDateRange.startDate.toLocaleDateString()} – ${customDateRange.endDate.toLocaleDateString()}`,
+            startDate: formatDateLocal(customDateRange.startDate),
+            endDate: formatDateLocal(customDateRange.endDate),
+            displayLabel: `${customDateRange.startDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} – ${customDateRange.endDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`,
           };
         }
         return { displayLabel: "Select dates" };
@@ -254,18 +273,20 @@ const NewCustomerAddition = () => {
 
       const response = await axios.get(
         `${backendUrl}/api/reports/new-customers/customers`,
-        { params }
+        { params },
       );
 
       if (response.data.success) {
         setModalCustomers(response.data.data || []);
-        setModalPagination(response.data.pagination || {
-          currentPage: 1,
-          totalPages: 1,
-          totalRecords: 0,
-          hasNext: false,
-          hasPrev: false,
-        });
+        setModalPagination(
+          response.data.pagination || {
+            currentPage: 1,
+            totalPages: 1,
+            totalRecords: 0,
+            hasNext: false,
+            hasPrev: false,
+          },
+        );
       } else {
         showToast("error", response.data.message || "Failed to load customers");
       }
@@ -490,16 +511,24 @@ const NewCustomerAddition = () => {
           key={index}
           className={`hover:bg-gray-50 ${index < data.records.length - 1 ? "border-b" : ""}`}
         >
-          <td className="p-3 text-sm text-gray-600 font-medium">{record.srNo}</td>
+          <td className="p-3 text-sm text-gray-600 font-medium">
+            {record.srNo}
+          </td>
           <td className="p-3 text-sm font-medium text-gray-900 capitalize">
             {record.mrName}
           </td>
-          <td className="p-3 text-sm text-gray-900">{record.contactNo || "N/A"}</td>
-          <td className="p-3 text-sm text-gray-900 capitalize">{record.zone || "N/A"}</td>
+          <td className="p-3 text-sm text-gray-900">
+            {record.contactNo || "N/A"}
+          </td>
+          <td className="p-3 text-sm text-gray-900 capitalize">
+            {record.zone || "N/A"}
+          </td>
           <td className="p-3 text-sm font-semibold text-blue-600">
             {record.newCustomers?.toLocaleString() || 0}
           </td>
-          <td className="p-3 text-sm text-gray-500">{record.date || "N/A"}</td>
+          <td className="p-3 text-sm text-gray-500">
+            {formatDateReadable(record.date)}
+          </td>
           <td className="p-3 text-center">
             <button
               onClick={() =>
@@ -538,7 +567,9 @@ const NewCustomerAddition = () => {
         <td className="p-3 text-sm font-semibold text-green-600">
           {record.averagePerMR?.toFixed(1) || "0.0"}
         </td>
-        <td className="p-3 text-sm text-gray-500">{record.date || "N/A"}</td>
+        <td className="p-3 text-sm text-gray-500">
+          {formatDateReadable(record.date)}
+        </td>
         <td className="p-3 text-center">
           <button
             onClick={() =>
@@ -662,12 +693,24 @@ const NewCustomerAddition = () => {
                   <thead className="bg-gray-100 text-gray-700">
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">#</th>
-                      <th className="px-4 py-3 text-left font-medium">Customer Name</th>
-                      <th className="px-4 py-3 text-left font-medium">Customer Code</th>
-                      <th className="px-4 py-3 text-left font-medium">Contact</th>
-                      <th className="px-4 py-3 text-left font-medium">Address</th>
-                      <th className="px-4 py-3 text-left font-medium">Province</th>
-                      <th className="px-4 py-3 text-left font-medium">Date Added</th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Customer Name
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Customer Code
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Contact
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Address
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Province
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium">
+                        Date Added
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -697,9 +740,7 @@ const NewCustomerAddition = () => {
                           {cust.province || "N/A"}
                         </td>
                         <td className="px-4 py-3 text-gray-700">
-                          {cust.date
-                            ? new Date(cust.date).toLocaleDateString()
-                            : "N/A"}
+                          {cust.date ? formatDateReadable(cust.date) : "N/A"}
                         </td>
                       </tr>
                     ))}
@@ -711,11 +752,14 @@ const NewCustomerAddition = () => {
               {modalPagination.totalPages > 1 && (
                 <div className="mt-6 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 p-4 rounded-lg">
                   <div className="text-sm text-gray-600">
-                    Page {modalPagination.currentPage} of {modalPagination.totalPages}
+                    Page {modalPagination.currentPage} of{" "}
+                    {modalPagination.totalPages}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleModalPageChange(modalPagination.currentPage - 1)}
+                      onClick={() =>
+                        handleModalPageChange(modalPagination.currentPage - 1)
+                      }
                       disabled={!modalPagination.hasPrev}
                       className={`flex items-center gap-1 px-3 py-1 rounded-lg ${
                         modalPagination.hasPrev
@@ -729,7 +773,10 @@ const NewCustomerAddition = () => {
                     <div className="flex gap-1">
                       {modalVisiblePages.map((page, idx) =>
                         page === "..." ? (
-                          <span key={`dot-${idx}`} className="px-3 py-1 text-gray-500">
+                          <span
+                            key={`dot-${idx}`}
+                            className="px-3 py-1 text-gray-500"
+                          >
                             ...
                           </span>
                         ) : (
@@ -744,11 +791,13 @@ const NewCustomerAddition = () => {
                           >
                             {page}
                           </button>
-                        )
+                        ),
                       )}
                     </div>
                     <button
-                      onClick={() => handleModalPageChange(modalPagination.currentPage + 1)}
+                      onClick={() =>
+                        handleModalPageChange(modalPagination.currentPage + 1)
+                      }
                       disabled={!modalPagination.hasNext}
                       className={`flex items-center gap-1 px-3 py-1 rounded-lg ${
                         modalPagination.hasNext
@@ -775,7 +824,7 @@ const NewCustomerAddition = () => {
           </div>
         </div>
       </div>,
-      document.body
+      document.body,
     );
   };
 
@@ -920,7 +969,10 @@ const NewCustomerAddition = () => {
               data.records.map((record, index) => renderTableRow(record, index))
             ) : (
               <tr>
-                <td colSpan={getColSpan()} className="p-8 text-center text-gray-400">
+                <td
+                  colSpan={getColSpan()}
+                  className="p-8 text-center text-gray-400"
+                >
                   {selectedDateTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates for custom filter"

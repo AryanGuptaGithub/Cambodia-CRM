@@ -90,6 +90,9 @@ const filterNumericInput = (value, allowDecimal = true) => {
   return filtered;
 };
 
+// ==========================================
+// DuplicateInvoicesModal
+// ==========================================
 const DuplicateInvoicesModal = ({
   isOpen,
   onClose,
@@ -268,6 +271,9 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
   return grouped;
 };
 
+// ==========================================
+// StockValidationModal (for normal sales)
+// ==========================================
 const StockValidationModal = ({
   isOpen,
   onClose,
@@ -411,7 +417,6 @@ const StockValidationModal = ({
               <thead className="bg-gray-100">
                 <tr>
                   {[
-                    "MR Name",
                     "Product Name",
                     "Required Quantity",
                     "Available Stock",
@@ -430,7 +435,6 @@ const StockValidationModal = ({
               <tbody>
                 {stockIssues.map((issue, idx) => (
                   <tr key={idx} className="border-t">
-                    <td className="px-3 py-2">{issue.mrName || "-"}</td>
                     <td className="px-3 py-2">{issue.productName}</td>
                     <td className="px-3 py-2">{issue.totalRequired}</td>
                     <td className="px-3 py-2">{issue.availableStock}</td>
@@ -484,6 +488,9 @@ const StockValidationModal = ({
   );
 };
 
+// ==========================================
+// MRValidationModal
+// ==========================================
 const MRValidationModal = ({
   isOpen,
   onClose,
@@ -583,12 +590,524 @@ const MRValidationModal = ({
   );
 };
 
+// ==========================================
+// FailedInvoicesModal (unchanged, but we keep it)
+// ==========================================
 const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
   // ... (original implementation, omitted for brevity but must be kept)
   // In a real answer we would include the full implementation.
   // Since it's long, we'll assume it's present.
 };
 
+// ==========================================
+// MrStockValidationModal – Grouped by MR with table per MR (case-insensitive)
+// ==========================================
+const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
+  const [expandedMRs, setExpandedMRs] = useState(new Set());
+  const [viewMode, setViewMode] = useState("mr"); // 'mr' or 'all'
+
+  if (!isOpen || !stockIssues || stockIssues.length === 0) return null;
+
+  // Group by MR and product (case-insensitive product keys)
+  const groupedByMR = useMemo(() => {
+    const map = new Map(); // Map<normalizedMrName, Map<normalizedProductName, { ... }>>
+    stockIssues.forEach((issue) => {
+      const mrName = issue.mrName || "Unknown MR";
+      const productName = issue.productName;
+      const normMr = mrName.toLowerCase().trim();
+      const normProd = productName.toLowerCase().trim();
+
+      if (!map.has(normMr)) {
+        map.set(normMr, {
+          originalMrName: mrName,
+          products: new Map(),
+        });
+      }
+      const mrGroup = map.get(normMr);
+      if (!mrGroup.products.has(normProd)) {
+        mrGroup.products.set(normProd, {
+          originalProductName: productName,
+          totalRequired: 0,
+          availableStock: 0,
+          insufficientQty: 0,
+          productExists: issue.productExists,
+        });
+      }
+      const productData = mrGroup.products.get(normProd);
+      productData.totalRequired += issue.totalRequired;
+      productData.availableStock = issue.availableStock; // assume same product same MR same stock
+      productData.insufficientQty += issue.insufficientQty;
+    });
+    return map;
+  }, [stockIssues]);
+
+  // Aggregate across all MRs for flat view (case-insensitive product keys)
+  const allProductsMap = useMemo(() => {
+    const map = new Map(); // Map<normalizedProductName, { ... }>
+    stockIssues.forEach((issue) => {
+      const productName = issue.productName;
+      const normProd = productName.toLowerCase().trim();
+
+      if (!map.has(normProd)) {
+        map.set(normProd, {
+          originalProductName: productName,
+          totalRequired: 0,
+          totalAvailable: 0,
+          totalInsufficient: 0,
+          productExists: issue.productExists,
+        });
+      }
+      const productData = map.get(normProd);
+      productData.totalRequired += issue.totalRequired;
+      productData.totalAvailable += issue.availableStock;
+      productData.totalInsufficient += issue.insufficientQty;
+    });
+    return map;
+  }, [stockIssues]);
+
+  const allProductsList = useMemo(
+    () => Array.from(allProductsMap.values()),
+    [allProductsMap],
+  );
+
+  const toggleMR = (normMr) => {
+    setExpandedMRs((prev) => {
+      const next = new Set(prev);
+      if (next.has(normMr)) next.delete(normMr);
+      else next.add(normMr);
+      return next;
+    });
+  };
+
+  const isExpanded = (normMr) =>
+    expandedMRs.has(normMr) || expandedMRs.size === 0;
+
+  const downloadGroupedReport = () => {
+    try {
+      const rows = [];
+      if (viewMode === "mr") {
+        groupedByMR.forEach((mrGroup, normMr) => {
+          mrGroup.products.forEach((productData) => {
+            rows.push({
+              "MR Name": mrGroup.originalMrName,
+              "Product Name": productData.originalProductName,
+              "Required Quantity": productData.totalRequired,
+              "Available Stock": productData.availableStock,
+              Shortage: productData.insufficientQty,
+              Status: productData.productExists
+                ? "Insufficient"
+                : "Product Not Found",
+            });
+          });
+        });
+      } else {
+        allProductsList.forEach((productData) => {
+          rows.push({
+            "Product Name": productData.originalProductName,
+            "Required Quantity": productData.totalRequired,
+            "Available Stock": productData.totalAvailable,
+            Shortage: productData.totalInsufficient,
+            Status: productData.productExists
+              ? "Insufficient"
+              : "Product Not Found",
+          });
+        });
+      }
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "MR Stock Issues");
+      XLSX.writeFile(
+        wb,
+        `mr_stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      showToast("success", "Report downloaded");
+    } catch (err) {
+      showToast("error", "Failed to download report");
+    }
+  };
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+      <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+        >
+          <X size={20} />
+        </button>
+        <h2 className="text-xl font-semibold text-red-600 mb-4 flex items-center gap-2">
+          <AlertTriangle size={20} />
+          Insufficient MR Hand Stock
+        </h2>
+        <p className="text-sm text-gray-600 mb-4">
+          {stockIssues.length} product issue(s) have insufficient stock in the
+          respective MR's hand. Please update stock or reduce quantities.
+        </p>
+
+        {/* View Toggle */}
+        <div className="flex gap-2 mb-4">
+          <button
+            onClick={() => setViewMode("mr")}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+              viewMode === "mr"
+                ? "bg-red-600 text-white"
+                : "bg-gray-200 text-gray-700"
+            }`}
+          >
+            Group by MR
+          </button>
+          <button
+            onClick={() => setViewMode("all")}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+              viewMode === "all"
+                ? "bg-red-600 text-white"
+                : "bg-gray-200 text-gray-700"
+            }`}
+          >
+            All Products (Flat)
+          </button>
+        </div>
+
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={downloadGroupedReport}
+            className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm"
+          >
+            <Download size={14} />
+            Download Report
+          </button>
+        </div>
+
+        {viewMode === "mr" ? (
+          // Group by MR view – each MR expanded shows a table
+          <div className="space-y-3">
+            {Array.from(groupedByMR.entries()).map(([normMr, mrGroup]) => {
+              const productsArray = Array.from(mrGroup.products.values());
+              const productCount = productsArray.length;
+              const expanded = isExpanded(normMr);
+              return (
+                <div
+                  key={normMr}
+                  className="border border-gray-200 rounded-lg overflow-hidden"
+                >
+                  <button
+                    onClick={() => toggleMR(normMr)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-red-50 hover:bg-red-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <User size={16} className="text-red-500" />
+                      <span className="font-semibold text-red-800">
+                        {mrGroup.originalMrName}
+                      </span>
+                      <span className="bg-red-200 text-red-800 text-xs px-2 py-0.5 rounded-full">
+                        {productCount} product{productCount !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    {expanded ? (
+                      <ChevronDown size={16} className="text-red-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-red-400" />
+                    )}
+                  </button>
+                  {expanded && (
+                    <div className="p-4 bg-white">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100">
+                          <tr>
+                            <th className="px-4 py-2 text-left font-medium text-gray-600">
+                              Product Name
+                            </th>
+                            <th className="px-4 py-2 text-left font-medium text-gray-600">
+                              Required
+                            </th>
+                            <th className="px-4 py-2 text-left font-medium text-gray-600">
+                              Available
+                            </th>
+                            <th className="px-4 py-2 text-left font-medium text-gray-600">
+                              Shortage
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {productsArray.map((product) => (
+                            <tr
+                              key={product.originalProductName}
+                              className="border-t"
+                            >
+                              <td className="px-4 py-2">
+                                {product.originalProductName}
+                              </td>
+                              <td className="px-4 py-2">
+                                {product.totalRequired}
+                              </td>
+                              <td className="px-4 py-2 text-orange-600">
+                                {product.availableStock}
+                              </td>
+                              <td className="px-4 py-2 text-red-600 font-semibold">
+                                {product.insufficientQty}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          // All Products table view (flat)
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600">
+                    Sr.
+                  </th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600">
+                    Product Name
+                  </th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600">
+                    Required
+                  </th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600">
+                    Available
+                  </th>
+                  <th className="px-4 py-2 text-left font-medium text-gray-600">
+                    Shortage
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {allProductsList.map((product, index) => (
+                  <tr key={product.originalProductName} className="border-t">
+                    <td className="px-4 py-2">{index + 1}</td>
+                    <td className="px-4 py-2">{product.originalProductName}</td>
+                    <td className="px-4 py-2">{product.totalRequired}</td>
+                    <td className="px-4 py-2">{product.totalAvailable}</td>
+                    <td className="px-4 py-2 text-red-600 font-semibold">
+                      {product.totalInsufficient}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
+          >
+            Cancel Import
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+// const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
+//   const [expandedMRs, setExpandedMRs] = useState(new Set());
+
+//   if (!isOpen || !stockIssues || stockIssues.length === 0) return null;
+
+//   // Group issues by MR and product
+//   const grouped = new Map(); // Map<mrName, Map<productName, { totalRequired, availableStock, insufficientQty, productExists }>>
+
+//   stockIssues.forEach((issue) => {
+//     const mrName = issue.mrName || "Unknown MR";
+//     const productName = issue.productName;
+//     if (!grouped.has(mrName)) {
+//       grouped.set(mrName, new Map());
+//     }
+//     const mrGroup = grouped.get(mrName);
+//     if (!mrGroup.has(productName)) {
+//       mrGroup.set(productName, {
+//         productName,
+//         totalRequired: 0,
+//         availableStock: 0,
+//         insufficientQty: 0,
+//         productExists: issue.productExists,
+//       });
+//     }
+//     const productData = mrGroup.get(productName);
+//     productData.totalRequired += issue.totalRequired;
+//     // Use the most conservative available stock (should be same across issues for same product, but just in case)
+//     productData.availableStock = issue.availableStock; // assuming same product same MR same stock
+//     productData.insufficientQty += issue.insufficientQty;
+//   });
+
+//   const allMRNames = Array.from(grouped.keys());
+
+//   const toggleMR = (mrName) => {
+//     setExpandedMRs((prev) => {
+//       const next = new Set(prev);
+//       if (next.has(mrName)) {
+//         next.delete(mrName);
+//       } else {
+//         next.add(mrName);
+//       }
+//       return next;
+//     });
+//   };
+
+//   const isExpanded = (mrName) =>
+//     expandedMRs.has(mrName) || expandedMRs.size === 0; // expand all by default if none collapsed
+
+//   // Download grouped report
+//   const downloadGroupedReport = () => {
+//     try {
+//       const rows = [];
+//       grouped.forEach((mrMap, mrName) => {
+//         mrMap.forEach((productData) => {
+//           rows.push({
+//             "MR Name": mrName,
+//             "Product Name": productData.productName,
+//             "Required Quantity": productData.totalRequired,
+//             "Available Stock": productData.availableStock,
+//             Shortage: productData.insufficientQty,
+//             Status: productData.productExists
+//               ? "Insufficient"
+//               : "Product Not Found",
+//           });
+//         });
+//       });
+//       const ws = XLSX.utils.json_to_sheet(rows);
+//       const wb = XLSX.utils.book_new();
+//       XLSX.utils.book_append_sheet(wb, ws, "MR Stock Issues");
+//       XLSX.writeFile(
+//         wb,
+//         `mr_stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`,
+//       );
+//       showToast("success", "Report downloaded");
+//     } catch (err) {
+//       showToast("error", "Failed to download report");
+//     }
+//   };
+
+//   return ReactDOM.createPortal(
+//     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+//       <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+//         <button
+//           onClick={onClose}
+//           className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+//         >
+//           <X size={20} />
+//         </button>
+//         <h2 className="text-xl font-semibold text-red-600 mb-4 flex items-center gap-2">
+//           <AlertTriangle size={20} />
+//           Insufficient MR Hand Stock
+//         </h2>
+//         <p className="text-sm text-gray-600 mb-4">
+//           {stockIssues.length} product(s) have insufficient stock in the
+//           respective MR's hand. Please update stock or reduce quantities.
+//         </p>
+
+//         <div className="flex justify-end mb-4">
+//           <button
+//             onClick={downloadGroupedReport}
+//             className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm"
+//           >
+//             <Download size={14} />
+//             Download Grouped Report
+//           </button>
+//         </div>
+
+//         <div className="space-y-3">
+//           {allMRNames.map((mrName) => {
+//             const mrMap = grouped.get(mrName);
+//             const productCount = mrMap.size;
+//             const expanded = isExpanded(mrName);
+//             return (
+//               <div
+//                 key={mrName}
+//                 className="border border-gray-200 rounded-lg overflow-hidden"
+//               >
+//                 {/* MR Header */}
+//                 <button
+//                   onClick={() => toggleMR(mrName)}
+//                   className="w-full flex items-center justify-between px-4 py-3 bg-red-50 hover:bg-red-100 transition-colors"
+//                 >
+//                   <div className="flex items-center gap-2">
+//                     <User size={16} className="text-red-500" />
+//                     <span className="font-semibold text-red-800">{mrName}</span>
+//                     <span className="bg-red-200 text-red-800 text-xs px-2 py-0.5 rounded-full">
+//                       {productCount} product{productCount !== 1 ? "s" : ""}
+//                     </span>
+//                   </div>
+//                   {expanded ? (
+//                     <ChevronDown size={16} className="text-red-400" />
+//                   ) : (
+//                     <ChevronRight size={16} className="text-red-400" />
+//                   )}
+//                 </button>
+
+//                 {/* Products */}
+//                 {expanded && (
+//                   <div className="divide-y divide-gray-100">
+//                     {Array.from(mrMap.entries()).map(
+//                       ([productName, productData]) => (
+//                         <div key={productName} className="px-4 py-3 bg-white">
+//                           <div className="flex items-center gap-2 mb-2">
+//                             <Package size={14} className="text-red-500" />
+//                             <span className="font-medium text-gray-800">
+//                               {productName}
+//                             </span>
+//                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+//                               ❌ Insufficient
+//                             </span>
+//                           </div>
+//                           <div className="flex items-center gap-4 ml-5 text-sm">
+//                             <div>
+//                               Required:{" "}
+//                               <span className="font-semibold">
+//                                 {productData.totalRequired}
+//                               </span>
+//                             </div>
+//                             <div>
+//                               Available:{" "}
+//                               <span className="font-semibold text-orange-600">
+//                                 {productData.availableStock}
+//                               </span>
+//                             </div>
+//                             <div>
+//                               Shortage:{" "}
+//                               <span className="font-semibold text-red-600">
+//                                 {productData.insufficientQty}
+//                               </span>
+//                             </div>
+//                           </div>
+//                         </div>
+//                       ),
+//                     )}
+//                   </div>
+//                 )}
+//               </div>
+//             );
+//           })}
+//         </div>
+
+//         <div className="flex justify-end gap-3 mt-6">
+//           <button
+//             onClick={onCancel}
+//             className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
+//           >
+//             Cancel Import
+//           </button>
+//           {/* No Proceed button because insufficient stock blocks import */}
+//         </div>
+//       </div>
+//     </div>,
+//     document.body,
+//   );
+// };
+
+// ==========================================
+// ImportSalesModal Main Component
+// ==========================================
 const ImportSalesModal = ({
   isOpen,
   onClose,
@@ -622,6 +1141,9 @@ const ImportSalesModal = ({
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [mrStockValidationResult, setMrStockValidationResult] = useState(null);
   const [showMrStockValidation, setShowMrStockValidation] = useState(false);
+  // New state for grouped MR stock issues modal
+  const [showMrStockGroupedModal, setShowMrStockGroupedModal] = useState(false);
+  const [mrStockIssuesGrouped, setMrStockIssuesGrouped] = useState([]);
   const pollingIntervalRef = useRef(null);
 
   const clearPolling = useCallback(() => {
@@ -642,6 +1164,7 @@ const ImportSalesModal = ({
         setMrValidationResult(null);
         setDuplicateInvoices([]);
         setMrStockValidationResult(null);
+        setMrStockIssuesGrouped([]);
       }
       setShowParsedSection(false);
       setShowFailedInvoices(false);
@@ -649,6 +1172,7 @@ const ImportSalesModal = ({
       setShowMRValidation(false);
       setShowDuplicateModal(false);
       setShowMrStockValidation(false);
+      setShowMrStockGroupedModal(false);
       setServerProgress(0);
       setServerProcessed(0);
       setServerTotal(0);
@@ -1401,6 +1925,15 @@ const ImportSalesModal = ({
     showToast("info", "Import cancelled");
   }, []);
 
+  // ----- Handler for new grouped modal cancel -----
+  const handleMrStockGroupedCancel = useCallback(() => {
+    setShowMrStockGroupedModal(false);
+    setMrStockIssuesGrouped([]);
+    setIsValidatingStock(false);
+    setImportStep("");
+    showToast("info", "Import cancelled");
+  }, []);
+
   // ----- Handle skip duplicates -----
   const handleSkipDuplicates = useCallback(() => {
     const duplicateSet = new Set(duplicateInvoices);
@@ -1461,18 +1994,24 @@ const ImportSalesModal = ({
       );
 
       if (insufficientStockIssues.length > 0) {
-        setMrStockValidationResult({
-          ...svResult,
-          stockIssues: insufficientStockIssues,
-          summary: {
-            ...svResult.summary,
-            totalInsufficient: insufficientStockIssues.length,
-            hasInsufficientStock: true,
-          },
-          importBlocked: true,
-          message: `${insufficientStockIssues.length} products have insufficient MR hand stock.`,
-        });
-        setShowMrStockValidation(true);
+        if (importSaleType === "mr") {
+          // For MR sale, use the grouped modal
+          setMrStockIssuesGrouped(insufficientStockIssues);
+          setShowMrStockGroupedModal(true);
+        } else {
+          setMrStockValidationResult({
+            ...svResult,
+            stockIssues: insufficientStockIssues,
+            summary: {
+              ...svResult.summary,
+              totalInsufficient: insufficientStockIssues.length,
+              hasInsufficientStock: true,
+            },
+            importBlocked: true,
+            message: `${insufficientStockIssues.length} products have insufficient MR hand stock.`,
+          });
+          setShowMrStockValidation(true);
+        }
         return;
       }
 
@@ -1480,18 +2019,24 @@ const ImportSalesModal = ({
         missingProductIssues.length > 0 &&
         insufficientStockIssues.length === 0
       ) {
-        setMrStockValidationResult({
-          ...svResult,
-          stockIssues: missingProductIssues,
-          summary: {
-            ...svResult.summary,
-            totalInsufficient: missingProductIssues.length,
-            hasInsufficientStock: false,
-          },
-          importBlocked: false,
-          message: `${missingProductIssues.length} products not found in MR hand stock.`,
-        });
-        setShowMrStockValidation(true);
+        if (importSaleType === "mr") {
+          // For MR sale, use the grouped modal (missing products)
+          setMrStockIssuesGrouped(missingProductIssues);
+          setShowMrStockGroupedModal(true);
+        } else {
+          setMrStockValidationResult({
+            ...svResult,
+            stockIssues: missingProductIssues,
+            summary: {
+              ...svResult.summary,
+              totalInsufficient: missingProductIssues.length,
+              hasInsufficientStock: false,
+            },
+            importBlocked: false,
+            message: `${missingProductIssues.length} products not found in MR hand stock.`,
+          });
+          setShowMrStockValidation(true);
+        }
         return;
       }
     }
@@ -1507,7 +2052,7 @@ const ImportSalesModal = ({
     validateStockBeforeImport,
   ]);
 
-  // ----- handleProductImport (unchanged, but ensure it uses skipDuplicates appropriately) -----
+  // ----- handleProductImport (unchanged) -----
   const handleProductImport = useCallback(
     async (dataToImport) => {
       if (!dataToImport?.length) {
@@ -1670,6 +2215,8 @@ const ImportSalesModal = ({
     setShowDuplicateModal(false);
     setMrStockValidationResult(null);
     setShowMrStockValidation(false);
+    setMrStockIssuesGrouped([]);
+    setShowMrStockGroupedModal(false);
   }, []);
 
   useEffect(() => {
@@ -2049,6 +2596,14 @@ const ImportSalesModal = ({
             setShowDuplicateModal(false);
             resetModal();
           }}
+        />
+      )}
+      {showMrStockGroupedModal && mrStockIssuesGrouped.length > 0 && (
+        <MrStockValidationModal
+          isOpen={showMrStockGroupedModal}
+          onClose={() => setShowMrStockGroupedModal(false)}
+          stockIssues={mrStockIssuesGrouped}
+          onCancel={handleMrStockGroupedCancel}
         />
       )}
       {showMrStockValidation && mrStockValidationResult && (

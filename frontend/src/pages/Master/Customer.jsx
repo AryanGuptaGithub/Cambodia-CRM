@@ -30,8 +30,6 @@ import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustome
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import LoadingOverlay from "../../components/Loading";
-import { parseExcelDateValue } from "../../utils/dateUtil";
-
 import {
   fetchProvinces as fetchProvincesAPI,
   fetchMRList as fetchMRListAPI,
@@ -43,13 +41,11 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const isSampleDownloadFile =
   import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
-// ✅ NEW: Controls whether customer code is shown in export and importable
 const isWithCustomerCode =
   import.meta.env.VITE_IS_WITH_CUSTOMER_CODE === "true";
 
 const customersPerPage = 10;
 
-// --- Axios Interceptor Setup ---
 axios.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -198,7 +194,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
 };
 
 // ─────────────────────────────────────────────
-// Import Modal
+// Import Modal (with fixed date parsing)
 // ─────────────────────────────────────────────
 const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [parsedData, setParsedData] = useState([]);
@@ -208,8 +204,45 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [existingCustomers, setExistingCustomers] = useState([]);
   const [duplicateRows, setDuplicateRows] = useState([]);
   const [loadingExisting, setLoadingExisting] = useState(false);
-  // ✅ NEW: checkbox — only visible when isWithCustomerCode is true
   const [importWithCode, setImportWithCode] = useState(false);
+
+  // Helper: convert Excel serial number to YYYY-MM-DD (local date)
+  const excelSerialToDateStr = (serial) => {
+    // Excel serial date: days since 1899-12-30
+    const excelEpoch = new Date(1899, 11, 30); // local time 1899-12-30
+    const date = new Date(excelEpoch.getTime() + (serial - 1) * 86400000);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  // Helper: parse any input into a YYYY-MM-DD string
+  const parseDateValue = (val) => {
+    if (!val) return "";
+    // If it's a number, treat as Excel serial
+    if (typeof val === "number") {
+      return excelSerialToDateStr(val);
+    }
+    // If it's a string, try to parse
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      // Already in YYYY-MM-DD format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        return trimmed;
+      }
+      // Try to parse using JavaScript Date
+      const d = new Date(trimmed);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      }
+    }
+    // Fallback: empty string (backend will use today)
+    return "";
+  };
 
   const getRowKey = (row) => {
     const fields = [
@@ -230,7 +263,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     if (isOpen) fetchExistingCustomers();
   }, [isOpen]);
 
-  // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
       setParsedData([]);
@@ -288,7 +320,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           .map((c) => c.customerNumber?.trim().toLowerCase())
           .filter(Boolean),
       );
-      // ✅ If importing with customer code, also check for duplicate codes
       const existingCodes = new Set(
         existingCustomers
           .map((c) => c.customerCode?.trim().toLowerCase())
@@ -412,8 +443,13 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             return;
           }
 
+          // ----- Date parsing -----
+          const rawDate = getValue(obj, ["Date", "Joining Date"]);
+          const dateStr = parseDateValue(rawDate);
+          // -------------------------
+
           const rowData = {
-            date: parseExcelDateValue(getValue(obj, ["Date", "Joining Date"])),
+            date: dateStr, // now always a string in YYYY-MM-DD or empty
             medicalRepName: String(
               getValue(obj, [
                 "Medical Representative Name",
@@ -437,7 +473,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             ).trim(),
           };
 
-          // ✅ If importWithCode is enabled and VITE_IS_WITH_CUSTOMER_CODE is true, read customer code
           if (isWithCustomerCode && importWithCode) {
             const code = String(
               getValue(obj, ["Customer Code", "Code"]) || "",
@@ -483,7 +518,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     try {
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
-        // ✅ Send flag to backend so it knows to use provided customer codes
         {
           customers: uniqueData,
           importWithCode: isWithCustomerCode && importWithCode,
@@ -527,7 +561,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
         <h2 className="text-lg font-semibold mb-1">Import Customers</h2>
         {isSampleFile && <SampleExcelDownloadCustomer />}
 
-        {/* ✅ NEW: Customer Code checkbox — only shown when VITE_IS_WITH_CUSTOMER_CODE=true */}
         {isWithCustomerCode && (
           <div className="mb-3 flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <input
@@ -536,7 +569,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
               checked={importWithCode}
               onChange={(e) => {
                 setImportWithCode(e.target.checked);
-                // Re-parse the file if already uploaded
                 setParsedData([]);
                 setParseErrors([]);
                 setFileName("");
@@ -771,6 +803,7 @@ const Customer = () => {
   useEffect(() => {
     fetchCustomers();
   }, [currentPage, searchTerm]);
+
   useEffect(() => {
     fetchDropdownData();
   }, []);
@@ -1068,15 +1101,15 @@ const Customer = () => {
     setShowImportModal(false);
     if (shouldRefresh) fetchCustomers();
   };
+
   const handleIconClick = () => {
     inputRef.current?.focus();
   };
 
-  // ✅ Export — includes Customer Code column when isWithCustomerCode=true
   const handleDownloadAll = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/customers/export`, {
-        params: { withCode: isWithCustomerCode }, // ✅ tell backend to include code
+        params: { withCode: isWithCustomerCode },
         responseType: "blob",
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -1159,7 +1192,6 @@ const Customer = () => {
             >
               <Upload size={18} /> Import Customer
             </button>
-            {/* ✅ Export button shown only when VITE_IS_SAMPLE_DOWNLOAD_FILE=true */}
             {isSampleDownloadFile && (
               <button
                 onClick={handleDownloadAll}

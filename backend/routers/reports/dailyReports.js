@@ -53,6 +53,8 @@ router.get("/", async (req, res) => {
     const limitNum = Math.max(1, parseInt(limit, 10));
     const skip = (pageNum - 1) * limitNum;
 
+    console.log('values of starDate', startDate);
+    console.log('valueso f enddate', endDate);
     // Build match conditions
     const matchConditions = {};
 

@@ -324,12 +324,14 @@ const escapeRegex = (str) => {
 };
 
 // ==========================================
-// findStockItemFlexible
+// Improved findStockItemFlexible
 // ==========================================
 const findStockItemFlexible = async (productName, session = null) => {
   try {
     const normalizedName = normalizeProductName(productName);
+    const words = normalizedName.split(/\s+/).filter((w) => w.length > 0);
 
+    // Step 1: Exact match (case‑insensitive)
     let query = ReportInHand.findOne({
       productName: {
         $regex: new RegExp(`^${escapeRegex(normalizedName)}$`, "i"),
@@ -338,18 +340,29 @@ const findStockItemFlexible = async (productName, session = null) => {
     if (session) query = query.session(session);
     let stockItem = await query;
 
-    if (!stockItem) {
-      const nameParts = normalizedName.split(/\s+/);
-      const flexiblePattern = nameParts
-        .map((p) => escapeRegex(p))
-        .join("\\s*.*?\\s*");
-      query = ReportInHand.findOne({
-        productName: { $regex: new RegExp(flexiblePattern, "i") },
-      });
+    if (!stockItem && words.length > 0) {
+      // Step 2: Require each word as a whole word (in any order)
+      const andConditions = words.map((w) => ({
+        productName: { $regex: new RegExp(`\\b${escapeRegex(w)}\\b`, "i") },
+      }));
+      query = ReportInHand.findOne({ $and: andConditions });
       if (session) query = query.session(session);
       stockItem = await query;
+
+      // Log if multiple matches (optional)
+      if (stockItem) {
+        const count = await ReportInHand.countDocuments({
+          $and: andConditions,
+        }).session(session);
+        if (count > 1) {
+          console.warn(
+            `⚠️ Multiple products (${count}) matched for "${productName}". Using first: ${stockItem.productName}`,
+          );
+        }
+      }
     }
 
+    // Step 3: If still not found, try via product record
     if (!stockItem) {
       const productRecord = await findProductRecordFlexible(
         productName,
@@ -377,11 +390,14 @@ const findStockItemFlexible = async (productName, session = null) => {
 };
 
 // ==========================================
-// findProductRecordFlexible
+// Improved findProductRecordFlexible
 // ==========================================
 const findProductRecordFlexible = async (productName, session = null) => {
   try {
     const normalizedName = normalizeProductName(productName);
+    const words = normalizedName.split(/\s+/).filter((w) => w.length > 0);
+
+    // Step 1: Exact match
     let query = Product.findOne({
       productName: {
         $regex: new RegExp(`^${escapeRegex(normalizedName)}$`, "i"),
@@ -390,16 +406,25 @@ const findProductRecordFlexible = async (productName, session = null) => {
     if (session) query = query.session(session);
     let product = await query;
 
-    if (!product) {
-      const nameParts = normalizedName.split(/\s+/);
-      const flexiblePattern = nameParts
-        .map((p) => escapeRegex(p))
-        .join("\\s*.*?\\s*");
-      query = Product.findOne({
-        productName: { $regex: new RegExp(flexiblePattern, "i") },
-      });
+    if (!product && words.length > 0) {
+      // Step 2: Require all words as whole words
+      const andConditions = words.map((w) => ({
+        productName: { $regex: new RegExp(`\\b${escapeRegex(w)}\\b`, "i") },
+      }));
+      query = Product.findOne({ $and: andConditions });
       if (session) query = query.session(session);
       product = await query;
+
+      if (product) {
+        const count = await Product.countDocuments({
+          $and: andConditions,
+        }).session(session);
+        if (count > 1) {
+          console.warn(
+            `⚠️ Multiple products (${count}) matched for "${productName}". Using first: ${product.productName}`,
+          );
+        }
+      }
     }
 
     return product;
@@ -490,15 +515,19 @@ const getCustomerByCode = async (customerCode, session = null) => {
 };
 
 // ==========================================
-// getRealBatches
+// Improved getRealBatches – include all except explicit adjustments
 // ==========================================
-const getRealBatches = (batches = []) =>
-  batches.filter(
-    (batch) => !batch.adjustmentType || batch.adjustmentType === "batch",
-  );
+const getRealBatches = (batches = []) => {
+  const adjustmentTypes = ["adjustment", "audit", "correction", "write-off"];
+  return batches.filter((batch) => {
+    if (!batch.adjustmentType) return true; // no type → real batch
+    const type = batch.adjustmentType.toLowerCase();
+    return !adjustmentTypes.includes(type);
+  });
+};
 
 // ==========================================
-// calculateProductStock
+// calculateProductStock with detailed logging
 // ==========================================
 const calculateProductStock = async (productName, requiredQty = 0) => {
   try {
@@ -519,24 +548,41 @@ const calculateProductStock = async (productName, requiredQty = 0) => {
     }
 
     const realBatches = getRealBatches(stockItem.batches || []);
+    console.log(`[STOCK DEBUG] Product: ${stockItem.productName}`);
+    console.log(
+      `[STOCK DEBUG] Total batches: ${stockItem.batches?.length || 0}, real batches: ${realBatches.length}`,
+    );
+
     let batchesSum = 0;
     realBatches.forEach((batch) => {
       const batchQty = fixPrecision(Number(batch.boxes || 0));
+      console.log(
+        `[STOCK DEBUG] Batch ${batch.batchNumber || "?"}: boxes=${batchQty}, adjType=${batch.adjustmentType || "none"}`,
+      );
       if (batchQty > 0) batchesSum = fixPrecision(batchesSum + batchQty);
     });
+
     let totalAdjustments = 0;
-    if (stockItem.addStockAdjustment)
-      totalAdjustments = fixPrecision(
-        totalAdjustments + fixPrecision(Number(stockItem.addStockAdjustment)),
+    if (stockItem.addStockAdjustment) {
+      totalAdjustments += fixPrecision(Number(stockItem.addStockAdjustment));
+      console.log(
+        `[STOCK DEBUG] addStockAdjustment: ${stockItem.addStockAdjustment}`,
       );
-    if (stockItem.removeStockAdjustment)
-      totalAdjustments = fixPrecision(
-        totalAdjustments -
-          fixPrecision(Number(stockItem.removeStockAdjustment)),
+    }
+    if (stockItem.removeStockAdjustment) {
+      totalAdjustments -= fixPrecision(Number(stockItem.removeStockAdjustment));
+      console.log(
+        `[STOCK DEBUG] removeStockAdjustment: ${stockItem.removeStockAdjustment}`,
       );
+    }
+
     const availableStock = fixPrecision(
       Math.max(0, batchesSum + totalAdjustments),
     );
+    console.log(
+      `[STOCK DEBUG] batchesSum=${batchesSum}, totalAdjustments=${totalAdjustments} → availableStock=${availableStock}`,
+    );
+
     const fixedRequiredQty = fixPrecision(requiredQty);
     const insufficientQty = fixPrecision(
       Math.max(0, fixedRequiredQty - availableStock),
@@ -930,7 +976,7 @@ const validateMR = async (mrName, session = null) => {
 };
 
 // ==========================================
-// validateStockForImport
+// validateStockForImport – FIXED with normalized product names
 // ==========================================
 const validateStockForImport = async (invoices) => {
   try {
@@ -939,39 +985,44 @@ const validateStockForImport = async (invoices) => {
 
     for (const invoice of invoices) {
       for (const product of invoice.products) {
-        const productName = product.productName?.trim();
+        // Normalize to lowercase for consistent grouping
+        const productName = product.productName?.trim().toLowerCase();
+        if (!productName) continue; // skip if no product name
+
         const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
         const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
         const requiredQty = fixPrecision(salesQty + bonusQty);
-        if (requiredQty > 0 && productName) {
-          if (!productStockMap.has(productName)) {
-            productStockMap.set(productName, {
-              productName,
-              totalRequired: 0,
-              requiredByInvoices: [],
-              checked: false,
-              productExists: false,
-              availableStock: 0,
-            });
-          }
-          const pd = productStockMap.get(productName);
-          pd.totalRequired = fixPrecision(pd.totalRequired + requiredQty);
-          pd.requiredByInvoices.push({
-            invoiceNumber: invoice.invoiceNumber,
-            requiredQty,
-            salesQty,
-            bonusQty,
-            customerName: invoice.customerName,
+        if (requiredQty <= 0) continue;
+
+        if (!productStockMap.has(productName)) {
+          productStockMap.set(productName, {
+            productName: productName, // normalized key
+            originalName: product.productName?.trim(), // original for display
+            totalRequired: 0,
+            requiredByInvoices: [],
+            checked: false,
+            productExists: false,
+            availableStock: 0,
           });
         }
+        const pd = productStockMap.get(productName);
+        pd.totalRequired = fixPrecision(pd.totalRequired + requiredQty);
+        pd.requiredByInvoices.push({
+          invoiceNumber: invoice.invoiceNumber,
+          requiredQty,
+          salesQty,
+          bonusQty,
+          customerName: invoice.customerName,
+        });
       }
     }
 
-    for (const [productName, productData] of productStockMap.entries()) {
+    for (const [normalizedName, productData] of productStockMap.entries()) {
       if (!productData.checked) {
         try {
+          // Pass the normalized name – findStockItemFlexible handles lowercase
           const stockCheck = await calculateProductStock(
-            productName,
+            normalizedName,
             productData.totalRequired,
           );
           productData.availableStock = stockCheck.availableStock;
@@ -982,7 +1033,7 @@ const validateStockForImport = async (invoices) => {
 
           if (stockCheck.insufficient || !stockCheck.found) {
             stockIssues.push({
-              productName,
+              productName: productData.originalName || normalizedName, // use original for display
               totalRequired: productData.totalRequired,
               availableStock: stockCheck.availableStock,
               insufficientQty: stockCheck.insufficientQty || 0,
@@ -999,7 +1050,7 @@ const validateStockForImport = async (invoices) => {
           productData.checked = true;
         } catch (error) {
           stockIssues.push({
-            productName,
+            productName: productData.originalName || normalizedName,
             totalRequired: productData.totalRequired,
             availableStock: 0,
             insufficientQty: productData.totalRequired,
@@ -2909,7 +2960,7 @@ router.post("/check-duplicates", protect, async (req, res) => {
     }
 
     const existing = await SaleSummary.find({
-      invoiceNumber: { $in: invoiceNumbers }
+      invoiceNumber: { $in: invoiceNumbers },
     }).distinct("invoiceNumber");
 
     res.json({ success: true, existingInvoices: existing });
@@ -2925,7 +2976,9 @@ router.post("/validate-import-mr-stock", protect, async (req, res) => {
   try {
     const { invoices } = req.body;
     if (!invoices || !Array.isArray(invoices)) {
-      return res.status(400).json({ success: false, message: "Invoices array required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invoices array required" });
     }
 
     // Build map of (mrName, productName) -> totalRequired, invoice list
@@ -2994,9 +3047,11 @@ router.post("/validate-import-mr-stock", protect, async (req, res) => {
       // Find MR stock document
       let mrStock = null;
       try {
-        mrStock = await stockInMRHand.findOne({
-          mrId: new mongoose.Types.ObjectId(mrId),
-        }).lean();
+        mrStock = await stockInMRHand
+          .findOne({
+            mrId: new mongoose.Types.ObjectId(mrId),
+          })
+          .lean();
       } catch {
         mrStock = await stockInMRHand.findOne({ mrId }).lean();
       }
@@ -3019,7 +3074,7 @@ router.post("/validate-import-mr-stock", protect, async (req, res) => {
       // Find product in MR's hand
       const normalizedProductName = productName.toLowerCase().trim();
       const productInHand = mrStock.productsInHand?.find(
-        (p) => p.productName?.toLowerCase().trim() === normalizedProductName
+        (p) => p.productName?.toLowerCase().trim() === normalizedProductName,
       );
 
       if (!productInHand) {
@@ -3059,12 +3114,22 @@ router.post("/validate-import-mr-stock", protect, async (req, res) => {
     // Summary
     const summary = {
       totalProducts: productMrMap.size,
-      totalRequired: Array.from(productMrMap.values()).reduce((s, e) => s + e.totalRequired, 0),
-      totalAvailable: stockIssues.reduce((s, e) => s + (e.availableStock || 0), 0),
-      totalInsufficient: stockIssues.filter(i => i.insufficient && i.productExists).length,
-      missingProducts: stockIssues.filter(i => !i.productExists).length,
-      hasInsufficientStock: stockIssues.some(i => i.insufficient && i.productExists),
-      importBlocked: stockIssues.some(i => i.insufficient && i.productExists),
+      totalRequired: Array.from(productMrMap.values()).reduce(
+        (s, e) => s + e.totalRequired,
+        0,
+      ),
+      totalAvailable: stockIssues.reduce(
+        (s, e) => s + (e.availableStock || 0),
+        0,
+      ),
+      totalInsufficient: stockIssues.filter(
+        (i) => i.insufficient && i.productExists,
+      ).length,
+      missingProducts: stockIssues.filter((i) => !i.productExists).length,
+      hasInsufficientStock: stockIssues.some(
+        (i) => i.insufficient && i.productExists,
+      ),
+      importBlocked: stockIssues.some((i) => i.insufficient && i.productExists),
     };
 
     res.json({
@@ -3073,10 +3138,16 @@ router.post("/validate-import-mr-stock", protect, async (req, res) => {
         stockIssues,
         totalInvoices: invoices.length,
         summary,
-        insufficientStockIssues: stockIssues.filter(i => i.productExists && i.insufficient),
-        missingProductIssues: stockIssues.filter(i => !i.productExists),
+        insufficientStockIssues: stockIssues.filter(
+          (i) => i.productExists && i.insufficient,
+        ),
+        missingProductIssues: stockIssues.filter((i) => !i.productExists),
         importBlocked: summary.importBlocked,
-        blockReason: summary.importBlocked ? "INSUFFICIENT_MR_STOCK" : (summary.missingProducts > 0 ? "MISSING_PRODUCTS_ONLY" : "NO_ISSUES"),
+        blockReason: summary.importBlocked
+          ? "INSUFFICIENT_MR_STOCK"
+          : summary.missingProducts > 0
+            ? "MISSING_PRODUCTS_ONLY"
+            : "NO_ISSUES",
         message: summary.importBlocked
           ? `${summary.totalInsufficient} product(s) have insufficient MR hand stock.`
           : summary.missingProducts > 0

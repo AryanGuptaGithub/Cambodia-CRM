@@ -56,8 +56,17 @@ const DailyReports = () => {
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
+
+  // Helper: Convert local Date to YYYY-MM-DD string (no timezone shift)
+  const formatDateLocal = (date) => {
+    if (!date) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   // Calculate serial number based on current page and items per page
   const getSerialNumber = (index) => {
@@ -95,7 +104,7 @@ const DailyReports = () => {
     const endDate = new Date(currentYear, currentMonth, 0);
     return {
       startDate: `${currentYear}-01-01`,
-      endDate: endDate.toISOString().split("T")[0],
+      endDate: formatDateLocal(endDate),
       label: `Jan - ${getPreviousMonthName()} ${currentYear}`,
     };
   };
@@ -108,25 +117,25 @@ const DailyReports = () => {
     switch (selectedTab) {
       case "today":
         return {
-          startDate: today.toISOString().split("T")[0],
-          endDate: today.toISOString().split("T")[0],
-          displayDate: today.toISOString().split("T")[0]
+          startDate: formatDateLocal(today),
+          endDate: formatDateLocal(today),
+          displayDate: formatDateLocal(today),
         };
 
       case "all":
         return {
           startDate: null,
           endDate: null,
-          displayDate: "All Records"
+          displayDate: "All Records",
         };
 
       case "currentMonth":
         const firstDay = new Date(currentYear, currentMonth, 1);
         const lastDay = new Date(currentYear, currentMonth + 1, 0);
         return {
-          startDate: firstDay.toISOString().split("T")[0],
-          endDate: lastDay.toISOString().split("T")[0],
-          displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`
+          startDate: formatDateLocal(firstDay),
+          endDate: formatDateLocal(lastDay),
+          displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`,
         };
 
       case "janToPreviousMonth":
@@ -134,27 +143,28 @@ const DailyReports = () => {
         return {
           startDate: janToPrevRange.startDate,
           endDate: janToPrevRange.endDate,
-          displayDate: janToPrevRange.label
+          displayDate: janToPrevRange.label,
         };
 
       case "custom":
         return {
           startDate: customDateRange.startDate
-            ? customDateRange.startDate.toISOString().split("T")[0]
+            ? formatDateLocal(customDateRange.startDate)
             : "",
           endDate: customDateRange.endDate
-            ? customDateRange.endDate.toISOString().split("T")[0]
+            ? formatDateLocal(customDateRange.endDate)
             : "",
-          displayDate: customDateRange.startDate && customDateRange.endDate
-            ? `${formatDateForDisplay(customDateRange.startDate)} - ${formatDateForDisplay(customDateRange.endDate)}`
-            : "Select custom dates"
+          displayDate:
+            customDateRange.startDate && customDateRange.endDate
+              ? `${formatDateToReadable(customDateRange.startDate)} - ${formatDateToReadable(customDateRange.endDate)}`
+              : "Select custom dates",
         };
 
       default:
         return {
           startDate: null,
           endDate: null,
-          displayDate: "Today"
+          displayDate: "Today",
         };
     }
   };
@@ -179,7 +189,7 @@ const DailyReports = () => {
           setLoading(false);
           showToast(
             "warning",
-            "Please select both start and end dates for custom filter"
+            "Please select both start and end dates for custom filter",
           );
           return;
         }
@@ -203,18 +213,25 @@ const DailyReports = () => {
         params.saleType = selectedSaleType;
       }
 
-      const response = await axios.get(`${backendUrl}/api/reports/daily-reports`, {
-        params,
-      });
+      const response = await axios.get(
+        `${backendUrl}/api/reports/daily-reports`,
+        {
+          params,
+        },
+      );
 
       // Add custom date display to records if it's a custom filter
       let records = response.data.data?.records || [];
-      
+
       // If it's a custom date filter, override the date with the selected range
-      if (selectedTab === "custom" && dateRange.startDate && dateRange.endDate) {
-        records = records.map(record => ({
+      if (
+        selectedTab === "custom" &&
+        dateRange.startDate &&
+        dateRange.endDate
+      ) {
+        records = records.map((record) => ({
           ...record,
-          date: dateRange.displayDate // Use the custom date range as display
+          date: dateRange.displayDate, // Use the custom date range as display
         }));
       }
 
@@ -229,7 +246,7 @@ const DailyReports = () => {
         },
         records: records,
       });
-      
+
       setPagination(
         response.data.pagination || {
           currentPage: 1,
@@ -237,7 +254,7 @@ const DailyReports = () => {
           totalRecords: 0,
           hasNext: false,
           hasPrev: false,
-        }
+        },
       );
     } catch (error) {
       console.error("Error fetching daily reports:", error);
@@ -269,7 +286,9 @@ const DailyReports = () => {
 
   const fetchSaleTypes = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/reports/daily-reports/types`);
+      const response = await axios.get(
+        `${backendUrl}/api/reports/daily-reports/types`,
+      );
       const types = response.data || [];
       const allTypes = [...types];
       setSaleTypes(allTypes);
@@ -282,7 +301,7 @@ const DailyReports = () => {
   useEffect(() => {
     // Automatically select the type with sequenceNumber === 1 on first load
     const defaultType = saleTypes.find(
-      (typeObj) => typeObj.sequenceNumber === 1
+      (typeObj) => typeObj.sequenceNumber === 1,
     );
     if (defaultType) {
       setSelectedSaleType(defaultType.type);
@@ -417,13 +436,14 @@ const DailyReports = () => {
     setExporting(true);
     try {
       const dateRange = getDateRange();
-      
+
       // Prepare export parameters
       const exportParams = {
-        saleType: selectedSaleType !== "Total sales" ? selectedSaleType : undefined,
+        saleType:
+          selectedSaleType !== "Total sales" ? selectedSaleType : undefined,
         dateFilter: selectedTab,
         search: searchTerm.trim() || undefined,
-        export: true // Flag to indicate this is an export request
+        export: true, // Flag to indicate this is an export request
       };
 
       // Add date parameters for non-"all" tabs
@@ -433,14 +453,17 @@ const DailyReports = () => {
       }
 
       // Make request to export endpoint
-      const response = await axios.get(`${backendUrl}/api/reports/daily-reports/export`, {
-        params: exportParams,
-        responseType: 'blob' // Important for file download
-      });
+      const response = await axios.get(
+        `${backendUrl}/api/reports/daily-reports/export`,
+        {
+          params: exportParams,
+          responseType: "blob", // Important for file download
+        },
+      );
 
       // Get filename from response headers or create one
-      let filename = 'daily_reports.xlsx';
-      const contentDisposition = response.headers['content-disposition'];
+      let filename = "daily_reports.xlsx";
+      const contentDisposition = response.headers["content-disposition"];
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename="(.+)"/);
         if (filenameMatch && filenameMatch[1]) {
@@ -450,16 +473,16 @@ const DailyReports = () => {
 
       // Create download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      link.setAttribute('download', filename);
+      link.setAttribute("download", filename);
       document.body.appendChild(link);
       link.click();
-      
+
       // Clean up
       link.remove();
       window.URL.revokeObjectURL(url);
-      
+
       showToast("success", "Excel file downloaded successfully");
     } catch (error) {
       console.error("Error exporting to Excel:", error);
@@ -512,8 +535,8 @@ const DailyReports = () => {
                 page === pagination.currentPage
                   ? "bg-indigo-600 text-white"
                   : typeof page === "number"
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
+                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                    : "bg-transparent text-gray-500 cursor-default"
               }`}
               disabled={typeof page !== "number"}
             >
@@ -993,7 +1016,7 @@ const DailyReports = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

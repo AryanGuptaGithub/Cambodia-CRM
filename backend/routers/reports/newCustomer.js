@@ -7,7 +7,16 @@ import mongoose from "mongoose";
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Build date filter on customer `date` field
+// HELPER: Parse a date string (YYYY-MM-DD) as a local date (no UTC shift)
+// ─────────────────────────────────────────────────────────────────────────────
+const parseLocalDate = (dateStr) => {
+  if (!dateStr) return null;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  return new Date(year, month - 1, day); // local time
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Build date filter on customer `date` field (using local dates)
 // ─────────────────────────────────────────────────────────────────────────────
 const buildDateFilter = (dateFilter, startDate, endDate) => {
   const today = new Date();
@@ -16,9 +25,9 @@ const buildDateFilter = (dateFilter, startDate, endDate) => {
 
   switch (dateFilter) {
     case "today": {
-      const start = new Date(today);
+      const start = new Date(currentYear, currentMonth, today.getDate());
       start.setHours(0, 0, 0, 0);
-      const end = new Date(today);
+      const end = new Date(currentYear, currentMonth, today.getDate());
       end.setHours(23, 59, 59, 999);
       return { date: { $gte: start, $lte: end } };
     }
@@ -45,9 +54,9 @@ const buildDateFilter = (dateFilter, startDate, endDate) => {
     }
     case "custom": {
       if (startDate && endDate) {
-        const start = new Date(startDate);
+        const start = parseLocalDate(startDate);
         start.setHours(0, 0, 0, 0);
-        const end = new Date(endDate);
+        const end = parseLocalDate(endDate);
         end.setHours(23, 59, 59, 999);
         return { date: { $gte: start, $lte: end } };
       }
@@ -63,6 +72,9 @@ const buildDateFilter = (dateFilter, startDate, endDate) => {
 // GET / — paginated new customer report (MR Wise or Zone Wise)
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
+  console.log("🔹 GET /new-customers - Request received");
+  console.log("   Query params:", req.query);
+
   try {
     const {
       page = 1,
@@ -78,6 +90,10 @@ router.get("/", async (req, res) => {
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
+    console.log(
+      `   Parsed pagination: page=${pageNum}, limit=${limitNum}, skip=${skip}`,
+    );
+
     let matchStage = {
       enabled: true,
       ...buildDateFilter(dateFilter, startDate, endDate),
@@ -88,6 +104,8 @@ router.get("/", async (req, res) => {
       matchStage[reportType === "MR Wise" ? "medicalRepName" : "zone"] =
         searchRegex;
     }
+
+    console.log("   Match stage:", JSON.stringify(matchStage, null, 2));
 
     let records = [];
     let totalRecords = 0;
@@ -157,6 +175,13 @@ router.get("/", async (req, res) => {
           mrIdToUse =
             typeof item._id === "object" ? item._id.toString() : item._id;
 
+        // Format latestDate as YYYY-MM-DD (local)
+        let dateStr = "N/A";
+        if (item.latestDate) {
+          const d = new Date(item.latestDate);
+          dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+
         return {
           srNo: skip + index + 1,
           mrId: mrIdToUse,
@@ -166,9 +191,7 @@ router.get("/", async (req, res) => {
           teamName: staffDetails?.teamName || "N/A",
           zone: item.zone || "N/A",
           newCustomers: item.newCustomers,
-          date: item.latestDate
-            ? new Date(item.latestDate).toLocaleDateString()
-            : "N/A",
+          date: dateStr,
           medicalRepId: item.medicalRepId
             ? item.medicalRepId.toString()
             : "N/A",
@@ -247,6 +270,12 @@ router.get("/", async (req, res) => {
           }
         }
 
+        let dateStr = "N/A";
+        if (item.latestDate) {
+          const d = new Date(item.latestDate);
+          dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+
         return {
           srNo: skip + index + 1,
           zoneId: item._id || "N/A",
@@ -256,9 +285,7 @@ router.get("/", async (req, res) => {
           averagePerMR: item.averagePerMR || 0,
           contactNo,
           contactMR,
-          date: item.latestDate
-            ? new Date(item.latestDate).toLocaleDateString()
-            : "N/A",
+          date: dateStr,
         };
       });
 
@@ -300,6 +327,10 @@ router.get("/", async (req, res) => {
 
     const totalPages = Math.ceil(totalRecords / limitNum);
 
+    console.log(
+      `   Sending response: ${records.length} records, totalRecords=${totalRecords}`,
+    );
+
     res.json({
       success: true,
       data: {
@@ -332,10 +363,10 @@ router.get("/", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /customers — fetch customers for a specific MR or zone (with pagination)
 // ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /customers — fetch customers for a specific MR or zone (with pagination)
-// ─────────────────────────────────────────────────────────────────────────────
 router.get("/customers", async (req, res) => {
+  console.log("🔹 GET /customers - Request received");
+  console.log("   Query params:", req.query);
+
   try {
     const {
       mrId,
@@ -352,21 +383,25 @@ router.get("/customers", async (req, res) => {
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
+    console.log(
+      `   Parsed pagination: page=${pageNum}, limit=${limitNum}, skip=${skip}`,
+    );
+
     let matchStage = { enabled: true };
 
     if (mrId) {
-      // Check if mrId is a valid MongoDB ObjectId
+      console.log(`   Filter by mrId: ${mrId}`);
       if (mongoose.Types.ObjectId.isValid(mrId)) {
-        // Use ObjectId directly
         matchStage.medicalRepId = new mongoose.Types.ObjectId(mrId);
+        console.log(`   -> Using as ObjectId: ${matchStage.medicalRepId}`);
       } else {
-        // Not a valid ObjectId → treat as custom MR ID (e.g., "946")
-        // Find the staff member with this custom MRId
+        console.log(`   -> Not a valid ObjectId, treating as custom MRId`);
         const staff = await Staff.findOne({ MRId: mrId }).lean();
         if (staff && staff._id) {
           matchStage.medicalRepId = staff._id;
+          console.log(`   -> Found staff with _id: ${staff._id}`);
         } else {
-          // No staff found with that custom ID → return empty result
+          console.log(`   -> No staff found with custom MRId "${mrId}"`);
           return res.json({
             success: true,
             data: [],
@@ -381,25 +416,33 @@ router.get("/customers", async (req, res) => {
         }
       }
     } else if (mrName) {
-      // Fallback to MR name (exact match, case‑insensitive)
+      console.log(`   Filter by mrName: ${mrName}`);
       matchStage.medicalRepName = {
         $regex: new RegExp(`^${mrName.trim()}$`, "i"),
       };
     } else if (zone) {
-      // Zone filter
+      console.log(`   Filter by zone: ${zone}`);
       matchStage.zone = { $regex: new RegExp(`^${zone.trim()}$`, "i") };
     } else {
+      console.log("   No filter provided (mrId, mrName, or zone required)");
       return res.status(400).json({
         success: false,
         message: "Either mrId, mrName, or zone is required",
       });
     }
 
-    // Apply date filter if provided
     if (dateFilter && dateFilter !== "all") {
+      console.log(
+        `   Applying dateFilter: ${dateFilter}, startDate=${startDate}, endDate=${endDate}`,
+      );
       const dateFilterObj = buildDateFilter(dateFilter, startDate, endDate);
       matchStage = { ...matchStage, ...dateFilterObj };
     }
+
+    console.log(
+      "   Querying customers with matchStage:",
+      JSON.stringify(matchStage, null, 2),
+    );
 
     const customers = await Customer.find(matchStage)
       .select(
@@ -410,9 +453,15 @@ router.get("/customers", async (req, res) => {
       .limit(limitNum)
       .lean();
 
+    console.log(`   Found ${customers.length} customers`);
+
     const total = await Customer.countDocuments(matchStage);
     const totalPages = Math.ceil(total / limitNum);
-    console.log('values of customers', customers);
+    console.log(
+      `   Total matching records: ${total}, totalPages: ${totalPages}`,
+    );
+
+    console.log("   Sending response with customers and pagination");
     res.json({
       success: true,
       data: customers,
@@ -509,6 +558,12 @@ router.get("/export", async (req, res) => {
         if (staffDetails?.MRId) mrIdToUse = staffDetails.MRId;
         else if (item.medicalRepId) mrIdToUse = item.medicalRepId.toString();
 
+        let dateStr = "N/A";
+        if (item.latestDate) {
+          const d = new Date(item.latestDate);
+          dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+
         return {
           "Sr.No": index + 1,
           "MR ID": mrIdToUse,
@@ -518,9 +573,7 @@ router.get("/export", async (req, res) => {
           "Team Name": staffDetails?.teamName || "N/A",
           Zone: item.zone || "N/A",
           "New Customers": item.newCustomers,
-          Date: item.latestDate
-            ? new Date(item.latestDate).toLocaleDateString()
-            : "N/A",
+          Date: dateStr,
         };
       });
     } else {
@@ -583,6 +636,13 @@ router.get("/export", async (req, res) => {
             }
           }
         }
+
+        let dateStr = "N/A";
+        if (item.latestDate) {
+          const d = new Date(item.latestDate);
+          dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+
         return {
           "Sr.No": index + 1,
           "Zone Name": item.zoneName || "Unknown Zone",
@@ -590,9 +650,7 @@ router.get("/export", async (req, res) => {
           "New Customers": item.newCustomers || 0,
           "Average per MR": item.averagePerMR?.toFixed(1) || "0.0",
           "Contact MR": contactMR,
-          Date: item.latestDate
-            ? new Date(item.latestDate).toLocaleDateString()
-            : "N/A",
+          Date: dateStr,
         };
       });
     }
