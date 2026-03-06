@@ -2898,6 +2898,202 @@ router.post("/validate-import-mrs", async (req, res) => {
   }
 });
 
+// ==========================================
+// NEW ENDPOINT: Check duplicate invoices
+// ==========================================
+router.post("/check-duplicates", protect, async (req, res) => {
+  try {
+    const { invoiceNumbers } = req.body;
+    if (!Array.isArray(invoiceNumbers) || invoiceNumbers.length === 0) {
+      return res.json({ success: true, existingInvoices: [] });
+    }
+
+    const existing = await SaleSummary.find({
+      invoiceNumber: { $in: invoiceNumbers }
+    }).distinct("invoiceNumber");
+
+    res.json({ success: true, existingInvoices: existing });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ==========================================
+// NEW ENDPOINT: Validate MR hand stock for import
+// ==========================================
+router.post("/validate-import-mr-stock", protect, async (req, res) => {
+  try {
+    const { invoices } = req.body;
+    if (!invoices || !Array.isArray(invoices)) {
+      return res.status(400).json({ success: false, message: "Invoices array required" });
+    }
+
+    // Build map of (mrName, productName) -> totalRequired, invoice list
+    const productMrMap = new Map(); // key: `${mrName}|${productName}`
+    const mrNameToIdMap = new Map();
+
+    for (const invoice of invoices) {
+      const mrName = invoice.mrName?.trim();
+      if (!mrName) continue;
+
+      for (const product of invoice.products || []) {
+        const productName = product.productName?.trim();
+        const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
+        const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
+        const totalQty = salesQty + bonusQty;
+        if (totalQty <= 0) continue;
+
+        const key = `${mrName}|${productName}`;
+        if (!productMrMap.has(key)) {
+          productMrMap.set(key, {
+            mrName,
+            productName,
+            totalRequired: 0,
+            invoices: [],
+          });
+        }
+        const entry = productMrMap.get(key);
+        entry.totalRequired = fixPrecision(entry.totalRequired + totalQty);
+        entry.invoices.push({
+          invoiceNumber: invoice.invoiceNumber,
+          requiredQty: totalQty,
+        });
+      }
+    }
+
+    // For each (mr, product), query MR hand stock
+    const stockIssues = [];
+    for (const [key, entry] of productMrMap.entries()) {
+      const { mrName, productName, totalRequired } = entry;
+
+      // Find MR id
+      let mrId = mrNameToIdMap.get(mrName);
+      if (!mrId) {
+        const mr = await Staff.findOne({
+          medicalRepNameLower: mrName.toLowerCase(),
+        }).lean();
+        if (!mr) {
+          // MR not found – treat as missing (but MR validation should have caught this)
+          stockIssues.push({
+            mrName,
+            productName,
+            totalRequired,
+            availableStock: 0,
+            insufficientQty: totalRequired,
+            productExists: false,
+            insufficient: true,
+            message: `MR "${mrName}" not found in Staff system`,
+            type: "mr_not_found",
+          });
+          continue;
+        }
+        mrId = mr._id.toString();
+        mrNameToIdMap.set(mrName, mrId);
+      }
+
+      // Find MR stock document
+      let mrStock = null;
+      try {
+        mrStock = await stockInMRHand.findOne({
+          mrId: new mongoose.Types.ObjectId(mrId),
+        }).lean();
+      } catch {
+        mrStock = await stockInMRHand.findOne({ mrId }).lean();
+      }
+
+      if (!mrStock) {
+        stockIssues.push({
+          mrName,
+          productName,
+          totalRequired,
+          availableStock: 0,
+          insufficientQty: totalRequired,
+          productExists: false,
+          insufficient: true,
+          message: `Stock record not found for MR "${mrName}"`,
+          type: "mr_stock_missing",
+        });
+        continue;
+      }
+
+      // Find product in MR's hand
+      const normalizedProductName = productName.toLowerCase().trim();
+      const productInHand = mrStock.productsInHand?.find(
+        (p) => p.productName?.toLowerCase().trim() === normalizedProductName
+      );
+
+      if (!productInHand) {
+        stockIssues.push({
+          mrName,
+          productName,
+          totalRequired,
+          availableStock: 0,
+          insufficientQty: totalRequired,
+          productExists: false,
+          insufficient: true,
+          message: `Product "${productName}" not found in ${mrName}'s hand stock`,
+          type: "product_not_found_in_mr",
+        });
+        continue;
+      }
+
+      const availableStock = fixPrecision(Number(productInHand.quantity) || 0);
+      const insufficient = availableStock < totalRequired;
+      const insufficientQty = insufficient ? totalRequired - availableStock : 0;
+
+      if (insufficient) {
+        stockIssues.push({
+          mrName,
+          productName,
+          totalRequired,
+          availableStock,
+          insufficientQty,
+          productExists: true,
+          insufficient: true,
+          message: `Insufficient MR stock: Required ${totalRequired}, Available ${availableStock}`,
+          type: "insufficient_mr_stock",
+        });
+      }
+    }
+
+    // Summary
+    const summary = {
+      totalProducts: productMrMap.size,
+      totalRequired: Array.from(productMrMap.values()).reduce((s, e) => s + e.totalRequired, 0),
+      totalAvailable: stockIssues.reduce((s, e) => s + (e.availableStock || 0), 0),
+      totalInsufficient: stockIssues.filter(i => i.insufficient && i.productExists).length,
+      missingProducts: stockIssues.filter(i => !i.productExists).length,
+      hasInsufficientStock: stockIssues.some(i => i.insufficient && i.productExists),
+      importBlocked: stockIssues.some(i => i.insufficient && i.productExists),
+    };
+
+    res.json({
+      success: true,
+      validationResult: {
+        stockIssues,
+        totalInvoices: invoices.length,
+        summary,
+        insufficientStockIssues: stockIssues.filter(i => i.productExists && i.insufficient),
+        missingProductIssues: stockIssues.filter(i => !i.productExists),
+        importBlocked: summary.importBlocked,
+        blockReason: summary.importBlocked ? "INSUFFICIENT_MR_STOCK" : (summary.missingProducts > 0 ? "MISSING_PRODUCTS_ONLY" : "NO_ISSUES"),
+        message: summary.importBlocked
+          ? `${summary.totalInsufficient} product(s) have insufficient MR hand stock.`
+          : summary.missingProducts > 0
+            ? `${summary.missingProducts} product(s) not found in MR hand stock.`
+            : "All MR hand stock sufficient.",
+      },
+    });
+  } catch (error) {
+    console.error("MR stock validation error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to validate MR stock",
+      error: error.message,
+    });
+  }
+});
+
 router.get("/debug/customer/:code", async (req, res) => {
   try {
     const result = await getCustomerByCode(req.params.code);
