@@ -89,15 +89,31 @@ const NewCustomerAddition = () => {
 
   // ── Helper: Format date string (YYYY-MM-DD) to "4 March 2026" ───────────
   const formatDateReadable = (dateStr) => {
-    if (!dateStr || dateStr === "N/A") return "N/A";
-    const d = new Date(dateStr + "T00:00:00"); // treat as local midnight
+    if (!dateStr) return "N/A";
+
+    // Extract YYYY-MM-DD from the beginning of the string (handles ISO format)
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const [, year, month, day] = match;
+      // Create a Date in UTC to avoid timezone shifts
+      const date = new Date(Date.UTC(year, month - 1, day));
+      return date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      });
+    }
+
+    // Fallback for other formats (if needed)
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "Invalid Date";
     return d.toLocaleDateString("en-GB", {
       day: "numeric",
-      month: "long",
+      month: "short",
       year: "numeric",
     });
   };
-
   // ── Date helpers ────────────────────────────────────────────────────────
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
@@ -253,6 +269,7 @@ const NewCustomerAddition = () => {
   // ── Fetch customers for modal ───────────────────────────────────────────
   const fetchModalCustomers = async (entity, page = 1) => {
     if (!entity) return;
+
     setModalLoading(true);
     try {
       const dateParams = getDateParams();
@@ -264,10 +281,16 @@ const NewCustomerAddition = () => {
       if (dateParams.startDate) params.startDate = dateParams.startDate;
       if (dateParams.endDate) params.endDate = dateParams.endDate;
 
+      // ── FIX: send correct filter param based on entity type ──
       if (entity.type === "mr") {
-        if (entity.id) params.mrId = entity.id;
-        else params.mrName = entity.name;
+        // Prefer the MongoDB _id; fall back to name
+        if (entity.id && entity.id !== "N/A") {
+          params.mrId = entity.id;
+        } else {
+          params.mrName = entity.name;
+        }
       } else if (entity.type === "zone") {
+        // Zone Wise — send the zone name
         params.zone = entity.name;
       }
 
@@ -534,7 +557,7 @@ const NewCustomerAddition = () => {
               onClick={() =>
                 openCustomerModal({
                   type: "mr",
-                  id: record.mrId,
+                  id: record.medicalRepId, // ── FIX: use medicalRepId (MongoDB ObjectId string)
                   name: record.mrName,
                 })
               }
@@ -575,7 +598,7 @@ const NewCustomerAddition = () => {
             onClick={() =>
               openCustomerModal({
                 type: "zone",
-                name: record.zoneName,
+                name: record.zoneName, // ── correct: zoneName passed as entity.name
               })
             }
             className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200"

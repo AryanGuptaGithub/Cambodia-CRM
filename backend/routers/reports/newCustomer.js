@@ -359,10 +359,6 @@ router.get("/", async (req, res) => {
     });
   }
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /customers — fetch customers for a specific MR or zone (with pagination)
-// ─────────────────────────────────────────────────────────────────────────────
 router.get("/customers", async (req, res) => {
   console.log("🔹 GET /customers - Request received");
   console.log("   Query params:", req.query);
@@ -391,17 +387,28 @@ router.get("/customers", async (req, res) => {
 
     if (mrId) {
       console.log(`   Filter by mrId: ${mrId}`);
-      if (mongoose.Types.ObjectId.isValid(mrId)) {
+
+      // Skip "N/A" or empty values
+      if (mrId === "N/A" || mrId.trim() === "") {
+        console.log("   mrId is N/A or empty – no filter applied");
+        // Do nothing, matchStage remains as is
+      }
+      // Case 1: Valid MongoDB ObjectId
+      else if (mongoose.Types.ObjectId.isValid(mrId)) {
         matchStage.medicalRepId = new mongoose.Types.ObjectId(mrId);
         console.log(`   -> Using as ObjectId: ${matchStage.medicalRepId}`);
-      } else {
-        console.log(`   -> Not a valid ObjectId, treating as custom MRId`);
-        const staff = await Staff.findOne({ MRId: mrId }).lean();
+      }
+      // Case 2: Numeric custom MRId (e.g., "955")
+      else if (/^\d+$/.test(mrId)) {
+        const numericId = parseInt(mrId, 10);
+        const staff = await Staff.findOne({ MRId: numericId }).lean();
         if (staff && staff._id) {
           matchStage.medicalRepId = staff._id;
-          console.log(`   -> Found staff with _id: ${staff._id}`);
+          console.log(
+            `   -> Found staff with numeric MRId ${numericId}, _id: ${staff._id}`,
+          );
         } else {
-          console.log(`   -> No staff found with custom MRId "${mrId}"`);
+          console.log(`   -> No staff found with numeric MRId "${mrId}"`);
           return res.json({
             success: true,
             data: [],
@@ -414,6 +421,13 @@ router.get("/customers", async (req, res) => {
             },
           });
         }
+      }
+      // Case 3: It's a string that looks like an MR name – treat as mrName
+      else {
+        console.log(`   -> Treating "${mrId}" as MR name (fallback)`);
+        matchStage.medicalRepName = {
+          $regex: new RegExp(`^${mrId.trim()}$`, "i"),
+        };
       }
     } else if (mrName) {
       console.log(`   Filter by mrName: ${mrName}`);

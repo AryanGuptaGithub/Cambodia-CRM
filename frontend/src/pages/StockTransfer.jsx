@@ -1784,7 +1784,7 @@ const StockTransfer = () => {
         )}
 
       {/* ── View Modal ────────────────────────────────────────────────────────── */}
-      {isViewModalOpen &&
+       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
@@ -1975,8 +1975,8 @@ const StockTransfer = () => {
                       {form.items && form.items.length > 0 ? (
                         form.items.map((item, index) => {
                           const productCost =
-                            item.itemCost ||
-                            (item.lc || 0) * (item.boxQuantity || 0);
+                           
+                            (item.sellingPrice || 0) * (item.boxQuantity || 0);
                           return (
                             <div
                               key={item._id || index}
@@ -2002,19 +2002,19 @@ const StockTransfer = () => {
                                 </div>
                                 <div>
                                   <label className="block text-sm font-medium text-gray-600">
-                                    LC ($)
+                                    Selling Price ($)
                                   </label>
                                   <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
                                     <DollarSign
                                       size={14}
                                       className="text-green-600"
                                     />
-                                    {formatCurrency(item.lc)}
+                                    {formatCurrency(item.sellingPrice)}
                                   </p>
                                 </div>
                                 <div>
                                   <label className="block text-sm font-medium text-gray-600">
-                                    Total Cost ($)
+                                    Total Selling Price ($)
                                   </label>
                                   <p className="px-3 py-2 rounded bg-white font-medium text-green-700">
                                     ${formatCurrency(productCost)}
@@ -2039,8 +2039,7 @@ const StockTransfer = () => {
                       {form.items && form.items.length > 0 ? (
                         form.items.map((item, index) => {
                           const productCost =
-                            item.itemCost ||
-                            (item.lc || 0) * (item.boxQuantity || 0);
+                            (item.sellingPrice || 0) * (item.boxQuantity || 0);
                           return (
                             <div
                               key={item._id || index}
@@ -2066,19 +2065,19 @@ const StockTransfer = () => {
                                 </div>
                                 <div>
                                   <label className="block text-sm font-medium text-gray-600">
-                                    LC ($)
+                                  Selling Price ($)
                                   </label>
                                   <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
                                     <DollarSign
                                       size={14}
                                       className="text-green-600"
                                     />
-                                    {formatCurrency(item.lc)}
+                                    {formatCurrency(item.sellingPrice)}
                                   </p>
                                 </div>
                                 <div>
                                   <label className="block text-sm font-medium text-gray-600">
-                                    Total Cost ($)
+                                    Total Selling Price ($)
                                   </label>
                                   <p className="px-3 py-2 rounded bg-white font-medium text-green-700">
                                     ${formatCurrency(productCost)}

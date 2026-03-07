@@ -1,24 +1,43 @@
 import mongoose from "mongoose";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Item sub-schema  (one product line inside a transfer)
+// NEW: sellingPrice — fetched from the matching ReportInHand batch and stored
+//      here so the transfer record is self-contained for reporting.
+// ─────────────────────────────────────────────────────────────────────────────
 const itemSchema = new mongoose.Schema({
   productId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Product",
     required: true,
   },
-  productName: String,
+  productName: { type: String, default: "" },
+
   boxQuantity: { type: Number, required: true, default: 0 },
   lc: { type: Number, required: true, default: 0 },
-  // amount = lc * boxQuantity (auto-calculated in pre-save hooks)
+
+  // sellingPrice from the ReportInHand batch (passed in by the route)
+  sellingPrice: { type: Number, default: 0 },
+
+  // amount = lc * boxQuantity  (calculated in pre-save / route)
   amount: { type: Number, default: 0 },
+
+  // productCost = ceil(amount)  — whole-number for display/totalling
   productCost: { type: Number, default: 0 },
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Main transfer schema
+// ─────────────────────────────────────────────────────────────────────────────
 const stockTransferToMRSchema = new mongoose.Schema(
   {
     invoiceNo: { type: String, required: true, unique: true },
     date: { type: String, required: true },
-    transferType: { type: String, enum: ["send", "receive"], required: true },
+    transferType: {
+      type: String,
+      enum: ["send", "receive"],
+      required: true,
+    },
 
     stockTransferToMr: { type: String, default: "" },
     stockTransferFromMrToMain: { type: String, default: "" },
@@ -33,22 +52,26 @@ const stockTransferToMRSchema = new mongoose.Schema(
     remarks: { type: String, default: "" },
     totalTransferCost: { type: Number, default: 0 },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Calculate costs for a list of items.
-// Sets item.lc (from Product if missing), item.amount = lc * boxQuantity,
-// item.productCost = ceil(amount), and returns the total transfer cost.
+// HELPER: Calculate costs for every item in-place.
+// Sets  item.lc (from Product master if missing),
+//       item.amount      = lc * boxQuantity,
+//       item.productCost = ceil(amount)
+// Returns the summed totalTransferCost.
+// NOTE: sellingPrice is NOT recalculated here — it is set by the route before
+//       the document is saved (fetched from ReportInHand batches).
 // ─────────────────────────────────────────────────────────────────────────────
 const calculateItemCosts = async (items) => {
   let totalCost = 0;
 
   for (const item of items) {
-    // Resolve LC from Product if not already set
+    // Resolve LC from Product master when the route didn't provide it
     if (!item.lc && item.productId) {
-      const Product = mongoose.model("Product");
-      const product = await Product.findById(item.productId);
+      const ProductModel = mongoose.model("Product");
+      const product = await ProductModel.findById(item.productId);
       if (product) {
         item.lc = product.lc || product.costPrice || 0;
       }
@@ -57,11 +80,8 @@ const calculateItemCosts = async (items) => {
     const lc = item.lc || 0;
     const qty = item.boxQuantity || 0;
 
-    // amount = lc * boxQuantity (exact, not rounded)
-    item.amount = lc * qty;
-
-    // productCost = ceil(amount) for display/totalling
-    item.productCost = Math.ceil(item.amount);
+    item.amount = lc * qty; // exact
+    item.productCost = Math.ceil(item.amount); // whole number
 
     totalCost += item.productCost;
   }
@@ -82,20 +102,17 @@ stockTransferToMRSchema.pre("save", async function (next) {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Pre-findOneAndUpdate hook – handles both $set operators and direct updates
+// Pre-findOneAndUpdate hook
 // ─────────────────────────────────────────────────────────────────────────────
 stockTransferToMRSchema.pre("findOneAndUpdate", async function (next) {
   try {
     const update = this.getUpdate();
 
-    // If the update uses $set (e.g., { $set: { items: [...] } })
     if (update.$set?.items) {
       update.$set.totalTransferCost = await calculateItemCosts(
-        update.$set.items
+        update.$set.items,
       );
-    }
-    // If the update directly sets the items field (e.g., { items: [...] })
-    else if (update.items) {
+    } else if (update.items) {
       update.totalTransferCost = await calculateItemCosts(update.items);
     }
 
