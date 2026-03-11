@@ -32,7 +32,7 @@ const useMrBasicPayrollForm = () => {
       setMrListLoading(true);
 
       // Use the correct endpoint
-      const endpoint = `${backendUrl}/api/hrm/mr-basic-payrolls/mrs/available`;
+      const endpoint = `${backendUrl}/api/stock-transfer-to-mr/mrs-list`;
       const response = await axios.get(endpoint, {
         timeout: 8000,
         headers: {

@@ -1,12 +1,11 @@
 /**
  * stockTransferToMR.routes.js
  *
- * Dependencies to install in your backend:
- *   npm install xlsx multer
- *
- * Mount in your main app file:
- *   import stockTransferToMRRouter from "./routes/stockTransferToMR.routes.js";
- *   app.use("/api/stock-transfer-to-mr", stockTransferToMRRouter);
+ * FIX: When transferType === "receive", assignedQuantity is now reset to 0
+ *      (same as quantity) instead of keeping the old accumulated value.
+ *      This affects two places:
+ *        1. recomputeMRStock()        — replay logic
+ *        2. returnAllMRStockToWarehouse() — live zeroing of MR stock doc
  */
 
 import express from "express";
@@ -19,6 +18,8 @@ import Product from "../../models/projectManger/product.js";
 import mongoose from "mongoose";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import User from "../../models/User.js";
+import staffSchema from "../../models/staffMember/staff.js";
 
 const router = express.Router();
 
@@ -145,6 +146,14 @@ const getPricesFromReportInHand = async (productName, session) => {
   };
 };
 
+const sendError = (res, error, code = 400) => {
+  console.error("❌ ERROR:", error);
+  res.status(code).json({
+    success: false,
+    message: error.message || "Server error",
+  });
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: Deduct stock from ReportInHand (FIFO)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -257,7 +266,6 @@ const addBackToReportInHand = async (
 const returnAllMRStockToWarehouse = async (mrId, mrName, session) => {
   let mrStock = null;
 
-  // Find the MR's current stock record
   if (mrId) {
     try {
       mrStock = await stockInMRHand
@@ -277,7 +285,6 @@ const returnAllMRStockToWarehouse = async (mrId, mrName, session) => {
 
   const returnedItems = [];
 
-  // Add every product with quantity > 0 back to ReportInHand
   for (const product of mrStock.productsInHand) {
     const qty = product.quantity || 0;
     if (qty <= 0) continue;
@@ -295,7 +302,6 @@ const returnAllMRStockToWarehouse = async (mrId, mrName, session) => {
         sp,
       });
     } catch (err) {
-      // If product somehow not in ReportInHand, create it
       console.warn(
         `addBack failed for ${product.productName}, creating new ReportInHand entry:`,
         err.message,
@@ -334,11 +340,11 @@ const returnAllMRStockToWarehouse = async (mrId, mrName, session) => {
     }
   }
 
-  // Zero out all products in MR stock
+  // ✅ FIX: Zero out BOTH quantity AND assignedQuantity on receive
   mrStock.productsInHand = mrStock.productsInHand.map((p) => ({
     ...p.toObject(),
     quantity: 0,
-    assignedQuantity: p.assignedQuantity || 0, // keep historical assigned
+    assignedQuantity: 0, // was: p.assignedQuantity (kept old value — now correctly reset)
     amount: 0,
     productCost: 0,
   }));
@@ -390,13 +396,13 @@ const recomputeMRStock = async (mrId, mrName, session) => {
   for (const transfer of allTransfers) {
     if (!Array.isArray(transfer.items)) continue;
 
-    // ── On a "receive" transfer: zero out ALL products for this MR ──────
+    // ✅ FIX: On a "receive" transfer — reset BOTH quantity AND assignedQuantity to 0
     if (transfer.transferType === "receive") {
       for (const [key, entry] of productMap.entries()) {
         productMap.set(key, {
           ...entry,
           quantity: 0,
-          assignedQuantity: entry.assignedQuantity,
+          assignedQuantity: 0, // was: entry.assignedQuantity (kept accumulating — now correctly reset)
         });
       }
       continue; // items on receive transfer don't add/change quantities
@@ -886,6 +892,22 @@ router.get("/mr-hand", async (req, res) => {
   }
 });
 
+router.get("/mrs-list", async (_, res) => {
+  try {
+    // 1. Get all user IDs where isActive = true
+    const activeUserIds = await User.find({ isActive: true }).distinct("_id");
+
+    // 2. Find staff whose userId is in the active user IDs array
+    const staff = await staffSchema
+      .find({ userId: { $in: activeUserIds } })
+      .populate("userId", "name email role isActive")
+      .sort({ updatedAt: -1 });
+
+    res.json(staff);
+  } catch (error) {
+    sendError(res, error, 500);
+  }
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /mrs
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1263,7 +1285,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     if (data.transferType === "receive") {
       await returnAllMRStockToWarehouse(mrId, mrName, session);
 
-      // Save the receive transfer record (items are informational only)
       const receiveItems = (data.items || []).map((item) => ({
         ...item,
         productName: item.productName || "Unknown",
@@ -1278,7 +1299,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         { session },
       );
 
-      // Recompute — will zero out MR stock since receive wipes quantities
       await recomputeMRStock(mrId, mrName, session);
 
       await session.commitTransaction();
@@ -1321,7 +1341,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       }),
     );
 
-    // Merge duplicate productId rows
     const mergedItemsMap = new Map();
     for (const item of itemsWithPrices) {
       const key = item.productId?.toString();
@@ -1342,7 +1361,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       { session },
     );
 
-    // Deduct from ReportInHand (FIFO)
     for (const item of mergedItems) {
       const { lc: deductedLC, sellingPrice: deductedSP } =
         await deductFromReportInHand(
@@ -1411,8 +1429,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       "";
 
     if (existing.transferType === "receive") {
-      // For receive updates: undo old return, redo new return
-      // 1. Re-deduct the previously returned stock from ReportInHand
       for (const item of existing.items) {
         if ((item.boxQuantity || 0) <= 0) continue;
         try {
@@ -1429,7 +1445,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         }
       }
 
-      // 2. Return ALL current MR stock back to warehouse (fresh)
       await returnAllMRStockToWarehouse(oldMrId, oldMrName, session);
 
       const receiveItems = (data.items || []).map((item) => ({
@@ -1457,7 +1472,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       });
     }
 
-    // ── SEND update: diff old vs new items ───────────────────────────
     const newItemsWithPrices = await Promise.all(
       data.items.map(async (item) => {
         try {
@@ -1631,8 +1645,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
         );
       }
     } else if (transfer.transferType === "receive") {
-      // Deleting a receive means the stock should go back OUT of warehouse
-      // (undo the return) — deduct it again from ReportInHand
       for (const item of transfer.items) {
         try {
           await deductFromReportInHand(

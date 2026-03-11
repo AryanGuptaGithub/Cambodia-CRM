@@ -22,22 +22,10 @@ function capitalizeFirstLetter(str) {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
-/**
- * Build { invoiceDate: { $gte, $lte } } from period param
- *
- * Supported periods:
- *   today            → today only
- *   month            → current calendar month
- *   jan_feb          → Jan 1 → last day of previous month
- *   last_month       → previous calendar month (legacy)
- *   last_year        → previous full calendar year (legacy)
- *   custom           → uses startDate / endDate params
- *   all              → no filter
- */
 function buildDateFilter(period, startDate, endDate) {
   const now = new Date();
   const yr = now.getFullYear();
-  const mo = now.getMonth(); // 0-indexed
+  const mo = now.getMonth();
 
   const dayStart = (d) => {
     const x = new Date(d);
@@ -64,7 +52,6 @@ function buildDateFilter(period, startDate, endDate) {
     case "jan_feb":
     case "janToPreviousMonth": {
       if (mo === 0) {
-        // January → show all of previous year
         return {
           invoiceDate: {
             $gte: dayStart(new Date(yr - 1, 0, 1)),
@@ -74,8 +61,8 @@ function buildDateFilter(period, startDate, endDate) {
       }
       return {
         invoiceDate: {
-          $gte: dayStart(new Date(yr, 0, 1)), // Jan 1 this year
-          $lte: dayEnd(new Date(yr, mo, 0)), // last day of prev month
+          $gte: dayStart(new Date(yr, 0, 1)),
+          $lte: dayEnd(new Date(yr, mo, 0)),
         },
       };
     }
@@ -108,10 +95,10 @@ function buildDateFilter(period, startDate, endDate) {
   }
 }
 
-/**
- * Core aggregation pipeline — groups by customerCode, flags repeat customers
- */
-function buildPipeline(period, startDate, endDate, search) {
+// ─────────────────────────────────────────────────────────────────────────────
+// AGGREGATION — groups by zone (mrName), then by customer within each zone
+// ─────────────────────────────────────────────────────────────────────────────
+function buildZonePipeline(period, startDate, endDate, search) {
   const dateFilter = buildDateFilter(period, startDate, endDate);
 
   const matchQuery = {
@@ -120,47 +107,84 @@ function buildPipeline(period, startDate, endDate, search) {
     isExchange: { $ne: true },
   };
 
-  if (search && search.trim()) {
-    matchQuery.$or = [
-      { customerName: { $regex: search.trim(), $options: "i" } },
-      { customerCode: { $regex: search.trim(), $options: "i" } },
-      { mrName: { $regex: search.trim(), $options: "i" } },
-    ];
-  }
+  // Search filter applied at customer level before grouping
+  const searchFilter =
+    search && search.trim()
+      ? {
+          $or: [
+            { customerName: { $regex: search.trim(), $options: "i" } },
+            { customerCode: { $regex: search.trim(), $options: "i" } },
+            { mrName: { $regex: search.trim(), $options: "i" } },
+          ],
+        }
+      : null;
 
-  return [
-    { $match: matchQuery },
+  const pipeline = [
+    { $match: { ...matchQuery, ...(searchFilter || {}) } },
+
+    // Group by customer first
     {
       $group: {
         _id: "$customerCode",
         customerName: { $first: "$customerName" },
         customerCode: { $first: "$customerCode" },
         mrName: { $first: "$mrName" },
-        totalPurchases: { $sum: 1 },
-        totalAmount: { $sum: "$totalAmount" },
+        totalSales: { $sum: 1 },
         firstPurchaseDate: { $min: "$invoiceDate" },
         lastPurchaseDate: { $max: "$invoiceDate" },
       },
     },
     {
       $addFields: {
-        isRepeatCustomer: {
-          $cond: {
-            if: { $gte: ["$totalPurchases", 2] },
-            then: true,
-            else: false,
+        isRepeatCustomer: { $gte: ["$totalSales", 2] },
+      },
+    },
+
+    // Group by zone (mrName)
+    {
+      $group: {
+        _id: "$mrName",
+        zoneName: { $first: "$mrName" },
+        totalCustomers: { $sum: 1 },
+        retainedCustomers: {
+          $sum: { $cond: ["$isRepeatCustomer", 1, 0] },
+        },
+        customers: {
+          $push: {
+            customerId: "$_id",
+            customerName: "$customerName",
+            customerCode: "$customerCode",
+            medicalRepName: "$mrName",
+            totalSales: "$totalSales",
+            firstPurchaseDate: "$firstPurchaseDate",
+            lastPurchaseDate: "$lastPurchaseDate",
+            isRepeatCustomer: "$isRepeatCustomer",
           },
         },
       },
     },
-    { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
+    {
+      $addFields: {
+        retentionRate: {
+          $cond: [
+            { $eq: ["$totalCustomers", 0] },
+            0,
+            {
+              $multiply: [
+                { $divide: ["$retainedCustomers", "$totalCustomers"] },
+                100,
+              ],
+            },
+          ],
+        },
+      },
+    },
+    { $sort: { retentionRate: -1, totalCustomers: -1 } },
   ];
+
+  return pipeline;
 }
 
-/**
- * Summary stats — two-stage group (customerCode → global totals)
- * Uses only date filter (not search) so summary cards reflect full period
- */
 async function getSummary(period, startDate, endDate) {
   const dateFilter = buildDateFilter(period, startDate, endDate);
 
@@ -212,6 +236,7 @@ async function getSummary(period, startDate, endDate) {
     newCustomers: 0,
     repeatRate: 0,
   };
+
   return {
     totalCustomers: raw.totalCustomers,
     repeatCustomers: raw.repeatCustomers,
@@ -223,7 +248,7 @@ async function getSummary(period, startDate, endDate) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared GET handler
+// BASE HANDLER — used by /customer-retention and legacy /monthly & /annual
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleGetRequest(req, res, defaultPeriod) {
   try {
@@ -239,7 +264,7 @@ async function handleGetRequest(req, res, defaultPeriod) {
     const pageNum = Math.max(1, parseInt(page, 10));
     const limitNum = Math.max(1, parseInt(limit, 10));
 
-    const basePipeline = buildPipeline(period, startDate, endDate, search);
+    const basePipeline = buildZonePipeline(period, startDate, endDate, search);
 
     const [countResult, records, summary] = await Promise.all([
       SaleSummary.aggregate([...basePipeline, { $count: "total" }]),
@@ -259,14 +284,21 @@ async function handleGetRequest(req, res, defaultPeriod) {
       data: {
         summary,
         records: records.map((r) => ({
-          customerCode: r.customerCode || "",
-          customerName: r.customerName || "N/A",
-          mrName: r.mrName || "",
-          totalPurchases: r.totalPurchases,
-          totalAmount: r.totalAmount || 0,
-          firstPurchaseDate: r.firstPurchaseDate || null,
-          lastPurchaseDate: r.lastPurchaseDate || null,
-          isRepeatCustomer: r.isRepeatCustomer,
+          _id: r._id,
+          zoneName: r.zoneName || r._id || "N/A",
+          totalCustomers: r.totalCustomers || 0,
+          retainedCustomers: r.retainedCustomers || 0,
+          retentionRate: parseFloat((r.retentionRate || 0).toFixed(2)),
+          customers: (r.customers || []).map((c) => ({
+            customerId: c.customerId,
+            customerName: c.customerName || "N/A",
+            customerCode: c.customerCode || "",
+            medicalRepName: c.medicalRepName || "",
+            totalSales: c.totalSales || 0,
+            firstPurchaseDate: c.firstPurchaseDate || null,
+            lastPurchaseDate: c.lastPurchaseDate || null,
+            isRepeatCustomer: c.isRepeatCustomer,
+          })),
         })),
       },
       pagination: {
@@ -278,14 +310,11 @@ async function handleGetRequest(req, res, defaultPeriod) {
       },
     });
   } catch (err) {
-    console.error("❌ Error fetching customer repeat rate:", err);
+    console.error("❌ Error fetching customer retention data:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared Export handler
-// ─────────────────────────────────────────────────────────────────────────────
 async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
   try {
     const {
@@ -296,7 +325,9 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
     } = req.query;
 
     const [records, summary] = await Promise.all([
-      SaleSummary.aggregate(buildPipeline(period, startDate, endDate, search)),
+      SaleSummary.aggregate(
+        buildZonePipeline(period, startDate, endDate, search),
+      ),
       getSummary(period, startDate, endDate),
     ]);
 
@@ -321,11 +352,11 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
       cell.alignment = { horizontal: "center" };
     });
     summarySheet.addRow(["Total Customers", summary.totalCustomers]);
+    summarySheet.addRow(["Retained Customers", summary.retainedCustomers]);
     summarySheet.addRow(["Repeat Customers", summary.repeatCustomers]);
-    summarySheet.addRow(["New Customers", summary.newCustomers]);
     summarySheet.addRow([
-      "Repeat Rate",
-      `${summary.repeatRate?.toFixed(2) || 0}%`,
+      "Retention Rate",
+      `${summary.retentionRate?.toFixed(2) || 0}%`,
     ]);
     summarySheet.addRow(["Period", period]);
     summarySheet.addRow(["Generated On", new Date().toLocaleString()]);
@@ -341,14 +372,14 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
     detailsSheet.addRow([]);
     const detailsHeaderRow = detailsSheet.addRow([
       "Sr.No",
+      "Zone / MR Name",
       "Customer Name",
       "Customer Code",
-      "MR Name",
-      "Total Purchases",
-      "Total Amount",
+      "Total Sales",
       "First Purchase",
       "Last Purchase",
       "Status",
+      "Zone Retention Rate",
     ]);
     detailsHeaderRow.eachCell((cell) => {
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -360,46 +391,38 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
       cell.alignment = { horizontal: "center" };
     });
 
-    records.forEach((record, idx) => {
-      const row = detailsSheet.addRow([
-        idx + 1,
-        capitalizeFirstLetter(record.customerName),
-        record.customerCode || "N/A",
-        record.mrName || "N/A",
-        record.totalPurchases || 0,
-        Number(record.totalAmount || 0).toFixed(2),
-        formatDateForExcel(record.firstPurchaseDate),
-        formatDateForExcel(record.lastPurchaseDate),
-        record.isRepeatCustomer ? "Repeat" : "One-Time",
-      ]);
+    let srNo = 1;
+    records.forEach((zone) => {
+      (zone.customers || []).forEach((customer) => {
+        const row = detailsSheet.addRow([
+          srNo++,
+          zone.zoneName || "N/A",
+          capitalizeFirstLetter(customer.customerName),
+          customer.customerCode || "N/A",
+          customer.totalSales || 0,
+          formatDateForExcel(customer.firstPurchaseDate),
+          formatDateForExcel(customer.lastPurchaseDate),
+          customer.isRepeatCustomer ? "Repeat" : "One-Time",
+          `${(zone.retentionRate || 0).toFixed(1)}%`,
+        ]);
 
-      const statusCell = row.getCell(9);
-      if (record.isRepeatCustomer) {
-        statusCell.font = { bold: true, color: { argb: "166534" } };
-        statusCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "DCFCE7" },
-        };
-      } else {
-        statusCell.font = { bold: true, color: { argb: "991B1B" } };
-        statusCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FEE2E2" },
-        };
-      }
-
-      if (idx % 2 === 1) {
-        row.eachCell((cell, colNum) => {
-          if (colNum !== 9)
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "F5F3FF" },
-            };
-        });
-      }
+        const statusCell = row.getCell(8);
+        if (customer.isRepeatCustomer) {
+          statusCell.font = { bold: true, color: { argb: "166534" } };
+          statusCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "DCFCE7" },
+          };
+        } else {
+          statusCell.font = { bold: true, color: { argb: "991B1B" } };
+          statusCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FEE2E2" },
+          };
+        }
+      });
     });
 
     detailsSheet.columns.forEach((col) => {
@@ -411,7 +434,9 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
       col.width = Math.min(maxLen + 2, 30);
     });
 
-    const fileName = `${sheetTitle.replace(/ /g, "_")}_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const fileName = `${sheetTitle.replace(/ /g, "_")}_${period}_${new Date()
+      .toISOString()
+      .slice(0, 10)}.xlsx`;
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -420,7 +445,7 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
-    console.error("❌ Error exporting repeat rate:", err);
+    console.error("❌ Error exporting customer retention:", err);
     res.status(500).json({
       success: false,
       message: "Failed to export",
@@ -432,6 +457,14 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ✅ NEW — base route that the frontend calls
+router.get("/", (req, res) => handleGetRequest(req, res, "all"));
+router.get("/export", (req, res) =>
+  handleExportRequest(req, res, "all", "Customer Retention Rate"),
+);
+
+// Legacy routes (kept for backward compatibility)
 router.get("/monthly", (req, res) => handleGetRequest(req, res, "last_month"));
 router.get("/monthly/export", (req, res) =>
   handleExportRequest(req, res, "last_month", "Monthly Customer Repeat Rate"),

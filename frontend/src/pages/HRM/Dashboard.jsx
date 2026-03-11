@@ -30,7 +30,7 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
-import { fetchMRList, fetchHRMSalary } from "../../utils/customerUtil";
+import { fetchWholeMRList, fetchHRMSalary } from "../../utils/customerUtil";
 import SampleExcelDownloadStaff from "../../excels/SampleExcelDownloadStaff";
 import { parseExcelDate } from "../../utils/excelUtility";
 
@@ -328,7 +328,7 @@ const Dashboard = () => {
         // Fetch user data
         await fetchUserData();
         // Fetch MR List
-        const mrData = await fetchMRList();
+        const mrData = await fetchWholeMRList();
         setMrList(mrData.data);
 
         // Calculate previous month label

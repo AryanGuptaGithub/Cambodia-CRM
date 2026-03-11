@@ -48,9 +48,20 @@ export const validateCustomerForm = (form) => {
   return newErrors;
 };
 
-export const fetchMRList = async () => {
+export const fetchWholeMRList = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/staff`);
+    const mrData = response.data || [];
+    return { success: true, data: mrData };
+  } catch (error) {
+    console.error("Error fetching MR list:", error);
+    return { success: false, error: "Failed to load Medical Representatives" };
+  }
+};
+
+export const fetchMRList = async () => {
+  try {
+    const response = await axios.get(`${backendUrl}/api/stock-transfer-to-mr/mrs-list`);
     const mrData = response.data || [];
     return { success: true, data: mrData };
   } catch (error) {

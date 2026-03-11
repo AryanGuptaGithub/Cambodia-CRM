@@ -88,6 +88,7 @@ const CustomerRetentionRate = () => {
           params,
         }
       );
+      console.log('values of response', response);
 
       setData(
         response.data.data || {

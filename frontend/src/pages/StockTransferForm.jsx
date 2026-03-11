@@ -218,7 +218,7 @@ const CreateStockTransfer = () => {
     const fetchSendMRList = async () => {
       try {
         setSendMrListLoading(true);
-        const res = await axios.get(`${backendUrl}/api/staff`);
+        const res = await axios.get(`${backendUrl}/api/stock-transfer-to-mr/mrs-list`);
         setSendMrList(res.data || []);
       } catch {
         setSendMrList([]);
