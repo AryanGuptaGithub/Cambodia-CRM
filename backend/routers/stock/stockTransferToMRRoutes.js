@@ -1,4 +1,17 @@
+/**
+ * stockTransferToMR.routes.js
+ *
+ * Dependencies to install in your backend:
+ *   npm install xlsx multer
+ *
+ * Mount in your main app file:
+ *   import stockTransferToMRRouter from "./routes/stockTransferToMR.routes.js";
+ *   app.use("/api/stock-transfer-to-mr", stockTransferToMRRouter);
+ */
+
 import express from "express";
+import multer from "multer";
+import * as XLSX from "xlsx";
 import stockInMRHand from "../../models/stock/stockInMRHand.js";
 import StockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
@@ -10,7 +23,74 @@ import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Recalculate all totals on a ReportInHand document in-place.
+// Multer — store Excel file in memory (no disk writes needed)
+// ─────────────────────────────────────────────────────────────────────────────
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+    ];
+    if (
+      allowed.includes(file.mimetype) ||
+      file.originalname.endsWith(".xlsx") ||
+      file.originalname.endsWith(".xls")
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only .xlsx or .xls files are allowed"));
+    }
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Parse Excel buffer → [{ productName, sendQuantity }]
+// ─────────────────────────────────────────────────────────────────────────────
+const parseExcelBuffer = (buffer) => {
+  const wb = XLSX.read(buffer, { type: "buffer" });
+
+  const sheetName = wb.SheetNames.includes("Transfer Data")
+    ? "Transfer Data"
+    : wb.SheetNames[0];
+
+  const ws = wb.Sheets[sheetName];
+  if (!ws) throw new Error("No valid sheet found in the uploaded Excel file");
+
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  if (!rows.length) throw new Error("The Excel sheet appears to be empty");
+
+  const parsed = [];
+
+  for (const row of rows) {
+    const keys = Object.keys(row);
+
+    const nameKey = keys.find((k) =>
+      k.trim().toLowerCase().includes("product name"),
+    );
+    const qtyKey = keys.find((k) =>
+      k.trim().toLowerCase().includes("send quantity"),
+    );
+
+    if (!nameKey || !qtyKey) continue;
+
+    const productName = String(row[nameKey] || "").trim();
+    if (!productName) continue;
+
+    const rawQty = String(row[qtyKey] || "0").replace(/[^0-9]/g, "");
+    const sendQuantity = parseInt(rawQty, 10);
+
+    if (isNaN(sendQuantity) || sendQuantity <= 0) continue;
+
+    parsed.push({ productName, sendQuantity });
+  }
+
+  return parsed;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Recalculate ReportInHand totals from batches
 // ─────────────────────────────────────────────────────────────────────────────
 const recalcReportTotals = (productStock) => {
   const batchEntries = productStock.batches.filter(
@@ -41,14 +121,7 @@ const recalcReportTotals = (productStock) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Get LC AND sellingPrice from ReportInHand batches for a product.
-//
-// WHAT CHANGED:  previously only lc was returned.  Now we also return
-// sellingPrice so the transfer route can store it on every item and every
-// productsInHand entry.
-//
-// Strategy: use the most-recent batch that still has stock (boxes > 0).
-// Fall back to the last batch in the array if none have stock.
+// HELPER: Get lc + sellingPrice from ReportInHand
 // ─────────────────────────────────────────────────────────────────────────────
 const getPricesFromReportInHand = async (productName, session) => {
   const productStock = await ReportInHand.findOne({
@@ -59,7 +132,6 @@ const getPricesFromReportInHand = async (productName, session) => {
     return { lc: 0, sellingPrice: 0 };
   }
 
-  // Prefer the most-recent batch that still has boxes
   const batchWithStock = [...productStock.batches]
     .reverse()
     .find((b) => (b.boxes || 0) > 0);
@@ -73,15 +145,8 @@ const getPricesFromReportInHand = async (productName, session) => {
   };
 };
 
-// Keep old helper name for backward-compat with receive / addBack paths
-const getLCFromReportInHand = async (productName, session) => {
-  const { lc } = await getPricesFromReportInHand(productName, session);
-  return lc;
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Deduct stock from ReportInHand batches (FIFO).
-// Returns { lc, sellingPrice, deductedAmount }.
+// HELPER: Deduct stock from ReportInHand (FIFO)
 // ─────────────────────────────────────────────────────────────────────────────
 const deductFromReportInHand = async (productName, qty, session) => {
   const productStock = await ReportInHand.findOne({
@@ -142,9 +207,15 @@ const deductFromReportInHand = async (productName, qty, session) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Add stock back to ReportInHand.
+// HELPER: Add stock back to ReportInHand
 // ─────────────────────────────────────────────────────────────────────────────
-const addBackToReportInHand = async (productName, qty, lc, session) => {
+const addBackToReportInHand = async (
+  productName,
+  qty,
+  lc,
+  session,
+  sellingPrice = 0,
+) => {
   const productStock = await ReportInHand.findOne({
     productName: { $regex: new RegExp(`^${productName}$`, "i") },
   }).session(session);
@@ -156,6 +227,8 @@ const addBackToReportInHand = async (productName, qty, lc, session) => {
   if (!lastBatch) throw new Error(`No batch found for ${productName}`);
 
   const useLC = lc || lastBatch.lc || 0;
+  const useSP =
+    sellingPrice || lastBatch.sellingPrice || productStock.sellingPrice || 0;
   const amountToAdd = qty * useLC;
 
   if (Math.abs((lastBatch.lc || 0) - useLC) < 0.001) {
@@ -166,6 +239,7 @@ const addBackToReportInHand = async (productName, qty, lc, session) => {
       batchNo: `BATCH-RETURN-${Date.now()}`,
       boxes: qty,
       lc: useLC,
+      sellingPrice: useSP,
       amount: amountToAdd,
       date: new Date().toISOString().split("T")[0],
       adjustmentType: "batch",
@@ -177,14 +251,106 @@ const addBackToReportInHand = async (productName, qty, lc, session) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Recompute stockInMRHand for one MR from all their transfers.
-//
-// WHAT CHANGED:
-//   • productMap entries now carry sellingPrice.
-//   • sellingPrice is stored on every finalProducts entry.
-//   • It is sourced from:
-//       1. The transfer item's own sellingPrice field (set during POST/PUT)
-//       2. Fallback to ReportInHand batch lookup (for legacy records)
+// HELPER: Return ALL products an MR currently holds back to ReportInHand
+//         Called on every "receive" transfer — full stock return
+// ─────────────────────────────────────────────────────────────────────────────
+const returnAllMRStockToWarehouse = async (mrId, mrName, session) => {
+  let mrStock = null;
+
+  // Find the MR's current stock record
+  if (mrId) {
+    try {
+      mrStock = await stockInMRHand
+        .findOne({ mrId: new mongoose.Types.ObjectId(mrId.toString()) })
+        .session(session);
+    } catch {
+      mrStock = await stockInMRHand.findOne({ mrId }).session(session);
+    }
+  }
+  if (!mrStock && mrName) {
+    mrStock = await stockInMRHand
+      .findOne({ mrName: { $regex: new RegExp(`^${mrName.trim()}$`, "i") } })
+      .session(session);
+  }
+
+  if (!mrStock || !mrStock.productsInHand?.length) return [];
+
+  const returnedItems = [];
+
+  // Add every product with quantity > 0 back to ReportInHand
+  for (const product of mrStock.productsInHand) {
+    const qty = product.quantity || 0;
+    if (qty <= 0) continue;
+
+    const lc = product.lc || 0;
+    const sp = product.sellingPrice || 0;
+
+    try {
+      await addBackToReportInHand(product.productName, qty, lc, session, sp);
+      returnedItems.push({
+        productName: product.productName,
+        productId: product.productId,
+        qty,
+        lc,
+        sp,
+      });
+    } catch (err) {
+      // If product somehow not in ReportInHand, create it
+      console.warn(
+        `addBack failed for ${product.productName}, creating new ReportInHand entry:`,
+        err.message,
+      );
+      await ReportInHand.create(
+        [
+          {
+            productName: product.productName,
+            sellingPrice: sp,
+            batches: [
+              {
+                batchNo: `BATCH-RETURN-${Date.now()}`,
+                boxes: qty,
+                lc,
+                sellingPrice: sp,
+                amount: qty * lc,
+                date: new Date().toISOString().split("T")[0],
+                adjustmentType: "batch",
+              },
+            ],
+            totalBoxes: qty,
+            totalBoxesFromBatches: qty,
+            totalAmount: qty * lc,
+            averagePrice: lc,
+          },
+        ],
+        { session },
+      );
+      returnedItems.push({
+        productName: product.productName,
+        productId: product.productId,
+        qty,
+        lc,
+        sp,
+      });
+    }
+  }
+
+  // Zero out all products in MR stock
+  mrStock.productsInHand = mrStock.productsInHand.map((p) => ({
+    ...p.toObject(),
+    quantity: 0,
+    assignedQuantity: p.assignedQuantity || 0, // keep historical assigned
+    amount: 0,
+    productCost: 0,
+  }));
+  mrStock.totalAmount = 0;
+  mrStock.totalProductCost = 0;
+  await mrStock.save({ session });
+
+  return returnedItems;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Recompute stockInMRHand from all transfers (full replay)
 // ─────────────────────────────────────────────────────────────────────────────
 const recomputeMRStock = async (mrId, mrName, session) => {
   if (!mrId && !mrName) return;
@@ -214,15 +380,29 @@ const recomputeMRStock = async (mrId, mrName, session) => {
   }
   if (orConditions.length === 0) return;
 
-  const allTransfers = await StockTransferToMR.find({
-    $or: orConditions,
-  }).session(session);
+  // Fetch all transfers sorted oldest → newest for correct replay
+  const allTransfers = await StockTransferToMR.find({ $or: orConditions })
+    .sort({ createdAt: 1 })
+    .session(session);
 
   const productMap = new Map();
 
   for (const transfer of allTransfers) {
     if (!Array.isArray(transfer.items)) continue;
 
+    // ── On a "receive" transfer: zero out ALL products for this MR ──────
+    if (transfer.transferType === "receive") {
+      for (const [key, entry] of productMap.entries()) {
+        productMap.set(key, {
+          ...entry,
+          quantity: 0,
+          assignedQuantity: entry.assignedQuantity,
+        });
+      }
+      continue; // items on receive transfer don't add/change quantities
+    }
+
+    // ── On a "send" transfer: accumulate quantities ──────────────────────
     for (const item of transfer.items) {
       const key = item.productId?.toString();
       if (!key) continue;
@@ -232,7 +412,7 @@ const recomputeMRStock = async (mrId, mrName, session) => {
           productId: item.productId,
           productName: item.productName || "Unknown",
           lc: item.lc || 0,
-          sellingPrice: item.sellingPrice || 0, // ← NEW
+          sellingPrice: item.sellingPrice || 0,
           assignedQuantity: 0,
           quantity: 0,
           lastUpdated: transfer.updatedAt || transfer.createdAt || new Date(),
@@ -242,7 +422,7 @@ const recomputeMRStock = async (mrId, mrName, session) => {
       const entry = productMap.get(key);
 
       if (item.lc) entry.lc = item.lc;
-      if (item.sellingPrice) entry.sellingPrice = item.sellingPrice; // ← NEW
+      if (item.sellingPrice) entry.sellingPrice = item.sellingPrice;
       if (item.productName) entry.productName = item.productName;
 
       const transferDate =
@@ -251,17 +431,12 @@ const recomputeMRStock = async (mrId, mrName, session) => {
         entry.lastUpdated = transferDate;
       }
 
-      if (transfer.transferType === "send") {
-        entry.assignedQuantity += item.boxQuantity || 0;
-        entry.quantity += item.boxQuantity || 0;
-      } else if (transfer.transferType === "receive") {
-        entry.quantity = Math.max(0, entry.quantity - (item.boxQuantity || 0));
-        if (entry.quantity === 0) entry.assignedQuantity = 0;
-      }
+      entry.assignedQuantity += item.boxQuantity || 0;
+      entry.quantity += item.boxQuantity || 0;
     }
   }
 
-  // Find or prepare the existing stockInMRHand document
+  // Find or create the MR stock document
   let existingMRStock = null;
   if (mrId) {
     try {
@@ -278,59 +453,21 @@ const recomputeMRStock = async (mrId, mrName, session) => {
       .session(session);
   }
 
-  // Build final product list
+  // Only include products that still have quantity > 0 after replay
   const finalProducts = [];
-
   for (const [, entry] of productMap.entries()) {
-    const transferQty = Math.max(0, entry.quantity);
-    const lc = entry.lc || 0;
-    const sellingPrice = entry.sellingPrice || 0; // ← NEW
-
-    const existingProduct = existingMRStock?.productsInHand?.find(
-      (p) => p.productId?.toString() === entry.productId?.toString(),
-    );
-
-    let finalQty = transferQty;
-    if (existingProduct) {
-      const existingQty = existingProduct.quantity || 0;
-      const existingAssigned = existingProduct.assignedQuantity || 0;
-      const soldQty = Math.max(0, existingAssigned - existingQty);
-      finalQty = Math.max(0, transferQty - soldQty);
-    }
-
-    const finalAssignedQty = finalQty === 0 ? 0 : entry.assignedQuantity;
-
+    if (entry.quantity <= 0) continue;
     finalProducts.push({
       productId: entry.productId,
       productName: entry.productName,
-      quantity: finalQty,
-      assignedQuantity: finalAssignedQty,
-      lc,
-      sellingPrice, // ← NEW
-      amount: lc * finalQty,
-      productCost: Math.ceil(lc * finalQty),
+      quantity: entry.quantity,
+      assignedQuantity: entry.assignedQuantity,
+      lc: entry.lc || 0,
+      sellingPrice: entry.sellingPrice || 0,
+      amount: (entry.lc || 0) * entry.quantity,
+      productCost: Math.ceil((entry.lc || 0) * entry.quantity),
       lastUpdated: entry.lastUpdated,
     });
-  }
-
-  // Preserve products that exist in MR hand but had no transfer record
-  if (existingMRStock) {
-    for (const existingProduct of existingMRStock.productsInHand || []) {
-      const inTransfer = productMap.has(existingProduct.productId?.toString());
-      if (!inTransfer && existingProduct.quantity > 0) {
-        finalProducts.push({
-          productId: existingProduct.productId,
-          productName: existingProduct.productName,
-          quantity: existingProduct.quantity,
-          assignedQuantity: existingProduct.assignedQuantity || 0,
-          lc: existingProduct.lc || 0,
-          sellingPrice: existingProduct.sellingPrice || 0, // ← NEW
-          amount: existingProduct.amount || 0,
-          productCost: existingProduct.productCost || 0,
-          lastUpdated: existingProduct.lastUpdated,
-        });
-      }
-    }
   }
 
   const newTotalAmount = finalProducts.reduce((s, p) => s + (p.amount || 0), 0);
@@ -351,6 +488,7 @@ const recomputeMRStock = async (mrId, mrName, session) => {
       await newMRStock.save({ session });
       return newMRStock;
     }
+    return null;
   } else {
     if (mrId && !existingMRStock.mrId) existingMRStock.mrId = mrId;
     existingMRStock.productsInHand = finalProducts;
@@ -422,33 +560,33 @@ router.get("/mr-stock-by-mr-id/:mrId", async (req, res) => {
           select: "productName lc costPrice",
         });
     } catch {
-      mrStock = await stockInMRHand
-        .findOne({ mrId })
-        .populate({
-          path: "productsInHand.productId",
-          select: "productName lc costPrice",
-        });
+      mrStock = await stockInMRHand.findOne({ mrId }).populate({
+        path: "productsInHand.productId",
+        select: "productName lc costPrice",
+      });
     }
 
     if (!mrStock) {
       return res.json({ success: true, data: null, products: [] });
     }
 
-    const products = (mrStock.productsInHand || []).map((p) => {
-      const lc = p.lc || p.productId?.lc || p.productId?.costPrice || 0;
-      return {
-        _id: p._id?.toString(),
-        productId: (p.productId?._id || p.productId)?.toString(),
-        productName: p.productName || p.productId?.productName || "Unknown",
-        quantity: p.quantity || 0,
-        assignedQuantity: p.assignedQuantity || 0,
-        lc,
-        sellingPrice: p.sellingPrice || 0, // ← NEW
-        amount: p.amount || 0,
-        productCost: p.productCost || 0,
-        lastUpdated: p.lastUpdated,
-      };
-    });
+    const products = (mrStock.productsInHand || [])
+      .filter((p) => (p.quantity || 0) > 0)
+      .map((p) => {
+        const lc = p.lc || p.productId?.lc || p.productId?.costPrice || 0;
+        return {
+          _id: p._id?.toString(),
+          productId: (p.productId?._id || p.productId)?.toString(),
+          productName: p.productName || p.productId?.productName || "Unknown",
+          quantity: p.quantity || 0,
+          assignedQuantity: p.assignedQuantity || 0,
+          lc,
+          sellingPrice: p.sellingPrice || 0,
+          amount: p.amount || 0,
+          productCost: p.productCost || 0,
+          lastUpdated: p.lastUpdated,
+        };
+      });
 
     res.json({
       success: true,
@@ -491,7 +629,7 @@ router.get("/", async (req, res) => {
           return {
             ...itemObj,
             lc,
-            sellingPrice: item.sellingPrice || 0, // ← NEW
+            sellingPrice: item.sellingPrice || 0,
             itemCost,
             productName:
               item.productName ||
@@ -526,6 +664,7 @@ router.get("/mr-hand-admin", async (req, res) => {
     const stockAggregation = [
       matchStage,
       { $unwind: "$productsInHand" },
+      { $match: { "productsInHand.quantity": { $gt: 0 } } },
       {
         $lookup: {
           from: "products",
@@ -560,7 +699,7 @@ router.get("/mr-hand-admin", async (req, res) => {
               else: "$productDetails.lc",
             },
           },
-          sellingPrice: "$productsInHand.sellingPrice", // ← NEW
+          sellingPrice: "$productsInHand.sellingPrice",
           amount: "$productsInHand.amount",
           productCost: "$productsInHand.productCost",
           costPrice: "$productDetails.costPrice",
@@ -621,7 +760,7 @@ router.get("/mr-hand-admin", async (req, res) => {
         boxQuantity: remainingQty,
         quantity: remainingQty,
         lc,
-        sellingPrice: item.sellingPrice || 0, // ← NEW
+        sellingPrice: item.sellingPrice || 0,
         amount,
         productCost,
         unit: item.unit || "pcs",
@@ -677,6 +816,7 @@ router.get("/mr-hand", async (req, res) => {
       .map((mrStock) =>
         (mrStock.productsInHand || [])
           .filter((product) => {
+            if ((product.quantity || 0) <= 0) return false;
             if (!search) return true;
             const name =
               product.productName || product.productId?.productName || "";
@@ -700,11 +840,8 @@ router.get("/mr-hand", async (req, res) => {
               product.productId?.lc ||
               product.productId?.costPrice ||
               0;
-
-            // sellingPrice: prefer stored value, fallback to Product master
             const sellingPrice =
               product.sellingPrice || product.productId?.sellingPrice || 0;
-
             const amount =
               product.amount !== undefined && product.amount !== null
                 ? product.amount
@@ -728,7 +865,7 @@ router.get("/mr-hand", async (req, res) => {
               usedQty,
               utilization,
               lc,
-              sellingPrice, // ← NEW
+              sellingPrice,
               amount,
               productCost,
               assignedDate: product.lastUpdated || mrStock.createdAt,
@@ -768,14 +905,341 @@ router.get("/mrs", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST / — Create new transfer
-//
-// WHAT CHANGED:
-//   • itemsWithLC is now built by getPricesFromReportInHand, which returns
-//     BOTH lc AND sellingPrice from the matching ReportInHand batch.
-//   • sellingPrice is stored on every merged item.
-//   • After deductFromReportInHand (which also returns sellingPrice), the
-//     item's sellingPrice is updated with the actual batch value.
+// POST /validate-excel
+// ─────────────────────────────────────────────────────────────────────────────
+router.post(
+  "/validate-excel",
+  protect,
+  allowAdminOnly,
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res
+          .status(400)
+          .json({ success: false, error: "No file uploaded" });
+      }
+
+      let parsedRows;
+      try {
+        parsedRows = parseExcelBuffer(req.file.buffer);
+      } catch (parseErr) {
+        return res
+          .status(400)
+          .json({ success: false, error: parseErr.message });
+      }
+
+      if (!parsedRows.length) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "No valid rows found in the Excel file. Make sure Send Quantity > 0.",
+        });
+      }
+
+      const warehouseProducts = await Product.find({}).select(
+        "productName lc costPrice totalBoxes _id",
+      );
+
+      const reportInHandDocs = await ReportInHand.find({}).select(
+        "productName totalBoxes batches",
+      );
+
+      const warehouseMap = new Map();
+      for (const p of warehouseProducts) {
+        warehouseMap.set(p.productName.trim().toLowerCase(), p);
+      }
+
+      const reportMap = new Map();
+      for (const r of reportInHandDocs) {
+        reportMap.set(r.productName.trim().toLowerCase(), r.totalBoxes || 0);
+      }
+
+      const matched = [];
+      const errors = [];
+
+      for (const row of parsedRows) {
+        const key = row.productName.toLowerCase();
+        const warehouseProd = warehouseMap.get(key);
+
+        if (!warehouseProd) {
+          errors.push({
+            productName: row.productName,
+            reason: "Product not found in warehouse",
+          });
+          continue;
+        }
+
+        const liveStock = reportMap.has(key)
+          ? reportMap.get(key)
+          : warehouseProd.totalBoxes || 0;
+
+        if (liveStock <= 0) {
+          errors.push({
+            productName: row.productName,
+            reason: "No stock available in warehouse",
+          });
+          continue;
+        }
+
+        let sendQuantity = row.sendQuantity;
+        let warning = null;
+
+        if (sendQuantity > liveStock) {
+          warning = `Requested ${sendQuantity} but only ${liveStock} available — will be clamped`;
+          sendQuantity = liveStock;
+        }
+
+        matched.push({
+          productId: warehouseProd._id,
+          productName: warehouseProd.productName,
+          availableStock: liveStock,
+          requestedQuantity: row.sendQuantity,
+          sendQuantity,
+          lc: warehouseProd.lc || warehouseProd.costPrice || 0,
+          warning: warning || null,
+        });
+      }
+
+      res.json({
+        success: true,
+        matched,
+        errors,
+        summary: {
+          totalRowsInFile: parsedRows.length,
+          matchedCount: matched.length,
+          errorCount: errors.length,
+          totalBoxes: matched.reduce((s, m) => s + m.sendQuantity, 0),
+        },
+      });
+    } catch (err) {
+      console.error("VALIDATE EXCEL ERROR →", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /import-excel
+// ─────────────────────────────────────────────────────────────────────────────
+router.post(
+  "/import-excel",
+  protect,
+  allowAdminOnly,
+  upload.single("file"),
+  async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      if (!req.file) {
+        await session.abortTransaction();
+        return res
+          .status(400)
+          .json({ success: false, error: "No Excel file uploaded" });
+      }
+
+      const { mrId, mrName, date, remarks } = req.body;
+
+      if (!mrId || !mrName) {
+        await session.abortTransaction();
+        return res
+          .status(400)
+          .json({ success: false, error: "mrId and mrName are required" });
+      }
+
+      let parsedRows;
+      try {
+        parsedRows = parseExcelBuffer(req.file.buffer);
+      } catch (parseErr) {
+        await session.abortTransaction();
+        return res
+          .status(400)
+          .json({ success: false, error: parseErr.message });
+      }
+
+      if (!parsedRows.length) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          error:
+            "No valid rows found. Ensure the Send Quantity column has values > 0.",
+        });
+      }
+
+      const warehouseProducts = await Product.find({})
+        .select("productName lc costPrice totalBoxes _id")
+        .session(session);
+
+      const warehouseMap = new Map();
+      for (const p of warehouseProducts) {
+        warehouseMap.set(p.productName.trim().toLowerCase(), p);
+      }
+
+      const items = [];
+      const errors = [];
+
+      for (const row of parsedRows) {
+        const key = row.productName.toLowerCase();
+        const warehouseProd = warehouseMap.get(key);
+
+        if (!warehouseProd) {
+          errors.push({
+            productName: row.productName,
+            reason: "Product not found in warehouse",
+          });
+          continue;
+        }
+
+        const reportStock = await ReportInHand.findOne({
+          productName: {
+            $regex: new RegExp(`^${warehouseProd.productName}$`, "i"),
+          },
+        }).session(session);
+
+        const liveStock =
+          reportStock?.totalBoxes ?? warehouseProd.totalBoxes ?? 0;
+
+        if (liveStock <= 0) {
+          errors.push({
+            productName: row.productName,
+            reason: "No stock available in warehouse",
+          });
+          continue;
+        }
+
+        const sendQuantity = Math.min(row.sendQuantity, liveStock);
+
+        if (sendQuantity < row.sendQuantity) {
+          errors.push({
+            productName: row.productName,
+            reason: `Requested ${row.sendQuantity}, only ${liveStock} available — clamped to ${sendQuantity}`,
+          });
+        }
+
+        items.push({
+          productId: warehouseProd._id,
+          productName: warehouseProd.productName,
+          sendQuantity,
+          lc: warehouseProd.lc || warehouseProd.costPrice || 0,
+        });
+      }
+
+      if (items.length === 0) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          success: false,
+          error:
+            "None of the products in the Excel file matched available warehouse stock.",
+          details: errors,
+        });
+      }
+
+      const itemsWithPrices = await Promise.all(
+        items.map(async (item) => {
+          try {
+            const { lc, sellingPrice } = await getPricesFromReportInHand(
+              item.productName,
+              session,
+            );
+            return {
+              ...item,
+              lc: lc || item.lc || 0,
+              sellingPrice: sellingPrice || 0,
+            };
+          } catch {
+            return { ...item, sellingPrice: 0 };
+          }
+        }),
+      );
+
+      let invoiceNo = req.body.invoiceNo;
+      if (!invoiceNo) {
+        invoiceNo = await generateNextStockTransferNumber();
+      }
+
+      const transferDate = date || new Date().toISOString().split("T")[0];
+
+      const transferItems = itemsWithPrices.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        boxQuantity: item.sendQuantity,
+        lc: item.lc,
+        sellingPrice: item.sellingPrice,
+        productCost: Math.ceil(item.lc * item.sendQuantity),
+        amount: item.lc * item.sendQuantity,
+      }));
+
+      const [newTransfer] = await StockTransferToMR.create(
+        [
+          {
+            invoiceNo,
+            date: transferDate,
+            transferType: "send",
+            mrId,
+            mrName,
+            stockTransferToMr: mrName,
+            stockTransferFromMrToMain: "",
+            remarks: remarks || "",
+            items: transferItems,
+            importedFromExcel: true,
+            originalFileName: req.file.originalname,
+          },
+        ],
+        { session },
+      );
+
+      for (const item of transferItems) {
+        const { lc: deductedLC, sellingPrice: deductedSP } =
+          await deductFromReportInHand(
+            item.productName,
+            item.boxQuantity,
+            session,
+          );
+        item.lc = deductedLC || item.lc;
+        item.sellingPrice = deductedSP || item.sellingPrice;
+        item.amount = item.lc * item.boxQuantity;
+        item.productCost = Math.ceil(item.amount);
+      }
+
+      await StockTransferToMR.findByIdAndUpdate(
+        newTransfer._id,
+        { items: transferItems },
+        { session },
+      );
+
+      await recomputeMRStock(mrId, mrName, session);
+
+      await session.commitTransaction();
+
+      res.status(201).json({
+        success: true,
+        message: `Stock transfer created from Excel. ${items.length} product(s) imported.`,
+        data: {
+          invoiceNo,
+          transferType: "send",
+          mrId,
+          mrName,
+          date: transferDate,
+          itemsImported: items.length,
+          itemsSkipped: errors.length,
+          totalBoxes: transferItems.reduce((s, i) => s + i.boxQuantity, 0),
+          items: transferItems,
+        },
+        warnings: errors,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      console.error("EXCEL IMPORT ERROR →", error);
+      res.status(500).json({ success: false, error: error.message });
+    } finally {
+      session.endSession();
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST / — Create new transfer (manual JSON body)
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
@@ -788,7 +1252,44 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       invoiceNo = await generateNextStockTransferNumber();
     }
 
-    // ── Step 1: Resolve lc + sellingPrice for every item from ReportInHand ──
+    const mrId = data.mrId;
+    const mrName =
+      data.stockTransferToMr ||
+      data.stockTransferFromMrToMain ||
+      data.mrName ||
+      "";
+
+    // ── RECEIVE: return ALL MR stock to warehouse first ───────────────
+    if (data.transferType === "receive") {
+      await returnAllMRStockToWarehouse(mrId, mrName, session);
+
+      // Save the receive transfer record (items are informational only)
+      const receiveItems = (data.items || []).map((item) => ({
+        ...item,
+        productName: item.productName || "Unknown",
+        lc: item.lc || 0,
+        sellingPrice: item.sellingPrice || 0,
+        amount: (item.lc || 0) * (item.boxQuantity || 0),
+        productCost: Math.ceil((item.lc || 0) * (item.boxQuantity || 0)),
+      }));
+
+      const [newTransfer] = await StockTransferToMR.create(
+        [{ ...data, invoiceNo, items: receiveItems }],
+        { session },
+      );
+
+      // Recompute — will zero out MR stock since receive wipes quantities
+      await recomputeMRStock(mrId, mrName, session);
+
+      await session.commitTransaction();
+      return res.status(201).json({
+        success: true,
+        message: "Stock received back to warehouse successfully!",
+        data: newTransfer,
+      });
+    }
+
+    // ── SEND: resolve prices and deduct from warehouse ────────────────
     const itemsWithPrices = await Promise.all(
       data.items.map(async (item) => {
         try {
@@ -806,7 +1307,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
           return {
             ...item,
             lc: lcValue,
-            sellingPrice: item.sellingPrice || sellingPrice || 0, // prefer incoming, then ReportInHand
+            sellingPrice: item.sellingPrice || sellingPrice || 0,
             productName: item.productName || "Unknown",
           };
         } catch {
@@ -820,7 +1321,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       }),
     );
 
-    // ── Step 2: Merge duplicate productId rows ────────────────────────────
+    // Merge duplicate productId rows
     const mergedItemsMap = new Map();
     for (const item of itemsWithPrices) {
       const key = item.productId?.toString();
@@ -829,7 +1330,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         ex.boxQuantity = (ex.boxQuantity || 0) + (item.boxQuantity || 0);
         ex.amount = (ex.lc || 0) * ex.boxQuantity;
         ex.productCost = Math.ceil(ex.amount);
-        // Keep the most recent sellingPrice
         if (item.sellingPrice) ex.sellingPrice = item.sellingPrice;
       } else {
         mergedItemsMap.set(key, { ...item });
@@ -837,99 +1337,32 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     }
     const mergedItems = Array.from(mergedItemsMap.values());
 
-    // ── Step 3: Save the transfer document ───────────────────────────────
     const [newTransfer] = await StockTransferToMR.create(
       [{ ...data, invoiceNo, items: mergedItems }],
       { session },
     );
 
-    // ── Step 4: Deduct / restore ReportInHand stock ───────────────────────
-    if (data.transferType === "send") {
-      for (const item of mergedItems) {
-        const { lc: deductedLC, sellingPrice: deductedSP } =
-          await deductFromReportInHand(
-            item.productName,
-            item.boxQuantity,
-            session,
-          );
-
-        item.lc = deductedLC || item.lc;
-        item.sellingPrice = deductedSP || item.sellingPrice; // ← NEW
-        item.amount = (item.lc || 0) * item.boxQuantity;
-        item.productCost = Math.ceil(item.amount);
-      }
-      // Persist updated lc / sellingPrice back onto the transfer
-      await StockTransferToMR.findByIdAndUpdate(
-        newTransfer._id,
-        { items: mergedItems },
-        { session },
-      );
-    } else if (data.transferType === "receive") {
-      for (const item of mergedItems) {
-        const lcValue = item.lc || 0;
-        const amountToAdd = item.boxQuantity * lcValue;
-        const productStock = await ReportInHand.findOne({
-          productName: { $regex: new RegExp(`^${item.productName}$`, "i") },
-        }).session(session);
-
-        if (!productStock) {
-          await ReportInHand.create(
-            [
-              {
-                productName: item.productName,
-                sellingPrice: item.sellingPrice || 0,
-                batches: [
-                  {
-                    batchNo: `BATCH-RETURN-${Date.now()}`,
-                    boxes: item.boxQuantity,
-                    lc: lcValue,
-                    sellingPrice: item.sellingPrice || 0,
-                    amount: amountToAdd,
-                    date: new Date().toISOString().split("T")[0],
-                    adjustmentType: "batch",
-                  },
-                ],
-                totalBoxes: item.boxQuantity,
-                totalBoxesFromBatches: item.boxQuantity,
-                totalAmount: amountToAdd,
-                averagePrice: lcValue,
-              },
-            ],
-            { session },
-          );
-        } else {
-          const lastBatch =
-            productStock.batches[productStock.batches.length - 1];
-          if (!lastBatch || Math.abs((lastBatch.lc || 0) - lcValue) > 0.001) {
-            productStock.batches.push({
-              batchNo: `BATCH-RETURN-${Date.now()}`,
-              boxes: item.boxQuantity,
-              lc: lcValue,
-              sellingPrice: item.sellingPrice || 0,
-              amount: amountToAdd,
-              date: new Date().toISOString().split("T")[0],
-              adjustmentType: "batch",
-            });
-          } else {
-            lastBatch.boxes += item.boxQuantity;
-            lastBatch.amount = (lastBatch.amount || 0) + amountToAdd;
-          }
-          recalcReportTotals(productStock);
-          await productStock.save({ session });
-        }
-      }
+    // Deduct from ReportInHand (FIFO)
+    for (const item of mergedItems) {
+      const { lc: deductedLC, sellingPrice: deductedSP } =
+        await deductFromReportInHand(
+          item.productName,
+          item.boxQuantity,
+          session,
+        );
+      item.lc = deductedLC || item.lc;
+      item.sellingPrice = deductedSP || item.sellingPrice;
+      item.amount = (item.lc || 0) * item.boxQuantity;
+      item.productCost = Math.ceil(item.amount);
     }
 
-    // ── Step 5: Recompute stockInMRHand ───────────────────────────────────
-    const mrId = data.mrId;
-    const mrName =
-      data.stockTransferToMr ||
-      data.stockTransferFromMrToMain ||
-      data.mrName ||
-      "";
-    if (mrId || mrName) {
-      await recomputeMRStock(mrId, mrName, session);
-    }
+    await StockTransferToMR.findByIdAndUpdate(
+      newTransfer._id,
+      { items: mergedItems },
+      { session },
+    );
+
+    await recomputeMRStock(mrId, mrName, session);
 
     await session.commitTransaction();
     res.status(201).json({
@@ -948,8 +1381,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUT /:id — Update a transfer
-//
-// WHAT CHANGED: sellingPrice is now updated on the merged items alongside lc.
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
@@ -972,8 +1403,61 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       existing.stockTransferFromMrToMain ||
       existing.mrName ||
       "";
+    const newMrId = data.mrId;
+    const newMrName =
+      data.stockTransferToMr ||
+      data.stockTransferFromMrToMain ||
+      data.mrName ||
+      "";
 
-    // Resolve prices for incoming items
+    if (existing.transferType === "receive") {
+      // For receive updates: undo old return, redo new return
+      // 1. Re-deduct the previously returned stock from ReportInHand
+      for (const item of existing.items) {
+        if ((item.boxQuantity || 0) <= 0) continue;
+        try {
+          await deductFromReportInHand(
+            item.productName,
+            item.boxQuantity,
+            session,
+          );
+        } catch (e) {
+          console.warn(
+            `Could not re-deduct ${item.productName} during receive update:`,
+            e.message,
+          );
+        }
+      }
+
+      // 2. Return ALL current MR stock back to warehouse (fresh)
+      await returnAllMRStockToWarehouse(oldMrId, oldMrName, session);
+
+      const receiveItems = (data.items || []).map((item) => ({
+        ...item,
+        productName: item.productName || "Unknown",
+        lc: item.lc || 0,
+        sellingPrice: item.sellingPrice || 0,
+        amount: (item.lc || 0) * (item.boxQuantity || 0),
+        productCost: Math.ceil((item.lc || 0) * (item.boxQuantity || 0)),
+      }));
+
+      const updated = await StockTransferToMR.findByIdAndUpdate(
+        id,
+        { ...data, items: receiveItems },
+        { new: true, runValidators: true, session },
+      );
+
+      await recomputeMRStock(newMrId, newMrName, session);
+
+      await session.commitTransaction();
+      return res.json({
+        success: true,
+        message: "Receive transfer updated successfully",
+        data: updated,
+      });
+    }
+
+    // ── SEND update: diff old vs new items ───────────────────────────
     const newItemsWithPrices = await Promise.all(
       data.items.map(async (item) => {
         try {
@@ -1030,104 +1514,51 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           boxQuantity: item.boxQuantity || 0,
           productName: item.productName,
           lc: item.lc || 0,
-          sellingPrice: item.sellingPrice || 0, // ← NEW
+          sellingPrice: item.sellingPrice || 0,
         });
       }
     }
 
-    if (existing.transferType === "send") {
-      for (const [key, oldItem] of oldItemsMap.entries()) {
-        const newItem = newItemsMap.get(key);
-        const diff = (newItem?.boxQuantity || 0) - (oldItem.boxQuantity || 0);
+    for (const [key, oldItem] of oldItemsMap.entries()) {
+      const newItem = newItemsMap.get(key);
+      const diff = (newItem?.boxQuantity || 0) - (oldItem.boxQuantity || 0);
 
-        if (newItem) {
-          if (diff > 0) {
-            const { sellingPrice: sp } = await deductFromReportInHand(
-              oldItem.productName,
-              diff,
-              session,
-            );
-            if (sp) newItem.sellingPrice = sp;
-          } else if (diff < 0) {
-            await addBackToReportInHand(
-              oldItem.productName,
-              Math.abs(diff),
-              oldItem.lc,
-              session,
-            );
-          }
-        } else {
-          await addBackToReportInHand(
-            oldItem.productName,
-            oldItem.boxQuantity,
-            oldItem.lc,
-            session,
-          );
-        }
-      }
-
-      for (const [key, newItem] of newItemsMap.entries()) {
-        if (!oldItemsMap.has(key)) {
+      if (newItem) {
+        if (diff > 0) {
           const { sellingPrice: sp } = await deductFromReportInHand(
-            newItem.productName,
-            newItem.boxQuantity,
+            oldItem.productName,
+            diff,
             session,
           );
           if (sp) newItem.sellingPrice = sp;
-        }
-      }
-    } else if (existing.transferType === "receive") {
-      for (const [key, oldItem] of oldItemsMap.entries()) {
-        const newItem = newItemsMap.get(key);
-        const diff = (newItem?.boxQuantity || 0) - (oldItem.boxQuantity || 0);
-
-        if (newItem) {
-          if (diff > 0) {
-            const lcValue = newItem.lc || oldItem.lc || 0;
-            const productStock = await ReportInHand.findOne({
-              productName: {
-                $regex: new RegExp(`^${oldItem.productName}$`, "i"),
-              },
-            }).session(session);
-
-            if (productStock) {
-              const lastBatch =
-                productStock.batches[productStock.batches.length - 1];
-              const amountToAdd = diff * lcValue;
-              if (
-                !lastBatch ||
-                Math.abs((lastBatch.lc || 0) - lcValue) > 0.001
-              ) {
-                productStock.batches.push({
-                  batchNo: `BATCH-RETURN-${Date.now()}`,
-                  boxes: diff,
-                  lc: lcValue,
-                  sellingPrice: newItem.sellingPrice || 0,
-                  amount: amountToAdd,
-                  date: new Date().toISOString().split("T")[0],
-                  adjustmentType: "batch",
-                });
-              } else {
-                lastBatch.boxes += diff;
-                lastBatch.amount = (lastBatch.amount || 0) + amountToAdd;
-              }
-              recalcReportTotals(productStock);
-              await productStock.save({ session });
-            }
-          } else if (diff < 0) {
-            await deductFromReportInHand(
-              oldItem.productName,
-              Math.abs(diff),
-              session,
-            );
-          }
-        } else {
-          await deductFromReportInHand(
+        } else if (diff < 0) {
+          await addBackToReportInHand(
             oldItem.productName,
-            oldItem.boxQuantity,
+            Math.abs(diff),
+            oldItem.lc,
             session,
+            oldItem.sellingPrice,
           );
         }
+      } else {
+        await addBackToReportInHand(
+          oldItem.productName,
+          oldItem.boxQuantity,
+          oldItem.lc,
+          session,
+          oldItem.sellingPrice,
+        );
+      }
+    }
+
+    for (const [key, newItem] of newItemsMap.entries()) {
+      if (!oldItemsMap.has(key)) {
+        const { sellingPrice: sp } = await deductFromReportInHand(
+          newItem.productName,
+          newItem.boxQuantity,
+          session,
+        );
+        if (sp) newItem.sellingPrice = sp;
       }
     }
 
@@ -1136,13 +1567,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       { ...data, items: mergedNewItems },
       { new: true, runValidators: true, session },
     );
-
-    const newMrId = data.mrId;
-    const newMrName =
-      data.stockTransferToMr ||
-      data.stockTransferFromMrToMain ||
-      data.mrName ||
-      "";
 
     const mrChanged =
       (oldMrId?.toString() || "") !== (newMrId?.toString() || "") ||
@@ -1203,15 +1627,25 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
           item.boxQuantity,
           item.lc || 0,
           session,
+          item.sellingPrice || 0,
         );
       }
     } else if (transfer.transferType === "receive") {
+      // Deleting a receive means the stock should go back OUT of warehouse
+      // (undo the return) — deduct it again from ReportInHand
       for (const item of transfer.items) {
-        await deductFromReportInHand(
-          item.productName,
-          item.boxQuantity,
-          session,
-        );
+        try {
+          await deductFromReportInHand(
+            item.productName,
+            item.boxQuantity,
+            session,
+          );
+        } catch (e) {
+          console.warn(
+            `Could not re-deduct ${item.productName} on receive delete:`,
+            e.message,
+          );
+        }
       }
     }
 
@@ -1270,15 +1704,23 @@ router.delete(
             item.boxQuantity,
             item.lc || 0,
             session,
+            item.sellingPrice || 0,
           );
         }
       } else if (transfer.transferType === "receive") {
         for (const item of transfer.items) {
-          await deductFromReportInHand(
-            item.productName,
-            item.boxQuantity,
-            session,
-          );
+          try {
+            await deductFromReportInHand(
+              item.productName,
+              item.boxQuantity,
+              session,
+            );
+          } catch (e) {
+            console.warn(
+              `Could not re-deduct ${item.productName} on receive delete:`,
+              e.message,
+            );
+          }
         }
       }
 
@@ -1301,7 +1743,7 @@ router.delete(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /recompute/:mrName — Admin utility
+// POST /recompute/:mrName
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/recompute/:mrName", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
@@ -1326,7 +1768,7 @@ router.post("/recompute/:mrName", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /recompute-all — Admin utility
+// POST /recompute-all
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/recompute-all", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
@@ -1397,7 +1839,7 @@ router.post("/recompute-all", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /merge-duplicate-mr-stocks — Admin utility
+// POST /merge-duplicate-mr-stocks
 // ─────────────────────────────────────────────────────────────────────────────
 router.post(
   "/merge-duplicate-mr-stocks",
@@ -1443,7 +1885,7 @@ router.post(
                 (Number(dupProduct.assignedQuantity) || 0);
               if (dupProduct.lc) p.lc = dupProduct.lc;
               if (dupProduct.sellingPrice)
-                p.sellingPrice = dupProduct.sellingPrice; // ← NEW
+                p.sellingPrice = dupProduct.sellingPrice;
             } else {
               primary.productsInHand.push(dupProduct);
             }

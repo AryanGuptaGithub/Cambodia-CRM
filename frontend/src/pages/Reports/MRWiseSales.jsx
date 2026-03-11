@@ -33,7 +33,7 @@ const MRWiseSales = () => {
     records: [],
   });
   const [loading, setLoading] = useState(false);
-  const [selectedTab, setSelectedTab] = useState("all");
+  const [selectedTab, setSelectedTab] = useState("currentMonth");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
     startDate: null,
@@ -478,16 +478,6 @@ const MRWiseSales = () => {
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           <button
-            onClick={() => handleTabChange("all")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "all"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            All Records
-          </button>
-          <button
             onClick={() => handleTabChange("currentMonth")}
             className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
               selectedTab === "currentMonth"
@@ -516,6 +506,16 @@ const MRWiseSales = () => {
             }`}
           >
             MR Wise Sales Filter
+          </button>
+               <button
+            onClick={() => handleTabChange("all")}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              selectedTab === "all"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            All Records
           </button>
         </div>
 

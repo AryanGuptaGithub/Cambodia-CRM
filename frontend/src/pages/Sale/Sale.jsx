@@ -590,13 +590,426 @@ const MRValidationModal = ({
   );
 };
 
-// ==========================================
-// FailedInvoicesModal (unchanged, but we keep it)
-// ==========================================
 const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
-  // ... (original implementation, omitted for brevity but must be kept)
-  // In a real answer we would include the full implementation.
-  // Since it's long, we'll assume it's present.
+  const [searchTerm, setSearchTerm] = useState("");
+  const [expandedRow, setExpandedRow] = useState(null);
+  const [filterType, setFilterType] = useState("all");
+
+  if (!isOpen) return null;
+
+  const list = failedInvoices || [];
+
+  // ── Map each error to a friendly category ────────────────────────────
+  const classify = (inv) => {
+    const msg = (inv.message || inv.error || "").toLowerCase();
+    const type = (inv.type || "").toLowerCase();
+
+    if (
+      type === "duplicate_skipped" ||
+      msg.includes("duplicate") ||
+      msg.includes("already exists")
+    )
+      return {
+        label: "Duplicate",
+        color: "bg-yellow-100 text-yellow-700 border-yellow-300",
+      };
+    if (
+      type === "mr_validation_error" ||
+      (msg.includes("mr") && msg.includes("not found"))
+    )
+      return {
+        label: "MR Not Found",
+        color: "bg-purple-100 text-purple-700 border-purple-300",
+      };
+    if (msg.includes("insufficient") && msg.includes("stock"))
+      return {
+        label: "Insufficient Stock",
+        color: "bg-orange-100 text-orange-700 border-orange-300",
+      };
+    if (msg.includes("product") && msg.includes("not found"))
+      return {
+        label: "Product Missing",
+        color: "bg-blue-100 text-blue-700 border-blue-300",
+      };
+    if (msg.includes("customer"))
+      return {
+        label: "Customer Issue",
+        color: "bg-pink-100 text-pink-700 border-pink-300",
+      };
+    if (
+      type === "validation_error" ||
+      msg.includes("required") ||
+      msg.includes("invalid")
+    )
+      return {
+        label: "Validation Error",
+        color: "bg-gray-100 text-gray-700 border-gray-300",
+      };
+    return {
+      label: "Import Error",
+      color: "bg-red-100 text-red-700 border-red-300",
+    };
+  };
+
+  // ── Count by category ────────────────────────────────────────────────
+  const summary = list.reduce((acc, inv) => {
+    const { label } = classify(inv);
+    acc[label] = (acc[label] || 0) + 1;
+    return acc;
+  }, {});
+
+  // ── Filter ───────────────────────────────────────────────────────────
+  const filtered = list.filter((inv) => {
+    const matchesType =
+      filterType === "all" || classify(inv).label === filterType;
+    const q = searchTerm.toLowerCase().trim();
+    const matchesSearch =
+      !q ||
+      String(inv.invoiceNumber || "")
+        .toLowerCase()
+        .includes(q) ||
+      String(inv.mrName || "")
+        .toLowerCase()
+        .includes(q) ||
+      String(inv.customerName || "")
+        .toLowerCase()
+        .includes(q) ||
+      String(inv.message || inv.error || "")
+        .toLowerCase()
+        .includes(q);
+    return matchesType && matchesSearch;
+  });
+
+  // ── Download as Excel ────────────────────────────────────────────────
+  const downloadReport = () => {
+    try {
+      const rows = list.map((inv, idx) => ({
+        "S.No": idx + 1,
+        "Row (Excel)": inv.row || "",
+        "Invoice Number": inv.invoiceNumber || "Unknown",
+        "MR Name": inv.mrName || "",
+        "Customer Name": inv.customerName || "",
+        "Error Category": classify(inv).label,
+        "Reason / Message": inv.message || inv.error || "Unknown error",
+        "Error Type Code": inv.type || "",
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [
+        { wch: 6 },
+        { wch: 10 },
+        { wch: 20 },
+        { wch: 22 },
+        { wch: 26 },
+        { wch: 22 },
+        { wch: 80 },
+        { wch: 22 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Failed Invoices");
+      XLSX.writeFile(
+        wb,
+        `failed_invoices_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      showToast("success", "Failed invoices report downloaded");
+    } catch (err) {
+      console.error(err);
+      showToast("error", "Failed to download report");
+    }
+  };
+
+  // ── Fix hints ────────────────────────────────────────────────────────
+  const fixTips = {
+    Duplicate:
+      "These invoices already exist. Remove them from your Excel file and re-import.",
+    "MR Not Found":
+      "The MR name doesn't match any Staff record. Add the MR in Staff module first or correct the spelling.",
+    "Insufficient Stock":
+      "Not enough stock in warehouse / MR hand. Top up stock first or reduce quantities in your file.",
+    "Product Missing":
+      "Product doesn't exist in inventory. Add it in the Product module first.",
+    "Customer Issue":
+      "Customer code not found. Verify it exists in the Customer module.",
+    "Validation Error":
+      "Required fields are missing or have invalid values (e.g. Invoice Number or Qty).",
+    "Import Error":
+      "Unexpected error. Read the full reason below and fix the data in your file.",
+  };
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+      <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl relative max-h-[92vh] flex flex-col">
+        {/* ── Header ─────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h2 className="text-xl font-bold text-red-700 flex items-center gap-2">
+              <AlertCircle size={22} />
+              {list.length} Invoice{list.length !== 1 ? "s" : ""} Failed to
+              Import
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Review the reasons below, fix the issues in your Excel file, then
+              re-import.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-700 cursor-pointer flex-shrink-0 ml-4 mt-1"
+          >
+            <X size={22} />
+          </button>
+        </div>
+
+        {/* ── Scrollable body ────────────────────────────────────── */}
+        <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
+          {/* Summary pills (clickable filter) */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1">
+              Filter by:
+            </span>
+            {Object.entries(summary).map(([label, count]) => {
+              const { color } = classify({
+                message: label.toLowerCase(),
+                type: "",
+              });
+              const active = filterType === label;
+              return (
+                <button
+                  key={label}
+                  onClick={() => setFilterType(active ? "all" : label)}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer select-none transition-all
+                    ${color}
+                    ${active ? "ring-2 ring-offset-1 ring-current shadow-sm scale-105" : "opacity-75 hover:opacity-100"}`}
+                >
+                  {label}: {count}
+                </button>
+              );
+            })}
+            {filterType !== "all" && (
+              <button
+                onClick={() => setFilterType("all")}
+                className="text-xs text-gray-400 hover:text-gray-600 underline px-2"
+              >
+                Show all
+              </button>
+            )}
+          </div>
+
+          {/* Search + download */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search
+                size={14}
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
+              />
+              <input
+                type="text"
+                placeholder="Search invoice #, MR name, error message…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-200 outline-none"
+              />
+            </div>
+            <button
+              onClick={downloadReport}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer"
+            >
+              <Download size={15} />
+              Download Report (.xlsx)
+            </button>
+          </div>
+
+          {/* Table */}
+          {filtered.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">
+              {searchTerm || filterType !== "all"
+                ? "No results match your search / filter."
+                : "No failed invoices to display."}
+            </div>
+          ) : (
+            <>
+              <div className="border border-gray-200 rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-red-50 text-red-800">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold w-16">
+                        Row
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold min-w-[130px]">
+                        Invoice No
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold min-w-[120px]">
+                        MR Name
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold min-w-[130px]">
+                        Customer
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold min-w-[140px]">
+                        Error Type
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold">
+                        Reason
+                      </th>
+                      <th className="px-4 py-3 w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((inv, idx) => {
+                      const { label, color } = classify(inv);
+                      const reason =
+                        inv.message || inv.error || "Unknown error";
+                      const isLong = reason.length > 90;
+                      const isExpanded = expandedRow === idx;
+
+                      return (
+                        <React.Fragment key={idx}>
+                          <tr
+                            className={`border-t transition-colors ${
+                              isExpanded
+                                ? "bg-red-50"
+                                : idx % 2 === 0
+                                  ? "bg-white"
+                                  : "bg-gray-50/50"
+                            }`}
+                          >
+                            {/* Row # */}
+                            <td className="px-4 py-3 text-gray-400 text-xs font-mono">
+                              {inv.row ? `#${inv.row}` : "—"}
+                            </td>
+
+                            {/* Invoice number */}
+                            <td className="px-4 py-3 font-semibold text-gray-800">
+                              {inv.invoiceNumber || "Unknown"}
+                            </td>
+
+                            {/* MR name */}
+                            <td className="px-4 py-3 text-gray-600 text-xs">
+                              {inv.mrName || "—"}
+                            </td>
+
+                            {/* Customer */}
+                            <td className="px-4 py-3 text-gray-600 text-xs">
+                              {inv.customerName || "—"}
+                            </td>
+
+                            {/* Error badge */}
+                            <td className="px-4 py-3">
+                              <span
+                                className={`text-xs font-semibold px-2 py-1 rounded-full border ${color}`}
+                              >
+                                {label}
+                              </span>
+                            </td>
+
+                            {/* Reason (truncated) */}
+                            <td className="px-4 py-3 text-red-700 text-xs max-w-xs leading-relaxed">
+                              {isLong && !isExpanded
+                                ? `${reason.slice(0, 90)}…`
+                                : reason}
+                            </td>
+
+                            {/* Expand */}
+                            <td className="px-3 py-3 text-center">
+                              {isLong && (
+                                <button
+                                  onClick={() =>
+                                    setExpandedRow(isExpanded ? null : idx)
+                                  }
+                                  className="text-gray-400 hover:text-gray-700 cursor-pointer"
+                                  title={
+                                    isExpanded ? "Collapse" : "See full reason"
+                                  }
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown size={15} />
+                                  ) : (
+                                    <ChevronRight size={15} />
+                                  )}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+
+                          {/* Expanded full-error panel */}
+                          {isExpanded && (
+                            <tr className="border-t border-red-100 bg-red-50">
+                              <td colSpan={7} className="px-6 py-3 space-y-2">
+                                {/* Full error message */}
+                                <div className="bg-white border border-red-200 rounded-lg p-3 text-xs text-red-800 font-mono break-all whitespace-pre-wrap leading-relaxed">
+                                  {reason}
+                                </div>
+
+                                {/* Fix hint */}
+                                {fixTips[label] && (
+                                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                    <AlertTriangle
+                                      size={13}
+                                      className="flex-shrink-0 mt-0.5"
+                                    />
+                                    <span>
+                                      <strong>How to fix:</strong>{" "}
+                                      {fixTips[label]}
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {(searchTerm || filterType !== "all") && (
+                <p className="text-xs text-gray-400 text-right">
+                  Showing {filtered.length} of {list.length} failed invoices
+                </p>
+              )}
+            </>
+          )}
+
+          {/* ── Fix guide ──────────────────────────────────────────── */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <p className="text-sm font-bold text-amber-800 mb-3 flex items-center gap-2">
+              <AlertTriangle size={16} />
+              Common Causes &amp; How to Fix Them
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
+              {Object.entries(fixTips).map(([cat, tip]) => (
+                <div
+                  key={cat}
+                  className="flex items-start gap-1.5 text-xs text-amber-700"
+                >
+                  <span className="font-bold flex-shrink-0 mt-0.5">•</span>
+                  <span>
+                    <strong>{cat}:</strong> {tip}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Footer ─────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex-shrink-0">
+          <p className="text-xs text-gray-500">
+            {list.length} invoice{list.length !== 1 ? "s" : ""} failed
+            &nbsp;·&nbsp; Fix the issues &nbsp;·&nbsp; Re-import your corrected
+            file
+          </p>
+          <button
+            onClick={onClose}
+            className="px-5 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-sm font-medium cursor-pointer transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 };
 
 // ==========================================

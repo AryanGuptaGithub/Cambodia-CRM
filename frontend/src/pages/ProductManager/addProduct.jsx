@@ -163,8 +163,6 @@ const AddProduct = () => {
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.message || "Failed to add product");
-      showToast("success", data.message || "Product added successfully");
-
       setForm({
         productName: "",
         type: "",

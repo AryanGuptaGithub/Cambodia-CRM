@@ -1,5 +1,4 @@
 import express from "express";
-import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import Product from "../../models/projectManger/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
@@ -8,274 +7,274 @@ import Purchase from "../../models/purcharsing/purchaseInventory.js";
 
 const router = express.Router();
 
-// Helper function to normalize product names for matching
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Normalize product names for matching
+// ─────────────────────────────────────────────────────────────────────────────
 const normalizeProductName = (name) => {
   if (!name) return "";
   return name
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, " ") // Replace multiple spaces with single space
-    .replace(/[^\w\s]/g, "") // Remove special characters
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s]/g, "")
     .trim();
 };
 
-// Get product report with profit margin calculation
-// CHANGED: removed duplicate "/product-report" prefix
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Weighted average price across all filtered sales
+// Formula: sum(netSellingAmount) / sum(salesQty + bonusQty)
+// ─────────────────────────────────────────────────────────────────────────────
+const calculateWeightedAveragePrice = (salesArray) => {
+  const totalAmount = salesArray.reduce(
+    (s, sale) => s + (sale.netSellingAmount || 0),
+    0,
+  );
+  const totalQty = salesArray.reduce((s, sale) => s + (sale.totalQty || 0), 0);
+  if (totalQty === 0) return 0;
+  return totalAmount / totalQty;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CORE: Build processed product list (shared by /report and /export/excel)
+// ─────────────────────────────────────────────────────────────────────────────
+async function buildProductReport(period, month, year) {
+  const [products, reportInHands, saleSummaries, purchases] = await Promise.all(
+    [
+      Product.find({}).lean(),
+      ReportInHand.find({}).lean(),
+      SaleSummary.find({}).lean(),
+      Purchase.find({}).lean(),
+    ],
+  );
+
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1;
+  const currentYear = currentDate.getFullYear();
+
+  const filterMonth = parseInt(month || currentMonth);
+  const filterYear = parseInt(year || currentYear);
+
+  return products.map((product) => {
+    // ── ReportInHand ───────────────────────────────────────────────────────
+    const reportInHand = reportInHands.find(
+      (r) =>
+        r.productName &&
+        normalizeProductName(r.productName) ===
+          normalizeProductName(product.productName),
+    );
+
+    // ── Purchase data for LC / FOB ─────────────────────────────────────────
+    let purchaseProduct;
+    const purchaseData = purchases.find((p) =>
+      p.products?.some(
+        (prod) =>
+          normalizeProductName(prod.productName) ===
+          normalizeProductName(product.productName),
+      ),
+    );
+    if (purchaseData) {
+      purchaseProduct = purchaseData.products.find(
+        (prod) =>
+          normalizeProductName(prod.productName) ===
+          normalizeProductName(product.productName),
+      );
+    }
+
+    const lcPrice = purchaseProduct?.lc || product.lc || 0;
+    const fobPrice = purchaseProduct?.fob || product.fob || 0;
+    const sellingPrice = product.sellingPrice || 0;
+    const productNorm = normalizeProductName(product.productName);
+
+    // ── Collect all matching sales ─────────────────────────────────────────
+    const allSales = [];
+    saleSummaries.forEach((sale) => {
+      if (!sale.products?.length) return;
+      sale.products.forEach((sp) => {
+        if (!sp.productName || !productNorm) return;
+        const spNorm = normalizeProductName(sp.productName);
+        const matched =
+          spNorm === productNorm ||
+          spNorm.includes(productNorm) ||
+          productNorm.includes(spNorm);
+        if (!matched) return;
+
+        const saleDate = new Date(sale.invoiceDate || sale.createdAt);
+        const salesQty = sp.salesQty || sp.qty || 0;
+        const bonusQty = sp.bonusQty || 0;
+        const totalQty = sp.totalQty || salesQty + bonusQty;
+        // netSellingAmount = amount after discount — this is the true revenue
+        const netSellingAmount = sp.netSellingAmount || sp.amount || 0;
+
+        allSales.push({
+          date: saleDate,
+          salesQty,
+          bonusQty,
+          totalQty, // salesQty + bonusQty
+          netSellingAmount, // revenue for this line
+          invoiceNumber: sale.invoiceNumber,
+          customerName: sale.customerName,
+        });
+      });
+    });
+
+    // ── Filter sales by selected period ───────────────────────────────────
+    let filteredSales;
+    if (period === "month") {
+      filteredSales = allSales.filter((s) => {
+        const d = new Date(s.date);
+        return (
+          d.getMonth() + 1 === filterMonth && d.getFullYear() === filterYear
+        );
+      });
+    } else if (period === "year") {
+      filteredSales = allSales.filter(
+        (s) => new Date(s.date).getFullYear() === filterYear,
+      );
+    } else {
+      filteredSales = allSales;
+    }
+
+    // ── Period totals ──────────────────────────────────────────────────────
+    const periodSalesAmount = filteredSales.reduce(
+      (s, x) => s + x.netSellingAmount,
+      0,
+    );
+    const periodSoldQuantity = filteredSales.reduce(
+      (s, x) => s + x.totalQty,
+      0,
+    );
+
+    // ── WEIGHTED AVERAGE PRICE ─────────────────────────────────────────────
+    // = sum(netSellingAmount) / sum(salesQty + bonusQty)
+    // e.g. 85457.08 / 5033.8 = 16.98  (NOT the catalogue price of 18)
+    const weightedAveragePrice = calculateWeightedAveragePrice(filteredSales);
+
+    // ── Profit ─────────────────────────────────────────────────────────────
+    let profitMargin = 0;
+    let profitAmount = 0;
+    if (periodSoldQuantity > 0 && lcPrice > 0) {
+      profitAmount = periodSalesAmount - periodSoldQuantity * lcPrice;
+      profitMargin =
+        periodSalesAmount > 0 ? (profitAmount / periodSalesAmount) * 100 : 0;
+    }
+
+    // ── Sold this/last month ───────────────────────────────────────────────
+    const soldThisMonth = allSales
+      .filter((s) => {
+        const d = new Date(s.date);
+        return (
+          d.getMonth() + 1 === currentMonth && d.getFullYear() === currentYear
+        );
+      })
+      .reduce((s, x) => s + x.totalQty, 0);
+
+    const lastMonthNum = currentMonth === 1 ? 12 : currentMonth - 1;
+    const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+    const soldLastMonth = allSales
+      .filter((s) => {
+        const d = new Date(s.date);
+        return (
+          d.getMonth() + 1 === lastMonthNum && d.getFullYear() === lastMonthYear
+        );
+      })
+      .reduce((s, x) => s + x.totalQty, 0);
+
+    const currentStock = parseFloat(
+      Number(reportInHand?.totalBoxes || 0).toFixed(2),
+    );
+    const status = reportInHand?.status || "Unknown";
+
+    return {
+      _id: product._id,
+      name: product.productName,
+      category: product.type || "Uncategorized",
+      sku: product.packing || "N/A",
+      currentStock,
+      // ── price = weighted average price for the selected period ──────────
+      // Formula: sum(netSellingAmount) / sum(salesQty + bonusQty)
+      price: weightedAveragePrice,
+      weightedAveragePrice,
+      sellingPrice, // original catalogue price (kept for reference)
+      cost: lcPrice,
+      lcPrice,
+      fobPrice,
+      totalSales: periodSalesAmount,
+      soldThisMonth,
+      soldLastMonth,
+      periodSales: periodSalesAmount,
+      periodSoldQuantity,
+      profitMargin: `${profitMargin.toFixed(2)}%`,
+      profitAmount,
+      profitMarginValue: profitMargin,
+      enabled: true,
+      status,
+      supplierName: product.supplierName,
+      createdAt: product.createdAt,
+      salesData: allSales,
+      filteredSales,
+      hasSales: allSales.length > 0,
+    };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /report
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/report", async (req, res) => {
   try {
     const { period, month, year, searchTerm, category } = req.query;
-    const products = await Product.find({}).lean();
-    const normalizedProductMap = {};
-    products.forEach((product) => {
-      if (product.productName) {
-        const normalized = normalizeProductName(product.productName);
-        normalizedProductMap[normalized] = product;
-      }
-    });
 
-    const reportInHands = await ReportInHand.find({}).lean();
-    const saleSummaries = await SaleSummary.find({}).lean();
-    const purchases = await Purchase.find({}).lean();
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth() + 1;
-    const currentYear = currentDate.getFullYear();
-    const processedProducts = products.map((product, index) => {
-      const reportInHand = reportInHands.find((r) => {
-        if (!r.productName || !product.productName) return false;
-        const normalizedR = normalizeProductName(r.productName);
-        const normalizedP = normalizeProductName(product.productName);
-        return normalizedR === normalizedP;
-      });
+    let processedProducts = await buildProductReport(period, month, year);
 
-      const purchaseData = purchases.find((p) => {
-        if (!p.products) return false;
-        return p.products.some((prod) => {
-          if (!prod.productName || !product.productName) return false;
-          const normalizedProd = normalizeProductName(prod.productName);
-          const normalizedProduct = normalizeProductName(product.productName);
-          return normalizedProd === normalizedProduct;
-        });
-      });
-
-      let purchaseProduct;
-      if (purchaseData) {
-        purchaseProduct = purchaseData.products.find((prod) => {
-          if (!prod.productName || !product.productName) return false;
-          const normalizedProd = normalizeProductName(prod.productName);
-          const normalizedProduct = normalizeProductName(product.productName);
-          return normalizedProd === normalizedProduct;
-        });
-      }
-
-      const lcPrice = purchaseProduct?.lc || product.lc || 0;
-      const fobPrice = purchaseProduct?.fob || product.fob || 0;
-      const sellingPrice = product.sellingPrice || 0;
-      const allSales = [];
-      let totalSalesAmount = 0;
-      let totalSoldQuantity = 0;
-
-      // Normalize product name for matching
-      const productNormalizedName = product.productName
-        ? normalizeProductName(product.productName)
-        : "";
-
-      saleSummaries.forEach((sale, saleIndex) => {
-        if (sale.products && sale.products.length > 0) {
-          sale.products.forEach((saleProduct, spIndex) => {
-            if (saleProduct.productName && productNormalizedName) {
-              const saleProductNormalizedName = normalizeProductName(
-                saleProduct.productName
-              );
-              if (
-                saleProductNormalizedName === productNormalizedName ||
-                saleProductNormalizedName.includes(productNormalizedName) ||
-                productNormalizedName.includes(saleProductNormalizedName)
-              ) {
-                const saleDate = new Date(sale.invoiceDate || sale.createdAt);
-                const saleMonth = saleDate.getMonth() + 1;
-                const saleYear = saleDate.getFullYear();
-                const quantity =
-                  saleProduct.salesQty ||
-                  saleProduct.totalQty ||
-                  saleProduct.quantity ||
-                  saleProduct.qty ||
-                  0;
-                const price =
-                  saleProduct.sellingPrice ||
-                  saleProduct.price ||
-                  saleProduct.rate ||
-                  sellingPrice;
-
-                const amount = quantity * price;
-
-                allSales.push({
-                  date: saleDate,
-                  quantity: quantity,
-                  price: price,
-                  amount: amount,
-                  invoiceNumber: sale.invoiceNumber,
-                  customerName: sale.customerName,
-                  saleProductName: saleProduct.productName, // For debugging
-                  matchedProductName: product.productName, // For debugging
-                });
-
-                totalSoldQuantity += quantity;
-                totalSalesAmount += amount;
-              }
-            }
-          });
-        }
-      });
-
-      let filteredSales = [];
-      let filterMonth = parseInt(month || currentMonth);
-      let filterYear = parseInt(year || currentYear);
-
-      if (period === "month") {
-        filteredSales = allSales.filter((sale) => {
-          const saleDate = new Date(sale.date);
-          return (
-            saleDate.getMonth() + 1 === filterMonth &&
-            saleDate.getFullYear() === filterYear
-          );
-        });
-      } else if (period === "year") {
-        filteredSales = allSales.filter((sale) => {
-          const saleDate = new Date(sale.date);
-          return saleDate.getFullYear() === filterYear;
-        });
-      } else {
-        filteredSales = allSales;
-      }
-
-      // Calculate period sales
-      const periodSalesAmount = filteredSales.reduce(
-        (sum, sale) => sum + sale.amount,
-        0
-      );
-      const periodSoldQuantity = filteredSales.reduce(
-        (sum, sale) => sum + sale.quantity,
-        0
-      );
-
-      let profitMargin = 0;
-      let profitAmount = 0;
-
-      if (periodSoldQuantity > 0 && lcPrice > 0) {
-        const totalCost = periodSoldQuantity * lcPrice;
-        profitAmount = periodSalesAmount - totalCost;
-        // Calculate profit margin as percentage of sales (standard business practice)
-        profitMargin =
-          periodSalesAmount > 0 ? (profitAmount / periodSalesAmount) * 100 : 0;
-      } 
-
-      const rawCurrentStock = reportInHand?.totalBoxes || 0;
-      const currentStock = parseFloat(Number(rawCurrentStock).toFixed(2));
-      const status = reportInHand?.status || "Unknown";
-    
-      return {
-        _id: product._id,
-        name: product.productName,
-        category: product.type || "Uncategorized",
-        sku: product.packing || "N/A",
-        currentStock: currentStock,
-        price: sellingPrice,
-        cost: lcPrice,
-        lcPrice: lcPrice,
-        fobPrice: fobPrice,
-        totalSales: periodSalesAmount, // Use period sales for display
-        soldThisMonth: allSales
-          .filter((sale) => {
-            const saleDate = new Date(sale.date);
-            return (
-              saleDate.getMonth() + 1 === currentMonth &&
-              saleDate.getFullYear() === currentYear
-            );
-          })
-          .reduce((sum, sale) => sum + sale.quantity, 0),
-        soldLastMonth: allSales
-          .filter((sale) => {
-            const saleDate = new Date(sale.date);
-            const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1;
-            const lastMonthYear =
-              currentMonth === 1 ? currentYear - 1 : currentYear;
-            return (
-              saleDate.getMonth() + 1 === lastMonth &&
-              saleDate.getFullYear() === lastMonthYear
-            );
-          })
-          .reduce((sum, sale) => sum + sale.quantity, 0),
-        periodSales: periodSalesAmount,
-        periodSoldQuantity: periodSoldQuantity,
-        profitMargin: `${profitMargin.toFixed(2)}%`,
-        profitAmount: profitAmount,
-        profitMarginValue: profitMargin,
-        enabled: true,
-        status: status,
-        supplierName: product.supplierName,
-        createdAt: product.createdAt,
-        salesData: allSales,
-        filteredSales: filteredSales,
-        hasSales: allSales.length > 0, // Add flag to check if product has sales
-      };
-    });
-
-    const productsWithoutSales = processedProducts.filter((p) => !p.hasSales);
-    let filteredProducts = [...processedProducts];
-
+    // ── Filters ────────────────────────────────────────────────────────────
     if (searchTerm) {
-      const originalCount = filteredProducts.length;
-      filteredProducts = filteredProducts.filter(
-        (product) =>
-          product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          product.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          product.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          product.supplierName?.toLowerCase().includes(searchTerm.toLowerCase())
+      const q = searchTerm.toLowerCase();
+      processedProducts = processedProducts.filter(
+        (p) =>
+          p.name?.toLowerCase().includes(q) ||
+          p.category?.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          p.supplierName?.toLowerCase().includes(q),
       );
     }
-    // Apply category filter
     if (category) {
-      const beforeCount = filteredProducts.length;
-      filteredProducts = filteredProducts.filter(
-        (product) => product.category === category
+      processedProducts = processedProducts.filter(
+        (p) => p.category === category,
       );
     }
 
-    const totalSales = filteredProducts.reduce(
-      (sum, p) => sum + p.periodSales,
-      0
+    // ── Summary ────────────────────────────────────────────────────────────
+    const totalSales = processedProducts.reduce((s, p) => s + p.periodSales, 0);
+    const totalProfit = processedProducts.reduce(
+      (s, p) => s + p.profitAmount,
+      0,
     );
-    const totalProfit = filteredProducts.reduce(
-      (sum, p) => sum + p.profitAmount,
-      0
-    );
-    const totalStock = filteredProducts.reduce(
-      (sum, p) => sum + p.currentStock,
-      0
+    const totalStock = processedProducts.reduce(
+      (s, p) => s + p.currentStock,
+      0,
     );
     const avgProfitMargin =
-      filteredProducts.length > 0
-        ? filteredProducts.reduce(
-            (sum, p) => sum + (p.profitMarginValue || 0),
-            0
-          ) / filteredProducts.length
+      processedProducts.length > 0
+        ? processedProducts.reduce(
+            (s, p) => s + (p.profitMarginValue || 0),
+            0,
+          ) / processedProducts.length
         : 0;
 
     res.json({
       success: true,
-      products: filteredProducts,
-      total: filteredProducts.length,
+      products: processedProducts,
+      total: processedProducts.length,
       summary: {
-        totalProducts: filteredProducts.length,
-        totalSales: totalSales,
-        totalProfit: totalProfit,
-        avgProfitMargin: avgProfitMargin,
-        totalStock: totalStock,
+        totalProducts: processedProducts.length,
+        totalSales,
+        totalProfit,
+        avgProfitMargin,
+        totalStock,
       },
     });
   } catch (error) {
     console.error("❌ PRODUCT REPORT ERROR:", error);
-    console.error("Error stack:", error.stack);
     res.status(500).json({
       success: false,
       error: "Failed to generate product report",
@@ -285,48 +284,117 @@ router.get("/report", async (req, res) => {
   }
 });
 
-// Export product report to Excel
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /fix-average-prices  (one-time admin utility)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/fix-average-prices", async (req, res) => {
+  try {
+    const saleSummaries = await SaleSummary.find({});
+    let updatedCount = 0;
+    let errorCount = 0;
+
+    for (const sale of saleSummaries) {
+      if (!sale.products?.length) continue;
+      let changed = false;
+
+      sale.products.forEach((product) => {
+        const salesQty = product.salesQty || 0;
+        const bonusQty = product.bonusQty || 0;
+        const totalQty = salesQty + bonusQty;
+        const netSellingAmount =
+          product.netSellingAmount || product.amount || 0;
+        const correctAvg = totalQty > 0 ? netSellingAmount / totalQty : 0;
+
+        if (Math.abs((product.averageUnitPrice || 0) - correctAvg) > 0.001) {
+          product.averageUnitPrice = correctAvg;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        try {
+          await sale.save();
+          updatedCount++;
+        } catch (err) {
+          console.error(`Failed sale ${sale._id}:`, err.message);
+          errorCount++;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Fixed averageUnitPrice for ${updatedCount} sale records`,
+      updatedCount,
+      errorCount,
+      totalProcessed: saleSummaries.length,
+    });
+  } catch (error) {
+    console.error("❌ FIX AVERAGE PRICES ERROR:", error);
+    res
+      .status(500)
+      .json({
+        success: false,
+        error: "Failed to fix average prices",
+        message: error.message,
+      });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /export/excel
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/export/excel", async (req, res) => {
   try {
     const { period, month, year, searchTerm, category } = req.query;
-    const response = await fetchProductReportData(
-      period,
-      month,
-      year,
-      searchTerm,
-      category
-    );
-    const products = response.products;
+    let products = await buildProductReport(period, month, year);
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      products = products.filter(
+        (p) =>
+          p.name?.toLowerCase().includes(q) ||
+          p.category?.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          p.supplierName?.toLowerCase().includes(q),
+      );
+    }
+    if (category) {
+      products = products.filter((p) => p.category === category);
+    }
+
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Product Report System";
     workbook.created = new Date();
-
     const worksheet = workbook.addWorksheet("Product Report");
-    d;
+
+    const currentDate = new Date();
+    const cm = currentDate.getMonth() + 1;
+    const cy = currentDate.getFullYear();
+
     let salesColumnHeader = "Total Sales";
-    if (period === "month") {
-      salesColumnHeader = `Sales (Month ${month || new Date().getMonth() + 1})`;
-    } else if (period === "year") {
-      salesColumnHeader = `Sales (Year ${year || new Date().getFullYear()})`;
-    }
+    if (period === "month") salesColumnHeader = `Sales (Month ${month || cm})`;
+    else if (period === "year")
+      salesColumnHeader = `Sales (Year ${year || cy})`;
 
     worksheet.columns = [
       { header: "Product Name", key: "name", width: 30 },
       { header: "Category", key: "category", width: 20 },
       { header: "SKU/Packing", key: "sku", width: 15 },
       { header: "Current Stock", key: "currentStock", width: 15 },
-      { header: "Selling Price ($)", key: "price", width: 15 },
+      // Avg Price = sum(netSellingAmount) / sum(salesQty + bonusQty) for period
+      { header: "Avg Price ($)", key: "price", width: 18 },
+      { header: "Catalogue Price ($)", key: "sellingPrice", width: 18 },
       { header: "LC Price ($)", key: "lcPrice", width: 15 },
       { header: "FOB Price ($)", key: "fobPrice", width: 15 },
-      { header: salesColumnHeader + " ($)", key: "periodSales", width: 20 },
-      { header: "Quantity Sold", key: "periodSoldQuantity", width: 15 },
-      { header: "Profit Amount ($)", key: "profitAmount", width: 15 },
-      { header: "Profit Margin (%)", key: "profitMargin", width: 15 },
+      { header: salesColumnHeader + " ($)", key: "periodSales", width: 22 },
+      { header: "Qty Sold", key: "periodSoldQuantity", width: 13 },
+      { header: "Profit Amount ($)", key: "profitAmount", width: 16 },
+      { header: "Profit Margin (%)", key: "profitMargin", width: 16 },
       { header: "Supplier", key: "supplierName", width: 25 },
       { header: "Status", key: "status", width: 15 },
     ];
 
-    // Style the header row
     worksheet.getRow(1).font = { bold: true };
     worksheet.getRow(1).fill = {
       type: "pattern",
@@ -334,14 +402,14 @@ router.get("/export/excel", async (req, res) => {
       fgColor: { argb: "FFE0E0E0" },
     };
 
-    // Add data rows
-    products.forEach((product, index) => {
+    products.forEach((product) => {
       const row = worksheet.addRow({
         name: product.name,
         category: product.category,
         sku: product.sku,
         currentStock: product.currentStock,
-        price: product.price.toFixed(2),
+        price: product.price.toFixed(4), // weighted avg price
+        sellingPrice: product.sellingPrice.toFixed(2),
         lcPrice: product.lcPrice.toFixed(2),
         fobPrice: product.fobPrice.toFixed(2),
         periodSales: product.periodSales.toFixed(2),
@@ -352,79 +420,64 @@ router.get("/export/excel", async (req, res) => {
         status: product.status,
       });
 
-      const profitMarginCell = row.getCell("profitMargin");
-      const profitValue = product.profitMarginValue || 0;
-
-      if (profitValue > 25) {
-        profitMarginCell.fill = {
+      const pv = product.profitMarginValue || 0;
+      const pmCell = row.getCell("profitMargin");
+      if (pv > 25) {
+        pmCell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFC6EFCE" },
         };
-        profitMarginCell.font = { color: { argb: "FF006100" } };
-      } else if (profitValue > 15) {
-        profitMarginCell.fill = {
+        pmCell.font = { color: { argb: "FF006100" } };
+      } else if (pv > 15) {
+        pmCell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFFFEB9C" },
         };
-        profitMarginCell.font = { color: { argb: "FF9C6500" } };
-      } else if (profitValue > 0) {
-        profitMarginCell.fill = {
+        pmCell.font = { color: { argb: "FF9C6500" } };
+      } else if (pv > 0) {
+        pmCell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFFFC7CE" },
         };
-        profitMarginCell.font = { color: { argb: "FF9C0006" } };
+        pmCell.font = { color: { argb: "FF9C0006" } };
       }
 
-      // Style status cells
-      const statusCell = row.getCell("status");
+      const stCell = row.getCell("status");
       if (product.status === "In Stock") {
-        statusCell.fill = {
+        stCell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFC6EFCE" },
         };
-        statusCell.font = { color: { argb: "FF006100" } };
+        stCell.font = { color: { argb: "FF006100" } };
       } else if (product.status === "Low Stock") {
-        statusCell.fill = {
+        stCell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFFFEB9C" },
         };
-        statusCell.font = { color: { argb: "FF9C6500" } };
+        stCell.font = { color: { argb: "FF9C6500" } };
       } else {
-        statusCell.fill = {
+        stCell.fill = {
           type: "pattern",
           pattern: "solid",
           fgColor: { argb: "FFFFC7CE" },
         };
-        statusCell.font = { color: { argb: "FF9C0006" } };
+        stCell.font = { color: { argb: "FF9C0006" } };
       }
     });
-
-    const totalSales = products.reduce((sum, p) => sum + p.periodSales, 0);
-    const totalProfit = products.reduce((sum, p) => sum + p.profitAmount, 0);
-    const totalStock = products.reduce((sum, p) => sum + p.currentStock, 0);
-    const avgProfitMargin =
-      products.length > 0
-        ? products.reduce((sum, p) => sum + (p.profitMarginValue || 0), 0) /
-          products.length
-        : 0;
 
     worksheet.addRow({});
-
-    // Add summary row
     const summaryRow = worksheet.addRow({
       name: "TOTAL SUMMARY",
-      periodSales: totalSales.toFixed(2),
-      profitAmount: totalProfit.toFixed(2),
-      profitMargin: `${avgProfitMargin.toFixed(2)}%`,
-      currentStock: totalStock.toFixed(2),
+      periodSales: products.reduce((s, p) => s + p.periodSales, 0).toFixed(2),
+      profitAmount: products.reduce((s, p) => s + p.profitAmount, 0).toFixed(2),
+      profitMargin: `${products.length > 0 ? (products.reduce((s, p) => s + (p.profitMarginValue || 0), 0) / products.length).toFixed(2) : "0.00"}%`,
+      currentStock: products.reduce((s, p) => s + p.currentStock, 0).toFixed(2),
     });
-
-    // Style total row
     summaryRow.font = { bold: true };
     summaryRow.fill = {
       type: "pattern",
@@ -432,43 +485,30 @@ router.get("/export/excel", async (req, res) => {
       fgColor: { argb: "FFD9E1F2" },
     };
 
-    worksheet.columns.forEach((column, colIndex) => {
-      let maxLength = 0;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const columnLength = cell.value ? cell.value.toString().length : 10;
-        if (columnLength > maxLength) {
-          maxLength = columnLength;
-        }
+    worksheet.columns.forEach((col) => {
+      let max = 0;
+      col.eachCell({ includeEmpty: true }, (cell) => {
+        const len = cell.value ? cell.value.toString().length : 10;
+        if (len > max) max = len;
       });
-      column.width = maxLength < 10 ? 10 : maxLength + 2;
+      col.width = Math.max(max + 2, 10);
     });
 
-    const currentDate = new Date();
-    const currentMonth = currentDate.getMonth() + 1;
-    const currentYear = currentDate.getFullYear();
-
-    // Generate filename based on period
     let fileName = "product-report";
-    if (period === "month") {
-      fileName = `product-report-month-${month || currentMonth}-${
-        year || currentYear
-      }`;
-    } else if (period === "year") {
-      fileName = `product-report-year-${year || currentYear}`;
-    }
+    if (period === "month")
+      fileName = `product-report-month-${month || cm}-${year || cy}`;
+    else if (period === "year") fileName = `product-report-year-${year || cy}`;
     fileName += ".xlsx";
+
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
-
-    // Write workbook to response
     await workbook.xlsx.write(res);
     res.end();
   } catch (error) {
     console.error("❌ EXCEL EXPORT ERROR:", error);
-    console.error("Error stack:", error.stack);
     res.status(500).json({
       success: false,
       error: "Failed to export product report",
@@ -477,190 +517,5 @@ router.get("/export/excel", async (req, res) => {
     });
   }
 });
-
-// Helper function to fetch product report data
-async function fetchProductReportData(
-  period,
-  month,
-  year,
-  searchTerm,
-  category
-) {
-  const products = await Product.find({}).lean();
-  const reportInHands = await ReportInHand.find({}).lean();
-  const saleSummaries = await SaleSummary.find({}).lean();
-  const purchases = await Purchase.find({}).lean();
-  const currentDate = new Date();
-  const currentMonth = currentDate.getMonth() + 1;
-  const currentYear = currentDate.getFullYear();
-
-  const processedProducts = products.map((product) => {
-    // Find corresponding report in hand data
-    const reportInHand = reportInHands.find((r) => {
-      if (!r.productName || !product.productName) return false;
-      const normalizedR = normalizeProductName(r.productName);
-      const normalizedP = normalizeProductName(product.productName);
-      return normalizedR === normalizedP;
-    });
-
-    // Find purchase data for LC price
-    const purchaseData = purchases.find((p) => {
-      if (!p.products) return false;
-      return p.products.some((prod) => {
-        if (!prod.productName || !product.productName) return false;
-        const normalizedProd = normalizeProductName(prod.productName);
-        const normalizedProduct = normalizeProductName(product.productName);
-        return normalizedProd === normalizedProduct;
-      });
-    });
-
-    let purchaseProduct;
-    if (purchaseData) {
-      purchaseProduct = purchaseData.products.find((prod) => {
-        if (!prod.productName || !product.productName) return false;
-        const normalizedProd = normalizeProductName(prod.productName);
-        const normalizedProduct = normalizeProductName(product.productName);
-        return normalizedProd === normalizedProduct;
-      });
-    }
-
-    const lcPrice = purchaseProduct?.lc || product.lc || 0;
-    const fobPrice = purchaseProduct?.fob || product.fob || 0;
-    const sellingPrice = product.sellingPrice || 0;
-
-    // Calculate sales data
-    const allSales = [];
-    const productNormalizedName = product.productName
-      ? normalizeProductName(product.productName)
-      : "";
-
-    saleSummaries.forEach((sale) => {
-      if (sale.products && sale.products.length > 0) {
-        sale.products.forEach((saleProduct) => {
-          if (saleProduct.productName && productNormalizedName) {
-            const saleProductNormalizedName = normalizeProductName(
-              saleProduct.productName
-            );
-
-            if (
-              saleProductNormalizedName === productNormalizedName ||
-              saleProductNormalizedName.includes(productNormalizedName) ||
-              productNormalizedName.includes(saleProductNormalizedName)
-            ) {
-              const saleDate = new Date(sale.invoiceDate || sale.createdAt);
-              const quantity =
-                saleProduct.salesQty ||
-                saleProduct.totalQty ||
-                saleProduct.quantity ||
-                saleProduct.qty ||
-                0;
-              const price =
-                saleProduct.sellingPrice ||
-                saleProduct.price ||
-                saleProduct.rate ||
-                sellingPrice;
-              const amount = quantity * price;
-
-              allSales.push({
-                date: saleDate,
-                quantity: quantity,
-                price: price,
-                amount: amount,
-              });
-            }
-          }
-        });
-      }
-    });
-
-    // Filter sales based on period
-    let filteredSales = [];
-    let filterMonth = parseInt(month || currentMonth);
-    let filterYear = parseInt(year || currentYear);
-
-    if (period === "month") {
-      filteredSales = allSales.filter((sale) => {
-        const saleDate = new Date(sale.date);
-        return (
-          saleDate.getMonth() + 1 === filterMonth &&
-          saleDate.getFullYear() === filterYear
-        );
-      });
-    } else if (period === "year") {
-      filteredSales = allSales.filter((sale) => {
-        const saleDate = new Date(sale.date);
-        return saleDate.getFullYear() === filterYear;
-      });
-    } else {
-      filteredSales = allSales;
-    }
-
-    const periodSalesAmount = filteredSales.reduce(
-      (sum, sale) => sum + sale.amount,
-      0
-    );
-    const periodSoldQuantity = filteredSales.reduce(
-      (sum, sale) => sum + sale.quantity,
-      0
-    );
-
-    // Calculate profit margin
-    let profitMargin = 0;
-    let profitAmount = 0;
-
-    if (periodSoldQuantity > 0 && lcPrice > 0) {
-      const totalCost = periodSoldQuantity * lcPrice;
-      profitAmount = periodSalesAmount - totalCost;
-      profitMargin =
-        periodSalesAmount > 0 ? (profitAmount / periodSalesAmount) * 100 : 0;
-    }
-
-    // Format current stock
-    const rawCurrentStock = reportInHand?.totalBoxes || 0;
-    const currentStock = parseFloat(Number(rawCurrentStock).toFixed(2));
-    const status = reportInHand?.status || "Unknown";
-
-    return {
-      _id: product._id,
-      name: product.productName,
-      category: product.type || "Uncategorized",
-      sku: product.packing || "N/A",
-      currentStock: currentStock,
-      price: sellingPrice,
-      cost: lcPrice,
-      lcPrice: lcPrice,
-      fobPrice: fobPrice,
-      periodSales: periodSalesAmount,
-      periodSoldQuantity: periodSoldQuantity,
-      profitMargin: `${profitMargin.toFixed(2)}%`,
-      profitAmount: profitAmount,
-      profitMarginValue: profitMargin,
-      enabled: true,
-      status: status,
-      supplierName: product.supplierName,
-    };
-  });
-
-  // Apply filters
-  let filteredProducts = [...processedProducts];
-
-  if (searchTerm) {
-    filteredProducts = filteredProducts.filter(
-      (product) =>
-        product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.supplierName?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }
-
-  if (category) {
-    filteredProducts = filteredProducts.filter(
-      (product) => product.category === category
-    );
-  }
-
-  return { products: filteredProducts };
-}
 
 export default router;

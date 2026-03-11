@@ -31,7 +31,7 @@ const MRWiseOutstanding = () => {
   });
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [selectedTab, setSelectedTab] = useState("all");
+  const [selectedTab, setSelectedTab] = useState("currentMonth");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
     startDate: null,
@@ -49,7 +49,7 @@ const MRWiseOutstanding = () => {
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
 
   // Calculate serial number based on current page and items per page
@@ -148,7 +148,7 @@ const MRWiseOutstanding = () => {
           setLoading(false);
           showToast(
             "warning",
-            "Please select both start and end dates for custom filter"
+            "Please select both start and end dates for custom filter",
           );
           return;
         }
@@ -169,7 +169,7 @@ const MRWiseOutstanding = () => {
         `${backendUrl}/api/reports/mr-wise-outstanding`,
         {
           params,
-        }
+        },
       );
 
       setData(response.data.data || { summary: {}, records: [] });
@@ -180,7 +180,7 @@ const MRWiseOutstanding = () => {
           totalRecords: 0,
           hasNext: false,
           hasPrev: false,
-        }
+        },
       );
     } catch (error) {
       console.error("Error fetching MR wise outstanding:", error);
@@ -318,37 +318,40 @@ const MRWiseOutstanding = () => {
     try {
       // Get the date range based on selected tab
       const dateRange = getDateRange();
-      
+
       // Build query parameters
       const params = new URLSearchParams();
-      
+
       if (searchTerm) {
-        params.append('search', searchTerm);
+        params.append("search", searchTerm);
       }
-      
-      if (selectedTab !== 'all') {
+
+      if (selectedTab !== "all") {
         if (dateRange.startDate) {
-          params.append('startDate', dateRange.startDate);
+          params.append("startDate", dateRange.startDate);
         }
         if (dateRange.endDate) {
-          params.append('endDate', dateRange.endDate);
+          params.append("endDate", dateRange.endDate);
         }
       }
-            
+
       // Make the export request
-      const response = await axios.get(`${backendUrl}/api/reports/mr-wise-outstanding/export/excel`, {
-        params: params,
-        responseType: 'blob'
-      });
+      const response = await axios.get(
+        `${backendUrl}/api/reports/mr-wise-outstanding/export/excel`,
+        {
+          params: params,
+          responseType: "blob",
+        },
+      );
 
       // Create a download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      
+
       // Extract filename from Content-Disposition header or use default
-      let fileName = 'mr-wise-outstanding.xlsx';
-      const contentDisposition = response.headers['content-disposition'];
+      let fileName = "mr-wise-outstanding.xlsx";
+      const contentDisposition = response.headers["content-disposition"];
       if (contentDisposition) {
         const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
         if (fileNameMatch && fileNameMatch.length > 1) {
@@ -357,29 +360,37 @@ const MRWiseOutstanding = () => {
       } else {
         // Fallback filename based on current tab
         const currentDate = new Date();
-        const formattedDate = currentDate.toISOString().split('T')[0];
-        
-        if (selectedTab === 'currentMonth') {
+        const formattedDate = currentDate.toISOString().split("T")[0];
+
+        if (selectedTab === "currentMonth") {
           fileName = `mr-wise-outstanding-${getCurrentMonthName().toLowerCase()}-${getCurrentYear()}.xlsx`;
-        } else if (selectedTab === 'janToPreviousMonth') {
-          fileName = `mr-wise-outstanding-${getJanToPreviousMonthRange().label.replace(/ /g, '-')}.xlsx`;
-        } else if (selectedTab === 'custom' && dateRange.startDate && dateRange.endDate) {
+        } else if (selectedTab === "janToPreviousMonth") {
+          fileName = `mr-wise-outstanding-${getJanToPreviousMonthRange().label.replace(/ /g, "-")}.xlsx`;
+        } else if (
+          selectedTab === "custom" &&
+          dateRange.startDate &&
+          dateRange.endDate
+        ) {
           fileName = `mr-wise-outstanding-${dateRange.startDate}-to-${dateRange.endDate}.xlsx`;
         } else {
           fileName = `mr-wise-outstanding-${formattedDate}.xlsx`;
         }
       }
-      
-      link.setAttribute('download', fileName);
+
+      link.setAttribute("download", fileName);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      
-      showToast('success', 'Excel file downloaded successfully!');
+
+      showToast("success", "Excel file downloaded successfully!");
     } catch (error) {
-      console.error('Export error:', error);
-      showToast('error', error.response?.data?.message || 'Failed to export to Excel. Please try again.');
+      console.error("Export error:", error);
+      showToast(
+        "error",
+        error.response?.data?.message ||
+          "Failed to export to Excel. Please try again.",
+      );
     } finally {
       setExporting(false);
     }
@@ -400,7 +411,7 @@ const MRWiseOutstanding = () => {
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
           return `${formatDateForDisplay(
-            customDateRange.startDate
+            customDateRange.startDate,
           )} to ${formatDateForDisplay(customDateRange.endDate)}`;
         }
         return "Select custom dates";
@@ -441,8 +452,8 @@ const MRWiseOutstanding = () => {
                 page === pagination.currentPage
                   ? "bg-indigo-600 text-white"
                   : typeof page === "number"
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
+                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                    : "bg-transparent text-gray-500 cursor-default"
               }`}
               disabled={typeof page !== "number"}
             >
@@ -505,9 +516,15 @@ const MRWiseOutstanding = () => {
 
           <button
             onClick={exportToExcel}
-            disabled={exporting || (selectedTab === "custom" && (!customDateRange.startDate || !customDateRange.endDate))}
+            disabled={
+              exporting ||
+              (selectedTab === "custom" &&
+                (!customDateRange.startDate || !customDateRange.endDate))
+            }
             className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
-              exporting || (selectedTab === "custom" && (!customDateRange.startDate || !customDateRange.endDate))
+              exporting ||
+              (selectedTab === "custom" &&
+                (!customDateRange.startDate || !customDateRange.endDate))
                 ? "bg-gray-400 text-gray-200 cursor-not-allowed"
                 : "bg-green-600 hover:bg-green-700 text-white"
             }`}
@@ -521,16 +538,6 @@ const MRWiseOutstanding = () => {
       {/* Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            onClick={() => handleTabChange("all")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "all"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            All Records
-          </button>
           <button
             onClick={() => handleTabChange("currentMonth")}
             className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
@@ -561,6 +568,16 @@ const MRWiseOutstanding = () => {
           >
             Custom Filter
           </button>
+          <button
+            onClick={() => handleTabChange("all")}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              selectedTab === "all"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            All Records
+          </button>
         </div>
 
         {/* Active Filter Display */}
@@ -578,7 +595,11 @@ const MRWiseOutstanding = () => {
             <div>
               <p className="text-sm text-gray-600">Total Outstanding</p>
               <p className="text-2xl font-bold text-gray-800">
-                ${data.summary.totalOutstandingAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                $
+                {data.summary.totalOutstandingAmount?.toLocaleString(
+                  undefined,
+                  { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+                ) || "0.00"}
               </p>
             </div>
             <FileText className="w-8 h-8 text-blue-500" />
@@ -668,7 +689,11 @@ const MRWiseOutstanding = () => {
                     {mr.totalCustomers || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-blue-600">
-                    ${mr.totalOutstandingAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
+                    $
+                    {mr.totalOutstandingAmount?.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }) || "0.00"}
                   </td>
                 </tr>
               ))
@@ -775,7 +800,7 @@ const MRWiseOutstanding = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );
