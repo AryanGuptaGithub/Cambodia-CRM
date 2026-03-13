@@ -27,7 +27,7 @@ const normalizeProductName = (name) => {
 const calculateWeightedAveragePrice = (salesArray) => {
   const totalAmount = salesArray.reduce(
     (s, sale) => s + (sale.netSellingAmount || 0),
-    0,
+    0
   );
   const totalQty = salesArray.reduce((s, sale) => s + (sale.totalQty || 0), 0);
   if (totalQty === 0) return 0;
@@ -35,24 +35,31 @@ const calculateWeightedAveragePrice = (salesArray) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CORE: Build processed product list (shared by /report and /export/excel)
+// CORE: Build processed product list (shared by all endpoints)
+// Accepts period, month, year, startDate, endDate for flexible filtering
 // ─────────────────────────────────────────────────────────────────────────────
-async function buildProductReport(period, month, year) {
+async function buildProductReport({
+  period,
+  month,
+  year,
+  startDate,
+  endDate,
+}) {
   const [products, reportInHands, saleSummaries, purchases] = await Promise.all(
     [
       Product.find({}).lean(),
       ReportInHand.find({}).lean(),
       SaleSummary.find({}).lean(),
       Purchase.find({}).lean(),
-    ],
+    ]
   );
 
   const currentDate = new Date();
   const currentMonth = currentDate.getMonth() + 1;
   const currentYear = currentDate.getFullYear();
 
-  const filterMonth = parseInt(month || currentMonth);
-  const filterYear = parseInt(year || currentYear);
+  const filterMonth = month ? parseInt(month) : currentMonth;
+  const filterYear = year ? parseInt(year) : currentYear;
 
   return products.map((product) => {
     // ── ReportInHand ───────────────────────────────────────────────────────
@@ -60,7 +67,7 @@ async function buildProductReport(period, month, year) {
       (r) =>
         r.productName &&
         normalizeProductName(r.productName) ===
-          normalizeProductName(product.productName),
+          normalizeProductName(product.productName)
     );
 
     // ── Purchase data for LC / FOB ─────────────────────────────────────────
@@ -69,14 +76,14 @@ async function buildProductReport(period, month, year) {
       p.products?.some(
         (prod) =>
           normalizeProductName(prod.productName) ===
-          normalizeProductName(product.productName),
-      ),
+          normalizeProductName(product.productName)
+      )
     );
     if (purchaseData) {
       purchaseProduct = purchaseData.products.find(
         (prod) =>
           normalizeProductName(prod.productName) ===
-          normalizeProductName(product.productName),
+          normalizeProductName(product.productName)
       );
     }
 
@@ -102,24 +109,32 @@ async function buildProductReport(period, month, year) {
         const salesQty = sp.salesQty || sp.qty || 0;
         const bonusQty = sp.bonusQty || 0;
         const totalQty = sp.totalQty || salesQty + bonusQty;
-        // netSellingAmount = amount after discount — this is the true revenue
         const netSellingAmount = sp.netSellingAmount || sp.amount || 0;
 
         allSales.push({
           date: saleDate,
           salesQty,
           bonusQty,
-          totalQty, // salesQty + bonusQty
-          netSellingAmount, // revenue for this line
+          totalQty,
+          netSellingAmount,
           invoiceNumber: sale.invoiceNumber,
           customerName: sale.customerName,
+          mrName: sale.mrName,
         });
       });
     });
 
-    // ── Filter sales by selected period ───────────────────────────────────
+    // ── Filter sales by selected period or date range ─────────────────────
     let filteredSales;
-    if (period === "month") {
+    if (period === "custom" && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999); // include the whole end day
+      filteredSales = allSales.filter((s) => {
+        const d = new Date(s.date);
+        return d >= start && d <= end;
+      });
+    } else if (period === "month") {
       filteredSales = allSales.filter((s) => {
         const d = new Date(s.date);
         return (
@@ -128,25 +143,23 @@ async function buildProductReport(period, month, year) {
       });
     } else if (period === "year") {
       filteredSales = allSales.filter(
-        (s) => new Date(s.date).getFullYear() === filterYear,
+        (s) => new Date(s.date).getFullYear() === filterYear
       );
     } else {
+      // no filter – return all sales (should not happen with proper params)
       filteredSales = allSales;
     }
 
     // ── Period totals ──────────────────────────────────────────────────────
     const periodSalesAmount = filteredSales.reduce(
       (s, x) => s + x.netSellingAmount,
-      0,
+      0
     );
     const periodSoldQuantity = filteredSales.reduce(
       (s, x) => s + x.totalQty,
-      0,
+      0
     );
 
-    // ── WEIGHTED AVERAGE PRICE ─────────────────────────────────────────────
-    // = sum(netSellingAmount) / sum(salesQty + bonusQty)
-    // e.g. 85457.08 / 5033.8 = 16.98  (NOT the catalogue price of 18)
     const weightedAveragePrice = calculateWeightedAveragePrice(filteredSales);
 
     // ── Profit ─────────────────────────────────────────────────────────────
@@ -180,7 +193,7 @@ async function buildProductReport(period, month, year) {
       .reduce((s, x) => s + x.totalQty, 0);
 
     const currentStock = parseFloat(
-      Number(reportInHand?.totalBoxes || 0).toFixed(2),
+      Number(reportInHand?.totalBoxes || 0).toFixed(2)
     );
     const status = reportInHand?.status || "Unknown";
 
@@ -190,11 +203,9 @@ async function buildProductReport(period, month, year) {
       category: product.type || "Uncategorized",
       sku: product.packing || "N/A",
       currentStock,
-      // ── price = weighted average price for the selected period ──────────
-      // Formula: sum(netSellingAmount) / sum(salesQty + bonusQty)
       price: weightedAveragePrice,
       weightedAveragePrice,
-      sellingPrice, // original catalogue price (kept for reference)
+      sellingPrice,
       cost: lcPrice,
       lcPrice,
       fobPrice,
@@ -218,15 +229,20 @@ async function buildProductReport(period, month, year) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /report
+// GET /all – returns product‑wise aggregated data (for the "All" tab)
 // ─────────────────────────────────────────────────────────────────────────────
-router.get("/report", async (req, res) => {
+router.get("/all", async (req, res) => {
   try {
-    const { period, month, year, searchTerm, category } = req.query;
+    const { period, month, year, startDate, endDate, searchTerm, category } =
+      req.query;
+    let processedProducts = await buildProductReport({
+      period,
+      month,
+      year,
+      startDate,
+      endDate,
+    });
 
-    let processedProducts = await buildProductReport(period, month, year);
-
-    // ── Filters ────────────────────────────────────────────────────────────
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
       processedProducts = processedProducts.filter(
@@ -234,30 +250,171 @@ router.get("/report", async (req, res) => {
           p.name?.toLowerCase().includes(q) ||
           p.category?.toLowerCase().includes(q) ||
           p.sku?.toLowerCase().includes(q) ||
-          p.supplierName?.toLowerCase().includes(q),
+          p.supplierName?.toLowerCase().includes(q)
       );
     }
     if (category) {
       processedProducts = processedProducts.filter(
-        (p) => p.category === category,
+        (p) => p.category === category
       );
     }
 
-    // ── Summary ────────────────────────────────────────────────────────────
+    res.json({
+      success: true,
+      data: processedProducts,
+      total: processedProducts.length,
+    });
+  } catch (error) {
+    console.error("❌ PRODUCT REPORT ALL ERROR:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /mr-wise – aggregate sales by MR
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/mr-wise", async (req, res) => {
+  try {
+    const { period, month, year, startDate, endDate, searchTerm } = req.query;
+    const products = await buildProductReport({
+      period,
+      month,
+      year,
+      startDate,
+      endDate,
+    });
+
+    const mrMap = new Map();
+
+    products.forEach((product) => {
+      (product.filteredSales || []).forEach((sale) => {
+        const mrName = sale.mrName || "Unknown MR";
+        if (!mrMap.has(mrName)) {
+          mrMap.set(mrName, {
+            mrName,
+            products: [],
+            totalSalesQty: 0,
+            totalBonusQty: 0,
+            totalQty: 0,
+            totalNetAmount: 0,
+            totalDiscount: 0,
+            totalProfitLoss: 0,
+          });
+        }
+        const mr = mrMap.get(mrName);
+        mr.products.push({
+          productName: product.name,
+          salesQty: sale.salesQty,
+          bonusQty: sale.bonusQty,
+          totalQty: sale.totalQty,
+          sellingPrice: product.sellingPrice,
+          discount: 0,
+          netSellingAmount: sale.netSellingAmount,
+          profitLoss: sale.netSellingAmount - sale.totalQty * product.lcPrice,
+        });
+        mr.totalSalesQty += sale.salesQty;
+        mr.totalBonusQty += sale.bonusQty;
+        mr.totalQty += sale.totalQty;
+        mr.totalNetAmount += sale.netSellingAmount;
+        mr.totalProfitLoss +=
+          sale.netSellingAmount - sale.totalQty * product.lcPrice;
+      });
+    });
+
+    let mrArray = Array.from(mrMap.values());
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      mrArray = mrArray
+        .filter(
+          (mr) =>
+            mr.mrName.toLowerCase().includes(q) ||
+            mr.products.some((p) => p.productName.toLowerCase().includes(q))
+        )
+        .map((mr) => ({
+          ...mr,
+          products: mr.products.filter((p) =>
+            p.productName.toLowerCase().includes(q)
+          ),
+        }));
+    }
+
+    res.json({
+      success: true,
+      data: mrArray,
+    });
+  } catch (error) {
+    console.error("❌ PRODUCT REPORT MR‑WISE ERROR:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /sample-wise – sample distribution (placeholder – replace with real logic)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/sample-wise", async (req, res) => {
+  try {
+    const { period, month, year, startDate, endDate } = req.query;
+
+    // TODO: Implement actual sample query. For now return empty array.
+    // Example: fetch from a SampleDistribution model and filter by date.
+    const sampleData = []; // replace with real aggregation
+
+    res.json({
+      success: true,
+      data: sampleData,
+    });
+  } catch (error) {
+    console.error("❌ PRODUCT REPORT SAMPLE‑WISE ERROR:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /report – original summary endpoint (kept for compatibility)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/report", async (req, res) => {
+  try {
+    const { period, month, year, startDate, endDate, searchTerm, category } =
+      req.query;
+    let processedProducts = await buildProductReport({
+      period,
+      month,
+      year,
+      startDate,
+      endDate,
+    });
+
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      processedProducts = processedProducts.filter(
+        (p) =>
+          p.name?.toLowerCase().includes(q) ||
+          p.category?.toLowerCase().includes(q) ||
+          p.sku?.toLowerCase().includes(q) ||
+          p.supplierName?.toLowerCase().includes(q)
+      );
+    }
+    if (category) {
+      processedProducts = processedProducts.filter(
+        (p) => p.category === category
+      );
+    }
+
     const totalSales = processedProducts.reduce((s, p) => s + p.periodSales, 0);
     const totalProfit = processedProducts.reduce(
       (s, p) => s + p.profitAmount,
-      0,
+      0
     );
     const totalStock = processedProducts.reduce(
       (s, p) => s + p.currentStock,
-      0,
+      0
     );
     const avgProfitMargin =
       processedProducts.length > 0
         ? processedProducts.reduce(
             (s, p) => s + (p.profitMarginValue || 0),
-            0,
+            0
           ) / processedProducts.length
         : 0;
 
@@ -285,69 +442,19 @@ router.get("/report", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /fix-average-prices  (one-time admin utility)
-// ─────────────────────────────────────────────────────────────────────────────
-router.get("/fix-average-prices", async (req, res) => {
-  try {
-    const saleSummaries = await SaleSummary.find({});
-    let updatedCount = 0;
-    let errorCount = 0;
-
-    for (const sale of saleSummaries) {
-      if (!sale.products?.length) continue;
-      let changed = false;
-
-      sale.products.forEach((product) => {
-        const salesQty = product.salesQty || 0;
-        const bonusQty = product.bonusQty || 0;
-        const totalQty = salesQty + bonusQty;
-        const netSellingAmount =
-          product.netSellingAmount || product.amount || 0;
-        const correctAvg = totalQty > 0 ? netSellingAmount / totalQty : 0;
-
-        if (Math.abs((product.averageUnitPrice || 0) - correctAvg) > 0.001) {
-          product.averageUnitPrice = correctAvg;
-          changed = true;
-        }
-      });
-
-      if (changed) {
-        try {
-          await sale.save();
-          updatedCount++;
-        } catch (err) {
-          console.error(`Failed sale ${sale._id}:`, err.message);
-          errorCount++;
-        }
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `Fixed averageUnitPrice for ${updatedCount} sale records`,
-      updatedCount,
-      errorCount,
-      totalProcessed: saleSummaries.length,
-    });
-  } catch (error) {
-    console.error("❌ FIX AVERAGE PRICES ERROR:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        error: "Failed to fix average prices",
-        message: error.message,
-      });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /export/excel
+// GET /export/excel – generate Excel file from filtered data
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/export/excel", async (req, res) => {
   try {
-    const { period, month, year, searchTerm, category } = req.query;
-    let products = await buildProductReport(period, month, year);
+    const { period, month, year, startDate, endDate, searchTerm, category } =
+      req.query;
+    let products = await buildProductReport({
+      period,
+      month,
+      year,
+      startDate,
+      endDate,
+    });
 
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
@@ -356,7 +463,7 @@ router.get("/export/excel", async (req, res) => {
           p.name?.toLowerCase().includes(q) ||
           p.category?.toLowerCase().includes(q) ||
           p.sku?.toLowerCase().includes(q) ||
-          p.supplierName?.toLowerCase().includes(q),
+          p.supplierName?.toLowerCase().includes(q)
       );
     }
     if (category) {
@@ -376,13 +483,14 @@ router.get("/export/excel", async (req, res) => {
     if (period === "month") salesColumnHeader = `Sales (Month ${month || cm})`;
     else if (period === "year")
       salesColumnHeader = `Sales (Year ${year || cy})`;
+    else if (period === "custom")
+      salesColumnHeader = `Sales (Custom Range)`;
 
     worksheet.columns = [
       { header: "Product Name", key: "name", width: 30 },
       { header: "Category", key: "category", width: 20 },
       { header: "SKU/Packing", key: "sku", width: 15 },
       { header: "Current Stock", key: "currentStock", width: 15 },
-      // Avg Price = sum(netSellingAmount) / sum(salesQty + bonusQty) for period
       { header: "Avg Price ($)", key: "price", width: 18 },
       { header: "Catalogue Price ($)", key: "sellingPrice", width: 18 },
       { header: "LC Price ($)", key: "lcPrice", width: 15 },
@@ -408,7 +516,7 @@ router.get("/export/excel", async (req, res) => {
         category: product.category,
         sku: product.sku,
         currentStock: product.currentStock,
-        price: product.price.toFixed(4), // weighted avg price
+        price: product.price.toFixed(4),
         sellingPrice: product.sellingPrice.toFixed(2),
         lcPrice: product.lcPrice.toFixed(2),
         fobPrice: product.fobPrice.toFixed(2),
@@ -497,12 +605,15 @@ router.get("/export/excel", async (req, res) => {
     let fileName = "product-report";
     if (period === "month")
       fileName = `product-report-month-${month || cm}-${year || cy}`;
-    else if (period === "year") fileName = `product-report-year-${year || cy}`;
+    else if (period === "year")
+      fileName = `product-report-year-${year || cy}`;
+    else if (period === "custom")
+      fileName = `product-report-custom-${Date.now()}`;
     fileName += ".xlsx";
 
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.setHeader("Content-Disposition", `attachment; filename=${fileName}`);
     await workbook.xlsx.write(res);
@@ -514,6 +625,61 @@ router.get("/export/excel", async (req, res) => {
       error: "Failed to export product report",
       message: error.message,
       stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /fix-average-prices – one‑time utility to correct averageUnitPrice in existing sales
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/fix-average-prices", async (req, res) => {
+  try {
+    const saleSummaries = await SaleSummary.find({});
+    let updatedCount = 0;
+    let errorCount = 0;
+
+    for (const sale of saleSummaries) {
+      if (!sale.products?.length) continue;
+      let changed = false;
+
+      sale.products.forEach((product) => {
+        const salesQty = product.salesQty || 0;
+        const bonusQty = product.bonusQty || 0;
+        const totalQty = salesQty + bonusQty;
+        const netSellingAmount =
+          product.netSellingAmount || product.amount || 0;
+        const correctAvg = totalQty > 0 ? netSellingAmount / totalQty : 0;
+
+        if (Math.abs((product.averageUnitPrice || 0) - correctAvg) > 0.001) {
+          product.averageUnitPrice = correctAvg;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        try {
+          await sale.save();
+          updatedCount++;
+        } catch (err) {
+          console.error(`Failed sale ${sale._id}:`, err.message);
+          errorCount++;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Fixed averageUnitPrice for ${updatedCount} sale records`,
+      updatedCount,
+      errorCount,
+      totalProcessed: saleSummaries.length,
+    });
+  } catch (error) {
+    console.error("❌ FIX AVERAGE PRICES ERROR:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fix average prices",
+      message: error.message,
     });
   }
 });

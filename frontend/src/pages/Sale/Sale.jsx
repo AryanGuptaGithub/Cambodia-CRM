@@ -43,6 +43,7 @@ import InputField from "../../components/common/InputField";
 import LoadingOverlay from "../../components/Loading";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import * as XLSX from "xlsx";
+import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -1322,201 +1323,6 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
     document.body,
   );
 };
-// const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
-//   const [expandedMRs, setExpandedMRs] = useState(new Set());
-
-//   if (!isOpen || !stockIssues || stockIssues.length === 0) return null;
-
-//   // Group issues by MR and product
-//   const grouped = new Map(); // Map<mrName, Map<productName, { totalRequired, availableStock, insufficientQty, productExists }>>
-
-//   stockIssues.forEach((issue) => {
-//     const mrName = issue.mrName || "Unknown MR";
-//     const productName = issue.productName;
-//     if (!grouped.has(mrName)) {
-//       grouped.set(mrName, new Map());
-//     }
-//     const mrGroup = grouped.get(mrName);
-//     if (!mrGroup.has(productName)) {
-//       mrGroup.set(productName, {
-//         productName,
-//         totalRequired: 0,
-//         availableStock: 0,
-//         insufficientQty: 0,
-//         productExists: issue.productExists,
-//       });
-//     }
-//     const productData = mrGroup.get(productName);
-//     productData.totalRequired += issue.totalRequired;
-//     // Use the most conservative available stock (should be same across issues for same product, but just in case)
-//     productData.availableStock = issue.availableStock; // assuming same product same MR same stock
-//     productData.insufficientQty += issue.insufficientQty;
-//   });
-
-//   const allMRNames = Array.from(grouped.keys());
-
-//   const toggleMR = (mrName) => {
-//     setExpandedMRs((prev) => {
-//       const next = new Set(prev);
-//       if (next.has(mrName)) {
-//         next.delete(mrName);
-//       } else {
-//         next.add(mrName);
-//       }
-//       return next;
-//     });
-//   };
-
-//   const isExpanded = (mrName) =>
-//     expandedMRs.has(mrName) || expandedMRs.size === 0; // expand all by default if none collapsed
-
-//   // Download grouped report
-//   const downloadGroupedReport = () => {
-//     try {
-//       const rows = [];
-//       grouped.forEach((mrMap, mrName) => {
-//         mrMap.forEach((productData) => {
-//           rows.push({
-//             "MR Name": mrName,
-//             "Product Name": productData.productName,
-//             "Required Quantity": productData.totalRequired,
-//             "Available Stock": productData.availableStock,
-//             Shortage: productData.insufficientQty,
-//             Status: productData.productExists
-//               ? "Insufficient"
-//               : "Product Not Found",
-//           });
-//         });
-//       });
-//       const ws = XLSX.utils.json_to_sheet(rows);
-//       const wb = XLSX.utils.book_new();
-//       XLSX.utils.book_append_sheet(wb, ws, "MR Stock Issues");
-//       XLSX.writeFile(
-//         wb,
-//         `mr_stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`,
-//       );
-//       showToast("success", "Report downloaded");
-//     } catch (err) {
-//       showToast("error", "Failed to download report");
-//     }
-//   };
-
-//   return ReactDOM.createPortal(
-//     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-//       <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-//         <button
-//           onClick={onClose}
-//           className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-//         >
-//           <X size={20} />
-//         </button>
-//         <h2 className="text-xl font-semibold text-red-600 mb-4 flex items-center gap-2">
-//           <AlertTriangle size={20} />
-//           Insufficient MR Hand Stock
-//         </h2>
-//         <p className="text-sm text-gray-600 mb-4">
-//           {stockIssues.length} product(s) have insufficient stock in the
-//           respective MR's hand. Please update stock or reduce quantities.
-//         </p>
-
-//         <div className="flex justify-end mb-4">
-//           <button
-//             onClick={downloadGroupedReport}
-//             className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm"
-//           >
-//             <Download size={14} />
-//             Download Grouped Report
-//           </button>
-//         </div>
-
-//         <div className="space-y-3">
-//           {allMRNames.map((mrName) => {
-//             const mrMap = grouped.get(mrName);
-//             const productCount = mrMap.size;
-//             const expanded = isExpanded(mrName);
-//             return (
-//               <div
-//                 key={mrName}
-//                 className="border border-gray-200 rounded-lg overflow-hidden"
-//               >
-//                 {/* MR Header */}
-//                 <button
-//                   onClick={() => toggleMR(mrName)}
-//                   className="w-full flex items-center justify-between px-4 py-3 bg-red-50 hover:bg-red-100 transition-colors"
-//                 >
-//                   <div className="flex items-center gap-2">
-//                     <User size={16} className="text-red-500" />
-//                     <span className="font-semibold text-red-800">{mrName}</span>
-//                     <span className="bg-red-200 text-red-800 text-xs px-2 py-0.5 rounded-full">
-//                       {productCount} product{productCount !== 1 ? "s" : ""}
-//                     </span>
-//                   </div>
-//                   {expanded ? (
-//                     <ChevronDown size={16} className="text-red-400" />
-//                   ) : (
-//                     <ChevronRight size={16} className="text-red-400" />
-//                   )}
-//                 </button>
-
-//                 {/* Products */}
-//                 {expanded && (
-//                   <div className="divide-y divide-gray-100">
-//                     {Array.from(mrMap.entries()).map(
-//                       ([productName, productData]) => (
-//                         <div key={productName} className="px-4 py-3 bg-white">
-//                           <div className="flex items-center gap-2 mb-2">
-//                             <Package size={14} className="text-red-500" />
-//                             <span className="font-medium text-gray-800">
-//                               {productName}
-//                             </span>
-//                             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-//                               ❌ Insufficient
-//                             </span>
-//                           </div>
-//                           <div className="flex items-center gap-4 ml-5 text-sm">
-//                             <div>
-//                               Required:{" "}
-//                               <span className="font-semibold">
-//                                 {productData.totalRequired}
-//                               </span>
-//                             </div>
-//                             <div>
-//                               Available:{" "}
-//                               <span className="font-semibold text-orange-600">
-//                                 {productData.availableStock}
-//                               </span>
-//                             </div>
-//                             <div>
-//                               Shortage:{" "}
-//                               <span className="font-semibold text-red-600">
-//                                 {productData.insufficientQty}
-//                               </span>
-//                             </div>
-//                           </div>
-//                         </div>
-//                       ),
-//                     )}
-//                   </div>
-//                 )}
-//               </div>
-//             );
-//           })}
-//         </div>
-
-//         <div className="flex justify-end gap-3 mt-6">
-//           <button
-//             onClick={onCancel}
-//             className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
-//           >
-//             Cancel Import
-//           </button>
-//           {/* No Proceed button because insufficient stock blocks import */}
-//         </div>
-//       </div>
-//     </div>,
-//     document.body,
-//   );
-// };
 
 // ==========================================
 // ImportSalesModal Main Component
@@ -1554,7 +1360,6 @@ const ImportSalesModal = ({
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [mrStockValidationResult, setMrStockValidationResult] = useState(null);
   const [showMrStockValidation, setShowMrStockValidation] = useState(false);
-  // New state for grouped MR stock issues modal
   const [showMrStockGroupedModal, setShowMrStockGroupedModal] = useState(false);
   const [mrStockIssuesGrouped, setMrStockIssuesGrouped] = useState([]);
   const pollingIntervalRef = useRef(null);
@@ -1630,7 +1435,6 @@ const ImportSalesModal = ({
     showToast("info", "Import cancelled");
   }, [clearPolling]);
 
-  // ----- Excel parsing functions (unchanged) -----
   const parseExcelDate = useCallback((value) => {
     if (value === null || value === undefined || value === "") {
       return new Date().toISOString().split("T")[0];
@@ -2099,23 +1903,18 @@ const ImportSalesModal = ({
     [importSaleType, resetModal, parseExcelFile],
   );
 
-  // ----- New Functions for Duplicate Check and MR Stock Validation -----
   const checkDuplicateInvoices = useCallback(async (invoices) => {
     try {
       const invoiceNumbers = invoices
         .map((inv) => inv.invoiceNumber)
         .filter(Boolean);
       if (invoiceNumbers.length === 0) return [];
-
       const response = await axios.post(
         `${backendUrl}/api/sales/check-duplicates`,
         { invoiceNumbers },
         getAuthHeaders(),
       );
-
-      if (response.data.success) {
-        return response.data.existingInvoices; // array of invoice numbers
-      }
+      if (response.data.success) return response.data.existingInvoices;
       return [];
     } catch (error) {
       console.error("Duplicate check error:", error);
@@ -2130,13 +1929,11 @@ const ImportSalesModal = ({
       setImportMessage(
         `Checking MR hand stock for ${invoices.length} invoices...`,
       );
-
       const response = await axios.post(
         `${backendUrl}/api/sales/validate-import-mr-stock`,
         { invoices },
         getAuthHeaders(),
       );
-
       setIsValidatingStock(false);
       return response.data.validationResult;
     } catch (error) {
@@ -2225,7 +2022,6 @@ const ImportSalesModal = ({
       });
 
       mrIssues.push(...Array.from(invalidMRMap.values()));
-
       return {
         mrIssues,
         totalInvoices: invoices.length,
@@ -2285,12 +2081,9 @@ const ImportSalesModal = ({
         );
 
         setIsValidatingStock(false);
-
-        if (response.data.success) {
-          return response.data.validationResult;
-        } else {
+        if (response.data.success) return response.data.validationResult;
+        else
           throw new Error(response.data.message || "Stock validation failed");
-        }
       } catch (error) {
         console.error("Stock validation error:", error);
         setIsValidatingStock(false);
@@ -2319,7 +2112,6 @@ const ImportSalesModal = ({
     [importSaleType],
   );
 
-  // ----- Handlers for MR stock validation modal -----
   const handleProceedWithMrStockIssues = useCallback(async () => {
     if (!mrStockValidationResult) return;
     if (mrStockValidationResult.summary?.hasInsufficientStock) {
@@ -2338,7 +2130,6 @@ const ImportSalesModal = ({
     showToast("info", "Import cancelled");
   }, []);
 
-  // ----- Handler for new grouped modal cancel -----
   const handleMrStockGroupedCancel = useCallback(() => {
     setShowMrStockGroupedModal(false);
     setMrStockIssuesGrouped([]);
@@ -2347,7 +2138,6 @@ const ImportSalesModal = ({
     showToast("info", "Import cancelled");
   }, []);
 
-  // ----- Handle skip duplicates -----
   const handleSkipDuplicates = useCallback(() => {
     const duplicateSet = new Set(duplicateInvoices);
     const filteredData = parsedData.filter(
@@ -2360,26 +2150,22 @@ const ImportSalesModal = ({
       "info",
       `Skipped ${duplicateInvoices.length} duplicate invoice(s). Remaining: ${filteredData.length}`,
     );
-    // Re-run validation on filtered data
     handleImportData();
   }, [duplicateInvoices, parsedData]);
 
-  // ----- Modified handleImportData -----
   const handleImportData = useCallback(async () => {
     if (parsedData.length === 0) {
       showToast("error", "No data to import");
       return;
     }
 
-    // Step 1: Check for duplicate invoices
     const duplicates = await checkDuplicateInvoices(parsedData);
     if (duplicates.length > 0) {
       setDuplicateInvoices(duplicates);
       setShowDuplicateModal(true);
-      return; // stop – user must decide what to do with duplicates
+      return;
     }
 
-    // Step 2: Validate MRs (only for MR sale)
     if (importSaleType === "mr") {
       const mrValResult = await validateMRsBeforeImport(parsedData);
       if (mrValResult.mrIssues && mrValResult.mrIssues.length > 0) {
@@ -2389,7 +2175,6 @@ const ImportSalesModal = ({
       }
     }
 
-    // Step 3: Validate stock (either normal or MR)
     let svResult;
     if (importSaleType === "mr") {
       svResult = await validateMRStockBeforeImport(parsedData);
@@ -2397,7 +2182,6 @@ const ImportSalesModal = ({
       svResult = await validateStockBeforeImport(parsedData);
     }
 
-    // Handle stock issues
     if (svResult.stockIssues?.length > 0) {
       const insufficientStockIssues = svResult.stockIssues.filter(
         (i) => i.productExists && i.insufficient,
@@ -2408,7 +2192,6 @@ const ImportSalesModal = ({
 
       if (insufficientStockIssues.length > 0) {
         if (importSaleType === "mr") {
-          // For MR sale, use the grouped modal
           setMrStockIssuesGrouped(insufficientStockIssues);
           setShowMrStockGroupedModal(true);
         } else {
@@ -2433,7 +2216,6 @@ const ImportSalesModal = ({
         insufficientStockIssues.length === 0
       ) {
         if (importSaleType === "mr") {
-          // For MR sale, use the grouped modal (missing products)
           setMrStockIssuesGrouped(missingProductIssues);
           setShowMrStockGroupedModal(true);
         } else {
@@ -2454,7 +2236,6 @@ const ImportSalesModal = ({
       }
     }
 
-    // Step 4: If all checks pass, start import
     await handleProductImport(parsedData);
   }, [
     parsedData,
@@ -2465,7 +2246,6 @@ const ImportSalesModal = ({
     validateStockBeforeImport,
   ]);
 
-  // ----- handleProductImport (unchanged) -----
   const handleProductImport = useCallback(
     async (dataToImport) => {
       if (!dataToImport?.length) {
@@ -2510,7 +2290,7 @@ const ImportSalesModal = ({
           {
             invoices: transformedInvoices,
             updateInventory: true,
-            skipDuplicates: true, // we already removed duplicates, but keep true for safety
+            skipDuplicates: true,
             importTimestamp: new Date().toISOString(),
           },
           {
@@ -2698,11 +2478,7 @@ const ImportSalesModal = ({
           {/* Info banner */}
           {!isImporting && (
             <div
-              className={`p-3 rounded-lg mb-4 text-sm ${
-                importSaleType === "normal"
-                  ? "bg-indigo-50 text-indigo-800"
-                  : "bg-green-50 text-green-800"
-              }`}
+              className={`p-3 rounded-lg mb-4 text-sm ${importSaleType === "normal" ? "bg-indigo-50 text-indigo-800" : "bg-green-50 text-green-800"}`}
             >
               {importSaleType === "normal" ? (
                 <p>
@@ -2718,6 +2494,38 @@ const ImportSalesModal = ({
               )}
             </div>
           )}
+
+          {/* ✅ Sample download template banner */}
+          {!showParsedSection &&
+            !isUploading &&
+            !isProcessingFile &&
+            !isImporting && (
+              <div
+                className={`flex items-center justify-between gap-3 p-3 rounded-lg border mb-4 ${
+                  importSaleType === "normal"
+                    ? "bg-indigo-50 border-indigo-200"
+                    : "bg-green-50 border-green-200"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Download
+                    size={16}
+                    className={
+                      importSaleType === "normal"
+                        ? "text-indigo-500 flex-shrink-0"
+                        : "text-green-500 flex-shrink-0"
+                    }
+                  />
+                  <p
+                    className={`text-sm ${importSaleType === "normal" ? "text-indigo-700" : "text-green-700"}`}
+                  >
+                    First time importing? Download the sample template to get
+                    the correct format.
+                  </p>
+                </div>
+                <SampleExcelDownloadSale saleType={importSaleType} />
+              </div>
+            )}
 
           {/* Upload area */}
           {!showParsedSection &&
@@ -2839,7 +2647,6 @@ const ImportSalesModal = ({
                 </p>
               )}
 
-              {/* Sample preview */}
               <div>
                 <p className="text-sm font-medium text-gray-700 mb-2">
                   Sample Data (First 3 invoices):
@@ -3251,6 +3058,13 @@ const Sales = () => {
   const { statuses, loading } = useInitialSaleData();
   const [saleTypeTab, setSaleTypeTab] = useState("all");
 
+  // --- Zone and Province data (like AddCustomer) ---
+  const [provincesList, setProvincesList] = useState([]);
+  const [zonesList, setZonesList] = useState([]);
+  const [provincesLoading, setProvincesLoading] = useState(false);
+  const [zonesLoading, setZonesLoading] = useState(false);
+  const lastFetchedProvinceRef = useRef("");
+
   const [form, setForm] = useState({
     _id: null,
     recordingDate: "",
@@ -3270,6 +3084,10 @@ const Sales = () => {
     totalAmount: 0,
     paymentStatus: "",
     remark: "",
+    // New fields for customer details
+    customerPhone: "",
+    customerZone: "",
+    customerProvince: "",
   });
 
   // ✅ FIX: handleMRChange — always stringify _id to avoid ObjectId vs string mismatch
@@ -3331,6 +3149,7 @@ const Sales = () => {
       }
 
       const data = await res.json();
+      console.log("Fetched sale summaries:", data); // Debug log
       processSalesData(data.summaries);
     } catch (error) {
       showToast("error", error.message || "Error fetching sale summaries");
@@ -3358,6 +3177,61 @@ const Sales = () => {
     setShouldCheckPurchase(true);
   }, []);
 
+  // ----- Fetch provinces -----
+  const fetchProvinces = useCallback(async () => {
+    setProvincesLoading(true);
+    try {
+      const response = await axios.get(`${backendUrl}/api/customers/provinces`);
+      if (response.data.success) {
+        setProvincesList(response.data.data || []);
+      } else {
+        // Fallback static data for demo
+        setProvincesList([
+          { name: "Province A" },
+          { name: "Province B" },
+          { name: "Province C" },
+        ]);
+      }
+    } catch (error) {
+      console.error("Error fetching provinces:", error);
+      showToast("error", "Failed to load provinces");
+      setProvincesList([
+        { name: "Province A" },
+        { name: "Province B" },
+        { name: "Province C" },
+      ]);
+    } finally {
+      setProvincesLoading(false);
+    }
+  }, []);
+
+  // ----- Fetch zones for a selected province -----
+  const fetchZonesByProvince = useCallback(async (provinceName) => {
+    if (!provinceName) {
+      setZonesList([]);
+      return;
+    }
+    setZonesLoading(true);
+    try {
+      // Adjust endpoint as needed; here we use a query param
+      const response = await axios.get(
+        `${backendUrl}/api/zones?province=${encodeURIComponent(provinceName)}`,
+      );
+      if (response.data.success) {
+        setZonesList(response.data.data || []);
+      } else {
+        // Fallback: use province name as a single zone
+        setZonesList([{ name: provinceName }]);
+      }
+    } catch (error) {
+      console.error("Error fetching zones:", error);
+      // Fallback: use province name as zone
+      setZonesList([{ name: provinceName }]);
+    } finally {
+      setZonesLoading(false);
+    }
+  }, []);
+
   // ----- Effects -----
   useEffect(() => {
     fetchSaleSummaries();
@@ -3366,7 +3240,8 @@ const Sales = () => {
   useEffect(() => {
     checkPurchaseInventories();
     fetchProductsList();
-  }, [checkPurchaseInventories, fetchProductsList]);
+    fetchProvinces();
+  }, [checkPurchaseInventories, fetchProductsList, fetchProvinces]);
 
   useEffect(() => {
     if (shouldCheckPurchase) {
@@ -3374,6 +3249,20 @@ const Sales = () => {
       setShouldCheckPurchase(false);
     }
   }, [shouldCheckPurchase, checkPurchaseInventories]);
+
+  // Fetch zones when province changes (like AddCustomer)
+  useEffect(() => {
+    if (
+      form.customerProvince &&
+      form.customerProvince !== lastFetchedProvinceRef.current
+    ) {
+      lastFetchedProvinceRef.current = form.customerProvince;
+      fetchZonesByProvince(form.customerProvince);
+    } else if (!form.customerProvince) {
+      setZonesList([]);
+      lastFetchedProvinceRef.current = "";
+    }
+  }, [form.customerProvince, fetchZonesByProvince]);
 
   useEffect(() => {
     const handleInventoryUpdated = () => {
@@ -3435,7 +3324,12 @@ const Sales = () => {
         }
 
         if (customers && customers.success && Array.isArray(customers.data)) {
-          setCustomerList(customers.data);
+          // ✅ Stringify customer _id as well
+          const customerData = customers.data.map((c) => ({
+            ...c,
+            _id: String(c._id),
+          }));
+          setCustomerList(customerData);
         } else {
           setCustomerList([]);
         }
@@ -3582,6 +3476,11 @@ const Sales = () => {
     });
   }, [sales, searchTerm, selectedTab, saleTypeTab]);
 
+  // Debug log
+  useEffect(() => {
+    console.log("values of filteredSales", filteredSales);
+  }, [filteredSales]);
+
   const downloadData = useMemo(() => {
     if (isSampleDownloadFile) {
       if (saleTypeTab === "all") return sales;
@@ -3638,12 +3537,10 @@ const Sales = () => {
   }, []);
 
   const handleView = useCallback((sale) => {
+    // Customer fields are already on the sale object from the backend
     setForm({
       ...sale,
       products: sale.products || [],
-      customerName: sale.customerName || "--",
-      customerCode: sale.customerCode || "",
-      customerId: sale.customerId || "",
     });
     setIsViewModalOpen(true);
   }, []);
@@ -3661,11 +3558,8 @@ const Sales = () => {
       );
 
       setForm({
-        ...sale,
+        ...sale, // customerPhone, customerZone, customerProvince are already here
         products: sale.products || [],
-        customerName: sale.customerName || "--",
-        customerCode: sale.customerCode || "",
-        customerId: sale.customerId || "",
         // ✅ Use matched MR's _id (already stringified) or fall back to sale.mrId stringified
         mrId: matchedMr
           ? String(matchedMr._id)
@@ -3673,6 +3567,9 @@ const Sales = () => {
             ? String(sale.mrId)
             : "",
         mrName: matchedMr ? matchedMr.mrName : sale.mrName || "",
+        // Ensure zone and province are set from the sale's customer fields
+        customerZone: sale.customerZone || "",
+        customerProvince: sale.customerProvince || "",
       });
       setIsEditModalOpen(true);
     },
@@ -3821,6 +3718,18 @@ const Sales = () => {
 
   const handleCustomerChange = useCallback(
     (customerId) => {
+      if (!customerId) {
+        setForm((prev) => ({
+          ...prev,
+          customerId: "",
+          customerCode: "",
+          customerName: "",
+          customerPhone: "",
+          customerZone: "",
+          customerProvince: "",
+        }));
+        return;
+      }
       const selectedCustomer = customerList.find((c) => c._id === customerId);
       if (selectedCustomer) {
         setForm((prev) => ({
@@ -3828,6 +3737,9 @@ const Sales = () => {
           customerId,
           customerCode: selectedCustomer.customerCode,
           customerName: selectedCustomer.name,
+          customerPhone: selectedCustomer.phone || "",
+          customerZone: selectedCustomer.zone || "",
+          customerProvince: selectedCustomer.province || "",
         }));
       }
     },
@@ -3846,6 +3758,121 @@ const Sales = () => {
       })),
     ];
   }, [customerList, customerListLoading]);
+
+  // --- MR dropdown options (includes current selection) ---
+  const mrOptions = useMemo(() => {
+    const options = [{ value: "", label: "Select MR" }];
+
+    // Add all known MRs from mrFullList
+    mrFullList.forEach((mr) => {
+      options.push({ value: String(mr._id), label: mr.mrName });
+    });
+
+    // If the current selected MR (from form) is not in the list, add it as a fallback
+    if (form.mrId && form.mrName) {
+      const exists = options.some((opt) => opt.value === String(form.mrId));
+      if (!exists) {
+        options.push({ value: String(form.mrId), label: form.mrName });
+      }
+    }
+
+    return options;
+  }, [mrFullList, form.mrId, form.mrName]);
+
+  // --- Province dropdown options (includes current selection) ---
+  const provinceOptions = useMemo(() => {
+    if (provincesLoading) {
+      return [{ value: "", label: "Loading provinces...", disabled: true }];
+    }
+    const options = [
+      { value: "", label: "Select Province" },
+      ...provincesList.map((prov) => {
+        const provName =
+          prov.name ||
+          prov.provinceName ||
+          prov.value ||
+          prov.label ||
+          prov.province ||
+          "";
+        return {
+          value: provName.trim(),
+          label: provName.trim(),
+        };
+      }),
+    ];
+    // Ensure the current province is always in the list
+    if (
+      form.customerProvince &&
+      !options.some((opt) => opt.value === form.customerProvince.trim())
+    ) {
+      options.push({
+        value: form.customerProvince.trim(),
+        label: form.customerProvince.trim(),
+      });
+    }
+    return options;
+  }, [provincesList, provincesLoading, form.customerProvince]);
+
+  // --- Zone dropdown options (includes current selection) ---
+  const zoneOptions = useMemo(() => {
+    if (zonesLoading) {
+      return [{ value: "", label: "Loading zones...", disabled: true }];
+    }
+    if (!zonesList || zonesList.length === 0) {
+      if (form.customerZone) {
+        // If a zone is already selected but no zones fetched, show it as an option
+        return [
+          { value: "", label: "Select a province first", disabled: true },
+          { value: form.customerZone.trim(), label: form.customerZone.trim() },
+        ];
+      }
+      return form.customerProvince
+        ? [{ value: "", label: "No zones for this province", disabled: true }]
+        : [{ value: "", label: "Select a province first", disabled: true }];
+    }
+    const options = [
+      { value: "", label: "Select Zone" },
+      ...zonesList.map((zone) => {
+        const zoneName =
+          zone.name ||
+          zone.zoneName ||
+          zone.value ||
+          zone.label ||
+          zone.zone ||
+          "";
+        return {
+          value: zoneName.trim(),
+          label: zoneName.trim(),
+        };
+      }),
+    ];
+    // Ensure the current zone is always in the list
+    if (
+      form.customerZone &&
+      !options.some((opt) => opt.value === form.customerZone.trim())
+    ) {
+      options.push({
+        value: form.customerZone.trim(),
+        label: form.customerZone.trim(),
+      });
+    }
+    return options;
+  }, [zonesList, zonesLoading, form.customerProvince, form.customerZone]);
+
+  // Handlers for province/zone changes
+  const handleProvinceChange = (value) => {
+    const trimmed = value.trim();
+    setForm((prev) => ({
+      ...prev,
+      customerProvince: trimmed,
+      customerZone: "",
+    }));
+    // Fetch zones will be triggered by the useEffect watching customerProvince
+  };
+
+  const handleZoneChange = (value) => {
+    setForm((prev) => ({ ...prev, customerZone: value.trim() }));
+  };
 
   const handleUpdateSale = useCallback(
     async (e) => {
@@ -4093,7 +4120,7 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* ✅ FIX: MR Name select — String comparison for both value and option values */}
+                  {/* MR Name select - using mrOptions with fallback */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       MR Name
@@ -4102,20 +4129,22 @@ const Sales = () => {
                       value={form.mrId ? String(form.mrId) : ""}
                       onChange={(e) => {
                         const selectedVal = e.target.value;
-                        // ✅ String-to-string comparison prevents ObjectId mismatch
-                        const selectedMr = mrFullList.find(
-                          (mr) => String(mr._id) === selectedVal,
+                        const selectedOption = mrOptions.find(
+                          (opt) => opt.value === selectedVal,
                         );
-                        if (selectedMr) {
+                        if (selectedOption) {
+                          const selectedMr = {
+                            _id: selectedVal,
+                            mrName: selectedOption.label,
+                          };
                           handleMRChange(selectedMr);
                         }
                       }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     >
-                      <option value="">Select MR</option>
-                      {mrFullList.map((mr) => (
-                        <option key={mr._id} value={String(mr._id)}>
-                          {mr.mrName}
+                      {mrOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
                         </option>
                       ))}
                     </select>
@@ -4135,6 +4164,51 @@ const Sales = () => {
                       disabled={false}
                     />
                   </div>
+
+                  {/* Customer extra fields – now editable with proper zone/province dropdowns */}
+                  {form.customerId && (
+                    <div className="col-span-1 md:col-span-2">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Phone
+                          </label>
+                          <input
+                            type="text"
+                            name="customerPhone"
+                            value={form.customerPhone}
+                            onChange={handleFormChange}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                          />
+                        </div>
+                        <div>
+                          <SearchableDropdown
+                            value={form.customerProvince}
+                            onChange={handleProvinceChange}
+                            options={provinceOptions}
+                            placeholder="Select Province"
+                            loading={provincesLoading}
+                            label="Province"
+                          />
+                        </div>
+                        <div>
+                          <SearchableDropdown
+                            value={form.customerZone}
+                            onChange={handleZoneChange}
+                            options={zoneOptions}
+                            placeholder={
+                              form.customerProvince
+                                ? "Select Zone"
+                                : "Select a province first"
+                            }
+                            loading={zonesLoading && !!form.customerProvince}
+                            label="Zone"
+                            disabled={!form.customerProvince}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Products section */}
@@ -4379,6 +4453,24 @@ const Sales = () => {
                     </label>
                     <div className="text-sm font-medium text-gray-800">
                       {val || "-"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* New row for customer contact details (read‑only in View modal) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {[
+                  ["Customer Phone", form.customerPhone || "-"],
+                  ["Customer Zone", form.customerZone || "-"],
+                  ["Customer Province", form.customerProvince || "-"],
+                ].map(([label, val]) => (
+                  <div key={label} className="bg-gray-50 p-3 rounded-lg">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      {label}
+                    </label>
+                    <div className="text-sm font-medium text-gray-800">
+                      {val}
                     </div>
                   </div>
                 ))}

@@ -91,7 +91,7 @@
 
       paymentStatus: {
         type: String,
-        enum: ["Cash", "Credit", "Partial", "Paid", "Return", "Unpaid"],
+        enum: ["Cash", "Credit", "Partial Paid", "Paid", "Return", "Unpaid"],
         default: "Credit",
       },
 

@@ -73,12 +73,12 @@ const INITIAL_FORM_STATE = {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-
 function capitalizeFirstLetter(str) {
   if (!str) return "";
   str = str.toString();
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
+
 // ------------------------------------------------
 // STOCK CALCULATION HELPERS (global & MR)
 // ------------------------------------------------
@@ -94,7 +94,7 @@ const calculateAvailableStock = (productData) => {
   if (productData.batches && Array.isArray(productData.batches)) {
     return productData.batches.reduce(
       (sum, batch) => sum + (batch.boxes || 0),
-      0
+      0,
     );
   }
   if (productData.inStock?.boxes !== undefined) {
@@ -106,11 +106,11 @@ const calculateAvailableStock = (productData) => {
 const getNearestExpiryDate = (productData) => {
   if (!productData?.batches || !Array.isArray(productData.batches)) return null;
   const validBatches = productData.batches.filter(
-    (batch) => batch.boxes > 0 && batch.expiryDate
+    (batch) => batch.boxes > 0 && batch.expiryDate,
   );
   if (validBatches.length === 0) return null;
   const sortedBatches = [...validBatches].sort(
-    (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
+    (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate),
   );
   return sortedBatches[0].expiryDate;
 };
@@ -128,9 +128,18 @@ const getMRNearestExpiry = (mrStockData) => {
   const valid = mrStockData.batches.filter((b) => b.boxes > 0 && b.expiryDate);
   if (!valid.length) return null;
   const sorted = [...valid].sort(
-    (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
+    (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate),
   );
   return sorted[0].expiryDate;
+};
+
+// ------------------------------------------------
+// HELPER: compute due date from today + N days
+// ------------------------------------------------
+const computeDueDate = (days) => {
+  const due = new Date();
+  due.setDate(due.getDate() + days);
+  return due.toISOString().split("T")[0];
 };
 
 // ------------------------------------------------
@@ -156,7 +165,7 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
           const bVal = typeof b === "string" ? b : b[filterField];
           return aVal.localeCompare(bVal);
         }),
-    [items, filterField, inputValue]
+    [items, filterField, inputValue],
   );
 
   const calculatePosition = useCallback(() => {
@@ -177,13 +186,13 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
         case "ArrowDown":
           e.preventDefault();
           setHighlightedIndex((prev) =>
-            prev < filteredItems.length - 1 ? prev + 1 : 0
+            prev < filteredItems.length - 1 ? prev + 1 : 0,
           );
           break;
         case "ArrowUp":
           e.preventDefault();
           setHighlightedIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredItems.length - 1
+            prev > 0 ? prev - 1 : filteredItems.length - 1,
           );
           break;
         case "Enter":
@@ -205,7 +214,7 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
           break;
       }
     },
-    [isOpen, filteredItems, highlightedIndex, filterField]
+    [isOpen, filteredItems, highlightedIndex, filterField],
   );
 
   const selectSuggestion = useCallback((value, onSelect) => {
@@ -242,7 +251,7 @@ const useProductSuggestions = (products, productNames) => {
     }));
     setSuggestionsList(initialSuggestions);
     inputRefs.current = products.map(
-      (_, i) => inputRefs.current[i] || React.createRef()
+      (_, i) => inputRefs.current[i] || React.createRef(),
     );
   }, [products.length]);
 
@@ -272,16 +281,16 @@ const useProductSuggestions = (products, productNames) => {
   const setIsOpen = useCallback((index, isOpen) => {
     setSuggestionsList((prev) =>
       prev.map((suggestion, i) =>
-        i === index ? { ...suggestion, isOpen } : suggestion
-      )
+        i === index ? { ...suggestion, isOpen } : suggestion,
+      ),
     );
   }, []);
 
   const setHighlightedIndex = useCallback((index, highlightedIndex) => {
     setSuggestionsList((prev) =>
       prev.map((suggestion, i) =>
-        i === index ? { ...suggestion, highlightedIndex } : suggestion
-      )
+        i === index ? { ...suggestion, highlightedIndex } : suggestion,
+      ),
     );
   }, []);
 
@@ -293,8 +302,8 @@ const useProductSuggestions = (products, productNames) => {
         prev.map((suggestion, i) =>
           i === index
             ? { ...suggestion, dropdownTop: 2 * height - 8 }
-            : suggestion
-        )
+            : suggestion,
+        ),
       );
     }
   }, []);
@@ -310,7 +319,7 @@ const useProductSuggestions = (products, productNames) => {
             index,
             suggestion.highlightedIndex < filteredItems[index].length - 1
               ? suggestion.highlightedIndex + 1
-              : 0
+              : 0,
           );
           break;
         case "ArrowUp":
@@ -319,7 +328,7 @@ const useProductSuggestions = (products, productNames) => {
             index,
             suggestion.highlightedIndex > 0
               ? suggestion.highlightedIndex - 1
-              : filteredItems[index].length - 1
+              : filteredItems[index].length - 1,
           );
           break;
         case "Enter":
@@ -341,7 +350,7 @@ const useProductSuggestions = (products, productNames) => {
           break;
       }
     },
-    [suggestionsList, filteredItems, setHighlightedIndex, setIsOpen]
+    [suggestionsList, filteredItems, setHighlightedIndex, setIsOpen],
   );
 
   const selectSuggestion = useCallback(
@@ -350,7 +359,7 @@ const useProductSuggestions = (products, productNames) => {
       setIsOpen(index, false);
       setHighlightedIndex(index, -1);
     },
-    [setIsOpen, setHighlightedIndex]
+    [setIsOpen, setHighlightedIndex],
   );
 
   const getInputRef = useCallback((index) => {
@@ -388,6 +397,8 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
 
   const [mrProductStock, setMrProductStock] = useState([]);
   const [mrAvailableProducts, setMrAvailableProducts] = useState([]);
+
+  const DEFAULT_CREDIT_DAYS = 30;
 
   const parseNumber = useCallback((val) => {
     if (val === "" || val === null || val === undefined) return 0;
@@ -465,7 +476,9 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       if (name === "paidAmount") {
         const totalNetAmount = calculateTotalNetAmount(currentForm.products);
         const paidAmount = parseNumber(value);
-        const newDueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(2);
+        const newDueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(
+          2,
+        );
         updatedForm.dueAmount = newDueAmount;
         updatedForm.paymentStatus = autoSetPaymentStatus({
           ...updatedForm,
@@ -473,10 +486,21 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
           dueAmount: newDueAmount,
           totalAmount: totalNetAmount,
         });
+
         const isFullPayment = parseFloat(totalNetAmount) === parseFloat(value);
         if (isFullPayment) {
+          // Cash — clear credit fields
           updatedForm.creditDays = "";
           updatedForm.dueDate = "";
+        } else if (
+          updatedForm.paymentStatus === "Credit" ||
+          updatedForm.paymentStatus === "Partial Paid"
+        ) {
+          // Default to 30 credit days if not already set by user
+          if (!updatedForm.creditDays || updatedForm.creditDays === "") {
+            updatedForm.creditDays = String(DEFAULT_CREDIT_DAYS);
+            updatedForm.dueDate = computeDueDate(DEFAULT_CREDIT_DAYS);
+          }
         }
       }
 
@@ -490,16 +514,25 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
           totalAmount: value,
           dueAmount: dueAmount.toFixed(2),
         });
+
         const isFullPayment = totalAmount === paidAmount;
         if (isFullPayment) {
           updatedForm.creditDays = "";
           updatedForm.dueDate = "";
+        } else if (
+          updatedForm.paymentStatus === "Credit" ||
+          updatedForm.paymentStatus === "Partial Paid"
+        ) {
+          if (!updatedForm.creditDays || updatedForm.creditDays === "") {
+            updatedForm.creditDays = String(DEFAULT_CREDIT_DAYS);
+            updatedForm.dueDate = computeDueDate(DEFAULT_CREDIT_DAYS);
+          }
         }
       }
 
       return updatedForm;
     },
-    [parseNumber, calculateTotalNetAmount, autoSetPaymentStatus]
+    [parseNumber, calculateTotalNetAmount, autoSetPaymentStatus],
   );
 
   const handleChange = useCallback(
@@ -507,7 +540,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       const { name, value } = e.target;
       setForm((prev) => calculateDerivedFields(name, value, prev));
     },
-    [calculateDerivedFields]
+    [calculateDerivedFields],
   );
 
   // ------------------------------------------------
@@ -571,6 +604,18 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
+  // Helper to apply default credit days to form state atomically
+  const applyDefaultCreditDays = useCallback((prevForm) => {
+    if (!prevForm.creditDays || prevForm.creditDays === "") {
+      return {
+        ...prevForm,
+        creditDays: String(DEFAULT_CREDIT_DAYS),
+        dueDate: computeDueDate(DEFAULT_CREDIT_DAYS),
+      };
+    }
+    return prevForm;
+  }, []);
+
   const handleMRChange = useCallback(
     (mrId) => {
       const selectedMR = mrList.find((mr) => mr._id === mrId);
@@ -583,13 +628,13 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       }
       setErrors((prev) => ({ ...prev, mrName: "" }));
     },
-    [mrList]
+    [mrList],
   );
 
   const handleCustomerChange = useCallback(
     (customerId) => {
       const selectedCustomer = customerList.find(
-        (customer) => customer._id === customerId
+        (customer) => customer._id === customerId,
       );
       if (selectedCustomer) {
         setForm((prevForm) => ({
@@ -601,7 +646,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       }
       setErrors((prev) => ({ ...prev, customerCode: "" }));
     },
-    [customerList]
+    [customerList],
   );
 
   // ------------------------------------------------
@@ -613,7 +658,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
 
   const isProductExpanded = useCallback(
     (index) => expandedProductIndex === index,
-    [expandedProductIndex]
+    [expandedProductIndex],
   );
 
   const isProductFilled = useCallback((product) => {
@@ -633,7 +678,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     }
     return requiredFields.every(
       (field) =>
-        currentForm[field] && currentForm[field].toString().trim() !== ""
+        currentForm[field] && currentForm[field].toString().trim() !== "",
     );
   }, []);
 
@@ -690,7 +735,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       calculateTotalAmount,
       calculateTotalNetAmount,
       autoSetPaymentStatus,
-    ]
+    ],
   );
 
   const removeProduct = useCallback(
@@ -731,7 +776,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       calculateTotalAmount,
       calculateTotalNetAmount,
       autoSetPaymentStatus,
-    ]
+    ],
   );
 
   const calculateProductFields = useCallback((product) => {
@@ -748,10 +793,9 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       totalQty > 0
         ? (parseFloat(netSellingAmount) / totalQty).toFixed(2)
         : "0.00";
-    const profitLoss = (
-      parseFloat(netSellingAmount) -
-      lc * totalQty
-    ).toFixed(2);
+    const profitLoss = (parseFloat(netSellingAmount) - lc * totalQty).toFixed(
+      2,
+    );
 
     return {
       ...product,
@@ -769,7 +813,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
         const updatedProducts = [...prev.products];
         updatedProducts[index] = { ...updatedProducts[index], [field]: value };
         const recalculatedProducts = updatedProducts.map((product) =>
-          calculateProductFields(product)
+          calculateProductFields(product),
         );
         const totalAmount = calculateTotalAmount(recalculatedProducts);
         const totalNetAmount = calculateTotalNetAmount(recalculatedProducts);
@@ -796,33 +840,30 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       calculateTotalNetAmount,
       calculateProductFields,
       autoSetPaymentStatus,
-    ]
+    ],
   );
 
   // --- STOCK VALIDATION (Normal Sale) ---
-  const validateTotalQuantity = useCallback(
-    (product, index, productsData) => {
-      if (!product.productName) return null;
-      const productData = productsData.find(
-        (p) => p.productName === product.productName
-      );
-      if (!productData) return null;
-      const availableStock = calculateAvailableStock(productData);
-      const salesQty = parseInt(product.salesQty) || 0;
-      const bonusQty = parseInt(product.bonusQty) || 0;
-      const totalQty = salesQty + bonusQty;
-      if (totalQty > availableStock) {
-        return `Total quantity (Sales + Bonus = ${totalQty}) cannot exceed available stock (${availableStock} boxes)`;
-      }
-      return null;
-    },
-    []
-  );
+  const validateTotalQuantity = useCallback((product, index, productsData) => {
+    if (!product.productName) return null;
+    const productData = productsData.find(
+      (p) => p.productName === product.productName,
+    );
+    if (!productData) return null;
+    const availableStock = calculateAvailableStock(productData);
+    const salesQty = parseInt(product.salesQty) || 0;
+    const bonusQty = parseInt(product.bonusQty) || 0;
+    const totalQty = salesQty + bonusQty;
+    if (totalQty > availableStock) {
+      return `Total quantity (Sales + Bonus = ${totalQty}) cannot exceed available stock (${availableStock} boxes)`;
+    }
+    return null;
+  }, []);
 
   const hasStockIssue = useCallback((product, productsData) => {
     if (!product.productName) return false;
     const productData = productsData.find(
-      (p) => p.productName === product.productName
+      (p) => p.productName === product.productName,
     );
     if (!productData) return false;
     const availableStock = calculateAvailableStock(productData);
@@ -835,7 +876,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
   const calculateRemainingStock = useCallback((product, productsData) => {
     if (!product.productName) return null;
     const productData = productsData.find(
-      (p) => p.productName === product.productName
+      (p) => p.productName === product.productName,
     );
     if (!productData) return null;
     const availableStock = calculateAvailableStock(productData);
@@ -846,22 +887,19 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
   }, []);
 
   // --- MR SALE: Stock validation ---
-  const validateMRTotalQuantity = useCallback(
-    (product, index, mrStock) => {
-      if (!product.productName || !product.selectedMrId) return null;
-      const stockData = mrStock[index];
-      if (!stockData) return "Stock information not loaded";
-      const availableStock = calculateMRStock(stockData);
-      const salesQty = parseInt(product.salesQty) || 0;
-      const bonusQty = parseInt(product.bonusQty) || 0;
-      const totalQty = salesQty + bonusQty;
-      if (totalQty > availableStock) {
-        return `Total quantity (Sales + Bonus = ${totalQty}) exceeds MR's available stock (${availableStock} boxes)`;
-      }
-      return null;
-    },
-    []
-  );
+  const validateMRTotalQuantity = useCallback((product, index, mrStock) => {
+    if (!product.productName || !product.selectedMrId) return null;
+    const stockData = mrStock[index];
+    if (!stockData) return "Stock information not loaded";
+    const availableStock = calculateMRStock(stockData);
+    const salesQty = parseInt(product.salesQty) || 0;
+    const bonusQty = parseInt(product.bonusQty) || 0;
+    const totalQty = salesQty + bonusQty;
+    if (totalQty > availableStock) {
+      return `Total quantity (Sales + Bonus = ${totalQty}) exceeds MR's available stock (${availableStock} boxes)`;
+    }
+    return null;
+  }, []);
 
   const validateProductField = useCallback(
     (index, field, value, productsData, saleType, mrStock) => {
@@ -894,13 +932,13 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
                 stockError = validateMRTotalQuantity(
                   { ...form.products[index], salesQty: value },
                   index,
-                  mrStock
+                  mrStock,
                 );
               } else {
                 stockError = validateTotalQuantity(
                   { ...form.products[index], salesQty: value },
                   index,
-                  productsData
+                  productsData,
                 );
               }
               if (stockError) {
@@ -935,7 +973,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
 
       setErrors(newErrors);
     },
-    [form.products, errors, validateTotalQuantity, validateMRTotalQuantity]
+    [form.products, errors, validateTotalQuantity, validateMRTotalQuantity],
   );
 
   const validate = useCallback(
@@ -963,9 +1001,8 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
             } is required`;
           }
           if (saleType === "mr" && !product.selectedMrId) {
-            newErrors[`selectedMrId_${index}`] = `Medical Representative for item ${
-              index + 1
-            } is required`;
+            newErrors[`selectedMrId_${index}`] =
+              `Medical Representative for item ${index + 1} is required`;
           }
 
           const salesQtyStr = product.salesQty?.toString().trim();
@@ -1003,7 +1040,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
             const stockError = validateTotalQuantity(
               product,
               index,
-              productsData
+              productsData,
             );
             if (stockError) newErrors[`salesQty_${index}`] = stockError;
           }
@@ -1011,14 +1048,14 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       });
 
       const hasProducts = form.products.some(
-        (product) => product.productName.trim() !== ""
+        (product) => product.productName.trim() !== "",
       );
       if (!hasProducts) newErrors.products = "At least one product is required";
 
       setErrors(newErrors);
       return Object.keys(newErrors).length === 0;
     },
-    [form, validateTotalQuantity, validateMRTotalQuantity]
+    [form, validateTotalQuantity, validateMRTotalQuantity],
   );
 
   // --- Process products list for Normal Sale ---
@@ -1046,7 +1083,9 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
             }
           });
         setProducts(availableProducts);
-        setProductNames(availableProducts.map((product) => product.productName));
+        setProductNames(
+          availableProducts.map((product) => product.productName),
+        );
       } catch (error) {
         console.error("Error processing products list:", error);
         setProducts([]);
@@ -1094,6 +1133,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     setMrProductStock,
     mrAvailableProducts,
     setMrAvailableProducts,
+    applyDefaultCreditDays,
   };
 };
 
@@ -1128,7 +1168,7 @@ const DatePickerField = React.memo(
           onChange(event);
         }
       },
-      [name, onChange, disabled]
+      [name, onChange, disabled],
     );
     const selectedDate = useMemo(() => {
       if (!value) return null;
@@ -1164,7 +1204,7 @@ const DatePickerField = React.memo(
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
       </div>
     );
-  }
+  },
 );
 
 const SuggestionInput = React.memo(
@@ -1193,7 +1233,7 @@ const SuggestionInput = React.memo(
       (index) => {
         if (!disabled) setHighlightedIndex(index);
       },
-      [setHighlightedIndex, disabled]
+      [setHighlightedIndex, disabled],
     );
     const handleClick = useCallback(
       (item) => {
@@ -1202,7 +1242,7 @@ const SuggestionInput = React.memo(
           onSuggestionSelect && onSuggestionSelect(value);
         }
       },
-      [onSuggestionSelect, getSuggestionValue, disabled]
+      [onSuggestionSelect, getSuggestionValue, disabled],
     );
     return (
       <div className="relative flex flex-col">
@@ -1233,7 +1273,7 @@ const SuggestionInput = React.memo(
           >
             {suggestions.map((item, idx) => (
               <li
-                key={typeof item === "object" ? item._id ?? idx : idx}
+                key={typeof item === "object" ? (item._id ?? idx) : idx}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleClick(item)}
                 onMouseEnter={() => handleMouseEnter(idx)}
@@ -1251,7 +1291,7 @@ const SuggestionInput = React.memo(
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
       </div>
     );
-  }
+  },
 );
 
 // ------------------------------------------------
@@ -1262,6 +1302,8 @@ const AddSale = () => {
   const location = useLocation();
   const { customerCode } = location.state || {};
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+  const DEFAULT_CREDIT_DAYS = 30;
 
   const [saleType, setSaleType] = useState("normal");
 
@@ -1299,6 +1341,7 @@ const AddSale = () => {
     setMrProductStock,
     mrAvailableProducts,
     setMrAvailableProducts,
+    applyDefaultCreditDays,
   } = useSaleForm(customerCode, saleType);
 
   const { statuses, loading: initialLoading } = useInitialSaleData();
@@ -1309,14 +1352,14 @@ const AddSale = () => {
 
   useEffect(() => {
     if (saleType === "mr") {
-      console.log('valuesof mr');
+      console.log("valuesof mr");
       const fetchMRStockList = async () => {
         setMrStockListLoading(true);
         try {
           const response = await axios.get(
-            `${backendUrl}/api/sales/mr-stock/mrs-with-stock`
+            `${backendUrl}/api/sales/mr-stock/mrs-with-stock`,
           );
-          console.log('values of responst 1318', response);
+          console.log("values of responst 1318", response);
           if (response.status === 200) {
             setMrStockList(response.data.data || []);
           } else {
@@ -1360,7 +1403,7 @@ const AddSale = () => {
       if (!mrId) return;
       try {
         const response = await axios.get(
-          `${backendUrl}/api/sales/mr-stock/products/${mrId}`
+          `${backendUrl}/api/sales/mr-stock/products/${mrId}`,
         );
         if (response.data.success) {
           const mrProducts = response.data.products || [];
@@ -1375,7 +1418,7 @@ const AddSale = () => {
         showToast("error", "Could not load product list for this MR");
       }
     },
-    [backendUrl, setMrAvailableProducts]
+    [backendUrl, setMrAvailableProducts],
   );
 
   // Auto-fetch products when new MR row is added with existing MR selected
@@ -1453,22 +1496,21 @@ const AddSale = () => {
   const paymentStatusSuggestions = useSuggestions(
     statuses,
     "type",
-    form.paymentStatus
+    form.paymentStatus,
   );
 
   // --- Product suggestions (for Normal Sale) ---
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
   // --- MR-specific stock fetch ---
-  // ✅ FIX: Only called when product name exactly matches a known MR product
   const fetchMRProductStock = useCallback(
     async (mrId, productName, index) => {
       if (!mrId || !productName) return null;
       try {
         const response = await axios.get(
           `${backendUrl}/api/sales/mr-stock/${mrId}/${encodeURIComponent(
-            productName
-          )}`
+            productName,
+          )}`,
         );
         if (response.data.success) {
           const stockData = response.data.stock;
@@ -1485,7 +1527,7 @@ const AddSale = () => {
       }
       return null;
     },
-    [backendUrl, setMrProductStock]
+    [backendUrl, setMrProductStock],
   );
 
   // --- Normal Sale expiry info ---
@@ -1501,7 +1543,7 @@ const AddSale = () => {
       const today = new Date();
       const expiryDate = new Date(nearestBatch.expiryDate);
       const daysUntilExpiry = Math.ceil(
-        (expiryDate - today) / (1000 * 60 * 60 * 24)
+        (expiryDate - today) / (1000 * 60 * 60 * 24),
       );
       return {
         nearestExpiry: nearestBatch.expiryDate,
@@ -1510,22 +1552,22 @@ const AddSale = () => {
         batchCount: validBatches.length,
       };
     },
-    [products]
+    [products],
   );
 
   // --- MR Sale expiry info ---
   const getMRProductExpiryInfo = useCallback((mrStockData) => {
     if (!mrStockData?.batches) return null;
     const valid = mrStockData.batches.filter(
-      (b) => b.boxes > 0 && b.expiryDate
+      (b) => b.boxes > 0 && b.expiryDate,
     );
     if (!valid.length) return null;
     const sorted = [...valid].sort(
-      (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
+      (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate),
     );
     const nearest = sorted[0];
     const days = Math.ceil(
-      (new Date(nearest.expiryDate) - new Date()) / (1000 * 60 * 60 * 24)
+      (new Date(nearest.expiryDate) - new Date()) / (1000 * 60 * 60 * 24),
     );
     return {
       nearestExpiry: nearest.expiryDate,
@@ -1559,7 +1601,7 @@ const AddSale = () => {
       productsList.length > 0
     ) {
       setUploadMessage(
-        "All products are currently out of stock. Please add stock to products first."
+        "All products are currently out of stock. Please add stock to products first.",
       );
       setShowUploadMessage(true);
       setIsFormDisabled(true);
@@ -1592,7 +1634,7 @@ const AddSale = () => {
           const found = available.find(
             (p) =>
               (p.productName || p.name || "").toLowerCase() ===
-              productName.toLowerCase()
+              productName.toLowerCase(),
           );
           if (found) {
             return {
@@ -1628,10 +1670,12 @@ const AddSale = () => {
         sellingPrice: sellingPrice.toString(),
       };
     },
-    [saleType, mrAvailableProducts, products]
+    [saleType, mrAvailableProducts, products],
   );
 
-  // --- Enhanced change handler for form fields ---
+  // ------------------------------------------------
+  // ENHANCED CHANGE HANDLER
+  // ------------------------------------------------
   const enhancedHandleChange = useCallback(
     (e) => {
       if (isFormDisabled) return;
@@ -1643,11 +1687,13 @@ const AddSale = () => {
       } else {
         handleChange(e);
       }
+
       if (name === "paidAmount") {
         setTimeout(() => {
           const totalAmount = parseFloat(form.totalAmount) || 0;
           const paidAmount = parseFloat(value) || 0;
           const dueAmount = totalAmount - paidAmount;
+
           if (totalAmount > 0) {
             let newPaymentStatus = "Credit";
             if (paidAmount === totalAmount) {
@@ -1657,8 +1703,25 @@ const AddSale = () => {
             } else if (paidAmount > 0 && paidAmount < totalAmount) {
               newPaymentStatus = "Partial Paid";
             }
+
             if (newPaymentStatus !== form.paymentStatus) {
               updateFormField("paymentStatus", newPaymentStatus);
+            }
+
+            // Set default 30 credit days if Credit or Partial Paid and not already set
+            if (
+              (newPaymentStatus === "Credit" ||
+                newPaymentStatus === "Partial Paid") &&
+              (!form.creditDays || form.creditDays === "")
+            ) {
+              updateFormField("creditDays", String(DEFAULT_CREDIT_DAYS));
+              updateFormField("dueDate", computeDueDate(DEFAULT_CREDIT_DAYS));
+            }
+
+            // Clear credit days if full payment (Cash)
+            if (newPaymentStatus === "Cash") {
+              updateFormField("creditDays", "");
+              updateFormField("dueDate", "");
             }
           }
         }, 100);
@@ -1670,8 +1733,9 @@ const AddSale = () => {
       updateFormField,
       form.totalAmount,
       form.paymentStatus,
+      form.creditDays,
       isFormDisabled,
-    ]
+    ],
   );
 
   // --- Returns MR-specific product names for dropdown ---
@@ -1686,11 +1750,10 @@ const AddSale = () => {
       }
       return productNames;
     },
-    [saleType, mrAvailableProducts, productNames]
+    [saleType, mrAvailableProducts, productNames],
   );
 
-  // ✅ FIX: Enhanced product change handler
-  // fetchMRProductStock is ONLY called when value exactly matches a product in mrAvailableProducts
+  // ✅ Enhanced product change handler
   const enhancedProductChange = useCallback(
     (index, field, value) => {
       if (isFormDisabled) return;
@@ -1698,7 +1761,6 @@ const AddSale = () => {
       updateProduct(index, field, value);
 
       if (field === "productName") {
-        // Get product details (lc, fob, cif, sellingPrice)
         const productDetails = getProductDetails(value, index);
         updateProduct(index, "lc", productDetails.lc);
         updateProduct(index, "fob", productDetails.fob);
@@ -1711,18 +1773,15 @@ const AddSale = () => {
           const mrId = form.products[index]?.selectedMrId;
           const available = mrAvailableProducts[index] || [];
 
-          // ✅ FIX: Only fetch stock when value exactly matches a known product name
           const isExactMatch = available.some(
             (p) =>
               (p.productName || p.name || "").toLowerCase() ===
-              value.toLowerCase()
+              value.toLowerCase(),
           );
 
           if (mrId && isExactMatch) {
-            // Exact match — fetch stock for this product
             fetchMRProductStock(mrId, value, index);
           } else {
-            // Still typing or no match — clear stock so badges don't show stale data
             setMrProductStock((prev) => {
               const newStock = [...prev];
               newStock[index] = null;
@@ -1741,9 +1800,7 @@ const AddSale = () => {
         if (selectedMr) {
           updateProduct(index, "selectedMrName", selectedMr.mrName);
         }
-        // Fetch MR-specific products for this row
         fetchMRAvailableProducts(value, index);
-        // Clear product name and stock when MR changes
         if (form.products[index].productName) {
           updateProduct(index, "productName", "");
           setMrProductStock((prev) => {
@@ -1758,7 +1815,7 @@ const AddSale = () => {
           value,
           products,
           saleType,
-          mrProductStock
+          mrProductStock,
         );
       }
 
@@ -1772,7 +1829,7 @@ const AddSale = () => {
             value,
             products,
             saleType,
-            mrProductStock
+            mrProductStock,
           );
         }, 10);
       }
@@ -1792,7 +1849,7 @@ const AddSale = () => {
       isFormDisabled,
       form.products,
       setMrProductStock,
-    ]
+    ],
   );
 
   // --- Keyboard / focus handlers ---
@@ -1803,7 +1860,7 @@ const AddSale = () => {
         updateFormField("paymentStatus", value);
       });
     },
-    [paymentStatusSuggestions, updateFormField, isFormDisabled]
+    [paymentStatusSuggestions, updateFormField, isFormDisabled],
   );
 
   const handleProductNameKeyDown = useCallback(
@@ -1813,7 +1870,7 @@ const AddSale = () => {
         enhancedProductChange(index, "productName", value);
       });
     },
-    [productSuggestions, enhancedProductChange, isFormDisabled]
+    [productSuggestions, enhancedProductChange, isFormDisabled],
   );
 
   const handlePaymentStatusFocus = useCallback(() => {
@@ -1829,7 +1886,7 @@ const AddSale = () => {
       productSuggestions.setDropdownTop(index);
       productSuggestions.setHighlightedIndex(index, 0);
     },
-    [productSuggestions, isFormDisabled]
+    [productSuggestions, isFormDisabled],
   );
 
   const handleProductRowHighlight = useCallback(
@@ -1837,7 +1894,7 @@ const AddSale = () => {
       if (isFormDisabled) return;
       productSuggestions.setHighlightedIndex(productIndex, suggestionIndex);
     },
-    [productSuggestions, isFormDisabled]
+    [productSuggestions, isFormDisabled],
   );
 
   // --- "Add Product" validation ---
@@ -1891,7 +1948,13 @@ const AddSale = () => {
       hasAtLeastOneProduct(form.products) &&
       !isFormDisabled
     );
-  }, [form, areCommonFieldsFilled, hasAtLeastOneProduct, isFormDisabled, saleType]);
+  }, [
+    form,
+    areCommonFieldsFilled,
+    hasAtLeastOneProduct,
+    isFormDisabled,
+    saleType,
+  ]);
 
   const handleNumericInputChange = useCallback(
     (e, updateFunc) => {
@@ -1901,7 +1964,7 @@ const AddSale = () => {
         updateFunc(e);
       }
     },
-    [isFormDisabled]
+    [isFormDisabled],
   );
 
   const handleAlphanumericInputChange = useCallback(
@@ -1912,7 +1975,7 @@ const AddSale = () => {
         updateFunc(e);
       }
     },
-    [isFormDisabled]
+    [isFormDisabled],
   );
 
   // --- SUBMIT ---
@@ -1931,7 +1994,7 @@ const AddSale = () => {
         (product) =>
           product.productName &&
           product.productName.trim() !== "" &&
-          (Number(product.salesQty) > 0 || Number(product.bonusQty) > 0)
+          (Number(product.salesQty) > 0 || Number(product.bonusQty) > 0),
       );
 
       if (validProducts.length === 0) {
@@ -1946,7 +2009,7 @@ const AddSale = () => {
           const stockData = mrProductStock[index];
           if (!stockData) {
             stockErrors.push(
-              `"${product.productName}": Stock information not loaded`
+              `"${product.productName}": Stock information not loaded`,
             );
             continue;
           }
@@ -1957,12 +2020,12 @@ const AddSale = () => {
             stockErrors.push(
               `"${product.productName}" for MR ${
                 product.selectedMrName || "unknown"
-              }: Required ${totalQty}, Available ${availableStock}`
+              }: Required ${totalQty}, Available ${availableStock}`,
             );
           }
         } else {
           const productData = products.find(
-            (p) => p.productName === product.productName
+            (p) => p.productName === product.productName,
           );
           if (productData) {
             const availableStock = calculateAvailableStock(productData);
@@ -1970,7 +2033,7 @@ const AddSale = () => {
               Number(product.salesQty) + Number(product.bonusQty || 0);
             if (totalQty > availableStock) {
               stockErrors.push(
-                `"${product.productName}": Required ${totalQty}, Available ${availableStock}`
+                `"${product.productName}": Required ${totalQty}, Available ${availableStock}`,
               );
             }
           }
@@ -1984,8 +2047,14 @@ const AddSale = () => {
 
       const safeFormatDate = (dateString) => {
         if (!dateString) return "";
+        // If already YYYY-MM-DD string, return as-is — no Date parsing needed
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return dateString;
         const date = new Date(dateString);
-        return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
+        if (isNaN(date.getTime())) return "";
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
       };
 
       const saleData = {
@@ -2073,7 +2142,7 @@ const AddSale = () => {
           const text = await response.text();
           errorMessage = `Server returned ${response.status}: ${text.substring(
             0,
-            100
+            100,
           )}...`;
         }
         throw new Error(errorMessage);
@@ -2177,18 +2246,18 @@ const AddSale = () => {
       {/* PRODUCT ROWS */}
       <div className="mb-6">
         {form.products.map((product, index) => {
-          // ✅ FIX: Compute stock values for display
           let availableStock = 0;
           let remainingStock = null;
           let hasStockProblem = false;
           let expiryInfo = null;
-          // ✅ FIX: stockLoaded indicates whether we have stock data to display
           let stockLoaded = false;
 
           if (saleType === "mr") {
             const stockData = mrProductStock[index];
-            // ✅ FIX: stockLoaded = true only when product is selected AND stock data was fetched
-            stockLoaded = !!product.productName && stockData !== null && stockData !== undefined;
+            stockLoaded =
+              !!product.productName &&
+              stockData !== null &&
+              stockData !== undefined;
             if (stockData) {
               availableStock = calculateMRStock(stockData);
               const totalQty =
@@ -2200,7 +2269,7 @@ const AddSale = () => {
             }
           } else {
             const productData = products.find(
-              (p) => p.productName === product.productName
+              (p) => p.productName === product.productName,
             );
             stockLoaded = !!productData;
             if (productData) {
@@ -2223,16 +2292,16 @@ const AddSale = () => {
                   </h3>
                   {product.productName && (
                     <>
-                      {/* ✅ FIX: Show stock badges when stockLoaded is true (even if availableStock === 0) */}
                       {stockLoaded && (
                         <>
                           <span
                             className={`text-sm px-3 py-2 rounded ${
                               remainingStock !== null && remainingStock < 0
                                 ? "bg-red-100 text-red-800 border border-red-300"
-                                : remainingStock !== null && remainingStock <= 10
-                                ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
-                                : "bg-green-100 text-green-800 border border-green-300"
+                                : remainingStock !== null &&
+                                    remainingStock <= 10
+                                  ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
+                                  : "bg-green-100 text-green-800 border border-green-300"
                             }`}
                           >
                             Remaining: {remainingStock ?? "N/A"} boxes
@@ -2250,7 +2319,7 @@ const AddSale = () => {
                               : "bg-green-100 text-green-800 border-green-300"
                           }`}
                           title={`Nearest expiry: ${new Date(
-                            expiryInfo.nearestExpiry
+                            expiryInfo.nearestExpiry,
                           ).toLocaleDateString()} (${
                             expiryInfo.daysUntilExpiry
                           } days)`}
@@ -2319,11 +2388,7 @@ const AddSale = () => {
                           <SearchableDropdown
                             value={product.selectedMrId || ""}
                             onChange={(mrId) =>
-                              enhancedProductChange(
-                                index,
-                                "selectedMrId",
-                                mrId
-                              )
+                              enhancedProductChange(index, "selectedMrId", mrId)
                             }
                             options={mrStockOptions}
                             placeholder="Select Medical Representative"
@@ -2365,7 +2430,7 @@ const AddSale = () => {
                           enhancedProductChange(
                             index,
                             "productName",
-                            e.target.value
+                            e.target.value,
                           )
                         }
                         onKeyDown={(e) => handleProductNameKeyDown(index, e)}
@@ -2373,7 +2438,7 @@ const AddSale = () => {
                         onBlur={() =>
                           setTimeout(
                             () => productSuggestions.setIsOpen(index, false),
-                            150
+                            150,
                           )
                         }
                         disabled={
@@ -2404,21 +2469,18 @@ const AddSale = () => {
                           <ul
                             className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
                             style={{
-                              top:
-                                productSuggestions.suggestionsList[index]
-                                  .dropdownTop,
+                              top: productSuggestions.suggestionsList[index]
+                                .dropdownTop,
                             }}
                           >
                             {saleType === "mr"
-                              ? // MR sale: filter directly from mrAvailableProducts
-                                (mrAvailableProducts[index] || [])
+                              ? (mrAvailableProducts[index] || [])
                                   .filter((p) => {
-                                    const name =
-                                      p.productName || p.name || "";
+                                    const name = p.productName || p.name || "";
                                     return name
                                       .toLowerCase()
                                       .includes(
-                                        product.productName.toLowerCase()
+                                        product.productName.toLowerCase(),
                                       );
                                   })
                                   .map((item, idx) => (
@@ -2429,7 +2491,7 @@ const AddSale = () => {
                                         enhancedProductChange(
                                           index,
                                           "productName",
-                                          item.productName || item.name
+                                          item.productName || item.name,
                                         )
                                       }
                                       onMouseEnter={() =>
@@ -2444,18 +2506,18 @@ const AddSale = () => {
                                       }`}
                                     >
                                       <span>
-                                        {capitalizeFirstLetter(item.productName || item.name)}
+                                        {capitalizeFirstLetter(
+                                          item.productName || item.name,
+                                        )}
                                       </span>
-                                 
                                     </li>
                                   ))
-                              : // Normal sale: original suggestion logic
-                                productSuggestions.filteredItems[index]?.map(
+                              : productSuggestions.filteredItems[index]?.map(
                                   (item, idx) => (
                                     <li
                                       key={
                                         typeof item === "object"
-                                          ? item._id ?? idx
+                                          ? (item._id ?? idx)
                                           : idx
                                       }
                                       onMouseDown={(e) => e.preventDefault()}
@@ -2469,8 +2531,8 @@ const AddSale = () => {
                                             enhancedProductChange(
                                               index,
                                               "productName",
-                                              value
-                                            )
+                                              value,
+                                            ),
                                         )
                                       }
                                       onMouseEnter={() =>
@@ -2488,7 +2550,7 @@ const AddSale = () => {
                                         ? item
                                         : item.name}
                                     </li>
-                                  )
+                                  ),
                                 )}
                           </ul>
                         )}
@@ -2510,8 +2572,8 @@ const AddSale = () => {
                           enhancedProductChange(
                             index,
                             "salesQty",
-                            e.target.value
-                          )
+                            e.target.value,
+                          ),
                         );
                       }}
                       error={errors[`salesQty_${index}`]}
@@ -2528,8 +2590,8 @@ const AddSale = () => {
                           enhancedProductChange(
                             index,
                             "bonusQty",
-                            e.target.value
-                          )
+                            e.target.value,
+                          ),
                         );
                       }}
                       error={errors[`bonusQty_${index}`]}
@@ -2545,8 +2607,8 @@ const AddSale = () => {
                           enhancedProductChange(
                             index,
                             "sellingPrice",
-                            e.target.value
-                          )
+                            e.target.value,
+                          ),
                         );
                       }}
                       error={errors[`sellingPrice_${index}`]}
@@ -2563,8 +2625,8 @@ const AddSale = () => {
                           enhancedProductChange(
                             index,
                             "discount",
-                            e.target.value
-                          )
+                            e.target.value,
+                          ),
                         );
                       }}
                       error={errors[`discount_${index}`]}
@@ -2787,9 +2849,24 @@ const AddSale = () => {
             onBlur={() =>
               setTimeout(() => paymentStatusSuggestions.setIsOpen(false), 150)
             }
-            onSuggestionSelect={(value) =>
-              updateFormField("paymentStatus", value)
-            }
+            onSuggestionSelect={(value) => {
+              updateFormField("paymentStatus", value);
+              // Apply default 30 credit days when manually selecting Credit or Partial Paid
+              if (value === "Credit" || value === "Partial Paid") {
+                if (!form.creditDays || form.creditDays === "") {
+                  updateFormField("creditDays", String(DEFAULT_CREDIT_DAYS));
+                  updateFormField(
+                    "dueDate",
+                    computeDueDate(DEFAULT_CREDIT_DAYS),
+                  );
+                }
+              }
+              // Clear credit days when selecting Cash
+              if (value === "Cash") {
+                updateFormField("creditDays", "");
+                updateFormField("dueDate", "");
+              }
+            }}
             getSuggestionValue={(item) => item.type}
             getSuggestionDisplay={(item) => item.type}
             setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex}

@@ -389,7 +389,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     try {
       const response = await fetch(`${backendUrl}/api/customers?limit=1`);
       const data = await response.json();
-      
+      console.log('values of response', data);
       if (data.ok && data.nextCustomerCode) {
         setForm(prev => ({
           ...prev,

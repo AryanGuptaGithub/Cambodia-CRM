@@ -140,9 +140,11 @@ const formatCustomerResponse = (customer) => {
 const generateNextCustomerCode = async () => {
   try {
     const last = await Customer.findOne({})
+      .collation({ locale: "en", numericOrdering: true }) // ← ADD THIS
       .sort({ customerCode: -1 })
       .select("customerCode");
 
+      console.log("last", last);
     let nextCode = 1;
     if (last?.customerCode) {
       const match = last.customerCode.match(/\d+/);
@@ -151,13 +153,12 @@ const generateNextCustomerCode = async () => {
         if (!isNaN(parsed)) nextCode = parsed + 1;
       }
     }
-
+    console.log('values of nextCode.toString().padStart(5, "0")', nextCode.toString().padStart(5, "0"));
     return nextCode.toString().padStart(5, "0");
   } catch {
     return "00001";
   }
 };
-
 const generateCustomerKey = (customer) => {
   const {
     name = "",

@@ -161,7 +161,7 @@ const mergeInvoiceProducts = async (
           salesQty,
           bonusQty,
           session,
-          mergeProductMrName, // ← mrNameHint
+          mergeProductMrName,
         );
 
         if (!deductionResult.success) {
@@ -1155,9 +1155,6 @@ const checkMRStock = async (
     }
     const mrId = mrValidation.mrData.mrId;
 
-    // Use resolveMRStock (defined below deductStockFromMRHand) so that a
-    // stale/duplicate Staff _id still resolves to the correct stockInMRHand
-    // document via the mrName fallback.
     const mrStock = await resolveMRStock(mrId, mrName, session);
 
     if (!mrStock) {
@@ -1214,17 +1211,7 @@ const checkMRStock = async (
 
 // ==========================================
 // updateMRCashes
-// ──────────────────────────────────────────────────────────────────────────
-// Parameters:
-//   mrName        – MR display name
-//   amount        – ABSOLUTE value of the cash change (always pass positive)
-//   invoiceNumber – invoice reference for the audit trail
-//   date          – invoice / transaction date
-//   session       – Mongoose transaction session
-//   isRefund      – true  → SUBTRACT amount from currentCash
-//                   false → ADD amount to currentCash
-//   auditNote     – optional caller-supplied note
-// ──────────────────────────────────────────────────────────────────────────
+// ==========================================
 const updateMRCashes = async (
   mrName,
   amount,
@@ -1265,12 +1252,6 @@ const updateMRCashes = async (
     const transactionNote = auditNote || defaultNote;
     console.log(`   transactionNote (final): ${transactionNote}`);
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // STEP 1: Search MRCash by mrName first (case-insensitive).
-    // This avoids the duplicate-Staff problem where a second Staff record with
-    // the same display name causes a brand-new MRCash to be created instead of
-    // updating the existing one.
-    // ─────────────────────────────────────────────────────────────────────────
     console.log(
       `   🔍 Searching MRCash by mrName = "${normalizedName}" (case-insensitive)...`,
     );
@@ -1281,15 +1262,8 @@ const updateMRCashes = async (
       `   MRCash by-name lookup: ${mrCash ? `FOUND → _id=${mrCash._id}, mrId=${mrCash.mrId}, currentCash=${mrCash.currentCash}` : "NOT FOUND"}`,
     );
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // STEP 2: Resolve the Staff record.
-    // Always look up Staff so we have a valid mrId for new MRCash creation.
-    // Prefer the Staff whose _id matches the EXISTING MRCash's mrId (if found),
-    // so we never accidentally bind to a duplicate Staff document.
-    // ─────────────────────────────────────────────────────────────────────────
     let mr;
     if (mrCash) {
-      // Use the Staff record that the existing MRCash is already linked to.
       console.log(`   🔍 Fetching Staff by mrCash.mrId = ${mrCash.mrId}...`);
       mr = await Staff.findById(mrCash.mrId).session(session);
       console.log(
@@ -1297,8 +1271,6 @@ const updateMRCashes = async (
       );
 
       if (!mr) {
-        // Fallback: MRCash exists but its mrId no longer points to a valid Staff.
-        // Search by name instead so we can still proceed.
         console.warn(
           `   ⚠️  Staff _id ${mrCash.mrId} not found. Falling back to name search.`,
         );
@@ -1310,7 +1282,6 @@ const updateMRCashes = async (
         );
       }
     } else {
-      // No existing MRCash — search Staff by name to create a fresh record.
       console.log(
         `   🔍 Searching Staff for medicalRepName = "${normalizedName}" (case-insensitive)...`,
       );
@@ -1327,11 +1298,7 @@ const updateMRCashes = async (
       throw new Error(`MR not found with name "${mrName}"`);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // STEP 3: Create or update MRCash.
-    // ─────────────────────────────────────────────────────────────────────────
     if (!mrCash) {
-      // No MRCash exists at all for this MR — create one.
       const initialCash = isRefund ? 0 : cleanAmount;
       console.log(
         `   isRefund=${isRefund} → initialCash set to: ${initialCash}`,
@@ -1372,7 +1339,6 @@ const updateMRCashes = async (
       };
     }
 
-    // MRCash already exists — update it.
     const previousAmount = fixPrecision(mrCash.currentCash || 0);
     console.log(`   previousAmount (current cash in DB): ${previousAmount}`);
 
@@ -1450,10 +1416,6 @@ const updateMRCashes = async (
 
 // ==========================================
 // computePaidAmount
-// ──────────────────────────────────────────
-// Derives the correct paidAmount from
-// paymentStatus + totalAmount + incoming
-// paidAmount field (for Partial Paid).
 // ==========================================
 const computePaidAmount = (paymentStatus, totalAmount, rawPaidAmount) => {
   const status = (paymentStatus || "").toLowerCase().trim();
@@ -1517,38 +1479,15 @@ const buildMatchConditions = (search, tab, saleType) => {
   return matchConditions;
 };
 
-// ==========================================
-// resolveMRStock
-// ──────────────────────────────────────────
-// Central helper used by deductStockFromMRHand,
-// getMRStockQuantity, and restoreStockToMRHand.
-//
-// PROBLEM: When a duplicate Staff record exists for
-// the same MR name, the sale/product data may carry
-// the NEW Staff _id while the stockInMRHand document
-// is still linked to the OLD Staff _id. A plain
-// mrId lookup would return null → "Available: 0".
-//
-// SOLUTION (priority order):
-//   1. Try exact mrId match (ObjectId cast).
-//   2. Try mrId as raw string (no cast).
-//   3. If mrNameHint provided, search by mrName
-//      (case-insensitive) — picks up the record
-//      regardless of which Staff _id it is linked to.
-// ──────────────────────────────────────────
 async function resolveMRStock(mrId, mrNameHint, session) {
-  // 1. Try ObjectId cast
   if (mrId) {
     try {
       const byOid = await stockInMRHand
         .findOne({ mrId: new mongoose.Types.ObjectId(String(mrId)) })
         .session(session);
       if (byOid) return byOid;
-    } catch (_) {
-      // mrId is not a valid ObjectId string – fall through
-    }
+    } catch (_) {}
 
-    // 2. Try raw string match
     try {
       const byRaw = await stockInMRHand
         .findOne({ mrId: String(mrId) })
@@ -1557,7 +1496,6 @@ async function resolveMRStock(mrId, mrNameHint, session) {
     } catch (_) {}
   }
 
-  // 3. Fall back to mrName search (handles duplicate-Staff scenario)
   if (mrNameHint && mrNameHint.trim()) {
     const escapedName = mrNameHint
       .trim()
@@ -1581,10 +1519,6 @@ async function deductStockFromMRHand(
 ) {
   const totalQty = fixPrecision(Number(salesQty || 0) + Number(bonusQty || 0));
 
-  // ── Resolve stockInMRHand by mrId first, then fall back to mrName ─────────
-  // This handles the duplicate-Staff problem: the stockInMRHand record may
-  // be linked to an OLD Staff _id while the sale/product carries a NEW _id.
-  // We always prefer the record that actually holds stock.
   let mrStock = await resolveMRStock(mrId, mrNameHint, session);
 
   if (!mrStock) {
@@ -1739,6 +1673,24 @@ async function restoreStockToMRHand(
 }
 
 // ==========================================
+// parseUTCDate helper — stores date exactly as selected (no offset)
+// ==========================================
+const parseUTCDate = (dateStr) => {
+  if (!dateStr) return new Date();
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+};
+
+// ==========================================
+// parseInvoiceDate helper — FIX: stores date exactly as selected (no +1/+2 day offset)
+// ==========================================
+const parseInvoiceDate = (dateStr) => {
+  if (!dateStr) return new Date();
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+};
+
+// ==========================================
 // CREATE SALE (Manual)
 // ==========================================
 router.post("/create", async (req, res) => {
@@ -1872,7 +1824,7 @@ router.post("/create", async (req, res) => {
           salesQty,
           bonusQty,
           session,
-          (p.mrName || "").trim(), // ← mrNameHint: fallback by name if mrId is stale
+          (p.mrName || "").trim(),
         );
 
         if (!deductionResult.success) {
@@ -1972,25 +1924,12 @@ router.post("/create", async (req, res) => {
       mrId = processedProducts[0].mrId;
     }
 
-    const parseUTCDate = (dateStr) => {
-      if (!dateStr) return new Date();
-      const [y, m, d] = dateStr.split("-").map(Number);
-      return new Date(Date.UTC(y, m - 1, d));
-    };
-
-    const parseInvoiceDate = (dateStr) => {
-      if (!dateStr) return new Date();
-      const [y, m, d] = dateStr.split("-").map(Number);
-      const date = new Date(Date.UTC(y, m - 1, d));
-      date.setUTCDate(date.getUTCDate() + 2);
-      return date;
-    };
-
     const saleData = {
       recordingDate: data.recordingDate
         ? parseUTCDate(data.recordingDate)
         : new Date(),
       invoiceNumber: data.invoiceNumber.trim(),
+      // FIX: use parseInvoiceDate which no longer adds +1 day
       invoiceDate: data.invoiceDate
         ? parseInvoiceDate(data.invoiceDate)
         : new Date(),
@@ -2210,7 +2149,7 @@ const processSingleInvoiceWithMRDistribution = async (
             salesQty,
             bonusQty,
             session,
-            (productMrName || "").trim(), // ← mrNameHint: name-based fallback
+            (productMrName || "").trim(),
           );
 
           if (!deductionResult.success)
@@ -2357,25 +2296,12 @@ const processSingleInvoiceWithMRDistribution = async (
       primaryMR = Array.from(invoiceData._mrDistribution.keys())[0];
     }
 
-    const parseUTCDate = (dateStr) => {
-      if (!dateStr) return null;
-      const [y, m, d] = dateStr.split("-").map(Number);
-      return new Date(Date.UTC(y, m - 1, d));
-    };
-
-    const parseInvoiceDate = (dateStr) => {
-      if (!dateStr) return null;
-      const [y, m, d] = dateStr.split("-").map(Number);
-      const date = new Date(Date.UTC(y, m - 1, d));
-      date.setUTCDate(date.getUTCDate() + 2);
-      return date;
-    };
-
     const saleRecord = new SaleSummary({
       recordingDate: invoiceData.recordingDate
         ? parseUTCDate(invoiceData.recordingDate)
         : new Date(),
       invoiceNumber: invoiceData.invoiceNumber.trim(),
+      // FIX: use parseInvoiceDate which no longer adds +2 days
       invoiceDate: invoiceData.invoiceDate
         ? parseInvoiceDate(invoiceData.invoiceDate)
         : new Date(),
@@ -3611,33 +3537,27 @@ router.get("/all", async (req, res) => {
   try {
     const { search = "", tab = "All", saleType = "all" } = req.query;
     const matchConditions = buildMatchConditions(search, tab, saleType);
-    const summaries = await SaleSummary.find(matchConditions)
-      .sort({ recordingDate: -1 })
-      .select({
-        recordingDate: 1,
-        invoiceNumber: 1,
-        invoiceDate: 1,
-        mrName: 1,
-        mrId: 1,
-        customerName: 1,
-        customerCode: 1,
-        customerId: 1,
-        paymentStatus: 1,
-        saleType: 1,
-        totalAmount: 1,
-        paidAmount: 1,
-        dueAmount: 1,
-        costAmount: 1,
-        totalProfitLoss: 1,
-        products: 1,
-        creditDays: 1,
-        dueDate: 1,
-        deliveryDate: 1,
-        remark: 1,
-        createdAt: 1,
-        updatedAt: 1,
-      })
-      .lean();
+
+    const summaries = await SaleSummary.aggregate([
+      { $match: matchConditions },
+      { $sort: { recordingDate: -1 } },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerId",
+          foreignField: "_id",
+          as: "customerInfo",
+        },
+      },
+      {
+        $addFields: {
+          customerPhone: { $arrayElemAt: ["$customerInfo.customerNumber", 0] },
+          customerZone: { $arrayElemAt: ["$customerInfo.zone", 0] },
+          customerProvince: { $arrayElemAt: ["$customerInfo.province", 0] },
+        },
+      },
+      { $unset: "customerInfo" },
+    ]);
     res.status(200).json({ summaries, count: summaries.length });
   } catch (error) {
     console.error("Fetch Sale Summary Error:", error);
@@ -3702,8 +3622,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       const totalQty = salesQty + bonusQty;
       if (totalQty > 0) {
         if (saleToDelete.saleType === "MR Sale" && product.mrId) {
-          // Pass mrName hint so resolveMRStock can find the stockInMRHand
-          // record by name when the stored mrId is a stale/duplicate Staff _id
           const deleteMrName = (
             product.mrName ||
             saleToDelete.mrName ||
@@ -3715,7 +3633,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
             totalQty,
             product.lc || 0,
             session,
-            deleteMrName, // ← mrNameHint
+            deleteMrName,
           );
         } else {
           await restoreStockToReportInHand(
@@ -3744,20 +3662,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ==========================================
-// PUT /:id  –  Update Sale
-// FIXED: Correct MR Cash handling for ALL
-// payment status transitions:
-//
-//   Cash    → Credit       subtract full old paidAmount
-//   Cash    → Partial Paid subtract old, add new partial
-//   Credit  → Cash         add full new totalAmount
-//   Credit  → Partial Paid add new partial amount
-//   Partial → Cash         add difference (new - old)
-//   Partial → Credit       subtract old partial amount
-//   Partial → Partial      adjust by delta (new - old)
-//   Cash    → Cash         adjust by delta (new - old)
-// ==========================================
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const { id } = req.params;
   const session = await mongoose.startSession();
@@ -3805,7 +3709,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       }
     }
 
-    // Build lookup maps
     const originalProductMap = new Map(
       originalSale.products.map((p) => [p.productName, p]),
     );
@@ -3820,15 +3723,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       ...updatedProductMap.keys(),
     ]);
 
-    // ── totalCostAmount strategy ────────────────────────────────────────────
-    // We start from 0 and rebuild the full cost from scratch:
-    //   • Products that are unchanged (same qty, same MR) → carry their
-    //     existing mrSalePurchasePrice or lc×qty cost forward.
-    //   • Products where stock was deducted (new/increased/transferred) →
-    //     cost comes from the deduction result.
-    //   • Products that were removed → contribute 0 (stock restored, no cost).
-    // This avoids double-counting and correctly handles MR transfers.
-    // ───────────────────────────────────────────────────────────────────────
     let totalCostAmount = 0;
 
     for (const productName of allProductNames) {
@@ -3843,20 +3737,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         : 0;
 
       if (isMRSale) {
-        // ══════════════════════════════════════════════════════════════════
-        // MR ID + NAME RESOLUTION
-        // ══════════════════════════════════════════════════════════════════
-        // KEY PROBLEM: stockInMRHand records are linked to the ORIGINAL
-        // Staff _id at the time of creation. If a duplicate Staff record
-        // was later created for the same MR (same name, new _id), any sale
-        // carrying that new _id will fail a plain mrId lookup → "Available: 0".
-        //
-        // SOLUTION: We always resolve BOTH mrId AND mrName so that
-        // resolveMRStock() can fall back to a name-based lookup when the
-        // mrId doesn't match any stockInMRHand document.
-        // ══════════════════════════════════════════════════════════════════
-
-        // --- Original MR (from the stored sale product / invoice header) ---
         const originalMrId = original?.mrId
           ? String(original.mrId)
           : String(originalSale.mrId || "");
@@ -3866,7 +3746,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           ""
         ).trim();
 
-        // --- Target MR (from the incoming update payload) ---
         const productLevelMrId = updated?.mrId ? String(updated.mrId) : null;
 
         const invoiceLevelMrChanged =
@@ -3882,7 +3761,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
         const targetMrId = updatedMrId || originalMrId;
 
-        // targetMrName is used as the mrNameHint fallback for resolveMRStock
         const targetMrName = (
           updated?.mrName ||
           saleData.mrName ||
@@ -3891,12 +3769,9 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           ""
         ).trim();
 
-        // ── Product REMOVED ──────────────────────────────────────────────
         if (originalQty > 0 && newQty === 0) {
           if (!originalMrId)
             throw new Error(`Original MR missing for ${productName}`);
-          // Pass originalMrName so resolveMRStock can find the record by name
-          // if the stored mrId no longer matches (duplicate Staff scenario).
           await restoreStockToMRHand(
             originalMrId,
             productName,
@@ -3905,8 +3780,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
             session,
             originalMrName,
           );
-
-          // ── Product ADDED ────────────────────────────────────────────────
         } else if (originalQty === 0 && newQty > 0) {
           if (!targetMrId) {
             await session.abortTransaction();
@@ -3919,7 +3792,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
             targetMrId,
             productName,
             session,
-            targetMrName, // ← mrNameHint: enables name-based fallback lookup
+            targetMrName,
           );
           if (available < newQty) {
             await session.abortTransaction();
@@ -3934,7 +3807,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
             newQty,
             0,
             session,
-            targetMrName, // ← mrNameHint
+            targetMrName,
           );
           if (!deduction.success) {
             await session.abortTransaction();
@@ -3946,35 +3819,19 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           totalCostAmount = fixPrecision(
             totalCostAmount + (deduction.amountDeducted || 0),
           );
-
-          // ── Product EXISTS in both ───────────────────────────────────────
         } else if (originalQty > 0 && newQty > 0) {
           const mrChanged =
             originalMrId && targetMrId && originalMrId !== targetMrId;
           const delta = fixPrecision(newQty - originalQty);
 
           if (mrChanged) {
-            // ────────────────────────────────────────────────────────────
-            // MR TRANSFER: old MR → new MR
-            //
-            // Order matters:
-            //   1. Restore originalQty to OLD MR first (makes old MR whole).
-            //      Pass originalMrName so the name-fallback can find the
-            //      stockInMRHand record even when mrId is stale.
-            //   2. Check available stock in NEW MR.
-            //      Pass targetMrName for the same fallback reason.
-            //   3. Deduct newQty from NEW MR.
-            //   4. Only accumulate the NEW deduction cost.
-            // ────────────────────────────────────────────────────────────
-
-            // Step 1 — restore to original MR
             const restoreResult = await restoreStockToMRHand(
               originalMrId,
               productName,
               originalQty,
               original.lc || 0,
               session,
-              originalMrName, // ← mrNameHint for old MR
+              originalMrName,
             );
             if (!restoreResult.success) {
               await session.abortTransaction();
@@ -3984,12 +3841,11 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
               });
             }
 
-            // Step 2 — check available in new MR
             const available = await getMRStockQuantity(
               targetMrId,
               productName,
               session,
-              targetMrName, // ← mrNameHint for new MR
+              targetMrName,
             );
             if (available < newQty) {
               await session.abortTransaction();
@@ -3999,14 +3855,13 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
               });
             }
 
-            // Step 3 — deduct from new MR
             const deduction = await deductStockFromMRHand(
               targetMrId,
               productName,
               newQty,
               0,
               session,
-              targetMrName, // ← mrNameHint for new MR
+              targetMrName,
             );
             if (!deduction.success) {
               await session.abortTransaction();
@@ -4016,17 +3871,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
               });
             }
 
-            // Step 4 — only new cost (old cost is replaced on save)
             totalCostAmount = fixPrecision(
               totalCostAmount + (deduction.amountDeducted || 0),
             );
           } else if (delta > 0) {
-            // Same MR, qty increased → deduct the delta
             const available = await getMRStockQuantity(
               targetMrId,
               productName,
               session,
-              targetMrName, // ← mrNameHint
+              targetMrName,
             );
             if (available < delta) {
               await session.abortTransaction();
@@ -4041,7 +3894,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
               delta,
               0,
               session,
-              targetMrName, // ← mrNameHint
+              targetMrName,
             );
             if (!deduction.success) {
               await session.abortTransaction();
@@ -4054,18 +3907,16 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
               totalCostAmount + (deduction.amountDeducted || 0),
             );
           } else if (delta < 0) {
-            // Same MR, qty decreased → restore the |delta| back to MR
             await restoreStockToMRHand(
               targetMrId,
               productName,
               -delta,
               original.lc || 0,
               session,
-              targetMrName, // ← mrNameHint
+              targetMrName,
             );
           }
 
-          // delta === 0 AND same MR → no stock op needed, carry forward cost
           if (delta === 0 && !mrChanged && original) {
             const existingCost = fixPrecision(
               Number(original.mrSalePurchasePrice) ||
@@ -4075,7 +3926,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           }
         }
       } else {
-        // ── Normal Sale stock management ─────────────────────────────────
         if (originalQty > 0 && newQty === 0) {
           await restoreStockToReportInHand(productName, originalQty, session);
         } else if (originalQty === 0 && newQty > 0) {
@@ -4159,7 +4009,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           } else if (delta < 0) {
             await restoreStockToReportInHand(productName, -delta, session);
           }
-          // delta === 0 → no stock op needed, but carry forward existing cost
           if (delta === 0 && original) {
             const existingCost = fixPrecision(
               Number(original.mrSalePurchasePrice) ||
@@ -4171,7 +4020,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       }
     }
 
-    // ── Rebuild updated products list ────────────────────────────────────
     const updatedProducts = [];
     let totalAmount = 0,
       totalProfitLoss = 0;
@@ -4249,42 +4097,11 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ error: "At least one valid product is required" });
     }
 
-    // ════════════════════════════════════════════════════════════════════
-    // PAYMENT STATUS & PAID AMOUNT – CORRECTED LOGIC
-    // ════════════════════════════════════════════════════════════════════
-    //
-    // Step 1: Determine the new paymentStatus from the incoming request.
-    //         We map both the old DB value and the incoming value so we
-    //         can compare them properly.
-    //
-    // Step 2: Derive the correct paidAmount from the new status:
-    //   - Cash         → paidAmount = totalAmount  (fully collected)
-    //   - Credit       → paidAmount = 0            (nothing collected)
-    //   - Partial Paid → paidAmount = saleData.paidAmount (clamped)
-    //
-    // Step 3: Compute the MR Cash delta:
-    //   paidDelta = newPaidAmount - oldPaidAmount
-    //   paidDelta > 0 → ADD to MR Cash  (more money collected)
-    //   paidDelta < 0 → SUBTRACT from MR Cash  (money returned / reversed)
-    //
-    // This single formula handles ALL transitions:
-    //   Cash    → Credit       : delta = 0 - totalAmount      → SUBTRACT all
-    //   Cash    → Partial Paid : delta = partial - totalAmount → SUBTRACT diff
-    //   Credit  → Cash         : delta = totalAmount - 0       → ADD all
-    //   Credit  → Partial Paid : delta = partial - 0           → ADD partial
-    //   Partial → Cash         : delta = totalAmount - partial → ADD diff
-    //   Partial → Credit       : delta = 0 - partial           → SUBTRACT all
-    //   Partial → Partial      : delta = newPartial - oldPartial
-    //   Cash    → Cash         : delta = newTotal - oldTotal   (product change)
-    // ════════════════════════════════════════════════════════════════════
-
-    // Resolve the incoming payment status
     const incomingStatus = (saleData.paymentStatus || "").trim();
     const newPaymentStatus = mapPaymentStatus(
       incomingStatus || originalSale.paymentStatus,
     );
 
-    // Compute new paidAmount based on status
     const newPaidAmount = computePaidAmount(
       newPaymentStatus,
       totalAmount,
@@ -4293,12 +4110,10 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
     const newDueAmount = fixPrecision(Math.max(0, totalAmount - newPaidAmount));
 
-    // ── MR Cash update ───────────────────────────────────────────────────
     const effectiveMrName =
       (saleData.mrName || "").trim() || (originalSale.mrName || "").trim();
 
     if (effectiveMrName) {
-      // What was actually stored as paid before this edit
       const oldPaidAmount = fixPrecision(Number(originalSale.paidAmount) || 0);
       const paidDelta = fixPrecision(newPaidAmount - oldPaidAmount);
 
@@ -4307,11 +4122,9 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         const invoiceDate =
           saleData.invoiceDate || originalSale.invoiceDate || new Date();
 
-        // Map old DB status for logging
         const oldStatusMapped = mapPaymentStatus(originalSale.paymentStatus);
         const transitionLabel = `${oldStatusMapped}→${newPaymentStatus}`;
 
-        // paidDelta < 0 means MR needs to RETURN cash → isRefund = true
         const isRefund = paidDelta < 0;
 
         const auditNote = isRefund
@@ -4320,16 +4133,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
         const mrCashUpdate = await updateMRCashes(
           effectiveMrName,
-          Math.abs(paidDelta), // always pass a positive amount
+          Math.abs(paidDelta),
           invoiceRef,
           invoiceDate,
           session,
-          isRefund, // direction determined by sign of paidDelta
+          isRefund,
           auditNote,
         );
 
         if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
-          // Log warning but do NOT fail the entire update for a cash tracking issue
           console.warn(
             `⚠️  MR Cash update failed for "${effectiveMrName}" on invoice ${invoiceRef} ` +
               `(${transitionLabel}): ${mrCashUpdate.error}`,
