@@ -9,6 +9,8 @@ import { useNavigate } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
 import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 
@@ -54,7 +56,7 @@ const MultipleSelectDropdown = ({
   const dropdownRef = useRef(null);
 
   const filteredOptions = options.filter((o) =>
-    o.label.toLowerCase().includes(searchTerm.toLowerCase()),
+    o.label.toLowerCase().includes(searchTerm.toLowerCase())
   );
   const toggleOption = (v) =>
     onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
@@ -77,7 +79,9 @@ const MultipleSelectDropdown = ({
       <label className="text-sm font-medium text-gray-700 mb-1">{label}</label>
       <div className="relative" ref={dropdownRef}>
         <div
-          className={`w-full border border-gray-300 rounded-md px-3 py-2 cursor-pointer min-h-[42px] flex flex-wrap items-center gap-1 ${disabled ? "bg-gray-100 cursor-not-allowed" : "bg-white"} ${error ? "border-red-500" : ""}`}
+          className={`w-full border border-gray-300 rounded-md px-3 py-2 cursor-pointer min-h-[42px] flex flex-wrap items-center gap-1 ${
+            disabled ? "bg-gray-100 cursor-not-allowed" : "bg-white"
+          } ${error ? "border-red-500" : ""}`}
           onClick={() => !disabled && setIsOpen(!isOpen)}
         >
           {getSelectedLabels().length === 0 ? (
@@ -113,7 +117,9 @@ const MultipleSelectDropdown = ({
               filteredOptions.map((o) => (
                 <div
                   key={o.value}
-                  className={`px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center ${value.includes(o.value) ? "bg-blue-50" : ""}`}
+                  className={`px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center ${
+                    value.includes(o.value) ? "bg-blue-50" : ""
+                  }`}
                   onClick={() => toggleOption(o.value)}
                 >
                   <input
@@ -321,7 +327,7 @@ const useAllMRList = () => {
             raw.map((s) => ({
               _id: s._id,
               medicalRepName: s.medicalRepName || s.name || `MR ${s._id}`,
-            })),
+            }))
           );
         } catch {
           showToast("error", "Failed to load MR list");
@@ -370,7 +376,7 @@ const usePayrollForm = () => {
     try {
       setMrListLoading(true);
       const res = await axios.get(
-        `${backendUrl}/api/hrm/payroll/mrs/from-basic-payroll`,
+        `${backendUrl}/api/hrm/payroll/mrs/from-basic-payroll`
       );
       if (res.data.success) {
         const d = res.data.data || [];
@@ -382,7 +388,7 @@ const usePayrollForm = () => {
           setIsMrListEmpty(true);
           showToast(
             "error",
-            "No MRs found with basic salary. Please add basic salary for MRs first.",
+            "No MRs found with basic salary. Please add basic salary for MRs first."
           );
         }
       } else throw new Error("Failed");
@@ -418,17 +424,19 @@ const usePayrollForm = () => {
       let destinations = Array.isArray(rd.data)
         ? rd.data
         : Array.isArray(rd.destinations)
-          ? rd.destinations
-          : Array.isArray(rd)
-            ? rd
-            : Array.isArray(rd.results)
-              ? rd.results
-              : [];
+        ? rd.destinations
+        : Array.isArray(rd)
+        ? rd
+        : Array.isArray(rd.results)
+        ? rd.results
+        : [];
       const options = destinations
         .filter((d) => (d.totalAmount || d.amount || d.balance || 0) > 0)
         .map((d) => ({
           value: d._id || d.id,
-          label: `${d.name || `Account ${d.code || d._id || d.id}`} ($${(d.totalAmount || d.amount || d.balance || 0).toFixed(2)})`,
+          label: `${d.name || `Account ${d.code || d._id || d.id}`} ($${(
+            d.totalAmount || d.amount || d.balance || 0
+          ).toFixed(2)})`,
           ...d,
         }));
       setSourceOptions(options);
@@ -448,7 +456,7 @@ const usePayrollForm = () => {
       setErrors((p) => ({ ...p, source: "" }));
       setSelectedSourceAccount(sourceOptions.find((o) => o.value === sourceId));
     },
-    [sourceOptions],
+    [sourceOptions]
   );
 
   const calculateSalary = useCallback(async (employeeId, period) => {
@@ -460,7 +468,7 @@ const usePayrollForm = () => {
     try {
       setCalculatingSalary(true);
       const res = await axios.get(
-        `${backendUrl}/api/hrm/payroll/calculate/${employeeId}/${period}`,
+        `${backendUrl}/api/hrm/payroll/calculate/${employeeId}/${period}`
       );
       if (res.data.success && res.data.data) {
         const sc = res.data.data.salaryCalculation;
@@ -473,7 +481,7 @@ const usePayrollForm = () => {
         setErrors((p) => ({ ...p, basicSalary: "", deductions: "" }));
         showToast(
           "success",
-          "Salary calculated successfully based on attendance and leaves",
+          "Salary calculated successfully based on attendance and leaves"
         );
       }
     } catch (err) {
@@ -482,7 +490,7 @@ const usePayrollForm = () => {
           "error",
           err.response.data?.message?.includes("Basic payroll")
             ? "Basic payroll record not found. Please set basic salary first."
-            : "Employee or payroll data not found",
+            : "Employee or payroll data not found"
         );
       } else showToast("error", "Failed to calculate salary");
       setSalaryCalculation(null);
@@ -508,7 +516,9 @@ const usePayrollForm = () => {
         selectedSourceAccount.balance ||
         0;
       if (bal < net)
-        e.source = `Insufficient balance. Available: $${bal.toFixed(2)}, Required: $${net.toFixed(2)}`;
+        e.source = `Insufficient balance. Available: $${bal.toFixed(
+          2
+        )}, Required: $${net.toFixed(2)}`;
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -524,13 +534,13 @@ const usePayrollForm = () => {
 
   const allowanceOptions = useMemo(
     () => allowanceTypes.map((t) => ({ value: t, label: t })),
-    [],
+    []
   );
 
   const handleAllowanceChange = useCallback((selectedTypes) => {
     setForm((p) => {
       const updated = (p.allowances || []).filter((a) =>
-        selectedTypes.includes(a.type),
+        selectedTypes.includes(a.type)
       );
       selectedTypes.forEach((type) => {
         if (!updated.some((a) => a.type === type))
@@ -545,10 +555,10 @@ const usePayrollForm = () => {
       setForm((p) => ({
         ...p,
         allowances: p.allowances.map((a) =>
-          a.type === type ? { ...a, amount } : a,
+          a.type === type ? { ...a, amount } : a
         ),
       })),
-    [],
+    []
   );
   const removeAllowance = useCallback(
     (type) =>
@@ -556,7 +566,7 @@ const usePayrollForm = () => {
         ...p,
         allowances: p.allowances.filter((a) => a.type !== type),
       })),
-    [],
+    []
   );
 
   const handleEmployeeChange = useCallback(
@@ -566,7 +576,7 @@ const usePayrollForm = () => {
       setSalaryCalculation(null);
       if (employeeId && form.period) calculateSalary(employeeId, form.period);
     },
-    [form.period, calculateSalary],
+    [form.period, calculateSalary]
   );
 
   const handlePeriodChange = useCallback(
@@ -576,16 +586,16 @@ const usePayrollForm = () => {
       setSalaryCalculation(null);
       if (form.employeeId && period) calculateSalary(form.employeeId, period);
     },
-    [form.employeeId, calculateSalary],
+    [form.employeeId, calculateSalary]
   );
 
   const totalAllowance = useMemo(
     () =>
       (form.allowances || []).reduce(
         (t, a) => t + (parseFloat(a.amount) || 0),
-        0,
+        0
       ),
-    [form.allowances],
+    [form.allowances]
   );
   const netSalary = useMemo(
     () =>
@@ -594,7 +604,7 @@ const usePayrollForm = () => {
         totalAllowance -
         (parseFloat(form.deductions) || 0)
       ).toFixed(2),
-    [form.basicSalary, totalAllowance, form.deductions],
+    [form.basicSalary, totalAllowance, form.deductions]
   );
   useEffect(() => setForm((p) => ({ ...p, netSalary })), [netSalary]);
 
@@ -628,14 +638,14 @@ const usePayrollForm = () => {
       if (err.response?.status === 400) {
         if (err.response.data?.errors)
           err.response.data.errors.forEach((e) =>
-            showToast("error", e.message || e.msg),
+            showToast("error", e.message || e.msg)
           );
         else showToast("error", err.response.data?.message || "Invalid data.");
       } else if (err.response?.status === 409)
         showToast(
           "error",
           err.response.data?.message ||
-            "Payroll already exists for this period",
+            "Payroll already exists for this period"
         );
       else showToast("error", err.message || "Failed to save payroll");
     } finally {
@@ -731,7 +741,7 @@ const CurrentMonthTab = () => {
 
   const selectedAllowanceTypes = useMemo(
     () => (form.allowances || []).map((a) => a.type),
-    [form.allowances],
+    [form.allowances]
   );
   const isFormValid = useMemo(
     () =>
@@ -743,7 +753,7 @@ const CurrentMonthTab = () => {
       !errors.employeeId &&
       !errors.basicSalary &&
       !errors.source,
-    [form, errors],
+    [form, errors]
   );
   const srcBal = selectedSourceAccount
     ? selectedSourceAccount.totalAmount ||
@@ -790,8 +800,8 @@ const CurrentMonthTab = () => {
               mrListLoading
                 ? "Loading..."
                 : isMrListEmpty
-                  ? "No MRs Available"
-                  : "Select MR"
+                ? "No MRs Available"
+                : "Select MR"
             }
             required
             loading={mrListLoading}
@@ -809,7 +819,11 @@ const CurrentMonthTab = () => {
               onChange={(e) => handlePeriodChange(e.target.value)}
               max={getCurrentMonth()}
               disabled={isMrListEmpty}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${errors.period ? "border-red-500 focus:ring-red-200" : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"} ${isMrListEmpty ? "bg-gray-100 cursor-not-allowed" : "bg-white"}`}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${
+                errors.period
+                  ? "border-red-500 focus:ring-red-200"
+                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+              } ${isMrListEmpty ? "bg-gray-100 cursor-not-allowed" : "bg-white"}`}
             />
             {errors.period && (
               <p className="mt-1 text-sm text-red-600">{errors.period}</p>
@@ -827,8 +841,8 @@ const CurrentMonthTab = () => {
                 sourceLoading
                   ? "Loading sources..."
                   : sourceOptions.length === 0
-                    ? "No accounts available"
-                    : "Select Source"
+                  ? "No accounts available"
+                  : "Select Source"
               }
               required
               loading={sourceLoading}
@@ -895,7 +909,15 @@ const CurrentMonthTab = () => {
               onChange={handleNumeric}
               placeholder="0.00"
               disabled={isMrListEmpty || calculatingSalary}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${errors.basicSalary ? "border-red-500 focus:ring-red-200" : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"} ${isMrListEmpty || calculatingSalary ? "bg-gray-100 cursor-not-allowed" : "bg-white"}`}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${
+                errors.basicSalary
+                  ? "border-red-500 focus:ring-red-200"
+                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+              } ${
+                isMrListEmpty || calculatingSalary
+                  ? "bg-gray-100 cursor-not-allowed"
+                  : "bg-white"
+              }`}
             />
             {errors.basicSalary && (
               <p className="mt-1 text-sm text-red-600">{errors.basicSalary}</p>
@@ -1060,15 +1082,23 @@ const CurrentMonthTab = () => {
               calculatingSalary ||
               sourceOptions.length === 0
             }
-            className={`px-4 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${loading || !isFormValid || isMrListEmpty || calculatingSalary || sourceOptions.length === 0 ? "bg-gray-400 text-gray-200 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 focus:ring-green-500"}`}
+            className={`px-4 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              loading ||
+              !isFormValid ||
+              isMrListEmpty ||
+              calculatingSalary ||
+              sourceOptions.length === 0
+                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 focus:ring-green-500"
+            }`}
           >
             {loading
               ? "Saving…"
               : calculatingSalary
-                ? "Calculating…"
-                : sourceOptions.length === 0
-                  ? "No Source Account"
-                  : "Save Payroll"}
+              ? "Calculating…"
+              : sourceOptions.length === 0
+              ? "No Source Account"
+              : "Save Payroll"}
           </button>
         </div>
       </form>
@@ -1241,56 +1271,66 @@ const PreviousMonthTab = () => {
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
-        { headers: { "Content-Type": "application/json" } },
+        { headers: { "Content-Type": "application/json" } }
       );
       if (res.status === 201 || res.status === 200) {
         showToast(
           "success",
-          res.data.message || "Previous month payroll saved successfully",
+          res.data.message || "Previous month payroll saved successfully"
         );
         setTimeout(() => navigate("/hrmlayout/payroll"), 1000);
       } else throw new Error(res.data.message || "Failed to save payroll");
     } catch (err) {
       showToast(
         "error",
-        err.response?.data?.message || err.message || "Failed to save payroll",
+        err.response?.data?.message || err.message || "Failed to save payroll"
       );
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ── Excel helpers ──
-  const downloadTemplate = () => {
-    const exampleRows =
-      mrList.length > 0
-        ? mrList
-            .slice(0, 3)
-            .map((mr) => [
-              mr.medicalRepName || mr.employeeName || "MR Name",
-              getPreviousMonth(),
-              "30000",
-              "2000",
-              "1500",
-              "500",
-              "300",
-            ])
-        : [
-            [
-              "John Doe",
-              getPreviousMonth(),
-              "30000",
-              "2000",
-              "1500",
-              "500",
-              "300",
-            ],
-          ];
-    const ws = XLSX.utils.aoa_to_sheet([EXCEL_HEADERS, ...exampleRows]);
-    ws["!cols"] = EXCEL_HEADERS.map(() => ({ wch: 22 }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Payroll");
-    XLSX.writeFile(wb, "previous_month_payroll_template.xlsx");
+  // ── Excel helpers (UPDATED with dropdown) ──
+  const downloadTemplate = async () => {
+    try {
+      const workbook = new ExcelJS.Workbook();
+
+      // 1. Main Payroll sheet with headers only
+      const mainSheet = workbook.addWorksheet("Payroll");
+      mainSheet.columns = EXCEL_HEADERS.map((h) => ({
+        header: h,
+        key: h.replace(/[^a-zA-Z]/g, ""),
+        width: 22,
+      }));
+      mainSheet.addRow({}); // optional empty row to make dropdown visible
+
+      // 2. MR List sheet
+      const mrSheet = workbook.addWorksheet("MR List");
+      mrSheet.columns = [{ header: "MR Name", key: "name", width: 30 }];
+      mrList.forEach((mr) => {
+        mrSheet.addRow({ name: mr.medicalRepName || mr.employeeName || "Unknown" });
+      });
+
+      // 3. Add dropdown validation to "MR Name" column in main sheet (starting from row 2)
+      //    Reference the list from MR List sheet (cells A2:A{lastRow})
+      const lastRow = mrList.length + 1; // +1 for header
+      const validationFormula = `'MR List'!$A$2:$A$${lastRow}`;
+      mainSheet.dataValidations.add(`A2:A1000`, {
+        type: "list",
+        allowBlank: true,
+        formulae: [validationFormula],
+        error: "Please select a valid MR name from the list",
+        errorTitle: "Invalid MR Name",
+      });
+
+      // Generate file
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/octet-stream" });
+      saveAs(blob, "previous_month_payroll_template.xlsx");
+    } catch (error) {
+      console.error("Error generating template:", error);
+      showToast("error", "Failed to generate template");
+    }
   };
 
   const handleFileUpload = (e) => {
@@ -1327,20 +1367,20 @@ const PreviousMonthTab = () => {
             const found = mrList.find(
               (m) =>
                 (m.medicalRepName || m.employeeName || "").toLowerCase() ===
-                row.mrName.toLowerCase(),
+                row.mrName.toLowerCase()
             );
             if (!found)
               errors.push(
-                `Row ${row.rowIndex}: MR "${row.mrName}" not found in system`,
+                `Row ${row.rowIndex}: MR "${row.mrName}" not found in system`
               );
           }
           if (!row.period || !/^\d{4}-\d{2}$/.test(row.period))
             errors.push(
-              `Row ${row.rowIndex}: Pay Period must be YYYY-MM format`,
+              `Row ${row.rowIndex}: Pay Period must be YYYY-MM format`
             );
           else if (row.period >= getCurrentMonth())
             errors.push(
-              `Row ${row.rowIndex}: Pay Period must be a previous month`,
+              `Row ${row.rowIndex}: Pay Period must be a previous month`
             );
           if (!row.salary || isNaN(parseFloat(row.salary)))
             errors.push(`Row ${row.rowIndex}: Salary must be a valid number`);
@@ -1350,7 +1390,7 @@ const PreviousMonthTab = () => {
       } catch {
         showToast(
           "error",
-          "Failed to parse Excel file. Please use the template.",
+          "Failed to parse Excel file. Please use the template."
         );
         setExcelRows([]);
         setExcelErrors(["Failed to parse file"]);
@@ -1376,7 +1416,7 @@ const PreviousMonthTab = () => {
         const mr = mrList.find(
           (m) =>
             (m.medicalRepName || m.employeeName || "").toLowerCase() ===
-            row.mrName.toLowerCase(),
+            row.mrName.toLowerCase()
         );
         return {
           employeeId: mr?._id || null,
@@ -1402,21 +1442,19 @@ const PreviousMonthTab = () => {
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
-        { headers: { "Content-Type": "application/json" } },
+        { headers: { "Content-Type": "application/json" } }
       );
       if (res.status === 201 || res.status === 200) {
         showToast(
           "success",
-          res.data.message || "Payroll uploaded successfully",
+          res.data.message || "Payroll uploaded successfully"
         );
         setTimeout(() => navigate("/hrmlayout/payroll"), 1000);
       } else throw new Error(res.data.message || "Failed to upload payroll");
     } catch (err) {
       showToast(
         "error",
-        err.response?.data?.message ||
-          err.message ||
-          "Failed to upload payroll",
+        err.response?.data?.message || err.message || "Failed to upload payroll"
       );
     } finally {
       setUploading(false);
@@ -1428,14 +1466,14 @@ const PreviousMonthTab = () => {
       rows
         .reduce((s, r) => s + (parseFloat(computeTotal(r)) || 0), 0)
         .toFixed(2),
-    [rows],
+    [rows]
   );
   const excelTotalSum = useMemo(
     () =>
       excelRows
         .reduce((s, r) => s + (parseFloat(computeTotal(r)) || 0), 0)
         .toFixed(2),
-    [excelRows],
+    [excelRows]
   );
 
   return (
@@ -1464,14 +1502,22 @@ const PreviousMonthTab = () => {
         <button
           type="button"
           onClick={() => setEntryMode("manual")}
-          className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${entryMode === "manual" ? "bg-blue-600 text-white shadow" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+          className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${
+            entryMode === "manual"
+              ? "bg-blue-600 text-white shadow"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          }`}
         >
           ✏️ Manual Entry
         </button>
         <button
           type="button"
           onClick={() => setEntryMode("excel")}
-          className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${entryMode === "excel" ? "bg-green-600 text-white shadow" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+          className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${
+            entryMode === "excel"
+              ? "bg-green-600 text-white shadow"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          }`}
         >
           📊 Upload Excel
         </button>
@@ -1534,7 +1580,11 @@ const PreviousMonthTab = () => {
                         updateRow(index, "period", e.target.value)
                       }
                       max={getPreviousMonth()}
-                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors bg-white ${rowErrors[index]?.period ? "border-red-500 focus:ring-red-200" : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"}`}
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors bg-white ${
+                        rowErrors[index]?.period
+                          ? "border-red-500 focus:ring-red-200"
+                          : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+                      }`}
                     />
                     {rowErrors[index]?.period && (
                       <p className="text-red-500 text-xs mt-1">
@@ -1554,7 +1604,11 @@ const PreviousMonthTab = () => {
                         handleNumericRow(index, "salary", e.target.value)
                       }
                       placeholder="0.00"
-                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none bg-white ${rowErrors[index]?.salary ? "border-red-500 focus:ring-red-200" : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"}`}
+                      className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none bg-white ${
+                        rowErrors[index]?.salary
+                          ? "border-red-500 focus:ring-red-200"
+                          : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+                      }`}
                     />
                     {rowErrors[index]?.salary && (
                       <p className="text-red-500 text-xs mt-1">
@@ -1667,7 +1721,11 @@ const PreviousMonthTab = () => {
               <button
                 type="submit"
                 disabled={submitting || mrListLoading}
-                className={`px-6 py-3 rounded-lg shadow text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${submitting || mrListLoading ? "bg-gray-400 text-gray-200 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white cursor-pointer focus:ring-green-500"}`}
+                className={`px-6 py-3 rounded-lg shadow text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                  submitting || mrListLoading
+                    ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                    : "bg-green-600 hover:bg-green-700 text-white cursor-pointer focus:ring-green-500"
+                }`}
               >
                 {submitting ? "Saving…" : "Save Previous Month Payroll"}
               </button>
@@ -1838,7 +1896,11 @@ const PreviousMonthTab = () => {
               disabled={
                 uploading || excelRows.length === 0 || excelErrors.length > 0
               }
-              className={`px-6 py-3 rounded-lg shadow text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${uploading || excelRows.length === 0 || excelErrors.length > 0 ? "bg-gray-400 text-gray-200 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white cursor-pointer focus:ring-green-500"}`}
+              className={`px-6 py-3 rounded-lg shadow text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                uploading || excelRows.length === 0 || excelErrors.length > 0
+                  ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-700 text-white cursor-pointer focus:ring-green-500"
+              }`}
             >
               {uploading ? "Uploading…" : "Upload & Save Payroll"}
             </button>
@@ -1869,7 +1931,11 @@ const AddPayroll = () => {
             key={key}
             type="button"
             onClick={() => setActiveTab(key)}
-            className={`py-2 px-4 font-medium text-sm focus:outline-none transition-colors ${activeTab === key ? "border-b-2 border-blue-600 text-blue-600" : "text-gray-500 hover:text-gray-700"}`}
+            className={`py-2 px-4 font-medium text-sm focus:outline-none transition-colors ${
+              activeTab === key
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
           >
             {label}
           </button>

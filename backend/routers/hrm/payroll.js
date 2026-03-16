@@ -14,12 +14,6 @@ const router = express.Router();
 // HELPERS
 // ─────────────────────────────────────────────
 
-/**
- * Generate the next PR-XXXX code.
- * Only called explicitly for the single-payroll POST endpoint.
- * The /bulk endpoint relies on the schema's pre('validate') hook instead,
- * which generates unique codes automatically per document.
- */
 const generateNextPayrollCode = async (session = null) => {
   const query = Payroll.findOne({})
     .sort({ createdAt: -1 })
@@ -65,8 +59,9 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
   if (!basicPayroll)
     throw new Error("Basic payroll record not found for employee");
 
-  const basicSalaryNum = parseFloat(basicPayroll.currentBasicSalary || 0);
-  const perDaySalary = basicSalaryNum / 30;
+  // ── Full (contracted) basic salary — what is stored in basicSalary field ──
+  const fullBasicSalary = parseFloat(basicPayroll.currentBasicSalary || 0);
+  const perDaySalary = fullBasicSalary / 30;
   const perMinuteSalary = perDaySalary / (8 * 60);
 
   const [year, month] = period.split("-").map(Number);
@@ -161,21 +156,34 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
   });
 
   const extraTimeAmount = totalExtraMinutes * perMinuteSalary;
-  const proratedBasicSalary = (totalDaysInPeriod / 30) * basicSalaryNum;
+
+  // ── Prorated = days-in-period / 30 × full basic ──────────────────────────
+  const proratedBasicSalary = (totalDaysInPeriod / 30) * fullBasicSalary;
+
+  // ── Unpaid-leave deduction (subtracted from prorated, not from full) ─────
   const unpaidLeaveDeduction = unpaidLeaveDays * perDaySalary;
-  const adjustedBasicSalary = proratedBasicSalary - unpaidLeaveDeduction;
-  const totalSalary = adjustedBasicSalary + extraTimeAmount;
+
+  // ── Adjusted = prorated minus unpaid-leave deduction + extra time ─────────
+  // This is the value shown as "Basic Salary ($)" in the UI.
+  // The full/contracted salary is stored separately as basicSalary in the DB.
+  const adjustedBasicSalary =
+    proratedBasicSalary - unpaidLeaveDeduction + extraTimeAmount;
+
+  // totalSalary here = adjustedBasicSalary (allowances added later in the route)
+  const totalSalary = adjustedBasicSalary;
 
   return {
     employee: {
       id: employee._id,
       name: employee.medicalRepName,
-      basicSalary: basicSalaryNum,
+      // The full contracted salary
+      basicSalary: fullBasicSalary,
     },
     period,
     isCurrentMonth,
     salaryCalculation: {
-      basicSalary: basicSalaryNum,
+      // ── Full contracted salary (stored in payroll.basicSalary) ───────────
+      basicSalary: fullBasicSalary,
       perDaySalary,
       perMinuteSalary,
       totalDaysInMonth: 30,
@@ -189,9 +197,12 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
       swapLeaves: swapLeaveDays,
       leaveDeduction: unpaidLeaveDeduction,
       proratedBasicSalary,
+      // ── Adjusted salary (prorated − unpaid leave + extra time) ───────────
+      // This is what the UI should display as "Basic Salary ($)"
       adjustedBasicSalary,
       extraMinutes: totalExtraMinutes,
       extraTimeAmount,
+      // totalSalary = adjustedBasicSalary (before adding allowances)
       totalSalary,
       calculationStartDate: startDate.toISOString().split("T")[0],
       calculationEndDate: calculationEndDate.toISOString().split("T")[0],
@@ -202,7 +213,6 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
 
 // ─────────────────────────────────────────────
 // GET /mrs/all
-// All active staff — used by the Previous Month tab.
 // ─────────────────────────────────────────────
 router.get("/mrs/all", async (req, res) => {
   try {
@@ -365,6 +375,7 @@ router.get("/", async (req, res) => {
         obj.joiningDate = obj.employeeId.date;
         obj.employeeEnabled = obj.employeeId.enabled;
         obj.MRId = obj.employeeId.MRId;
+        // Full contracted salary from basic payroll master
         obj.employeeBasicSalary = basicSalaryMap[obj.employeeId._id] || 0;
       } else {
         obj.employeeName = "Unknown";
@@ -376,6 +387,17 @@ router.get("/", async (req, res) => {
         obj.MRId = "N/A";
         obj.employeeBasicSalary = 0;
       }
+
+      // ── displayBasicSalary ─────────────────────────────────────────────
+      // For CURRENT-month payrolls: show adjustedBasicSalary (prorated − unpaid
+      // leave + extra time). Example: $604.31 when the MR was absent some days.
+      // For PREVIOUS-month bulk payrolls: basicSalary IS what was entered
+      // manually, so display it as-is.
+      obj.displayBasicSalary =
+        obj.payrollType === "current" && obj.adjustedBasicSalary != null
+          ? obj.adjustedBasicSalary
+          : obj.basicSalary;
+
       return obj;
     });
 
@@ -489,6 +511,12 @@ router.get("/export/csv", async (req, res) => {
         obj.MRId = "N/A";
         obj.employeeBasicSalary = 0;
       }
+      // Show adjusted salary in the export too
+      obj.displayBasicSalary =
+        obj.payrollType === "current" && obj.adjustedBasicSalary != null
+          ? obj.adjustedBasicSalary
+          : obj.basicSalary;
+
       obj.allowancesCSV = obj.allowances
         ? obj.allowances.map((a) => `${a.type}: $${a.amount}`).join("; ")
         : "";
@@ -500,7 +528,15 @@ router.get("/export/csv", async (req, res) => {
       { label: "Employee Name", value: "employeeName" },
       { label: "Team", value: "teamName" },
       { label: "Period", value: "period" },
-      { label: "Basic Salary", value: "basicSalary" },
+      // Export shows BOTH the contracted salary and the displayed (adjusted) salary
+      { label: "Contracted Basic Salary", value: "basicSalary" },
+      {
+        label: "Basic Salary (Adjusted/Displayed)",
+        value: "displayBasicSalary",
+      },
+      { label: "Adjusted Basic Salary", value: "adjustedBasicSalary" },
+      { label: "Prorated Basic Salary", value: "proratedBasicSalary" },
+      { label: "Extra Time Amount", value: "extraTimeAmount" },
       { label: "Allowances", value: "allowancesCSV" },
       { label: "Total Allowance", value: "totalAllowance" },
       { label: "Deductions", value: "deductions" },
@@ -532,7 +568,6 @@ router.get("/export/csv", async (req, res) => {
 
 // ─────────────────────────────────────────────
 // GET /mrs/from-basic-payroll
-// Only MRs with a basic payroll record — Current Month tab.
 // ─────────────────────────────────────────────
 router.get("/mrs/from-basic-payroll", async (req, res) => {
   try {
@@ -630,6 +665,12 @@ router.get("/:id", async (req, res) => {
       data.email = data.employeeId.email;
       data.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0;
     }
+    // Add displayBasicSalary for single-fetch as well
+    data.displayBasicSalary =
+      data.payrollType === "current" && data.adjustedBasicSalary != null
+        ? data.adjustedBasicSalary
+        : data.basicSalary;
+
     res.status(200).json({ success: true, data });
   } catch (error) {
     if (error.name === "CastError")
@@ -645,36 +686,9 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// POST /bulk
-// Creates multiple PREVIOUS MONTH payroll records.
-//
-// Root causes of the original 400 error — all fixed:
-//
-//  FIX 1: source field
-//    The schema originally had source: { required: true }.
-//    Bulk/previous-month entries have no account to debit,
-//    so source must be omitted. The Payroll.js model now has
-//    source: { required: false, default: null }.
-//    We do NOT send source in payrollData here.
-//
-//  FIX 2: payrollCode uniqueness race
-//    The old code called generateNextPayrollCode() inside the loop.
-//    Every call read the same "latest" DB record (none of the
-//    in-progress docs were committed yet), so every record got
-//    the same code → unique-index violation → 400.
-//    Fix: do NOT pass payrollCode at all — the schema's
-//    pre('validate') hook generates a unique code per document
-//    using this.constructor.findOne(), which correctly sees the
-//    already-saved docs within the transaction.
-//
-//  FIX 3: netSalary NaN guard
-//    parseFloat(undefined) = NaN. Now always falls back to 0.
-//
-//  FIX 4: per-record try/catch
-//    One bad record no longer aborts the entire batch.
+// POST /bulk  — create multiple PREVIOUS MONTH payroll records
 // ─────────────────────────────────────────────
 router.post("/bulk", async (req, res) => {
-  // Basic shape check — before opening a session
   const records = req.body;
   if (!Array.isArray(records) || records.length === 0) {
     return res.status(400).json({
@@ -703,7 +717,6 @@ router.post("/bulk", async (req, res) => {
         status = "pending",
       } = record;
 
-      // ── Validation ──
       if (!employeeId || !period) {
         errors.push({
           index: i,
@@ -726,7 +739,6 @@ router.post("/bulk", async (req, res) => {
         continue;
       }
 
-      // ── Employee check ──
       const employee = await Staff.findById(employeeId).session(session);
       if (!employee) {
         errors.push({
@@ -736,7 +748,6 @@ router.post("/bulk", async (req, res) => {
         continue;
       }
 
-      // ── Duplicate check ──
       const existing = await Payroll.findOne({ employeeId, period }).session(
         session,
       );
@@ -748,11 +759,9 @@ router.post("/bulk", async (req, res) => {
         continue;
       }
 
-      // ── Compute values safely ──
       const basicNum = parseFloat(basicSalary) || 0;
       const allowanceNum = parseFloat(totalAllowance) || 0;
       const deductionNum = parseFloat(deductions) || 0;
-
       const rawNet =
         netSalary !== undefined && netSalary !== null
           ? parseFloat(netSalary)
@@ -770,33 +779,26 @@ router.post("/bulk", async (req, res) => {
             }))
         : [];
 
-      // ── Build payroll document ──
-      // IMPORTANT: Do NOT set payrollCode here.
-      // The schema's pre('validate') hook generates it automatically,
-      // and each call to this.constructor.findOne() within the hook
-      // correctly reads the latest committed code, giving each
-      // document in the batch a unique incremented code.
-      //
-      // IMPORTANT: Do NOT set source here.
-      // The schema now has source: { required: false, default: null }.
-      // Previous-month entries have no account to debit.
+      // For previous-month bulk payrolls:
+      // basicSalary stores the manually-entered salary (could be full or partial — user's choice)
+      // adjustedBasicSalary = same as basicSalary (no auto-proration for manual entries)
       const payrollData = {
         employeeId,
         period,
         basicSalary: basicNum,
+        // For previous-month manual entries the "adjusted" value is what the user typed
+        adjustedBasicSalary: basicNum,
+        proratedBasicSalary: basicNum,
+        extraTimeAmount: 0,
         allowances: processedAllowances,
-        // totalAllowance and netSalary are recalculated by pre('save') hooks,
-        // but we send them too so the hook values are at least sane.
         totalAllowance: allowanceNum,
         deductions: deductionNum,
         netSalary: computedNet,
         status,
         paymentMethod: "bank",
         payrollType: "previous",
-        // source: intentionally omitted — not required for previous-month entries
       };
 
-      // ── Save with per-record error capture ──
       try {
         const payroll = new Payroll(payrollData);
         await payroll.save({ session });
@@ -820,18 +822,18 @@ router.post("/bulk", async (req, res) => {
       }
     }
 
-    // ── Commit or abort ──
     if (results.length === 0) {
       await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "No records could be saved. See errors for details.",
-        errors,
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "No records could be saved. See errors for details.",
+          errors,
+        });
     }
 
     await session.commitTransaction();
-
     return res.status(201).json({
       success: true,
       message: `${results.length} payroll record(s) created successfully${errors.length > 0 ? `, ${errors.length} skipped` : ""}`,
@@ -847,19 +849,22 @@ router.post("/bulk", async (req, res) => {
       await session.abortTransaction();
     } catch (_) {}
     console.error("Bulk payroll fatal error:", error);
-
     if (error.name === "ValidationError") {
-      return res.status(400).json({
-        success: false,
-        message: "Validation error",
-        errors: Object.values(error.errors).map((v) => v.message),
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Validation error",
+          errors: Object.values(error.errors).map((v) => v.message),
+        });
     }
-    res.status(500).json({
-      success: false,
-      message: "Failed to create bulk payroll",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to create bulk payroll",
+        error: error.message,
+      });
   } finally {
     await session.endSession();
   }
@@ -887,10 +892,12 @@ router.post("/", async (req, res) => {
     } = req.body;
 
     if (!employeeId || !period || !source)
-      return res.status(400).json({
-        success: false,
-        message: "Employee ID, period, and source account are required",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Employee ID, period, and source account are required",
+        });
     if (!/^\d{4}-\d{2}$/.test(period))
       return res
         .status(400)
@@ -906,11 +913,13 @@ router.post("/", async (req, res) => {
       session,
     );
     if (!basicPayroll)
-      return res.status(404).json({
-        success: false,
-        message:
-          "Basic payroll record not found for employee. Please set basic salary first.",
-      });
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message:
+            "Basic payroll record not found for employee. Please set basic salary first.",
+        });
 
     const sourceAccount = await Account.findById(source).session(session);
     if (!sourceAccount)
@@ -923,18 +932,30 @@ router.post("/", async (req, res) => {
       period,
     }).session(session);
     if (existingPayroll)
-      return res.status(409).json({
-        success: false,
-        message:
-          "Payroll record already exists for this employee in the selected period",
-      });
+      return res
+        .status(409)
+        .json({
+          success: false,
+          message:
+            "Payroll record already exists for this employee in the selected period",
+        });
 
     const salaryCalculation = await calculateSalaryForPeriod(
       employeeId,
       period,
       session,
     );
-    const basicSalaryNum = salaryCalculation.salaryCalculation.totalSalary;
+
+    // ── The ADJUSTED basic salary (prorated − unpaid leave + extra time) ──
+    // This is what gets shown in the UI as "Basic Salary ($)".
+    // e.g. $604.31 when the MR was absent for some days.
+    const adjustedBasicSalaryNum =
+      salaryCalculation.salaryCalculation.adjustedBasicSalary;
+
+    // ── The FULL contracted salary — stored in basicSalary field ───────────
+    // e.g. $1000. This is the "whole month salary" that is kept for reference.
+    const fullBasicSalaryNum = salaryCalculation.salaryCalculation.basicSalary;
+
     const deductionsNum = parseFloat(deductions) || 0;
     const leaveDeduction = salaryCalculation.salaryCalculation.leaveDeduction;
     const extraTimeAmount = salaryCalculation.salaryCalculation.extraTimeAmount;
@@ -944,43 +965,51 @@ router.post("/", async (req, res) => {
     if (allowances && Array.isArray(allowances)) {
       for (const allowance of allowances) {
         if (!allowance.type || allowance.amount === undefined)
-          return res.status(400).json({
-            success: false,
-            message: "Each allowance must have type and amount",
-          });
+          return res
+            .status(400)
+            .json({
+              success: false,
+              message: "Each allowance must have type and amount",
+            });
         const amt = parseFloat(allowance.amount);
         if (isNaN(amt) || amt < 0)
-          return res.status(400).json({
-            success: false,
-            message: "Allowance amount must be a valid non-negative number",
-          });
+          return res
+            .status(400)
+            .json({
+              success: false,
+              message: "Allowance amount must be a valid non-negative number",
+            });
         totalAllowance += amt;
         processedAllowances.push({ type: allowance.type.trim(), amount: amt });
       }
     }
 
-    const netSalary = basicSalaryNum + totalAllowance - deductionsNum;
+    // ── Net salary = adjusted basic + allowances − deductions ─────────────
+    // Uses adjustedBasicSalary (e.g. $604.31), NOT the full $1000.
+    // This means the employee is paid what they actually earned.
+    const netSalary = adjustedBasicSalaryNum + totalAllowance - deductionsNum;
     if (netSalary < 0)
       return res
         .status(400)
         .json({ success: false, message: "Net salary cannot be negative." });
 
-    // For current-month single payroll we pass payrollCode explicitly
-    // so it matches what was shown to the user in the UI.
     const payrollCode = await generateNextPayrollCode(session);
 
     const payroll = new Payroll({
       employeeId,
       period,
-      basicSalary: basicPayroll.currentBasicSalary,
-      adjustedBasicSalary:
-        salaryCalculation.salaryCalculation.adjustedBasicSalary,
+      // Store the FULL contracted salary so it's always on record
+      basicSalary: fullBasicSalaryNum,
+      // Store the adjusted (prorated - unpaid leave + extra time) salary
+      // This is what the frontend should display as "Basic Salary ($)"
+      adjustedBasicSalary: adjustedBasicSalaryNum,
       proratedBasicSalary:
         salaryCalculation.salaryCalculation.proratedBasicSalary,
       extraTimeAmount,
       allowances: processedAllowances,
       totalAllowance,
       deductions: deductionsNum,
+      // netSalary uses the ADJUSTED salary, not the full salary
       netSalary,
       status: status || "pending",
       paymentMethod: paymentMethod || "bank",
@@ -1010,6 +1039,7 @@ router.post("/", async (req, res) => {
     });
 
     await payroll.save({ session });
+    // Deduct ACTUAL net salary (based on adjusted basic) from account
     await updateAccountBalance(source, netSalary, "subtract", session);
     await session.commitTransaction();
 
@@ -1025,6 +1055,8 @@ router.post("/", async (req, res) => {
       responseData.teamName = responseData.employeeId.teamName;
       responseData.employeeBasicSalary = basicPayroll.currentBasicSalary;
     }
+    // Add displayBasicSalary to response
+    responseData.displayBasicSalary = adjustedBasicSalaryNum;
 
     res.status(201).json({
       success: true,
@@ -1036,25 +1068,31 @@ router.post("/", async (req, res) => {
       await session.abortTransaction();
     } catch (_) {}
     if (error.name === "ValidationError")
-      return res.status(400).json({
-        success: false,
-        message: "Validation error",
-        errors: Object.values(error.errors).map((v) => v.message),
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Validation error",
+          errors: Object.values(error.errors).map((v) => v.message),
+        });
     if (error.code === 11000)
-      return res.status(409).json({
-        success: false,
-        message: "Payroll record already exists for this period",
-      });
+      return res
+        .status(409)
+        .json({
+          success: false,
+          message: "Payroll record already exists for this period",
+        });
     if (error.message.includes("Insufficient balance"))
       return res.status(400).json({ success: false, message: error.message });
     if (error.message.includes("not found"))
       return res.status(404).json({ success: false, message: error.message });
-    res.status(500).json({
-      success: false,
-      message: "Failed to create payroll",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to create payroll",
+        error: error.message,
+      });
   } finally {
     await session.endSession();
   }
@@ -1113,13 +1151,24 @@ router.put("/:id", async (req, res) => {
         0,
       );
     }
+
+    // For updates: if adjustedBasicSalary is being changed, use it; otherwise keep existing
+    if (req.body.adjustedBasicSalary !== undefined) {
+      payroll.adjustedBasicSalary = parseFloat(req.body.adjustedBasicSalary);
+    }
+
+    // Net salary uses adjustedBasicSalary for current-month, basicSalary for previous-month
+    const baseForNet =
+      payroll.payrollType === "current" && payroll.adjustedBasicSalary != null
+        ? payroll.adjustedBasicSalary
+        : payroll.basicSalary;
+
     payroll.netSalary =
-      payroll.basicSalary + payroll.totalAllowance - payroll.deductions;
+      baseForNet + payroll.totalAllowance - payroll.deductions;
 
     const newNetSalary = payroll.netSalary;
     const newSource = payroll.source;
 
-    // Only adjust account balance if this payroll has a source account
     if (oldSource && newSource) {
       if (oldSource._id.toString() === newSource.toString()) {
         const diff = newNetSalary - oldNetSalary;
@@ -1140,10 +1189,8 @@ router.put("/:id", async (req, res) => {
         );
       }
     } else if (!oldSource && newSource) {
-      // Assigning a source for the first time (e.g. upgrading a previous-month record)
       await updateAccountBalance(newSource, newNetSalary, "subtract", session);
     } else if (oldSource && !newSource) {
-      // Removing the source — refund the old account
       await updateAccountBalance(oldSource._id, oldNetSalary, "add", session);
     }
 
@@ -1164,33 +1211,44 @@ router.put("/:id", async (req, res) => {
       responseData.teamName = responseData.employeeId.teamName;
       responseData.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0;
     }
+    responseData.displayBasicSalary =
+      responseData.payrollType === "current" &&
+      responseData.adjustedBasicSalary != null
+        ? responseData.adjustedBasicSalary
+        : responseData.basicSalary;
 
-    res.status(200).json({
-      success: true,
-      message: "Payroll updated successfully",
-      data: responseData,
-    });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Payroll updated successfully",
+        data: responseData,
+      });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
     if (error.name === "ValidationError")
-      return res.status(400).json({
-        success: false,
-        message: "Validation error",
-        errors: Object.values(error.errors).map((v) => v.message),
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Validation error",
+          errors: Object.values(error.errors).map((v) => v.message),
+        });
     if (error.name === "CastError")
       return res
         .status(400)
         .json({ success: false, message: "Invalid payroll ID" });
     if (error.message.includes("Insufficient balance"))
       return res.status(400).json({ success: false, message: error.message });
-    res.status(500).json({
-      success: false,
-      message: "Failed to update payroll",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to update payroll",
+        error: error.message,
+      });
   } finally {
     await session.endSession();
   }
@@ -1210,7 +1268,6 @@ router.delete("/:id", async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Payroll not found" });
-    // Only refund if this payroll had a source account
     if (payroll.source)
       await updateAccountBalance(
         payroll.source._id,
@@ -1220,11 +1277,13 @@ router.delete("/:id", async (req, res) => {
       );
     await Payroll.findByIdAndDelete(req.params.id).session(session);
     await session.commitTransaction();
-    res.status(200).json({
-      success: true,
-      message: "Payroll deleted successfully",
-      data: { id: req.params.id },
-    });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: "Payroll deleted successfully",
+        data: { id: req.params.id },
+      });
   } catch (error) {
     try {
       await session.abortTransaction();
@@ -1233,11 +1292,13 @@ router.delete("/:id", async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Invalid payroll ID" });
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete payroll",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to delete payroll",
+        error: error.message,
+      });
   } finally {
     await session.endSession();
   }
@@ -1270,7 +1331,6 @@ router.delete("/", async (req, res) => {
         .json({ success: false, message: "No payrolls found to delete" });
 
     for (const p of toDelete) {
-      // Only refund if the payroll had a source account (current-month entries do, previous-month bulk entries don't)
       if (p.source)
         await updateAccountBalance(p.source._id, p.netSalary, "add", session);
     }
@@ -1278,20 +1338,24 @@ router.delete("/", async (req, res) => {
       session,
     );
     await session.commitTransaction();
-    res.status(200).json({
-      success: true,
-      message: `${result.deletedCount} payroll(s) deleted successfully`,
-      data: { deletedCount: result.deletedCount },
-    });
+    res
+      .status(200)
+      .json({
+        success: true,
+        message: `${result.deletedCount} payroll(s) deleted successfully`,
+        data: { deletedCount: result.deletedCount },
+      });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete payrolls",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to delete payrolls",
+        error: error.message,
+      });
   } finally {
     await session.endSession();
   }

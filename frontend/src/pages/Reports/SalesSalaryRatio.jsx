@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   TrendingUp,
-  Download,
   Search,
   X,
   Users,
@@ -19,6 +18,18 @@ import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  The backend now returns flat numeric fields per record:
+//
+//    record.salary      → basic / adjusted salary
+//    record.incentive   → sum of allowances where type === "Incentive"
+//    record.allowance   → sum of all OTHER allowances (not Incentive, not Travel Allowance)
+//    record.tourExpense → sum of allowances where type === "Travel Allowance"
+//    record.totalExpense → salary + incentive + allowance + tourExpense
+//
+//  No client-side allowance parsing needed — just read the flat fields.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const SalesSalaryRatio = () => {
   const [data, setData] = useState({
     summary: {
@@ -30,7 +41,6 @@ const SalesSalaryRatio = () => {
     },
     records: [],
   });
-
   const [loading, setLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -40,7 +50,6 @@ const SalesSalaryRatio = () => {
     startDate: null,
     endDate: null,
   });
-
   const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -51,32 +60,28 @@ const SalesSalaryRatio = () => {
 
   const inputRef = useRef(null);
   const itemsPerPage = 7;
-
   const visiblePages = useVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
-
   const getSerialNumber = (index) =>
     (pagination.currentPage - 1) * itemsPerPage + index + 1;
 
+  // ── date helpers ────────────────────────────────────────────────────────────
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
   const getCurrentYear = () => new Date().getFullYear();
-
   const getPreviousMonthName = () => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
     return d.toLocaleString("default", { month: "long" });
   };
-
   const getJanToPreviousMonthDisplay = () => {
     const now = new Date();
     return now.getMonth() === 0
       ? `Jan - Dec ${now.getFullYear() - 1}`
       : `Jan - ${getPreviousMonthName()} ${now.getFullYear()}`;
   };
-
   const getYearMonthFromDate = (date) => {
     const d = new Date(date);
     return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, "0")}`;
@@ -84,17 +89,16 @@ const SalesSalaryRatio = () => {
 
   const getDateRange = () => {
     const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth();
-
+    const y = today.getFullYear();
+    const m = today.getMonth();
     switch (selectedTab) {
       case "today": {
-        const todayStr = today.toISOString().split("T")[0];
+        const s = today.toISOString().split("T")[0];
         return {
-          startDate: todayStr,
-          endDate: todayStr,
+          startDate: s,
+          endDate: s,
           period: getYearMonthFromDate(today),
-          displayDate: todayStr,
+          displayDate: s,
         };
       }
       case "all":
@@ -105,42 +109,39 @@ const SalesSalaryRatio = () => {
           displayDate: "All Records",
         };
       case "currentMonth": {
-        const firstDay = new Date(currentYear, currentMonth, 1);
-        const lastDay = new Date(currentYear, currentMonth + 1, 0);
+        const f = new Date(y, m, 1);
+        const l = new Date(y, m + 1, 0);
         return {
-          startDate: firstDay.toISOString().split("T")[0],
-          endDate: lastDay.toISOString().split("T")[0],
-          period: `${currentYear}-${(currentMonth + 1).toString().padStart(2, "0")}`,
+          startDate: f.toISOString().split("T")[0],
+          endDate: l.toISOString().split("T")[0],
+          period: `${y}-${(m + 1).toString().padStart(2, "0")}`,
           displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`,
         };
       }
       case "janToPreviousMonth": {
-        const janFirst = new Date(currentYear, 0, 1);
-        const lastMonthLastDay = new Date(currentYear, currentMonth, 0);
+        const j = new Date(y, 0, 1);
+        const lm = new Date(y, m, 0);
         return {
-          startDate: janFirst.toISOString().split("T")[0],
-          endDate: lastMonthLastDay.toISOString().split("T")[0],
+          startDate: j.toISOString().split("T")[0],
+          endDate: lm.toISOString().split("T")[0],
           period: null,
           displayDate: getJanToPreviousMonthDisplay(),
         };
       }
       case "custom": {
-        const startStr = customDateRange.startDate
+        const ss = customDateRange.startDate
           ? customDateRange.startDate.toISOString().split("T")[0]
           : "";
-        const endStr = customDateRange.endDate
+        const es = customDateRange.endDate
           ? customDateRange.endDate.toISOString().split("T")[0]
           : "";
         return {
-          startDate: startStr,
-          endDate: endStr,
+          startDate: ss,
+          endDate: es,
           period: customDateRange.startDate
             ? getYearMonthFromDate(customDateRange.startDate)
             : null,
-          displayDate:
-            customDateRange.startDate && customDateRange.endDate
-              ? `${startStr} - ${endStr}`
-              : "Select custom dates",
+          displayDate: ss && es ? `${ss} - ${es}` : "Select custom dates",
         };
       }
       default:
@@ -153,11 +154,12 @@ const SalesSalaryRatio = () => {
     }
   };
 
-  const fetchSalesSalaryData = async (page = 1, search = searchTerm) => {
+  // ── fetch ───────────────────────────────────────────────────────────────────
+  const fetchData = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
-      let params = { page, limit: itemsPerPage, dateFilter: selectedTab };
+      const params = { page, limit: itemsPerPage, dateFilter: selectedTab };
 
       if (selectedTab !== "all") {
         if (
@@ -175,29 +177,21 @@ const SalesSalaryRatio = () => {
         if (dateRange.endDate) params.endDate = dateRange.endDate;
         if (dateRange.period) params.period = dateRange.period;
       }
-
-      if (search && search.trim() !== "") params.search = search.trim();
+      if (search?.trim()) params.search = search.trim();
 
       const response = await axios.get(
         `${backendUrl}/api/reports/sales-and-salary`,
         { params },
       );
-
       if (response.data.success) {
-        const summary = response.data.data?.summary || {
-          totalSales: 0,
-          totalSalary: 0,
-          totalExpense: 0,
-          totalProfit: 0,
-          ratio: 0,
-        };
+        const s = response.data.data?.summary || {};
         setData({
           summary: {
-            totalSales: parseFloat(summary.totalSales) || 0,
-            totalSalary: parseFloat(summary.totalSalary) || 0,
-            totalExpense: parseFloat(summary.totalExpense) || 0,
-            totalProfit: parseFloat(summary.totalProfit) || 0,
-            ratio: parseFloat(summary.ratio) || 0,
+            totalSales: parseFloat(s.totalSales) || 0,
+            totalSalary: parseFloat(s.totalSalary) || 0,
+            totalExpense: parseFloat(s.totalExpense) || 0,
+            totalProfit: parseFloat(s.totalProfit) || 0,
+            ratio: parseFloat(s.ratio) || 0,
           },
           records: response.data.data?.records || [],
         });
@@ -214,7 +208,6 @@ const SalesSalaryRatio = () => {
         throw new Error(response.data.message || "Failed to fetch data");
       }
     } catch (error) {
-      console.error("Error fetching sales salary ratio data:", error);
       showToast(
         "error",
         error.response?.data?.message ||
@@ -244,9 +237,8 @@ const SalesSalaryRatio = () => {
 
   useEffect(() => {
     if (selectedTab === "custom") {
-      if (customDateRange.startDate && customDateRange.endDate) {
-        fetchSalesSalaryData(1);
-      } else {
+      if (customDateRange.startDate && customDateRange.endDate) fetchData(1);
+      else {
         setData({
           summary: {
             totalSales: 0,
@@ -266,7 +258,7 @@ const SalesSalaryRatio = () => {
         });
       }
     } else {
-      fetchSalesSalaryData(1);
+      fetchData(1);
     }
   }, [selectedTab]);
 
@@ -275,33 +267,24 @@ const SalesSalaryRatio = () => {
       selectedTab === "custom" &&
       customDateRange.startDate &&
       customDateRange.endDate
-    ) {
-      fetchSalesSalaryData(1);
-    }
+    )
+      fetchData(1);
   }, [customDateRange.startDate, customDateRange.endDate]);
 
+  useEffect(() => {
+    const t = setTimeout(() => fetchData(1, searchTerm), 500);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
   const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) fetchSalesSalaryData(page);
+    if (page >= 1 && page <= pagination.totalPages) fetchData(page);
   };
-
-  const handleSearchChange = (e) => setSearchTerm(e.target.value);
-
   const handleClearSearch = () => {
     setSearchTerm("");
-    fetchSalesSalaryData(1);
+    fetchData(1);
   };
-
-  const handleCustomDateChange = (name, date) => {
-    setCustomDateRange((prev) => ({ ...prev, [name]: date }));
-  };
-
-  useEffect(() => {
-    const delayDebounce = setTimeout(
-      () => fetchSalesSalaryData(1, searchTerm),
-      500,
-    );
-    return () => clearTimeout(delayDebounce);
-  }, [searchTerm]);
+  const handleCustomDateChange = (name, date) =>
+    setCustomDateRange((p) => ({ ...p, [name]: date }));
 
   const handleApplyCustomFilter = () => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
@@ -314,14 +297,13 @@ const SalesSalaryRatio = () => {
     }
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    fetchSalesSalaryData(1);
+    fetchData(1);
   };
 
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
-    if (tab === "custom") {
-      setShowCustomFilter(true);
-    } else {
+    if (tab === "custom") setShowCustomFilter(true);
+    else {
       setCustomDateRange({ startDate: null, endDate: null });
       setShowCustomFilter(false);
     }
@@ -334,8 +316,9 @@ const SalesSalaryRatio = () => {
     setShowCustomFilter(false);
   };
 
+  // ── export ──────────────────────────────────────────────────────────────────
   const exportToExcel = async () => {
-    if (data.records.length === 0) {
+    if (!data.records.length) {
       showToast("warning", "No data found to export");
       return;
     }
@@ -354,10 +337,7 @@ const SalesSalaryRatio = () => {
       }
       const response = await axios.get(
         `${backendUrl}/api/reports/sales-and-salary/export`,
-        {
-          params,
-          responseType: "blob",
-        },
+        { params, responseType: "blob" },
       );
       let filename = "sales-salary-ratio-report.xlsx";
       const cd = response.headers["content-disposition"];
@@ -366,16 +346,15 @@ const SalesSalaryRatio = () => {
         if (m?.[1]) filename = m[1];
       }
       const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      const a = document.createElement("a");
+      a.href = url;
+      a.setAttribute("download", filename);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       window.URL.revokeObjectURL(url);
       showToast("success", "Excel report downloaded successfully");
     } catch (error) {
-      console.error("Error exporting to Excel:", error);
       showToast(
         "error",
         error.response?.status === 404
@@ -387,33 +366,55 @@ const SalesSalaryRatio = () => {
     }
   };
 
+  // ── formatting ──────────────────────────────────────────────────────────────
   const getActiveFilterDisplay = () =>
     getDateRange().displayDate || "Current Month";
-
-  const formatCurrency = (amount) => {
-    const num = parseFloat(amount);
-    return isNaN(num)
+  const fmt$ = (v) => {
+    const n = parseFloat(v);
+    return isNaN(n)
       ? "$0.00"
-      : `$${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  const fmtPct = (v) => {
+    const n = parseFloat(v);
+    if (isNaN(n)) return "0.00%";
+    return `${n > 0 ? "+" : ""}${n.toFixed(2)}%`;
+  };
+  const fmtRatio = (v) => {
+    const n = parseFloat(v);
+    return isNaN(n) ? "0.0000" : n.toFixed(4);
   };
 
-  const formatPercentage = (value) => {
-    const num = parseFloat(value);
-    if (isNaN(num)) return "0.00%";
-    const sign = num > 0 ? "+" : "";
-    return `${sign}${num.toFixed(2)}%`;
+  const calcSalarySaleRatio = (sale, totalExpense) =>
+    totalExpense === 0 ? 0 : (sale / totalExpense) * 100;
+
+  const getPerformanceInfo = (ratio) => {
+    if (ratio <= 25)
+      return {
+        label: "Excellent",
+        textColor: "text-green-600",
+        bgColor: "bg-green-100",
+      };
+    if (ratio <= 50)
+      return {
+        label: "Positive",
+        textColor: "text-blue-600",
+        bgColor: "bg-blue-100",
+      };
+    if (ratio <= 100)
+      return {
+        label: "Usual",
+        textColor: "text-amber-600",
+        bgColor: "bg-amber-100",
+      };
+    return {
+      label: "Negative",
+      textColor: "text-red-600",
+      bgColor: "bg-red-100",
+    };
   };
 
-  const formatRatio = (value) => {
-    const num = parseFloat(value);
-    return isNaN(num) ? "0.0000" : num.toFixed(4);
-  };
-
-  const calculateSalarySaleRatio = (profit, totalExpense) => {
-    if (totalExpense === 0) return 0;
-    return ((profit - totalExpense) / totalExpense) * 100;
-  };
-
+  // ── pagination ──────────────────────────────────────────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
@@ -426,14 +427,12 @@ const SalesSalaryRatio = () => {
           ← Prev
         </button>
         <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
+          {visiblePages.map((page, i) => (
             <button
-              key={index}
-              onClick={() =>
-                typeof page === "number" ? handlePageChange(page) : null
-              }
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${page === pagination.currentPage ? "bg-indigo-600 text-white" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-transparent text-gray-500 cursor-default"}`}
+              key={i}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
               disabled={typeof page !== "number"}
+              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${page === pagination.currentPage ? "bg-indigo-600 text-white" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-transparent text-gray-500 cursor-default"}`}
             >
               {page}
             </button>
@@ -450,139 +449,10 @@ const SalesSalaryRatio = () => {
     );
   };
 
-  const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-      {[
-        {
-          label: "Total Sales",
-          value: formatCurrency(data.summary.totalSales),
-          icon: <DollarSign className="w-8 h-8 text-green-500" />,
-          border: "border-green-500",
-        },
-        {
-          label: "Total Salary",
-          value: formatCurrency(data.summary.totalSalary),
-          icon: <Users className="w-8 h-8 text-blue-500" />,
-          border: "border-blue-500",
-        },
-        {
-          label: "Total Expense",
-          value: formatCurrency(data.summary.totalExpense),
-          icon: <BarChart3 className="w-8 h-8 text-purple-500" />,
-          border: "border-purple-500",
-        },
-        {
-          label: "Expense/Sales Ratio",
-          value: formatRatio(data.summary.ratio),
-          icon: <Percent className="w-8 h-8 text-orange-500" />,
-          border: "border-orange-500",
-        },
-      ].map(({ label, value, icon, border }) => (
-        <div
-          key={label}
-          className={`bg-white p-6 rounded-xl shadow-md border-l-4 ${border} border border-gray-200`}
-        >
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">{label}</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {loading ? (
-                  <span className="block h-8 w-20 bg-gray-200 rounded animate-pulse" />
-                ) : (
-                  value
-                )}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                {getActiveFilterDisplay()}
-              </p>
-            </div>
-            {icon}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
-  // ── Table columns: Other Expense ($) column removed ──────────────────────
-  const renderTableHeaders = () => (
-    <thead className="bg-gray-100 text-gray-700 border-b">
-      <tr>
-        <th className="p-3 text-sm font-medium">Sr.No</th>
-        <th className="p-3 text-sm font-medium">MR Name</th>
-        <th className="p-3 text-sm font-medium">Sale ($)</th>
-        <th className="p-3 text-sm font-medium">Profit ($)</th>
-        <th className="p-3 text-sm font-medium">Salary ($)</th>
-        <th className="p-3 text-sm font-medium">Incentive ($)</th>
-        <th className="p-3 text-sm font-medium">Allowance ($)</th>
-        <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
-        <th className="p-3 text-sm font-medium">Total Expense ($)</th>
-        <th className="p-3 text-sm font-medium">Salary/Sale (%)</th>
-        <th className="p-3 text-sm font-medium">Performance (%)</th>
-      </tr>
-    </thead>
-  );
-
-  const renderTableRow = (record, index) => {
-    const salarySaleRatio = calculateSalarySaleRatio(
-      parseFloat(record.profit) || 0,
-      parseFloat(record.totalExpense) || 0,
-    );
-    const performance = parseFloat(record.performance) || 0;
-    const performanceColor =
-      performance >= 0 ? "text-green-600" : "text-red-600";
-    const salarySaleRatioColor =
-      salarySaleRatio >= 0 ? "text-green-600" : "text-red-600";
-
-    return (
-      <tr
-        key={`${record.mrId}-${index}`}
-        className={`hover:bg-gray-50 ${index === data.records.length - 1 ? "" : "border-b"}`}
-      >
-        <td className="p-3">
-          <div className="text-sm text-gray-600 font-medium">
-            {getSerialNumber(index)}
-          </div>
-        </td>
-        <td className="p-3">
-          <div className="text-sm font-medium text-gray-900 capitalize">
-            {record.mrName || "N/A"}
-          </div>
-        </td>
-        <td className="p-3 text-sm font-semibold text-gray-800">
-          {formatCurrency(record.sale)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-blue-600">
-          {formatCurrency(record.profit)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-purple-600">
-          {formatCurrency(record.salary)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-green-600">
-          {formatCurrency(record.incentive)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-yellow-600">
-          {formatCurrency(record.allowance)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-red-600">
-          {formatCurrency(record.tourExpense)}
-        </td>
-        {/* otherExpense column removed */}
-        <td className="p-3 text-sm font-bold text-gray-900">
-          {formatCurrency(record.totalExpense)}
-        </td>
-        <td className={`p-3 text-sm font-semibold ${salarySaleRatioColor}`}>
-          {formatPercentage(salarySaleRatio)}
-        </td>
-        <td className={`p-3 text-sm font-semibold ${performanceColor}`}>
-          {formatPercentage(performance)}
-        </td>
-      </tr>
-    );
-  };
-
+  // ── render ──────────────────────────────────────────────────────────────────
   return (
     <div className="p-6">
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div className="flex items-center gap-3">
           <TrendingUp className="w-8 h-8 text-indigo-600" />
@@ -602,17 +472,17 @@ const SalesSalaryRatio = () => {
               type="text"
               placeholder="Search MR Name..."
               value={searchTerm}
-              onChange={handleSearchChange}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64"
             />
             <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
               size={18}
             />
             {searchTerm && (
               <button
                 onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 <X size={16} />
               </button>
@@ -620,8 +490,8 @@ const SalesSalaryRatio = () => {
           </div>
           <button
             onClick={exportToExcel}
-            disabled={exportLoading || data.records.length === 0}
-            className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg shadow-md transition-colors min-w-[140px]"
+            disabled={exportLoading || !data.records.length}
+            className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg shadow-md min-w-[140px]"
           >
             {exportLoading ? (
               <>
@@ -638,7 +508,7 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* ── Date tabs ── */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           {[
@@ -667,17 +537,129 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {renderSummaryCards()}
+      {/* ── Summary cards ── */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        {[
+          {
+            label: "Total Sales",
+            value: fmt$(data.summary.totalSales),
+            icon: <DollarSign className="w-8 h-8 text-green-500" />,
+            border: "border-green-500",
+          },
+          {
+            label: "Total Salary",
+            value: fmt$(data.summary.totalSalary),
+            icon: <Users className="w-8 h-8 text-blue-500" />,
+            border: "border-blue-500",
+          },
+          {
+            label: "Total Expense",
+            value: fmt$(data.summary.totalExpense),
+            icon: <BarChart3 className="w-8 h-8 text-purple-500" />,
+            border: "border-purple-500",
+          },
+          {
+            label: "Expense/Sales Ratio",
+            value: fmtRatio(data.summary.ratio),
+            icon: <Percent className="w-8 h-8 text-orange-500" />,
+            border: "border-orange-500",
+          },
+        ].map(({ label, value, icon, border }) => (
+          <div
+            key={label}
+            className={`bg-white p-6 rounded-xl shadow-md border-l-4 ${border} border border-gray-200`}
+          >
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-gray-600">{label}</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {loading ? (
+                    <span className="block h-8 w-20 bg-gray-200 rounded animate-pulse" />
+                  ) : (
+                    value
+                  )}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {getActiveFilterDisplay()}
+                </p>
+              </div>
+              {icon}
+            </div>
+          </div>
+        ))}
+      </div>
 
-      {/* Table */}
+
+      {/* <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
+          <b>Incentive ($)</b> — allowance type "Incentive" only
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" />
+          <b>Allowance ($)</b> — all allowances except Incentive &amp; Travel
+          Allowance
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
+          <b>Tour Expense ($)</b> — allowance type "Travel Allowance" only
+        </span>
+      </div> 
+
+   
+      <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
+        <span className="font-semibold text-gray-600">
+          Performance (Salary/Sale %):
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-600 font-semibold">
+            Excellent
+          </span>
+          <span>0 – 25%</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 font-semibold">
+            Positive
+          </span>
+          <span>26 – 50%</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 font-semibold">
+            Usual
+          </span>
+          <span>51 – 100%</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">
+            Negative
+          </span>
+          <span>&gt; 100%</span>
+        </span>
+      </div>
+
+      {/* ── Table ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          {renderTableHeaders()}
+          <thead className="bg-gray-100 text-gray-700 border-b">
+            <tr>
+              <th className="p-3 text-sm font-medium">Sr.No</th>
+              <th className="p-3 text-sm font-medium">MR Name</th>
+              <th className="p-3 text-sm font-medium">Sale ($)</th>
+              <th className="p-3 text-sm font-medium">Profit ($)</th>
+              <th className="p-3 text-sm font-medium">Salary ($)</th>
+              <th className="p-3 text-sm font-medium">Incentive ($)</th>
+              <th className="p-3 text-sm font-medium">Allowance ($)</th>
+              <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
+              <th className="p-3 text-sm font-medium">Total Expense ($)</th>
+              <th className="p-3 text-sm font-medium">Salary/Sale (%)</th>
+              <th className="p-3 text-sm font-medium">Performance</th>
+            </tr>
+          </thead>
           <tbody>
             {loading ? (
               <tr>
                 <td colSpan={11} className="p-8 text-center">
-                  <div className="flex flex-col items-center justify-center">
+                  <div className="flex flex-col items-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4" />
                     <span className="text-gray-600">
                       Loading sales salary ratio data...
@@ -686,7 +668,73 @@ const SalesSalaryRatio = () => {
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
-              data.records.map((record, index) => renderTableRow(record, index))
+              data.records.map((record, index) => {
+                const salary = parseFloat(record.salary) || 0;
+                const incentive = parseFloat(record.incentive) || 0;
+                const allowance = parseFloat(record.allowance) || 0;
+                const tourExpense = parseFloat(record.tourExpense) || 0;
+                const profit = parseFloat(record.profit) || 0;
+                const sale = parseFloat(record.sale) || 0;
+                const totalExpense = parseFloat(record.totalExpense) || 0;
+
+                // Salary/Sale (%) = sale / totalExpense × 100
+                const salarySaleRatio = calcSalarySaleRatio(sale, totalExpense);
+
+                // Performance label derived from salarySaleRatio
+                const {
+                  label: perfLabel,
+                  textColor: perfText,
+                  bgColor: perfBg,
+                } = getPerformanceInfo(salarySaleRatio);
+
+                return (
+                  <tr
+                    key={`${record.mrId}-${index}`}
+                    className={`hover:bg-gray-50 ${index === data.records.length - 1 ? "" : "border-b"}`}
+                  >
+                    <td className="p-3 text-sm text-gray-600 font-medium">
+                      {getSerialNumber(index)}
+                    </td>
+                    <td className="p-3 text-sm font-medium text-gray-900 capitalize">
+                      {record.mrName || "N/A"}
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-gray-800">
+                      {fmt$(record.sale)}
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-blue-600">
+                      {fmt$(profit)}
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-purple-600">
+                      {fmt$(salary)}
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-green-600">
+                      {fmt$(incentive)}
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-yellow-600">
+                      {fmt$(allowance)}
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-red-600">
+                      {fmt$(tourExpense)}
+                    </td>
+                    <td className="p-3 text-sm font-bold text-gray-900">
+                      {fmt$(totalExpense)}
+                    </td>
+                    <td
+                      className={`p-3 text-sm font-semibold ${salarySaleRatio >= 0 ? "text-green-600" : "text-red-600"}`}
+                    >
+                      {fmtPct(salarySaleRatio)}
+                    </td>
+                    {/* Performance: label word based on salarySaleRatio range */}
+                    <td className="p-3 text-sm font-semibold">
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-xs font-bold ${perfBg} ${perfText}`}
+                      >
+                        {perfLabel}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan={11} className="p-8 text-center">
@@ -711,7 +759,7 @@ const SalesSalaryRatio = () => {
 
       {renderPagination()}
 
-      {/* Custom Filter Modal */}
+      {/* ── Custom Filter Modal ── */}
       {showCustomFilter && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
           <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg">
@@ -733,7 +781,7 @@ const SalesSalaryRatio = () => {
                 </label>
                 <DatePicker
                   selected={customDateRange.startDate}
-                  onChange={(date) => handleCustomDateChange("startDate", date)}
+                  onChange={(d) => handleCustomDateChange("startDate", d)}
                   selectsStart
                   startDate={customDateRange.startDate}
                   endDate={customDateRange.endDate}
@@ -749,7 +797,7 @@ const SalesSalaryRatio = () => {
                 </label>
                 <DatePicker
                   selected={customDateRange.endDate}
-                  onChange={(date) => handleCustomDateChange("endDate", date)}
+                  onChange={(d) => handleCustomDateChange("endDate", d)}
                   selectsEnd
                   startDate={customDateRange.startDate}
                   endDate={customDateRange.endDate}
@@ -764,20 +812,20 @@ const SalesSalaryRatio = () => {
             <div className="flex justify-between gap-3">
               <button
                 onClick={handleClearFilters}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
               >
                 Clear All
               </button>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowCustomFilter(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleApplyCustomFilter}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Apply Filter
                 </button>

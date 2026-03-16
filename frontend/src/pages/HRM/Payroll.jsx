@@ -1656,8 +1656,33 @@ const Payroll = () => {
                       payroll.contactNo ||
                       "N/A"}
                   </td>
+                  {/* displayBasicSalary = adjustedBasicSalary for current-month payrolls
+                      (prorated − unpaid leave + extra time, e.g. $604.31).
+                      For previous-month manual entries it equals basicSalary.
+                      Hover tooltip shows the full contracted salary for reference. */}
                   <td className="p-3 text-gray-600">
-                    {formatCurrency(payroll.basicSalary)}
+                    <span
+                      title={
+                        payroll.payrollType === "current" &&
+                        payroll.adjustedBasicSalary != null &&
+                        payroll.adjustedBasicSalary !== payroll.basicSalary
+                          ? `Full salary: ${formatCurrency(payroll.basicSalary)}`
+                          : undefined
+                      }
+                      className={
+                        payroll.payrollType === "current" &&
+                        payroll.adjustedBasicSalary != null &&
+                        payroll.adjustedBasicSalary !== payroll.basicSalary
+                          ? "cursor-help border-b border-dashed border-gray-400"
+                          : ""
+                      }
+                    >
+                      {formatCurrency(
+                        payroll.displayBasicSalary != null
+                          ? payroll.displayBasicSalary
+                          : payroll.basicSalary,
+                      )}
+                    </span>
                   </td>
                   <td className="p-3">
                     <div className="flex gap-1 justify-center">
@@ -2099,9 +2124,20 @@ const Payroll = () => {
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Basic Salary
+                      {form.payrollType === "current" &&
+                        form.adjustedBasicSalary != null &&
+                        form.adjustedBasicSalary !== form.basicSalary && (
+                          <span className="ml-1 text-xs text-gray-400 font-normal">
+                            (Full: {formatCurrency(form.basicSalary)})
+                          </span>
+                        )}
                     </label>
                     <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
-                      {formatCurrency(form.basicSalary)}
+                      {formatCurrency(
+                        form.displayBasicSalary != null
+                          ? form.displayBasicSalary
+                          : form.basicSalary,
+                      )}
                     </p>
                   </div>
                   <div>
