@@ -1,13 +1,12 @@
 import express from "express";
-import ExcelJS from 'exceljs';
+import ExcelJS from "exceljs";
 import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
-// Helper function to generate MR ID
 // Helper function to generate a fallback MR ID (if not found in staff)
 const generateFallbackMRId = (index) => {
-  return `MR${String(index + 1).padStart(3, '0')}`;
+  return `MR${String(index + 1).padStart(3, "0")}`;
 };
 
 // GET / – paginated data with working contact info
@@ -42,26 +41,46 @@ router.get("/", async (req, res) => {
     }
 
     // Base aggregation pipeline
+    // Key fix: normalize mrName (trim + toLower) BEFORE grouping so that
+    // "John Doe", " john doe ", "JOHN DOE" etc. all collapse into one group.
+    // We keep the original (first seen) mrName for display.
     const basePipeline = [
       { $match: matchConditions },
 
+      // Step 1: add a normalised key field on every document
+      {
+        $addFields: {
+          _mrNameNormalized: {
+            $toLower: { $trim: { input: "$mrName" } },
+          },
+        },
+      },
+
+      // Step 2: group by the normalised key; keep first original name for display
       {
         $group: {
-          _id: "$mrName",
+          _id: "$_mrNameNormalized",
+          mrNameDisplay: { $first: { $trim: { input: "$mrName" } } },
           totalOutstandingAmount: { $sum: "$dueAmount" },
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
       },
 
+      // Step 3: look up staff using case-insensitive match on the normalised name
       {
         $lookup: {
-          from: "staffs", // adjust collection name if needed (e.g., "staff")
-          let: { mrName: "$_id" },
+          from: "staffs",
+          let: { mrNameNorm: "$_id" },
           pipeline: [
             {
               $match: {
-                $expr: { $eq: ["$medicalRepName", "$$mrName"] } // removed enabled filter
-              }
+                $expr: {
+                  $eq: [
+                    { $toLower: { $trim: { input: "$medicalRepName" } } },
+                    "$$mrNameNorm",
+                  ],
+                },
+              },
             },
             {
               $project: {
@@ -69,7 +88,7 @@ router.get("/", async (req, res) => {
                 teamName: 1,
                 contactNo: 1,
                 email: 1,
-                MRId: 1, // include MRId for ID column
+                MRId: 1,
               },
             },
           ],
@@ -79,7 +98,7 @@ router.get("/", async (req, res) => {
 
       {
         $project: {
-          mrName: "$_id",
+          mrName: "$mrNameDisplay",
           totalOutstandingAmount: { $round: ["$totalOutstandingAmount", 2] },
           totalCustomers: { $size: "$uniqueCustomers" },
           staff: {
@@ -87,7 +106,7 @@ router.get("/", async (req, res) => {
               if: { $gt: [{ $size: "$staffDetails" }, 0] },
               then: { $arrayElemAt: ["$staffDetails", 0] },
               else: {
-                medicalRepName: "$_id",
+                medicalRepName: "$mrNameDisplay",
                 contactNo: "Not Available",
                 email: "Not Available",
                 teamName: "Not Available",
@@ -113,8 +132,15 @@ router.get("/", async (req, res) => {
       SaleSummary.aggregate([
         { $match: matchConditions },
         {
+          $addFields: {
+            _mrNameNormalized: {
+              $toLower: { $trim: { input: "$mrName" } },
+            },
+          },
+        },
+        {
           $group: {
-            _id: "$mrName",
+            _id: "$_mrNameNormalized",
             totalOutstandingAmount: { $sum: "$dueAmount" },
             uniqueCustomers: { $addToSet: "$customerCode" },
           },
@@ -136,7 +162,9 @@ router.get("/", async (req, res) => {
     const totalPages = Math.ceil(totalRecords / limitNum);
 
     const records = mrData.map((mr, index) => ({
-      mrId: mr.staff?.MRId ? String(mr.staff.MRId).padStart(3, '0') : generateFallbackMRId(skip + index),
+      mrId: mr.staff?.MRId
+        ? String(mr.staff.MRId).padStart(3, "0")
+        : generateFallbackMRId(skip + index),
       mrName: mr.mrName,
       totalOutstandingAmount: mr.totalOutstandingAmount,
       totalCustomers: mr.totalCustomers,
@@ -200,9 +228,19 @@ router.get("/export/excel", async (req, res) => {
     const mrData = await SaleSummary.aggregate([
       { $match: matchConditions },
 
+      // Normalise mrName before grouping (same fix as the GET route above)
+      {
+        $addFields: {
+          _mrNameNormalized: {
+            $toLower: { $trim: { input: "$mrName" } },
+          },
+        },
+      },
+
       {
         $group: {
-          _id: "$mrName",
+          _id: "$_mrNameNormalized",
+          mrNameDisplay: { $first: { $trim: { input: "$mrName" } } },
           totalOutstandingAmount: { $sum: "$dueAmount" },
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
@@ -211,12 +249,17 @@ router.get("/export/excel", async (req, res) => {
       {
         $lookup: {
           from: "staffs",
-          let: { mrName: "$_id" },
+          let: { mrNameNorm: "$_id" },
           pipeline: [
             {
               $match: {
-                $expr: { $eq: ["$medicalRepName", "$$mrName"] } // removed enabled filter
-              }
+                $expr: {
+                  $eq: [
+                    { $toLower: { $trim: { input: "$medicalRepName" } } },
+                    "$$mrNameNorm",
+                  ],
+                },
+              },
             },
             {
               $project: {
@@ -234,7 +277,7 @@ router.get("/export/excel", async (req, res) => {
 
       {
         $project: {
-          mrName: "$_id",
+          mrName: "$mrNameDisplay",
           totalOutstandingAmount: { $round: ["$totalOutstandingAmount", 2] },
           totalCustomers: { $size: "$uniqueCustomers" },
           staff: {
@@ -242,7 +285,7 @@ router.get("/export/excel", async (req, res) => {
               if: { $gt: [{ $size: "$staffDetails" }, 0] },
               then: { $arrayElemAt: ["$staffDetails", 0] },
               else: {
-                medicalRepName: "$_id",
+                medicalRepName: "$mrNameDisplay",
                 contactNo: "Not Available",
                 email: "Not Available",
                 teamName: "Not Available",
@@ -258,105 +301,102 @@ router.get("/export/excel", async (req, res) => {
 
     // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'MR Wise Outstanding System';
+    workbook.creator = "MR Wise Outstanding System";
     workbook.created = new Date();
 
-    const worksheet = workbook.addWorksheet('MR Wise Outstanding');
+    const worksheet = workbook.addWorksheet("MR Wise Outstanding");
 
     worksheet.columns = [
-      { header: 'Sr.No', key: 'serialNo', width: 10 },
-      { header: 'MR ID', key: 'mrId', width: 15 },
-      { header: 'MR Name', key: 'mrName', width: 30 },
-      { header: 'Contact', key: 'contact', width: 20 },
-      { header: 'Total Customers', key: 'totalCustomers', width: 15 },
-      { header: 'Total Outstanding ($)', key: 'totalOutstanding', width: 20 }
+      { header: "Sr.No", key: "serialNo", width: 10 },
+      { header: "MR ID", key: "mrId", width: 15 },
+      { header: "MR Name", key: "mrName", width: 30 },
+      { header: "Contact", key: "contact", width: 20 },
+      { header: "Total Customers", key: "totalCustomers", width: 15 },
+      { header: "Total Outstanding ($)", key: "totalOutstanding", width: 20 },
     ];
 
     const headerRow = worksheet.getRow(1);
     headerRow.font = { bold: true, size: 12 };
-    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    headerRow.alignment = { horizontal: "center", vertical: "middle" };
     headerRow.height = 25;
 
     mrData.forEach((mr, index) => {
-      const mrId = mr.staff?.MRId 
-        ? String(mr.staff.MRId).padStart(3, '0') 
+      const mrId = mr.staff?.MRId
+        ? String(mr.staff.MRId).padStart(3, "0")
         : generateFallbackMRId(index);
 
       const row = worksheet.addRow({
         serialNo: index + 1,
         mrId: mrId,
-        mrName: mr.mrName || 'N/A',
-        contact: mr.staff?.contactNo || 'Not Available',
+        mrName: mr.mrName || "N/A",
+        contact: mr.staff?.contactNo || "Not Available",
         totalCustomers: mr.totalCustomers || 0,
-        totalOutstanding: mr.totalOutstandingAmount || 0
+        totalOutstanding: mr.totalOutstandingAmount || 0,
       });
 
       row.font = { size: 11 };
-      row.alignment = { vertical: 'middle' };
-      row.getCell('totalOutstanding').numFmt = '$#,##0.00';
+      row.alignment = { vertical: "middle" };
+      row.getCell("totalOutstanding").numFmt = "$#,##0.00";
     });
 
     // Calculate totals
-    const totalOutstanding = mrData.reduce((sum, mr) => sum + (mr.totalOutstandingAmount || 0), 0);
-    const totalCustomers = mrData.reduce((sum, mr) => sum + (mr.totalCustomers || 0), 0);
+    const totalOutstanding = mrData.reduce(
+      (sum, mr) => sum + (mr.totalOutstandingAmount || 0),
+      0,
+    );
+    const totalCustomers = mrData.reduce(
+      (sum, mr) => sum + (mr.totalCustomers || 0),
+      0,
+    );
 
     if (mrData.length > 0) {
       worksheet.addRow({});
       const summaryRow = worksheet.addRow({});
-      summaryRow.getCell('mrName').value = 'TOTAL SUMMARY';
-      summaryRow.getCell('totalCustomers').value = totalCustomers;
-      summaryRow.getCell('totalOutstanding').value = totalOutstanding;
+      summaryRow.getCell("mrName").value = "TOTAL SUMMARY";
+      summaryRow.getCell("totalCustomers").value = totalCustomers;
+      summaryRow.getCell("totalOutstanding").value = totalOutstanding;
       summaryRow.font = { bold: true, size: 12 };
-      summaryRow.getCell('totalOutstanding').numFmt = '$#,##0.00';
+      summaryRow.getCell("totalOutstanding").numFmt = "$#,##0.00";
     }
 
     // Apply borders
     worksheet.eachRow({ includeEmpty: true }, (row) => {
       row.eachCell({ includeEmpty: true }, (cell) => {
         cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
         };
       });
     });
 
     const currentDate = new Date();
-    const formattedDate = currentDate.toISOString().split('T')[0];
-    let fileName = 'mr-wise-outstanding';
+    const formattedDate = currentDate.toISOString().split("T")[0];
+    let fileName = "mr-wise-outstanding";
     if (startDate && endDate) {
-      fileName = `mr-wise-outstanding-${startDate.replace(/-/g, '')}-to-${endDate.replace(/-/g, '')}`;
+      fileName = `mr-wise-outstanding-${startDate.replace(/-/g, "")}-to-${endDate.replace(/-/g, "")}`;
     } else {
-      fileName = `mr-wise-outstanding-${formattedDate.replace(/-/g, '')}`;
+      fileName = `mr-wise-outstanding-${formattedDate.replace(/-/g, "")}`;
     }
-    fileName += '.xlsx';
+    fileName += ".xlsx";
 
     res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${fileName}"`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     const buffer = await workbook.xlsx.writeBuffer();
     res.send(buffer);
-
   } catch (err) {
     console.error("Error in Excel export:", err);
     res.status(500).json({
       error: "Failed to generate Excel export",
       message: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
     });
   }
 });
-
-// Fallback ID generator (place this at the top of your file)
-// function generateFallbackMRId(index) {
-//   return `MR${String(index + 1).padStart(3, '0')}`;
-// }
 
 export default router;

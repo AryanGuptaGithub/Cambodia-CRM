@@ -4,6 +4,8 @@ import DailySampleReport from "../../models/reports/dailysample.js";
 import MRStockInHand from "../../models/sale/mrStockHand.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Staff from "../../models/staffMember/staff.js";
+// If you need to validate customer existence, import Customer model
+// import Customer from "../../models/customer/customer.js";
 
 const router = express.Router();
 
@@ -24,7 +26,7 @@ const findReportInHandFlexible = async (productName, session = null) => {
     const normalized = normalizeProductName(productName);
     // Exact match first
     let query = ReportInHand.findOne({
-      productName: { $regex: new RegExp(`^${escapeRegex(normalized)}$`, "i") }
+      productName: { $regex: new RegExp(`^${escapeRegex(normalized)}$`, "i") },
     });
     if (session) query = query.session(session);
     let stock = await query;
@@ -32,9 +34,11 @@ const findReportInHandFlexible = async (productName, session = null) => {
     if (!stock) {
       // Allow any characters between words
       const parts = normalized.split(/\s+/);
-      const flexiblePattern = parts.map(p => escapeRegex(p)).join("\\s*.*?\\s*");
+      const flexiblePattern = parts
+        .map((p) => escapeRegex(p))
+        .join("\\s*.*?\\s*");
       query = ReportInHand.findOne({
-        productName: { $regex: new RegExp(flexiblePattern, "i") }
+        productName: { $regex: new RegExp(flexiblePattern, "i") },
       });
       if (session) query = query.session(session);
       stock = await query;
@@ -43,7 +47,7 @@ const findReportInHandFlexible = async (productName, session = null) => {
     // Last resort: simple substring
     if (!stock) {
       query = ReportInHand.findOne({
-        productName: { $regex: new RegExp(escapeRegex(normalized), "i") }
+        productName: { $regex: new RegExp(escapeRegex(normalized), "i") },
       });
       if (session) query = query.session(session);
       stock = await query;
@@ -60,25 +64,28 @@ const findReportInHandFlexible = async (productName, session = null) => {
 const updateMRStock = async (mrName, productName, quantity, lc, session) => {
   try {
     const mr = await Staff.findOne({
-      medicalRepName: { $regex: new RegExp(`^${escapeRegex(mrName)}$`, "i") }
+      medicalRepName: { $regex: new RegExp(`^${escapeRegex(mrName)}$`, "i") },
     }).session(session);
 
     if (!mr) {
       throw new Error(`MR "${mrName}" not found in Staff`);
     }
 
-    let mrStock = await MRStockInHand.findOne({ mrId: mr._id }).session(session);
+    let mrStock = await MRStockInHand.findOne({ mrId: mr._id }).session(
+      session,
+    );
 
     if (!mrStock) {
       mrStock = new MRStockInHand({
         mrId: mr._id,
         mrName: mr.medicalRepName,
-        productsInHand: []
+        productsInHand: [],
       });
     }
 
     const productIndex = mrStock.productsInHand.findIndex(
-      p => p.productName.toLowerCase().trim() === productName.toLowerCase().trim()
+      (p) =>
+        p.productName.toLowerCase().trim() === productName.toLowerCase().trim(),
     );
 
     if (productIndex === -1) {
@@ -86,7 +93,7 @@ const updateMRStock = async (mrName, productName, quantity, lc, session) => {
         productName: productName,
         quantity: quantity,
         lc: lc || 0,
-        lastUpdated: new Date()
+        lastUpdated: new Date(),
       });
     } else {
       mrStock.productsInHand[productIndex].quantity += quantity;
@@ -117,12 +124,16 @@ const updateStockOnAdd = async (dailySample, session = null) => {
 
     const reportInHand = await findReportInHandFlexible(productName, session);
     if (!reportInHand) {
-      throw new Error(`Product "${productName}" not found in warehouse (ReportInHand)`);
+      throw new Error(
+        `Product "${productName}" not found in warehouse (ReportInHand)`,
+      );
     }
 
     // Check sufficient stock (current totalBoxes already reflects all previous adjustments)
     if (reportInHand.totalBoxes < qty) {
-      throw new Error(`Insufficient stock. Available: ${reportInHand.totalBoxes}, Required: ${qty}`);
+      throw new Error(
+        `Insufficient stock. Available: ${reportInHand.totalBoxes}, Required: ${qty}`,
+      );
     }
 
     // Add a removal entry linked to this daily sample
@@ -130,7 +141,7 @@ const updateStockOnAdd = async (dailySample, session = null) => {
       boxes: qty,
       adjustmentType: "remove",
       date: new Date(),
-      adjustmentId: _id   // store the daily sample's _id for later lookup
+      adjustmentId: _id, // store the daily sample's _id for later lookup
     });
 
     await reportInHand.save({ session });
@@ -156,16 +167,23 @@ const updateStockOnDelete = async (dailySample, session = null) => {
 
     const reportInHand = await findReportInHandFlexible(productName, session);
     if (!reportInHand) {
-      throw new Error(`Product "${productName}" not found in warehouse (ReportInHand)`);
+      throw new Error(
+        `Product "${productName}" not found in warehouse (ReportInHand)`,
+      );
     }
 
     // Find the removal entry that matches this daily sample's _id
     const removalIndex = reportInHand.batches.findIndex(
-      b => b.adjustmentType === "remove" && b.adjustmentId && b.adjustmentId.toString() === _id.toString()
+      (b) =>
+        b.adjustmentType === "remove" &&
+        b.adjustmentId &&
+        b.adjustmentId.toString() === _id.toString(),
     );
 
     if (removalIndex === -1) {
-      console.warn(`No removal entry found for daily sample ${_id} – cannot reverse stock.`);
+      console.warn(
+        `No removal entry found for daily sample ${_id} – cannot reverse stock.`,
+      );
       return;
     }
 
@@ -175,14 +193,18 @@ const updateStockOnDelete = async (dailySample, session = null) => {
 
     // Remove from MR's stock
     const mr = await Staff.findOne({
-      medicalRepName: { $regex: new RegExp(`^${escapeRegex(mrName)}$`, "i") }
+      medicalRepName: { $regex: new RegExp(`^${escapeRegex(mrName)}$`, "i") },
     }).session(session);
 
     if (mr) {
-      const mrStock = await MRStockInHand.findOne({ mrId: mr._id }).session(session);
+      const mrStock = await MRStockInHand.findOne({ mrId: mr._id }).session(
+        session,
+      );
       if (mrStock) {
         const productIndex = mrStock.productsInHand.findIndex(
-          p => p.productName.toLowerCase().trim() === productName.toLowerCase().trim()
+          (p) =>
+            p.productName.toLowerCase().trim() ===
+            productName.toLowerCase().trim(),
         );
         if (productIndex !== -1) {
           mrStock.productsInHand[productIndex].quantity -= qty;
@@ -195,7 +217,9 @@ const updateStockOnDelete = async (dailySample, session = null) => {
       }
     }
 
-    console.log(`✅ Reversed: ${qty} of ${productName} returned to warehouse from MR ${mrName}`);
+    console.log(
+      `✅ Reversed: ${qty} of ${productName} returned to warehouse from MR ${mrName}`,
+    );
   } catch (error) {
     console.error("❌ Error in updateStockOnDelete:", error);
     throw error;
@@ -224,7 +248,10 @@ const updateStockOnUpdate = async (oldData, newData, session = null) => {
 
       // Find the removal entry for this daily sample
       const removalEntry = reportInHand.batches.find(
-        b => b.adjustmentType === "remove" && b.adjustmentId && b.adjustmentId.toString() === _id.toString()
+        (b) =>
+          b.adjustmentType === "remove" &&
+          b.adjustmentId &&
+          b.adjustmentId.toString() === _id.toString(),
       );
       if (!removalEntry) {
         throw new Error(`No removal entry found for daily sample ${_id}`);
@@ -236,12 +263,14 @@ const updateStockOnUpdate = async (oldData, newData, session = null) => {
         // Stock before this removal = totalBoxes + oldQ.
         const availableBeforeRemoval = reportInHand.totalBoxes + oldQ;
         if (availableBeforeRemoval < newQ) {
-          throw new Error(`Insufficient stock. Available before removal: ${availableBeforeRemoval}, Required: ${newQ}`);
+          throw new Error(
+            `Insufficient stock. Available before removal: ${availableBeforeRemoval}, Required: ${newQ}`,
+          );
         }
-        removalEntry.boxes = newQ;  // increase the removal
+        removalEntry.boxes = newQ; // increase the removal
       } else {
         // Returning stock – no availability check needed
-        removalEntry.boxes = newQ;  // decrease the removal
+        removalEntry.boxes = newQ; // decrease the removal
       }
 
       await reportInHand.save({ session });
@@ -253,13 +282,19 @@ const updateStockOnUpdate = async (oldData, newData, session = null) => {
 
       // Remove from old MR
       const oldMr = await Staff.findOne({
-        medicalRepName: { $regex: new RegExp(`^${escapeRegex(oldMrName)}$`, "i") }
+        medicalRepName: {
+          $regex: new RegExp(`^${escapeRegex(oldMrName)}$`, "i"),
+        },
       }).session(session);
       if (oldMr) {
-        const oldMrStock = await MRStockInHand.findOne({ mrId: oldMr._id }).session(session);
+        const oldMrStock = await MRStockInHand.findOne({
+          mrId: oldMr._id,
+        }).session(session);
         if (oldMrStock) {
           const productIndex = oldMrStock.productsInHand.findIndex(
-            p => p.productName.toLowerCase().trim() === productName.toLowerCase().trim()
+            (p) =>
+              p.productName.toLowerCase().trim() ===
+              productName.toLowerCase().trim(),
           );
           if (productIndex !== -1) {
             oldMrStock.productsInHand[productIndex].quantity -= transferQty;
@@ -274,26 +309,32 @@ const updateStockOnUpdate = async (oldData, newData, session = null) => {
 
       // Add to new MR
       const newMr = await Staff.findOne({
-        medicalRepName: { $regex: new RegExp(`^${escapeRegex(newMrName)}$`, "i") }
+        medicalRepName: {
+          $regex: new RegExp(`^${escapeRegex(newMrName)}$`, "i"),
+        },
       }).session(session);
       if (newMr) {
-        let newMrStock = await MRStockInHand.findOne({ mrId: newMr._id }).session(session);
+        let newMrStock = await MRStockInHand.findOne({
+          mrId: newMr._id,
+        }).session(session);
         if (!newMrStock) {
           newMrStock = new MRStockInHand({
             mrId: newMr._id,
             mrName: newMr.medicalRepName,
-            productsInHand: []
+            productsInHand: [],
           });
         }
         const productIndex = newMrStock.productsInHand.findIndex(
-          p => p.productName.toLowerCase().trim() === productName.toLowerCase().trim()
+          (p) =>
+            p.productName.toLowerCase().trim() ===
+            productName.toLowerCase().trim(),
         );
         if (productIndex === -1) {
           newMrStock.productsInHand.push({
             productName: productName,
             quantity: transferQty,
             lc: 0,
-            lastUpdated: new Date()
+            lastUpdated: new Date(),
           });
         } else {
           newMrStock.productsInHand[productIndex].quantity += transferQty;
@@ -328,17 +369,31 @@ router.post("/import", async (req, res) => {
     const invalidEntries = [];
 
     data.forEach((entry, index) => {
-      if (!entry.requestNumber || !entry.date || !entry.mrName || !entry.productName) {
-        invalidEntries.push({ index: index + 1, reason: "Missing required fields", entry });
+      if (
+        !entry.requestNumber ||
+        !entry.date ||
+        !entry.mrName ||
+        !entry.productName
+      ) {
+        invalidEntries.push({
+          index: index + 1,
+          reason: "Missing required fields",
+          entry,
+        });
         return;
       }
 
       const parsedDate = new Date(entry.date);
       if (isNaN(parsedDate)) {
-        invalidEntries.push({ index: index + 1, reason: "Invalid date format", entry });
+        invalidEntries.push({
+          index: index + 1,
+          reason: "Invalid date format",
+          entry,
+        });
         return;
       }
 
+      // Include customer fields if present (they are optional in import)
       validEntries.push({
         requestNumber: entry.requestNumber,
         date: parsedDate,
@@ -350,6 +405,10 @@ router.post("/import", async (req, res) => {
         totalQty: Number(entry.totalQty) || 0,
         qtyPerBox: Number(entry.qtyPerBox) || 0,
         remark: entry.remark || "",
+        // New customer fields
+        customerId: entry.customerId || null,
+        customerName: entry.customerName || "",
+        customerCode: entry.customerCode || "",
       });
     });
 
@@ -361,13 +420,18 @@ router.post("/import", async (req, res) => {
       });
     }
 
-    const result = await DailySampleReport.insertMany(validEntries, { ordered: false });
+    const result = await DailySampleReport.insertMany(validEntries, {
+      ordered: false,
+    });
 
     for (const entry of result) {
       try {
-        await updateStockOnAdd(entry);  // no session in import (can be added if needed)
+        await updateStockOnAdd(entry);
       } catch (stockError) {
-        console.error(`Failed to update stock for entry ${entry.requestNumber}:`, stockError);
+        console.error(
+          `Failed to update stock for entry ${entry.requestNumber}:`,
+          stockError,
+        );
       }
     }
 
@@ -408,7 +472,8 @@ router.get("/", async (req, res) => {
 
     if (mrName) query.mrName = { $regex: mrName, $options: "i" };
     if (productName) query.productName = { $regex: productName, $options: "i" };
-    if (requestNumber) query.requestNumber = { $regex: requestNumber, $options: "i" };
+    if (requestNumber)
+      query.requestNumber = { $regex: requestNumber, $options: "i" };
     if (startDate || endDate) {
       query.date = {};
       if (startDate) query.date.$gte = new Date(startDate);
@@ -531,13 +596,17 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid report ID format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid report ID format" });
     }
 
     const report = await DailySampleReport.findById(id).lean();
 
     if (!report) {
-      return res.status(404).json({ success: false, message: "Daily sample report not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Daily sample report not found" });
     }
 
     res.status(200).json({ success: true, data: report });
@@ -567,38 +636,73 @@ router.post("/", async (req, res) => {
       totalQty = 0,
       qtyPerBox = 0,
       remark,
+      // New customer fields
+      customerId,
+      customerName,
+      customerCode,
     } = req.body;
 
     if (!date || !mrName || !productName) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "Date, MR name, and product name are required" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Date, MR name, and product name are required",
+        });
     }
+
+    // Optional: validate customerId if provided (uncomment if you have Customer model)
+    // if (customerId && !mongoose.Types.ObjectId.isValid(customerId)) {
+    //   await session.abortTransaction();
+    //   session.endSession();
+    //   return res.status(400).json({ success: false, message: "Invalid customer ID format" });
+    // }
+    // if (customerId) {
+    //   const customerExists = await Customer.exists({ _id: customerId }).session(session);
+    //   if (!customerExists) {
+    //     await session.abortTransaction();
+    //     session.endSession();
+    //     return res.status(400).json({ success: false, message: "Customer not found with the provided ID" });
+    //   }
+    // }
 
     if (qtyBigBox < 0 || qtySmallBox < 0 || totalQty < 0 || qtyPerBox < 0) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "Quantities must be 0 or greater" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Quantities must be 0 or greater" });
     }
 
     const parsedDate = new Date(date);
     if (isNaN(parsedDate)) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "Invalid date format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid date format" });
     }
 
     if (mrId && !mongoose.Types.ObjectId.isValid(mrId)) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "Invalid MR ID format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid MR ID format" });
     }
     if (mrId) {
       const mrExists = await Staff.exists({ _id: mrId }).session(session);
       if (!mrExists) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: "MR not found with the provided ID" });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "MR not found with the provided ID",
+          });
       }
     }
 
@@ -613,6 +717,10 @@ router.post("/", async (req, res) => {
       totalQty,
       qtyPerBox,
       remark: remark || "",
+      // New fields
+      customerId: customerId || null,
+      customerName: customerName || "",
+      customerCode: customerCode || "",
     });
 
     await report.save({ session });
@@ -632,11 +740,10 @@ router.post("/", async (req, res) => {
     session.endSession();
     console.error("Error saving daily sample report:", error);
 
-    // 👇 NEW: Return insufficient stock error as a 400 with clear message
-    if (error.message && error.message.startsWith('Insufficient stock')) {
-      return res.status(400).json({ 
-        success: false, 
-        message: error.message 
+    if (error.message && error.message.startsWith("Insufficient stock")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
       });
     }
 
@@ -645,17 +752,17 @@ router.post("/", async (req, res) => {
       for (const field in error.errors) {
         validationErrors[field] = error.errors[field].message;
       }
-      return res.status(400).json({ 
-        success: false, 
-        message: "Validation failed", 
-        errors: validationErrors 
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: validationErrors,
       });
     }
 
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while creating report", 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      message: "Server error while creating report",
+      error: error.message,
     });
   }
 });
@@ -671,14 +778,18 @@ router.put("/:id", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "Invalid report ID format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid report ID format" });
     }
 
     const oldReport = await DailySampleReport.findById(id).session(session);
     if (!oldReport) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ success: false, message: "Daily sample report not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Daily sample report not found" });
     }
 
     if (
@@ -689,7 +800,9 @@ router.put("/:id", async (req, res) => {
     ) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "Quantities must be 0 or greater" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Quantities must be 0 or greater" });
     }
 
     if (updateData.date) {
@@ -697,16 +810,20 @@ router.put("/:id", async (req, res) => {
       if (isNaN(parsedDate)) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({ success: false, message: "Invalid date format" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid date format" });
       }
       updateData.date = parsedDate;
     }
+
+    // Optional: validate customerId if present (similar to POST)
 
     // Update the report
     const updated = await DailySampleReport.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
-      session
+      session,
     });
 
     // Update stocks using old and new data
@@ -725,8 +842,7 @@ router.put("/:id", async (req, res) => {
     session.endSession();
     console.error("Update error:", err);
 
-    // 👇 NEW: Return insufficient stock error as a 400 with clear message
-    if (err.message && err.message.startsWith('Insufficient stock')) {
+    if (err.message && err.message.startsWith("Insufficient stock")) {
       return res.status(400).json({ success: false, message: err.message });
     }
 
@@ -735,17 +851,17 @@ router.put("/:id", async (req, res) => {
       for (const field in err.errors) {
         validationErrors[field] = err.errors[field].message;
       }
-      return res.status(400).json({ 
-        success: false, 
-        message: "Validation failed", 
-        errors: validationErrors 
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: validationErrors,
       });
     }
 
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while updating report", 
-      error: err.message 
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating report",
+      error: err.message,
     });
   }
 });
@@ -759,14 +875,19 @@ router.delete("/:id", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "Invalid report ID format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid report ID format" });
     }
 
-    const deleted = await DailySampleReport.findByIdAndDelete(id).session(session);
+    const deleted =
+      await DailySampleReport.findByIdAndDelete(id).session(session);
     if (!deleted) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({ success: false, message: "Daily sample report not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Daily sample report not found" });
     }
 
     await updateStockOnDelete(deleted, session);
@@ -784,15 +905,14 @@ router.delete("/:id", async (req, res) => {
     session.endSession();
     console.error("Delete Error:", err);
 
-    // Optional: handle insufficient stock on delete if ever needed
-    if (err.message && err.message.startsWith('Insufficient stock')) {
+    if (err.message && err.message.startsWith("Insufficient stock")) {
       return res.status(400).json({ success: false, message: err.message });
     }
 
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while deleting record", 
-      error: err.message 
+    res.status(500).json({
+      success: false,
+      message: "Server error while deleting record",
+      error: err.message,
     });
   }
 });
@@ -806,7 +926,9 @@ router.delete("/", async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "No IDs provided for deletion" });
+      return res
+        .status(400)
+        .json({ success: false, message: "No IDs provided for deletion" });
     }
 
     ids = ids.map((item) => (typeof item === "string" ? item : item.id));
@@ -821,18 +943,27 @@ router.delete("/", async (req, res) => {
     if (validIds.length === 0) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, message: "No valid IDs provided" });
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid IDs provided" });
     }
 
-    const reportsToDelete = await DailySampleReport.find({ _id: { $in: validIds } }).session(session);
+    const reportsToDelete = await DailySampleReport.find({
+      _id: { $in: validIds },
+    }).session(session);
 
-    const result = await DailySampleReport.deleteMany({ _id: { $in: validIds } }).session(session);
+    const result = await DailySampleReport.deleteMany({
+      _id: { $in: validIds },
+    }).session(session);
 
     for (const report of reportsToDelete) {
       try {
         await updateStockOnDelete(report, session);
       } catch (stockError) {
-        console.error(`Failed to update stock for deleted report ${report.requestNumber}:`, stockError);
+        console.error(
+          `Failed to update stock for deleted report ${report.requestNumber}:`,
+          stockError,
+        );
       }
     }
 
@@ -848,10 +979,10 @@ router.delete("/", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Bulk delete error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while deleting records", 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      message: "Server error while deleting records",
+      error: error.message,
     });
   }
 });

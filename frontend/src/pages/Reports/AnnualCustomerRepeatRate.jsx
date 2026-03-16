@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
 import {
   Download,
@@ -37,7 +37,7 @@ const AnnualCustomerRepeatRate = () => {
       repeatRate: 0,
       newCustomers: 0,
     },
-    records: [],
+    records: [], // changed from zones to records
   };
 
   const [data, setData] = useState(emptyData);
@@ -86,9 +86,15 @@ const AnnualCustomerRepeatRate = () => {
         { params },
       );
 
-      setData(response.data.data || emptyData);
+      // Safely extract data, ensuring records is always an array
+      const rawData = response.data?.data || emptyData;
+      setData({
+        summary: rawData.summary || emptyData.summary,
+        records: Array.isArray(rawData.records) ? rawData.records : [],
+      });
+
       setPagination(
-        response.data.pagination || {
+        response.data?.pagination || {
           currentPage: 1,
           totalPages: 1,
           totalRecords: 0,
@@ -143,7 +149,7 @@ const AnnualCustomerRepeatRate = () => {
   };
 
   const exportToExcel = async () => {
-    if (data.records.length === 0) {
+    if (!data.records || data.records.length === 0) {
       showToast("warning", "No records to export");
       return;
     }
@@ -179,19 +185,32 @@ const AnnualCustomerRepeatRate = () => {
     }
   };
 
+  // Filter records based on search term (search by zone name)
+  const filteredRecords = useMemo(() => {
+    const records = data.records || [];
+    if (!searchTerm.trim()) return records;
+    const q = searchTerm.toLowerCase();
+    return records.filter((zone) =>
+      zone.zoneName?.toLowerCase().includes(q),
+    );
+  }, [data.records, searchTerm]);
+
+  // Safe summary access
+  const summary = data.summary || emptyData.summary;
+
   return (
     <div className="p-6">
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold text-gray-800">
-          Annual Customer Repeat Rate
+          Annual Customer Repeat Rate – Zone Summary
         </h1>
         <div className="flex items-center gap-3">
           <div className="relative">
             <input
               ref={inputRef}
               type="text"
-              placeholder="Search by customer name, code, MR..."
+              placeholder="Search by zone name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && fetchData(1)}
@@ -215,9 +234,9 @@ const AnnualCustomerRepeatRate = () => {
           </div>
           <button
             onClick={exportToExcel}
-            disabled={exporting || data.records.length === 0}
+            disabled={exporting || !data.records || data.records.length === 0}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md ${
-              exporting || data.records.length === 0
+              exporting || !data.records || data.records.length === 0
                 ? "bg-gray-400 text-white cursor-not-allowed"
                 : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
             }`}
@@ -228,7 +247,7 @@ const AnnualCustomerRepeatRate = () => {
         </div>
       </div>
 
-      {/* Period Filter Tabs — Annual uses year-based tabs */}
+      {/* Period Filter Tabs */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         {[
           { id: "today", label: "Today" },
@@ -320,25 +339,25 @@ const AnnualCustomerRepeatRate = () => {
         {[
           {
             label: "Total Customers",
-            value: data.summary.totalCustomers,
+            value: summary.totalCustomers,
             icon: <Users className="w-8 h-8 text-green-500" />,
             border: "border-green-500",
           },
           {
             label: "Repeat Customers",
-            value: data.summary.repeatCustomers,
+            value: summary.repeatCustomers,
             icon: <Repeat className="w-8 h-8 text-blue-500" />,
             border: "border-blue-500",
           },
           {
             label: "Repeat Rate",
-            value: `${data.summary.repeatRate?.toFixed(2) || 0}%`,
+            value: `${summary.repeatRate?.toFixed(2) || 0}%`,
             icon: <BarChart3 className="w-8 h-8 text-purple-500" />,
             border: "border-purple-500",
           },
           {
             label: "New Customers",
-            value: data.summary.newCustomers,
+            value: summary.newCustomers,
             icon: <Target className="w-8 h-8 text-orange-500" />,
             border: "border-orange-500",
           },
@@ -364,85 +383,61 @@ const AnnualCustomerRepeatRate = () => {
         ))}
       </div>
 
-      {/* Table */}
+      {/* Zone Table (using records) */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3 text-sm font-medium">Sr.No</th>
-              <th className="p-3 text-sm font-medium text-left">
-                Customer Name
-              </th>
-              <th className="p-3 text-sm font-medium">Customer Code</th>
-              <th className="p-3 text-sm font-medium">MR Name</th>
-              <th className="p-3 text-sm font-medium">Total Purchases</th>
-              <th className="p-3 text-sm font-medium">First Purchase</th>
-              <th className="p-3 text-sm font-medium">Last Purchase</th>
-              <th className="p-3 text-sm font-medium">Status</th>
+              <th className="p-3 text-sm font-medium text-left">Zone Name</th>
+              <th className="p-3 text-sm font-medium">Total Customers</th>
+              <th className="p-3 text-sm font-medium">Retained Customers</th>
+              <th className="p-3 text-sm font-medium">Retention Rate (%)</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="p-8 text-center">
+                <td colSpan={5} className="p-8 text-center">
                   <div className="flex justify-center items-center gap-2">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
                     <span className="text-gray-500">Loading...</span>
                   </div>
                 </td>
               </tr>
-            ) : data.records.length > 0 ? (
-              data.records.map((record, index) => (
+            ) : filteredRecords.length > 0 ? (
+              filteredRecords.map((zone, index) => (
                 <tr
-                  key={index}
-                  className={`hover:bg-gray-50 ${index < data.records.length - 1 ? "border-b border-gray-100" : ""}`}
+                  key={zone._id || index}
+                  className={`hover:bg-gray-50 ${index < filteredRecords.length - 1 ? "border-b border-gray-100" : ""}`}
                 >
                   <td className="p-3 text-sm text-gray-600 font-medium">
-                    {getSerialNumber(index)}
+                    {index + 1}
                   </td>
                   <td className="p-3 text-sm font-medium text-gray-900 capitalize text-left">
-                    {capitalizeFirstLetter(record.customerName)}
-                  </td>
-                  <td className="p-3 text-sm text-gray-600">
-                    {record.customerCode || "—"}
-                  </td>
-                  <td className="p-3 text-sm text-gray-700 capitalize">
-                    {record.mrName || "—"}
+                    {zone.zoneName || "—"}
                   </td>
                   <td className="p-3">
                     <span className="inline-flex items-center justify-center min-w-[36px] h-8 bg-indigo-50 text-indigo-700 font-bold text-sm rounded-full px-3">
-                      {record.totalPurchases || 0}
+                      {zone.totalCustomers || 0}
                     </span>
-                  </td>
-                  <td className="p-3 text-sm text-gray-600">
-                    {record.firstPurchaseDate
-                      ? formatDateToReadable(record.firstPurchaseDate)
-                      : "N/A"}
-                  </td>
-                  <td className="p-3 text-sm text-gray-600">
-                    {record.lastPurchaseDate
-                      ? formatDateToReadable(record.lastPurchaseDate)
-                      : "N/A"}
                   </td>
                   <td className="p-3">
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        record.isRepeatCustomer
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-600"
-                      }`}
-                    >
-                      {record.isRepeatCustomer ? "Repeat" : "One-Time"}
+                    <span className="inline-flex items-center justify-center min-w-[36px] h-8 bg-green-50 text-green-700 font-bold text-sm rounded-full px-3">
+                      {zone.retainedCustomers || 0}
                     </span>
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-gray-800">
+                    {zone.retentionRate?.toFixed(2) ?? 0}%
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="p-10 text-center text-gray-400">
+                <td colSpan={5} className="p-10 text-center text-gray-400">
                   {period === "custom" && (!customStartDate || !customEndDate)
                     ? "Please select start and end dates"
-                    : "No data found for selected filter"}
+                    : "No zone data found for selected filter"}
                 </td>
               </tr>
             )}
@@ -451,7 +446,7 @@ const AnnualCustomerRepeatRate = () => {
       </div>
 
       {/* Pagination */}
-      {pagination.totalPages > 1 && data.records.length > 0 && (
+      {pagination.totalPages > 1 && filteredRecords.length > 0 && (
         <div className="flex items-center justify-start gap-2 mt-6">
           <button
             onClick={() => handlePageChange(pagination.currentPage - 1)}

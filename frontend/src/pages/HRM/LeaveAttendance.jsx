@@ -142,7 +142,7 @@ const LeaveAttendance = () => {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveDate, setLeaveDate] = useState("");
   const [leaveReason, setLeaveReason] = useState("");
-  const [leaveType, setLeaveType] = useState("unpaid"); // Added leaveType state
+  const [leaveType, setLeaveType] = useState("unpaid");
   const [leaveLoading, setLeaveLoading] = useState(false);
 
   // State for Extra Hours Conversion
@@ -229,7 +229,9 @@ const LeaveAttendance = () => {
   const fetchMRList = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${backendUrl}/api/stock-transfer-to-mr/mrs-list`);
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfer-to-mr/mrs-list`,
+      );
       setMrList(response.data || []);
     } catch (err) {
       setError(err.message || "Failed to fetch MR list");
@@ -246,7 +248,9 @@ const LeaveAttendance = () => {
 
   const fetchAttendanceRecords = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/hrm/leaves/attendance`);
+      const response = await axios.get(
+        `${backendUrl}/api/hrm/leaves/attendance`,
+      );
       const records = response.data || [];
       setAttendanceRecords(records);
 
@@ -350,14 +354,14 @@ const LeaveAttendance = () => {
     });
   };
 
-  // Fetch extra hours data
+  // ✅ FIXED: Fetch extra hours data with functional update to preserve toggle
   const fetchExtraHoursData = async (mrId) => {
     try {
       setExtraHoursData((prev) => ({ ...prev, loading: true }));
 
       const today = new Date();
       const response = await axios.get(
-        `${backendUrl}/api/attendance/extra-hours/${mrId}`,
+        `${backendUrl}/api/hrm/leaves/attendance/extra-hours/${mrId}`,
         {
           params: {
             year: today.getFullYear(),
@@ -369,17 +373,13 @@ const LeaveAttendance = () => {
       if (response.data.success) {
         const data = response.data.data;
 
-        // Get total and monthly minutes from the response
         const totalMinutes = data.totalExtraMinutes || 0;
         const monthlyMinutes = data.monthlyExtraMinutes || 0;
 
-        // Calculate for total minutes
         const totalCalc = calculateRemainingTime(totalMinutes);
-
-        // Calculate for monthly minutes
         const monthlyCalc = calculateRemainingTime(monthlyMinutes);
 
-        setExtraHoursData({
+        setExtraHoursData((prev) => ({
           totalExtraHours: totalCalc.totalHours,
           totalExtraMinutes: totalMinutes,
           leaveDaysAvailable: totalCalc.days,
@@ -388,8 +388,8 @@ const LeaveAttendance = () => {
           monthlyLeaveDaysAvailable: monthlyCalc.days,
           monthlyRemainingMinutes: monthlyCalc.minutes + monthlyCalc.hours * 60,
           loading: false,
-          useMonthlyOnly: extraHoursData.useMonthlyOnly,
-        });
+          useMonthlyOnly: prev.useMonthlyOnly, // ✅ preserve the current toggle
+        }));
       } else {
         throw new Error(response.data.message);
       }
@@ -449,7 +449,7 @@ const LeaveAttendance = () => {
     return day === 0;
   };
 
-  // Check if date is holiday - FIXED: Now handles both date formats
+  // Check if date is holiday
   const isHoliday = (date) => {
     if (!Array.isArray(holidays) || holidays.length === 0) {
       return false;
@@ -461,7 +461,6 @@ const LeaveAttendance = () => {
     return holidays.some((holiday) => {
       if (!holiday) return false;
 
-      // Get the holiday date from either 'date' or 'startDate' field
       const holidayDateObj = holiday.date
         ? new Date(holiday.date)
         : holiday.startDate
@@ -477,7 +476,7 @@ const LeaveAttendance = () => {
     });
   };
 
-  // Get holiday name for a date - FIXED: Now handles both date formats
+  // Get holiday name for a date
   const getHolidayName = (date) => {
     if (!Array.isArray(holidays) || holidays.length === 0) {
       return null;
@@ -489,7 +488,6 @@ const LeaveAttendance = () => {
     const holiday = holidays.find((holiday) => {
       if (!holiday) return false;
 
-      // Get the holiday date from either 'date' or 'startDate' field
       const holidayDateObj = holiday.date
         ? new Date(holiday.date)
         : holiday.startDate
@@ -526,22 +524,18 @@ const LeaveAttendance = () => {
   const getAttendanceForDate = (date, mrId) => {
     if (!mrId || !date) return null;
 
-    // Create date object for comparison (ignore time)
     const checkDate = new Date(date);
     checkDate.setHours(0, 0, 0, 0);
 
-    // Handle both object and string userId
     const records = attendanceRecords.filter((record) => {
       const recordUserId = record.userId?._id || record.userId;
       if (recordUserId !== mrId) return false;
 
       if (!record.loginTime) return false;
 
-      // Create date from record's loginTime (which is in UTC)
       const recordDate = new Date(record.loginTime);
       recordDate.setHours(0, 0, 0, 0);
 
-      // Compare dates (ignoring time)
       return recordDate.getTime() === checkDate.getTime();
     });
 
@@ -554,38 +548,35 @@ const LeaveAttendance = () => {
 
     const leaves = mrLeaves[mrId] || [];
 
-    // Create date object for comparison (ignore time)
     const checkDate = new Date(date);
     checkDate.setHours(0, 0, 0, 0);
 
-    // Check if there's a leave in the Leave collection
     for (let leave of leaves) {
       if (!leave.leaveDate || leave.status !== "approved") continue;
 
-      // Create date from leave's leaveDate
       const leaveDate = new Date(leave.leaveDate);
       leaveDate.setHours(0, 0, 0, 0);
 
-      // Compare dates (ignoring time)
       if (leaveDate.getTime() === checkDate.getTime()) {
-        // Return the actual leaveType from the leave record
-        return { 
-          isLeave: true, 
+        return {
+          isLeave: true,
           type: leave.leaveType || "unpaid",
           leaveDate: leave.leaveDate,
-          reason: leave.reason
+          reason: leave.reason,
         };
       }
     }
 
-    // Check attendance records for converted leaves (isLeaveDay = true)
     const attendance = getAttendanceForDate(date, mrId);
     if (attendance && attendance.isLeaveDay) {
-      // Check if there's a corresponding swapleave in the leaves collection
-      const swapLeave = leaves.find(leave => {
-        if (!leave.leaveDate || leave.status !== "approved" || leave.leaveType !== "swapleave") 
+      const swapLeave = leaves.find((leave) => {
+        if (
+          !leave.leaveDate ||
+          leave.status !== "approved" ||
+          leave.leaveType !== "swapleave"
+        )
           return false;
-        
+
         const leaveDate = new Date(leave.leaveDate);
         leaveDate.setHours(0, 0, 0, 0);
         return leaveDate.getTime() === checkDate.getTime();
@@ -594,8 +585,7 @@ const LeaveAttendance = () => {
       if (swapLeave) {
         return { isLeave: true, type: "swapleave", fromAttendance: true };
       }
-      
-      // If it's a leave day from attendance but no swapleave record, it's a paid leave
+
       return { isLeave: true, type: "paid", fromAttendance: true };
     }
 
@@ -604,22 +594,18 @@ const LeaveAttendance = () => {
 
   // Get leave counts with proper user ID matching - ONLY count unpaid leaves
   const getLeaveCounts = (mrId, joinDate) => {
-    // Get leaves for this MR - mrId should match the userId in leaves data
     const leaves = mrLeaves[mrId] || [];
 
-    // Filter only approved UNPAID leaves (not swapleave or paid)
     const approvedUnpaidLeaves = leaves.filter(
-      (leave) => leave.status === "approved" && leave.leaveType === "unpaid"
+      (leave) => leave.status === "approved" && leave.leaveType === "unpaid",
     );
 
-    // Also get swapleave leaves separately for display
     const swapLeaves = leaves.filter(
-      (leave) => leave.status === "approved" && leave.leaveType === "swapleave"
+      (leave) => leave.status === "approved" && leave.leaveType === "swapleave",
     );
 
-    // Get paid leaves (from attendance conversion but not recorded in leaves collection)
     const paidLeaves = leaves.filter(
-      (leave) => leave.status === "approved" && leave.leaveType === "paid"
+      (leave) => leave.status === "approved" && leave.leaveType === "paid",
     );
 
     const currentDate = new Date();
@@ -630,73 +616,63 @@ const LeaveAttendance = () => {
     const yearStart = new Date(currentYear, 0, 1);
     const yearEnd = new Date(currentYear, 11, 31);
 
-    // Filter unpaid leaves to include only past and current dates
     const validUnpaidLeaves = approvedUnpaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       date.setHours(0, 0, 0, 0);
       return date <= currentDate;
     });
 
-    // Filter swap leaves
     const validSwapLeaves = swapLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       date.setHours(0, 0, 0, 0);
       return date <= currentDate;
     });
 
-    // Filter paid leaves
     const validPaidLeaves = paidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       date.setHours(0, 0, 0, 0);
       return date <= currentDate;
     });
 
-    // Monthly unpaid leaves count
     const monthlyUnpaidLeaves = validUnpaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= currentMonthStart && date <= currentMonthEnd;
     }).length;
 
-    // Monthly swap leaves count
     const monthlySwapLeaves = validSwapLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= currentMonthStart && date <= currentMonthEnd;
     }).length;
 
-    // Monthly paid leaves count
     const monthlyPaidLeaves = validPaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= currentMonthStart && date <= currentMonthEnd;
     }).length;
 
-    // Annual unpaid leaves count
     const annualUnpaidLeaves = validUnpaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= yearStart && date <= yearEnd;
     }).length;
 
-    // Annual swap leaves count
     const annualSwapLeaves = validSwapLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= yearStart && date <= yearEnd;
     }).length;
 
-    // Annual paid leaves count
     const annualPaidLeaves = validPaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= yearStart && date <= yearEnd;
     }).length;
 
-    // Calculate paid leaves based on months of service
     const paidLeavesEntitlement = calculatePaidLeaves(joinDate);
 
     return {
       monthly: monthlyUnpaidLeaves,
       annual: annualUnpaidLeaves,
       paid: parseFloat(paidLeavesEntitlement),
-      total: validUnpaidLeaves.length, // Total approved UNPAID leaves only
-      swapLeaves: validSwapLeaves.length, // Total swap leaves
-      paidLeaves: validPaidLeaves.length, // Total paid leaves
+      total: validUnpaidLeaves.length,
+      swapLeaves: validSwapLeaves.length,
+      paidLeaves: validPaidLeaves.length,
       monthlySwapLeaves: monthlySwapLeaves,
       annualSwapLeaves: annualSwapLeaves,
       monthlyPaidLeaves: monthlyPaidLeaves,
@@ -707,7 +683,6 @@ const LeaveAttendance = () => {
   // Calculate remaining paid leaves correctly - only deduct unpaid leaves
   const getRemainingPaidLeaves = (mrId, joinDate) => {
     const leaveCounts = getLeaveCounts(mrId, joinDate);
-    // Only deduct unpaid leaves from the paid leave entitlement
     const remaining = leaveCounts.paid - leaveCounts.total;
     return Math.max(0, remaining).toFixed(2);
   };
@@ -779,9 +754,8 @@ const LeaveAttendance = () => {
     }
   };
 
-  // Calculate attendance statistics - FIXED: Proper date comparison
+  // Calculate attendance statistics
   const getAttendanceStats = (mrId) => {
-    // Handle both object and string userId
     const mrRecords = attendanceRecords.filter((record) => {
       const recordUserId = record.userId?._id || record.userId;
       return recordUserId === mrId;
@@ -792,10 +766,8 @@ const LeaveAttendance = () => {
     const yearStart = new Date(currentYear, 0, 1);
     const yearEnd = new Date(currentYear, 11, 31);
 
-    // Monthly attendance count
     const monthlyAttendance = mrRecords.filter((record) => {
       const recordDate = new Date(record.loginTime);
-      // Compare dates (ignoring time)
       const recordDateOnly = new Date(
         recordDate.getFullYear(),
         recordDate.getMonth(),
@@ -815,10 +787,8 @@ const LeaveAttendance = () => {
       return recordDateOnly >= monthStartOnly && recordDateOnly <= monthEndOnly;
     }).length;
 
-    // Annual attendance count
     const annualAttendance = mrRecords.filter((record) => {
       const recordDate = new Date(record.loginTime);
-      // Compare dates (ignoring time)
       const recordDateOnly = new Date(
         recordDate.getFullYear(),
         recordDate.getMonth(),
@@ -838,7 +808,6 @@ const LeaveAttendance = () => {
       return recordDateOnly >= yearStartOnly && recordDateOnly <= yearEndOnly;
     }).length;
 
-    // Calculate attendance percentage
     const totalWorkingDays = getWorkingDaysInMonth(currentYear, currentMonth);
     const attendancePercentage =
       totalWorkingDays > 0
@@ -848,7 +817,6 @@ const LeaveAttendance = () => {
     const today = new Date();
     const todayRecord = mrRecords.find((record) => {
       const recordDate = new Date(record.loginTime);
-      // Compare dates (ignoring time)
       const recordDateOnly = new Date(
         recordDate.getFullYear(),
         recordDate.getMonth(),
@@ -905,17 +873,14 @@ const LeaveAttendance = () => {
       return;
     }
 
-    // Check if date is in the future
     if (isFutureDate(startDate)) {
       showToast("error", "Cannot record attendance for future dates");
       return;
     }
 
-    // Create date strings with timezone offset
     const loginDateTime = `${startDate}T${startTime}`;
     const logoutDateTime = `${startDate}T${endTime}`;
 
-    // Get timezone offset
     const timezoneOffset = new Date().getTimezoneOffset();
     const offsetHours = Math.floor(Math.abs(timezoneOffset) / 60);
     const offsetMinutes = Math.abs(timezoneOffset) % 60;
@@ -927,7 +892,6 @@ const LeaveAttendance = () => {
       return;
     }
 
-    // Check if holiday
     const holidayName = getHolidayName(startDate);
     if (isHoliday(startDate)) {
       showToast("error", `Cannot record attendance on holiday: ${holidayName}`);
@@ -944,7 +908,6 @@ const LeaveAttendance = () => {
     try {
       setAttendanceLoading(true);
 
-      // Send attendance data with timezone
       const attendanceData = {
         userId: selectedAttendanceMr,
         loginTime: `${loginDateTime}${timezoneString}`,
@@ -978,14 +941,13 @@ const LeaveAttendance = () => {
     }
   };
 
-  // Handle leave application - UPDATED to include leaveType
+  // Handle leave application
   const handleApplyLeave = async () => {
     if (!selectedAttendanceMr || !leaveDate || !leaveReason || !leaveType) {
       showToast("error", "Please fill all required fields");
       return;
     }
 
-    // Check if date is in the future
     if (isFutureDate(leaveDate)) {
       showToast("error", "Cannot apply for leave for future dates");
       return;
@@ -996,7 +958,6 @@ const LeaveAttendance = () => {
       return;
     }
 
-    // Check if holiday
     const holidayName = getHolidayName(leaveDate);
     if (isHoliday(leaveDate)) {
       showToast("error", `Cannot apply for leave on holiday: ${holidayName}`);
@@ -1016,12 +977,17 @@ const LeaveAttendance = () => {
       return;
     }
 
-    // Check if user has enough paid leaves for paid leave type
     if (leaveType === "paid") {
-      const mr = mrList.find(mr => mr._id === selectedAttendanceMr);
-      const remainingPaid = getRemainingPaidLeaves(selectedAttendanceMr, mr?.date);
+      const mr = mrList.find((mr) => mr._id === selectedAttendanceMr);
+      const remainingPaid = getRemainingPaidLeaves(
+        selectedAttendanceMr,
+        mr?.date,
+      );
       if (parseFloat(remainingPaid) < 1) {
-        showToast("error", "Insufficient paid leave balance. Please apply for unpaid leave.");
+        showToast(
+          "error",
+          "Insufficient paid leave balance. Please apply for unpaid leave.",
+        );
         return;
       }
     }
@@ -1033,19 +999,25 @@ const LeaveAttendance = () => {
         userId: selectedAttendanceMr,
         leaveDate: new Date(leaveDate).toISOString(),
         reason: leaveReason,
-        leaveType: leaveType, // Use the selected leaveType
+        leaveType: leaveType,
         status: "approved",
       };
 
-      const response = await axios.post(`${backendUrl}/api/hrm/leaves`, leaveData);
+      const response = await axios.post(
+        `${backendUrl}/api/hrm/leaves`,
+        leaveData,
+      );
 
       if (response.data.success) {
-        showToast("success", `${leaveType === 'paid' ? 'Paid' : 'Unpaid'} leave applied successfully!`);
+        showToast(
+          "success",
+          `${leaveType === "paid" ? "Paid" : "Unpaid"} leave applied successfully!`,
+        );
         setShowLeaveModal(false);
         setSelectedAttendanceMr(null);
         setLeaveDate("");
         setLeaveReason("");
-        setLeaveType("unpaid"); // Reset to default
+        setLeaveType("unpaid");
 
         fetchLeaves();
       }
@@ -1060,20 +1032,19 @@ const LeaveAttendance = () => {
     }
   };
 
+  // ✅ FIXED: Close modal after successful conversion
   const handleConvertExtraHoursToLeave = async () => {
     if (!selectedAttendanceMr || !extraHoursDate) {
       showToast("error", "Please select MR and date for leave");
       return;
     }
 
-    // Validate leave days
+    const displayValues = getDisplayValues();
+
     if (extraHoursDays < 1) {
       showToast("error", "Please select at least 1 leave day");
       return;
     }
-
-    // Get display values
-    const displayValues = getDisplayValues();
 
     if (displayValues.showLeaveDaysAvailable < extraHoursDays) {
       const source = extraHoursData.useMonthlyOnly ? "monthly" : "total";
@@ -1084,43 +1055,34 @@ const LeaveAttendance = () => {
       return;
     }
 
-    // Check if date is valid (not Sunday, not holiday)
     if (isSunday(extraHoursDate)) {
       showToast("error", "Cannot take leave on Sunday");
       return;
     }
 
-    // Check if holiday
     const holidayName = getHolidayName(extraHoursDate);
     if (isHoliday(extraHoursDate)) {
       showToast("error", `Cannot take leave on holiday: ${holidayName}`);
       return;
     }
 
-    // Check if there's already an attendance record for this date
     const existingAttendance = attendanceRecords.find((record) => {
       const recordUserId = record.userId?._id || record.userId;
       if (recordUserId !== selectedAttendanceMr) return false;
-
       if (!record.loginTime) return false;
 
-      // Create dates for comparison (ignoring time)
       const recordDate = new Date(record.loginTime);
       recordDate.setHours(0, 0, 0, 0);
-
       const checkDate = new Date(extraHoursDate);
       checkDate.setHours(0, 0, 0, 0);
-
       return recordDate.getTime() === checkDate.getTime();
     });
 
-    // If there's an existing attendance record that is NOT a leave day, we can't convert
     if (existingAttendance && !existingAttendance.isLeaveDay) {
       showToast("error", "Regular attendance already exists for this date");
       return;
     }
 
-    // If there's already a paid leave attendance, we can't convert again
     if (existingAttendance && existingAttendance.isLeaveDay) {
       showToast("error", "This date is already marked as a leave day");
       return;
@@ -1134,7 +1096,6 @@ const LeaveAttendance = () => {
         date: extraHoursDate,
         leaveDays: extraHoursDays,
         useMonthlyOnly: extraHoursData.useMonthlyOnly,
-        convertExtraHours: true,
       };
 
       const response = await axios.post(
@@ -1148,13 +1109,15 @@ const LeaveAttendance = () => {
           `${extraHoursDays} leave day${extraHoursDays > 1 ? "s" : ""} successfully converted from extra hours!`,
         );
 
-        await fetchAttendanceRecords();
-        await fetchLeaves();
-        if (selectedAttendanceMr) {
-          await fetchExtraHoursData(selectedAttendanceMr);
-        }
+        // Refresh all data
+        await Promise.all([
+          fetchAttendanceRecords(),
+          fetchLeaves(),
+          fetchExtraHoursData(selectedAttendanceMr),
+        ]);
 
-        // Reset form
+        // ✅ Close the modal so fresh data is shown when reopened
+        setShowExtraHoursModal(false);
         setExtraHoursDate("");
         setExtraHoursDays(1);
       } else {
@@ -1174,14 +1137,13 @@ const LeaveAttendance = () => {
 
   // Calculate extra hours for a specific MR
   const getExtraHoursForMR = (mrId) => {
-    // Filter records for this MR
     const mrRecords = attendanceRecords.filter((record) => {
       const recordUserId = record.userId?._id || record.userId;
-      return recordUserId === mrId && record.isLeaveDay !== true; // Exclude leave days
+      return recordUserId === mrId && record.isLeaveDay !== true;
     });
 
     let totalExtraMinutes = 0;
-    mrRecords.forEach((record, index) => {
+    mrRecords.forEach((record) => {
       if (record.extraHoursInMinutes && record.extraHoursInMinutes > 0) {
         totalExtraMinutes += record.extraHoursInMinutes;
       }
@@ -1203,7 +1165,7 @@ const LeaveAttendance = () => {
     setEndTime("17:00");
   };
 
-  // Open leave modal - UPDATED to reset leaveType
+  // Open leave modal
   const handleOpenLeaveModal = () => {
     setShowLeaveModal(true);
     setSelectedAttendanceMr(null);
@@ -1212,7 +1174,7 @@ const LeaveAttendance = () => {
     const todayString = today.toISOString().split("T")[0];
     setLeaveDate(todayString);
     setLeaveReason("");
-    setLeaveType("unpaid"); // Reset to default
+    setLeaveType("unpaid");
   };
 
   // Open extra hours modal
@@ -1275,7 +1237,7 @@ const LeaveAttendance = () => {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                max={getTodayDate()} // Prevent future date selection
+                max={getTodayDate()}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -1363,7 +1325,7 @@ const LeaveAttendance = () => {
                   !startDate ||
                   !startTime ||
                   !endTime ||
-                  isFutureDate(startDate) || // Disable if future date
+                  isFutureDate(startDate) ||
                   isSunday(startDate) ||
                   isHoliday(startDate) ||
                   isLeave(new Date(startDate), selectedAttendanceMr).isLeave
@@ -1399,7 +1361,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Leave Modal - UPDATED with Leave Type dropdown */}
+      {/* Leave Modal */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1427,12 +1389,11 @@ const LeaveAttendance = () => {
                 type="date"
                 value={leaveDate}
                 onChange={(e) => setLeaveDate(e.target.value)}
-                max={getTodayDate()} // Prevent future date selection
+                max={getTodayDate()}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
 
-            {/* Leave Type Dropdown - NEW */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Leave Type
@@ -1447,11 +1408,14 @@ const LeaveAttendance = () => {
               </select>
               {selectedAttendanceMr && leaveType === "paid" && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Available paid leaves: {
-                    mrList.find(mr => mr._id === selectedAttendanceMr) ? 
-                    getRemainingPaidLeaves(selectedAttendanceMr, mrList.find(mr => mr._id === selectedAttendanceMr).date) 
-                    : "0.00"
-                  }
+                  Available paid leaves:{" "}
+                  {mrList.find((mr) => mr._id === selectedAttendanceMr)
+                    ? getRemainingPaidLeaves(
+                        selectedAttendanceMr,
+                        mrList.find((mr) => mr._id === selectedAttendanceMr)
+                          .date,
+                      )
+                    : "0.00"}
                 </p>
               )}
             </div>
@@ -1529,7 +1493,7 @@ const LeaveAttendance = () => {
                   !leaveDate ||
                   !leaveReason ||
                   !leaveType ||
-                  isFutureDate(leaveDate) || // Disable if future date
+                  isFutureDate(leaveDate) ||
                   isSunday(leaveDate) ||
                   isHoliday(leaveDate) ||
                   getAttendanceForDate(
@@ -1913,8 +1877,14 @@ const LeaveAttendance = () => {
                   {selectedMr?.medicalRepName} - Calendar View
                   {selectedMr && (
                     <span className="ml-2 text-lg font-normal">
-                      (Unpaid Leave Taken: {getLeaveCounts(selectedMr._id, selectedMr.date).total}, 
-                      Swap Leaves: {getLeaveCounts(selectedMr._id, selectedMr.date).swapLeaves})
+                      (Unpaid Leave Taken:{" "}
+                      {getLeaveCounts(selectedMr._id, selectedMr.date).total},
+                      Swap Leaves:{" "}
+                      {
+                        getLeaveCounts(selectedMr._id, selectedMr.date)
+                          .swapLeaves
+                      }
+                      )
                     </span>
                   )}
                 </h2>
@@ -1978,25 +1948,22 @@ const LeaveAttendance = () => {
                   const isToday =
                     date.toDateString() === new Date().toDateString();
 
-                  let cellStyle = "h-12 flex items-center justify-center rounded-lg border-2 ";
+                  let cellStyle =
+                    "h-12 flex items-center justify-center rounded-lg border-2 ";
                   let titleText = "";
 
                   if (attendance && !attendance.isLeaveDay) {
-                    // Regular attendance (not leave) - green
                     cellStyle += "bg-green-500 text-white border-green-600 ";
                     titleText = "Present";
                   } else if (isLeaveDay) {
-                    // It's a leave day
                     if (leaveType === "swapleave") {
-                      // Leave swap (converted from extra hours) - purple
-                      cellStyle += "bg-purple-500 text-white border-purple-600 ";
+                      cellStyle +=
+                        "bg-purple-500 text-white border-purple-600 ";
                       titleText = "Leave Swap (Converted from extra hours)";
                     } else if (leaveType === "paid") {
-                      // Paid leave (converted from extra hours via attendance) - blue
                       cellStyle += "bg-blue-500 text-white border-blue-600 ";
                       titleText = "Paid Leave (From extra hours)";
                     } else {
-                      // Unpaid leave - red
                       cellStyle += "bg-red-500 text-white border-red-600 ";
                       titleText = "Unpaid Leave";
                     }
@@ -2068,8 +2035,14 @@ const LeaveAttendance = () => {
                   {selectedMr?.medicalRepName} - Annual Calendar
                   {selectedMr && (
                     <span className="ml-2 text-lg font-normal">
-                      (Unpaid Leave Taken: {getLeaveCounts(selectedMr._id, selectedMr.date).total}, 
-                      Swap Leaves: {getLeaveCounts(selectedMr._id, selectedMr.date).swapLeaves})
+                      (Unpaid Leave Taken:{" "}
+                      {getLeaveCounts(selectedMr._id, selectedMr.date).total},
+                      Swap Leaves:{" "}
+                      {
+                        getLeaveCounts(selectedMr._id, selectedMr.date)
+                          .swapLeaves
+                      }
+                      )
                     </span>
                   )}
                 </h2>
@@ -2245,10 +2218,9 @@ const LeaveAttendance = () => {
                 currentMRs.map((mr, index) => {
                   const leaveCounts = getLeaveCounts(mr._id, mr.date);
                   const remainingPaid = getRemainingPaidLeaves(mr._id, mr.date);
-                  const leaveTaken = leaveCounts.total; // This now only counts unpaid leaves
+                  const leaveTaken = leaveCounts.total;
                   const attendanceStats = getAttendanceStats(mr._id);
 
-                  // Calculate extra hours
                   const totalExtraHours = getExtraHoursForMR(mr._id);
                   const extraHoursCalc = calculateRemainingTime(
                     totalExtraHours * 60,
@@ -2312,7 +2284,6 @@ const LeaveAttendance = () => {
                       <td className="p-3">
                         {totalExtraHours > 0 ? (
                           <div className="flex flex-col items-center gap-1">
-                            {/* Days in blue badge */}
                             {extraHoursCalc.days > 0 && (
                               <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
                                 <Clock size={10} />
@@ -2320,8 +2291,6 @@ const LeaveAttendance = () => {
                                 {extraHoursCalc.days !== 1 ? "s" : ""}
                               </span>
                             )}
-
-                            {/* Remaining hours in yellow badge */}
                             {(extraHoursCalc.hours > 0 ||
                               extraHoursCalc.minutes > 0) && (
                               <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">
@@ -2330,8 +2299,6 @@ const LeaveAttendance = () => {
                                 m
                               </span>
                             )}
-
-                            {/* Total hours in small text */}
                             <span className="text-xs text-gray-500">
                               Total: {totalExtraHours.toFixed(2)} hours
                             </span>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
+import { fetchCustomerList } from "../../pages/ProductManager/common/fetchDropdown"; // adjust path as needed
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -9,6 +10,9 @@ const initialFormState = {
   date: "",
   mrName: "",
   mrId: "",
+  customerId: "",
+  customerName: "",
+  customerCode: "",
   productName: "",
   productId: "",
   totalQty: "",
@@ -19,9 +23,14 @@ const AddDailySampleReport = () => {
   const navigate = useNavigate();
   const [form, setForm] = useState(initialFormState);
   const [errors, setErrors] = useState({});
+
   const [mrList, setMrList] = useState([]);
-  const [productsList, setProductsList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(true);
+
+  const [customerList, setCustomerList] = useState([]);
+  const [customerListLoading, setCustomerListLoading] = useState(true);
+
+  const [productsList, setProductsList] = useState([]);
   const [productsListLoading, setProductsListLoading] = useState(true);
 
   // Fetch MR List
@@ -31,9 +40,7 @@ const AddDailySampleReport = () => {
         setMrListLoading(true);
         const response = await fetch(`${backendUrl}/api/staff`);
         const data = await response.json();
-        if (data) {
-          setMrList(data);
-        }
+        if (data) setMrList(data);
       } catch (error) {
         console.error("Error fetching MR list:", error);
         showToast("error", "Failed to load Medical Representatives");
@@ -44,6 +51,27 @@ const AddDailySampleReport = () => {
     fetchMRList();
   }, []);
 
+  // Fetch Customer List
+  useEffect(() => {
+    const loadCustomers = async () => {
+      try {
+        setCustomerListLoading(true);
+        const result = await fetchCustomerList();
+        if (result.success) {
+          setCustomerList(result.data || []);
+        } else {
+          showToast("error", result.error || "Failed to load Customers");
+        }
+      } catch (error) {
+        console.error("Error fetching customers:", error);
+        showToast("error", "Failed to load Customers");
+      } finally {
+        setCustomerListLoading(false);
+      }
+    };
+    loadCustomers();
+  }, []);
+
   // Fetch Products List
   useEffect(() => {
     const fetchProductsList = async () => {
@@ -51,9 +79,7 @@ const AddDailySampleReport = () => {
         setProductsListLoading(true);
         const response = await fetch(`${backendUrl}/api/products`);
         const data = await response.json();
-        if (data) {
-          setProductsList(data || []);
-        }
+        if (data) setProductsList(data || []);
       } catch (error) {
         console.error("Error fetching products:", error);
         showToast("error", "Failed to load Products");
@@ -64,14 +90,20 @@ const AddDailySampleReport = () => {
     fetchProductsList();
   }, []);
 
+  // Validation
   const validate = () => {
     const newErrors = {};
 
     if (!form.date) newErrors.date = "Date is required";
     if (!form.mrName) newErrors.mrName = "MR Name is required";
+    if (!form.customerId) newErrors.customerId = "Customer is required";
     if (!form.productName) newErrors.productName = "Product Name is required";
 
-    if (form.totalQty && form.totalQty.trim() !== "" && (isNaN(Number(form.totalQty)) || Number(form.totalQty) < 0)) {
+    if (
+      form.totalQty &&
+      form.totalQty.trim() !== "" &&
+      (isNaN(Number(form.totalQty)) || Number(form.totalQty) < 0)
+    ) {
       newErrors.totalQty = "Total Quantity must be 0 or more";
     }
 
@@ -79,50 +111,63 @@ const AddDailySampleReport = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Numeric input handler
   const handleNumericChange = (e) => {
     const { name, value } = e.target;
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
-      setForm((prevForm) => ({
-        ...prevForm,
-        [name]: value,
-      }));
+      setForm((prevForm) => ({ ...prevForm, [name]: value }));
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
   };
 
+  // Generic change handler
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((prevForm) => ({
-      ...prevForm,
-      [name]: value,
-    }));
+    setForm((prevForm) => ({ ...prevForm, [name]: value }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
+  // MR change
   const handleMRChange = (mrId) => {
     const selectedMR = mrList.find((mr) => mr._id === mrId);
     if (selectedMR) {
       setForm((prevForm) => ({
         ...prevForm,
-        mrId: mrId,
+        mrId,
         mrName: selectedMR.medicalRepName,
       }));
       setErrors((prev) => ({ ...prev, mrName: "" }));
     }
   };
 
+  // Customer change (like in AddSale)
+  const handleCustomerChange = (customerId) => {
+    const selectedCustomer = customerList.find((c) => c._id === customerId);
+    if (selectedCustomer) {
+      setForm((prevForm) => ({
+        ...prevForm,
+        customerId,
+        customerCode: selectedCustomer.customerCode,
+        customerName: selectedCustomer.name,
+      }));
+      setErrors((prev) => ({ ...prev, customerId: "" }));
+    }
+  };
+
+  // Product change
   const handleProductChange = (productId) => {
-    const selectedProduct = productsList.find((product) => product._id === productId);
+    const selectedProduct = productsList.find((p) => p._id === productId);
     if (selectedProduct) {
       setForm((prevForm) => ({
         ...prevForm,
-        productId: productId,
+        productId,
         productName: selectedProduct.productName,
       }));
       setErrors((prev) => ({ ...prev, productName: "" }));
     }
   };
 
+  // Submit
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -132,8 +177,14 @@ const AddDailySampleReport = () => {
         date: form.date,
         mrName: form.mrName,
         mrId: form.mrId,
+        customerId: form.customerId,
+        customerName: form.customerName,
+        customerCode: form.customerCode,
         productName: form.productName,
-        totalQty: form.totalQty && form.totalQty.trim() !== "" ? Number(form.totalQty) : 0,
+        totalQty:
+          form.totalQty && form.totalQty.trim() !== ""
+            ? Number(form.totalQty)
+            : 0,
         remark: form.remark,
       };
 
@@ -152,7 +203,8 @@ const AddDailySampleReport = () => {
 
       showToast(
         "success",
-        data.message || `Daily sample report for <b>${form.productName} - ${form.mrName}</b> added successfully`
+        data.message ||
+          `Daily sample report for <b>${form.productName} - ${form.mrName}</b> added successfully`
       );
       navigate("/reportlayout/dailysample");
     } catch (error) {
@@ -160,6 +212,7 @@ const AddDailySampleReport = () => {
     }
   };
 
+  // Dropdown options
   const mrOptions = useMemo(() => {
     if (mrList.length === 0 && !mrListLoading) {
       return [{ value: "", label: "No Medical Representatives Available", disabled: true }];
@@ -170,25 +223,31 @@ const AddDailySampleReport = () => {
     ];
   }, [mrList, mrListLoading]);
 
+  const customerOptions = useMemo(() => {
+    if (customerList.length === 0 && !customerListLoading) {
+      return [{ value: "", label: "No Customers Available", disabled: true }];
+    }
+    return [
+      { value: "", label: "Select Customer" },
+      ...customerList.map((c) => ({
+        value: c._id,
+        label: `${c.customerCode} - ${c.name}`,
+      })),
+    ];
+  }, [customerList, customerListLoading]);
+
   const productOptions = useMemo(() => {
     if (productsList.length === 0 && !productsListLoading) {
       return [{ value: "", label: "No Products Available", disabled: true }];
     }
     return [
       { value: "", label: "Select Product" },
-      ...productsList.map((product) => ({ value: product._id, label: product.productName })),
+      ...productsList.map((p) => ({ value: p._id, label: p.productName })),
     ];
   }, [productsList, productsListLoading]);
 
-  const renderInput = (
-    label,
-    name,
-    type = "text",
-    placeholder = "",
-    required = false,
-    disabled = false,
-    isNumeric = false
-  ) => (
+  // Reusable input renderer (optional)
+  const renderInput = (label, name, type = "text", placeholder = "", required = false, disabled = false, isNumeric = false) => (
     <div>
       <label className="text-sm font-medium text-gray-700">
         {label}
@@ -244,6 +303,20 @@ const AddDailySampleReport = () => {
               loading={mrListLoading}
               error={errors.mrName}
               label="MR Name"
+            />
+          </div>
+
+          {/* Customer Dropdown (like AddSale) */}
+          <div>
+            <SearchableDropdown
+              value={form.customerId}
+              onChange={handleCustomerChange}
+              options={customerOptions}
+              placeholder="Select Customer"
+              required={true}
+              loading={customerListLoading}
+              error={errors.customerId}
+              label="Customer"
             />
           </div>
 

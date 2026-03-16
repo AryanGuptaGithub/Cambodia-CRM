@@ -69,7 +69,7 @@ const usePayrollForm = (initialForm = {}) => {
     paymentDate: "",
     remarks: "",
     payrollCode: "",
-    source: "", // Added source field
+    source: "",
     ...initialForm,
   });
 
@@ -79,7 +79,6 @@ const usePayrollForm = (initialForm = {}) => {
   const [isMrListEmpty, setIsMrListEmpty] = useState(false);
   const [showAllowanceBreakdown, setShowAllowanceBreakdown] = useState(false);
 
-  // Fetch MR List
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
@@ -107,7 +106,6 @@ const usePayrollForm = (initialForm = {}) => {
     }
   }, []);
 
-  // Handle numeric input
   const handleNumeric = useCallback((e) => {
     const { name, value } = e.target;
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
@@ -116,32 +114,22 @@ const usePayrollForm = (initialForm = {}) => {
     }
   }, []);
 
-  // Allowance handling
   const allowanceOptions = useMemo(
-    () =>
-      allowanceTypes.map((t) => ({
-        value: t,
-        label: t,
-      })),
-    []
+    () => allowanceTypes.map((t) => ({ value: t, label: t })),
+    [],
   );
 
   const handleAllowanceChange = useCallback((selectedTypes) => {
     setForm((prev) => {
       const currentAllowances = prev.allowances || [];
-
-      // Remove allowances that are no longer selected
       const updatedAllowances = currentAllowances.filter((allowance) =>
-        selectedTypes.includes(allowance.type)
+        selectedTypes.includes(allowance.type),
       );
-
-      // Add new allowances that weren't previously selected
       selectedTypes.forEach((type) => {
         if (!updatedAllowances.some((allowance) => allowance.type === type)) {
           updatedAllowances.push({ type, amount: "" });
         }
       });
-
       return { ...prev, allowances: updatedAllowances };
     });
   }, []);
@@ -150,7 +138,7 @@ const usePayrollForm = (initialForm = {}) => {
     setForm((prev) => ({
       ...prev,
       allowances: prev.allowances.map((allowance) =>
-        allowance.type === type ? { ...allowance, amount } : allowance
+        allowance.type === type ? { ...allowance, amount } : allowance,
       ),
     }));
   }, []);
@@ -159,7 +147,7 @@ const usePayrollForm = (initialForm = {}) => {
     setForm((prev) => ({
       ...prev,
       allowances: prev.allowances.filter(
-        (allowance) => allowance.type !== type
+        (allowance) => allowance.type !== type,
       ),
     }));
   }, []);
@@ -177,10 +165,9 @@ const usePayrollForm = (initialForm = {}) => {
       }));
       setErrors((prev) => ({ ...prev, employeeId: "" }));
     },
-    [mrList]
+    [mrList],
   );
 
-  // Calculate totals
   const totalAllowance = useMemo(() => {
     return (form.allowances || []).reduce((total, allowance) => {
       return total + (parseFloat(allowance.amount) || 0);
@@ -193,12 +180,10 @@ const usePayrollForm = (initialForm = {}) => {
     return (basic + totalAllowance - ded).toFixed(2);
   }, [form.basicSalary, totalAllowance, form.deductions]);
 
-  // Update net salary whenever dependencies change
   useEffect(() => {
     setForm((prev) => ({ ...prev, netSalary }));
   }, [netSalary]);
 
-  // Load data on mount
   useEffect(() => {
     fetchMRList();
   }, [fetchMRList]);
@@ -240,7 +225,7 @@ const MultipleSelectDropdown = ({
   const dropdownRef = useRef(null);
 
   const filteredOptions = options.filter((option) =>
-    option.label.toLowerCase().includes(searchTerm.toLowerCase())
+    option.label.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   const toggleOption = (optionValue) => {
@@ -257,7 +242,6 @@ const MultipleSelectDropdown = ({
     });
   };
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -265,7 +249,6 @@ const MultipleSelectDropdown = ({
         setSearchTerm("");
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
@@ -298,7 +281,6 @@ const MultipleSelectDropdown = ({
 
         {isOpen && !disabled && (
           <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
-            {/* Search input */}
             <div className="p-2 border-b border-gray-200">
               <input
                 type="text"
@@ -309,14 +291,12 @@ const MultipleSelectDropdown = ({
                 onClick={(e) => e.stopPropagation()}
               />
             </div>
-
-            {/* Options list */}
             {loading ? (
               <div className="px-3 py-2 text-gray-500">Loading...</div>
             ) : filteredOptions.length === 0 ? (
               <div className="px-3 py-2 text-gray-500">No options found</div>
             ) : (
-              filteredOptions.map((option, index) => (
+              filteredOptions.map((option) => (
                 <div
                   key={option.value}
                   className={`px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 flex items-center ${
@@ -327,7 +307,7 @@ const MultipleSelectDropdown = ({
                   <input
                     type="checkbox"
                     checked={value.includes(option.value)}
-                    onChange={() => {}} // Handled by parent div click
+                    onChange={() => {}}
                     className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <span
@@ -411,7 +391,6 @@ const AllowanceBreakdownModal = ({
                       type="button"
                       onClick={() => onRemove(allowance.type)}
                       className="text-red-500 hover:text-red-700 p-2 rounded transition-colors"
-                      title="Remove allowance"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -441,7 +420,7 @@ const AllowanceBreakdownModal = ({
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 };
 
@@ -449,8 +428,6 @@ const AllowanceBreakdownModal = ({
 const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-
-  // Get today's date to disable future dates
   const today = new Date();
 
   const handleApply = () => {
@@ -458,12 +435,10 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
       showToast("warning", "Please select both start and end dates");
       return;
     }
-
     if (startDate > endDate) {
       showToast("error", "Start date cannot be after end date");
       return;
     }
-
     onDateRangeSelect({
       start: startDate,
       end: endDate,
@@ -472,7 +447,6 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
     onClose();
   };
 
-  // Reset dates when modal opens
   useEffect(() => {
     if (isOpen) {
       setStartDate(null);
@@ -509,7 +483,7 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
                 selectsStart
                 startDate={startDate}
                 endDate={endDate}
-                maxDate={today} // Disable future dates
+                maxDate={today}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholderText="Select start date"
                 dateFormat="yyyy-MM-dd"
@@ -527,7 +501,7 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
                 startDate={startDate}
                 endDate={endDate}
                 minDate={startDate}
-                maxDate={today} // Disable future dates
+                maxDate={today}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholderText="Select end date"
                 dateFormat="yyyy-MM-dd"
@@ -554,43 +528,28 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 };
 
-// Fixed Date Selection Tabs Component
+// Date Selection Tabs Component
 const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
   const [activeTab, setActiveTab] = useState("previousMonth");
   const [showCustomModal, setShowCustomModal] = useState(false);
 
-  // Get current date info
   const getCurrentDateInfo = () => {
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed (0 = January, 11 = December)
-    const currentDate = now.getDate();
-
-    return { now, currentYear, currentMonth, currentDate };
+    return {
+      now,
+      currentYear: now.getFullYear(),
+      currentMonth: now.getMonth(),
+    };
   };
 
-  // Get previous month range
   const getPreviousMonthRange = () => {
     const { currentYear, currentMonth } = getCurrentDateInfo();
-
-    let prevMonth, prevYear;
-    if (currentMonth === 0) {
-      // If current month is January, previous month is December of previous year
-      prevMonth = 11;
-      prevYear = currentYear - 1;
-    } else {
-      prevMonth = currentMonth - 1;
-      prevYear = currentYear;
-    }
-
-    const start = new Date(prevYear, prevMonth, 1);
-    const end = new Date(prevYear, prevMonth + 1, 0); // Last day of previous month
-
-    // Get month name for label
+    const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
     const monthNames = [
       "January",
       "February",
@@ -605,30 +564,22 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
       "November",
       "December",
     ];
-
     return {
-      start,
-      end,
+      start: new Date(prevYear, prevMonth, 1),
+      end: new Date(prevYear, prevMonth + 1, 0),
       label: monthNames[prevMonth],
     };
   };
 
-  // Get Jan to [current month - 1] range
   const getJanToPreviousMonthRange = () => {
     const { currentYear, currentMonth } = getCurrentDateInfo();
-
-    // If current month is January, then Jan to Previous Month would be empty, so we handle this case
     if (currentMonth === 0) {
-      // If it's January, show previous year Jan to Dec
-      const start = new Date(currentYear - 1, 0, 1);
-      const end = new Date(currentYear - 1, 11, 31);
-      return { start, end, label: `Jan to Dec ${currentYear - 1}` };
+      return {
+        start: new Date(currentYear - 1, 0, 1),
+        end: new Date(currentYear - 1, 11, 31),
+        label: `Jan to Dec ${currentYear - 1}`,
+      };
     }
-
-    const start = new Date(currentYear, 0, 1); // January 1st
-    const end = new Date(currentYear, currentMonth, 0); // Last day of previous month
-
-    // Get month names for label
     const monthNames = [
       "Jan",
       "Feb",
@@ -643,97 +594,121 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
       "Nov",
       "Dec",
     ];
-
-    const endMonthName = monthNames[currentMonth - 1];
-
     return {
-      start,
-      end,
-      label: `Jan to ${endMonthName}`,
+      start: new Date(currentYear, 0, 1),
+      end: new Date(currentYear, currentMonth, 0),
+      label: `Jan to ${monthNames[currentMonth - 1]}`,
     };
   };
 
   const handleTabClick = (tab) => {
     setActiveTab(tab);
-
-    if (tab === "previousMonth") {
-      const range = getPreviousMonthRange();
-      onDateRangeSelect(range);
-    } else if (tab === "janToPrevious") {
-      const range = getJanToPreviousMonthRange();
-      onDateRangeSelect(range);
-    } else if (tab === "custom") {
-      setShowCustomModal(true);
-    }
+    if (tab === "previousMonth") onDateRangeSelect(getPreviousMonthRange());
+    else if (tab === "janToPrevious")
+      onDateRangeSelect(getJanToPreviousMonthRange());
+    else if (tab === "custom") setShowCustomModal(true);
   };
 
-  const handleCustomDateSelect = (dateRange) => {
-    onDateRangeSelect(dateRange);
-    setActiveTab("custom");
+  const tabLabels = {
+    previousMonth: getPreviousMonthRange().label,
+    janToPrevious: getJanToPreviousMonthRange().label,
   };
-
-  // Get tab labels based on current date
-  const getTabLabels = () => {
-    const prevMonthRange = getPreviousMonthRange();
-    const janToPrevRange = getJanToPreviousMonthRange();
-
-    return {
-      previousMonth: prevMonthRange.label,
-      janToPrevious: janToPrevRange.label,
-    };
-  };
-
-  const tabLabels = getTabLabels();
 
   return (
     <>
-      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">
-          Select Date Range
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          Filter by Month Range
         </h3>
-
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-4 overflow-x-auto">
-          <button
-            className={`px-4 py-2 font-medium text-sm whitespace-nowrap ${
-              activeTab === "previousMonth"
-                ? "border-b-2 border-blue-500 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-            onClick={() => handleTabClick("previousMonth")}
-          >
-            {tabLabels.previousMonth}
-          </button>
-          <button
-            className={`px-4 py-2 font-medium text-sm whitespace-nowrap ${
-              activeTab === "janToPrevious"
-                ? "border-b-2 border-blue-500 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-            onClick={() => handleTabClick("janToPrevious")}
-          >
-            {tabLabels.janToPrevious}
-          </button>
-          <button
-            className={`px-4 py-2 font-medium text-sm whitespace-nowrap ${
-              activeTab === "custom"
-                ? "border-b-2 border-blue-500 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-            onClick={() => handleTabClick("custom")}
-          >
-            Custom Calendar
-          </button>
+        <div className="flex border-b border-gray-200 overflow-x-auto">
+          {[
+            ["previousMonth", tabLabels.previousMonth],
+            ["janToPrevious", tabLabels.janToPrevious],
+            ["custom", "Custom Calendar"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              className={`px-4 py-2 font-medium text-sm whitespace-nowrap ${
+                activeTab === key
+                  ? "border-b-2 border-blue-500 text-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+              onClick={() => handleTabClick(key)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Custom Date Range Modal */}
       <CustomDateRangeModal
         isOpen={showCustomModal}
         onClose={() => setShowCustomModal(false)}
-        onDateRangeSelect={handleCustomDateSelect}
+        onDateRangeSelect={(range) => {
+          onDateRangeSelect(range);
+          setActiveTab("custom");
+        }}
       />
     </>
+  );
+};
+
+// ─────────────────────────────────────────────
+// YearFilterButtons — NEW
+// Shows year pill buttons. Always includes the
+// current year (2026) plus every year that exists
+// in the payroll data, sorted newest-first.
+// Clicking a year filters the table to that year only.
+// ─────────────────────────────────────────────
+const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
+  const currentYear = new Date().getFullYear();
+
+  // Build year list: always start with current year, then add years from data
+  const years = useMemo(() => {
+    const yearSet = new Set([currentYear]); // always include current year
+    allPayrolls.forEach((p) => {
+      if (p.period) {
+        const yr = parseInt(p.period.split("-")[0], 10);
+        if (!isNaN(yr)) yearSet.add(yr);
+      }
+    });
+    return Array.from(yearSet).sort((a, b) => b - a); // newest first
+  }, [allPayrolls, currentYear]);
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+      <h3 className="text-sm font-semibold text-gray-700 mb-3">
+        Filter by Year
+      </h3>
+      <div className="flex flex-wrap gap-2">
+        {/* All Years pill */}
+        <button
+          onClick={() => onYearSelect(null)}
+          className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
+            selectedYear === null
+              ? "bg-indigo-600 text-white border-indigo-600 shadow"
+              : "bg-white text-gray-600 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"
+          }`}
+        >
+          All Years
+        </button>
+
+        {/* One pill per year */}
+        {years.map((yr) => (
+          <button
+            key={yr}
+            onClick={() => onYearSelect(yr)}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
+              selectedYear === yr
+                ? "bg-indigo-600 text-white border-indigo-600 shadow"
+                : "bg-white text-gray-600 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"
+            }`}
+          >
+            {yr}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -741,12 +716,14 @@ const Payroll = () => {
   const navigate = useNavigate();
 
   const [payrolls, setPayrolls] = useState([]);
-  const [allPayrolls, setAllPayrolls] = useState([]); // Store all payrolls for client-side filtering
+  const [allPayrolls, setAllPayrolls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sourceOptions, setSourceOptions] = useState([]);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [selectedDateRange, setSelectedDateRange] = useState(null);
+  // ── NEW: year filter state ──
+  const [selectedYear, setSelectedYear] = useState(null);
 
   const [selected, setSelected] = useState([]);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -762,8 +739,6 @@ const Payroll = () => {
   const [isAllowanceModalOpen, setIsAllowanceModalOpen] = useState(false);
   const [currentAllowances, setCurrentAllowances] = useState([]);
 
-
-  // Use custom hook for form management
   const {
     form,
     setForm,
@@ -784,7 +759,7 @@ const Payroll = () => {
     fetchMRList,
   } = usePayrollForm();
 
-  // Fix the CSVImportModal component
+  // CSVImportModal (kept inside component to match original structure)
   const CSVImportModal = ({ isOpen, onClose, onImport }) => {
     const [file, setFile] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -794,49 +769,50 @@ const Payroll = () => {
     const handleFileChange = (e) => {
       const selectedFile = e.target.files[0];
       if (selectedFile) {
-        if (selectedFile.type === 'text/csv' || selectedFile.name.endsWith('.csv')) {
+        if (
+          selectedFile.type === "text/csv" ||
+          selectedFile.name.endsWith(".csv")
+        ) {
           setFile(selectedFile);
           setImportResult(null);
         } else {
-          showToast('error', 'Please select a CSV file');
+          showToast("error", "Please select a CSV file");
         }
       }
     };
 
     const handleImport = async () => {
       if (!file) {
-        showToast('error', 'Please select a CSV file first');
+        showToast("error", "Please select a CSV file first");
         return;
       }
-
       try {
         setLoading(true);
         const formData = new FormData();
-        formData.append('file', file);
-
+        formData.append("file", file);
         const response = await axios.post(
           `${backendUrl}/api/hrm/payroll/import/csv`,
           formData,
-          {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-            },
-          }
+          { headers: { "Content-Type": "multipart/form-data" } },
         );
-
         if (response.data.success) {
           setImportResult(response.data.data);
-          showToast('success', `Imported ${response.data.data.success} payrolls successfully`);
-          if (response.data.data.failed > 0) {
-            showToast('error', `${response.data.data.failed} payrolls failed to import`);
-          }
-          if (onImport) {
-            onImport();
-          }
+          showToast(
+            "success",
+            `Imported ${response.data.data.success} payrolls successfully`,
+          );
+          if (response.data.data.failed > 0)
+            showToast(
+              "error",
+              `${response.data.data.failed} payrolls failed to import`,
+            );
+          if (onImport) onImport();
         }
       } catch (error) {
-        console.error('CSV import error:', error);
-        showToast('error', error.response?.data?.message || 'Failed to import CSV');
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to import CSV",
+        );
       } finally {
         setLoading(false);
       }
@@ -846,23 +822,18 @@ const Payroll = () => {
       try {
         const response = await axios.get(
           `${backendUrl}/api/hrm/payroll/import/template`,
-          {
-            responseType: 'blob',
-          }
+          { responseType: "blob" },
         );
-
         const url = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement('a');
+        const link = document.createElement("a");
         link.href = url;
-        link.setAttribute('download', 'payroll_import_template.csv');
+        link.setAttribute("download", "payroll_import_template.csv");
         document.body.appendChild(link);
         link.click();
         link.remove();
-
-        showToast('success', 'Template downloaded successfully');
-      } catch (error) {
-        console.error('Template download error:', error);
-        showToast('error', 'Failed to download template');
+        showToast("success", "Template downloaded successfully");
+      } catch {
+        showToast("error", "Failed to download template");
       }
     };
 
@@ -880,16 +851,13 @@ const Payroll = () => {
               ✕
             </button>
           </div>
-
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Upload CSV File
               </label>
               <div
-                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer ${
-                  file ? 'border-green-500 bg-green-50' : 'border-gray-300 hover:border-gray-400'
-                }`}
+                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer ${file ? "border-green-500 bg-green-50" : "border-gray-300 hover:border-gray-400"}`}
                 onClick={() => fileInputRef.current.click()}
               >
                 {file ? (
@@ -916,10 +884,11 @@ const Payroll = () => {
                 />
               </div>
             </div>
-
             {importResult && (
               <div className="p-4 bg-gray-50 rounded-lg">
-                <h4 className="font-medium text-gray-800 mb-2">Import Results</h4>
+                <h4 className="font-medium text-gray-800 mb-2">
+                  Import Results
+                </h4>
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Total:</span>
@@ -927,17 +896,22 @@ const Payroll = () => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-green-600">Successful:</span>
-                    <span className="font-medium text-green-600">{importResult.success}</span>
+                    <span className="font-medium text-green-600">
+                      {importResult.success}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-red-600">Failed:</span>
-                    <span className="font-medium text-red-600">{importResult.failed}</span>
+                    <span className="font-medium text-red-600">
+                      {importResult.failed}
+                    </span>
                   </div>
                 </div>
-
                 {importResult.errors && importResult.errors.length > 0 && (
                   <div className="mt-3">
-                    <h5 className="text-sm font-medium text-gray-700 mb-1">Errors:</h5>
+                    <h5 className="text-sm font-medium text-gray-700 mb-1">
+                      Errors:
+                    </h5>
                     <div className="max-h-40 overflow-y-auto text-xs">
                       {importResult.errors.map((error, index) => (
                         <p key={index} className="text-red-600 mb-1">
@@ -949,7 +923,6 @@ const Payroll = () => {
                 )}
               </div>
             )}
-
             <div className="flex justify-between items-center pt-2">
               <button
                 type="button"
@@ -960,7 +933,6 @@ const Payroll = () => {
               </button>
             </div>
           </div>
-
           <div className="mt-6 flex justify-end gap-3">
             <button
               onClick={onClose}
@@ -971,58 +943,40 @@ const Payroll = () => {
             <button
               onClick={handleImport}
               disabled={!file || loading}
-              className={`px-4 py-2 rounded-md text-white ${
-                !file || loading
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              }`}
+              className={`px-4 py-2 rounded-md text-white ${!file || loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
             >
-              {loading ? 'Importing...' : 'Import CSV'}
+              {loading ? "Importing..." : "Import CSV"}
             </button>
           </div>
         </div>
       </div>,
-      document.body
+      document.body,
     );
   };
 
-  // Fetch source options - Fixed version
   const fetchSourceOptions = useCallback(async () => {
     try {
       setSourceLoading(true);
       const destinationResponse = await axios.get(
-        `${backendUrl}/api/accounts/destinations`
+        `${backendUrl}/api/accounts/destinations`,
       );
-
       if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
         const options = destinationResponse.data
-          .filter((destination) => destination.totalAmount > 0)
-          .map((destination) => {
-            // Ensure label is always a string
-            let label = "";
-            if (typeof destination.name === "string") {
-              label = destination.name;
-            } else if (typeof destination.destinationName === "string") {
-              label = destination.destinationName;
-            } else {
-              label = `Destination ${destination._id}`;
-            }
-
-            return {
-              value: destination._id || destination.id,
-              label: label,
-            };
-          });
+          .filter((d) => d.totalAmount > 0)
+          .map((d) => ({
+            value: d._id || d.id,
+            label:
+              typeof d.name === "string"
+                ? d.name
+                : typeof d.destinationName === "string"
+                  ? d.destinationName
+                  : `Destination ${d._id}`,
+          }));
         setSourceOptions(options);
       } else {
         setSourceOptions([]);
-        console.warn(
-          "Unexpected response format for destinations:",
-          destinationResponse.data
-        );
       }
     } catch (error) {
-      console.error("Error fetching destination options:", error);
       showToast("error", "Failed to load source options");
       setSourceOptions([]);
     } finally {
@@ -1030,43 +984,35 @@ const Payroll = () => {
     }
   }, []);
 
-  // Handle source change
   const handleSourceChange = (sourceId) => {
-    setForm((prev) => ({
-      ...prev,
-      source: sourceId,
-    }));
+    setForm((prev) => ({ ...prev, source: sourceId }));
     setErrors((prev) => ({ ...prev, source: "" }));
   };
 
-  // CSV Export Function - FIXED
   const exportToCSV = async () => {
     try {
       const response = await axios.get(
         `${backendUrl}/api/hrm/payroll/export/csv`,
-        {
-          responseType: 'blob',
-        }
+        { responseType: "blob" },
       );
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      link.setAttribute('download', `payrolls_export_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.setAttribute(
+        "download",
+        `payrolls_export_${new Date().toISOString().slice(0, 10)}.csv`,
+      );
       document.body.appendChild(link);
       link.click();
       link.remove();
-
-      showToast('success', 'Payrolls exported successfully');
+      showToast("success", "Payrolls exported successfully");
     } catch (error) {
-      console.error('Export error:', error);
-      showToast('error', 'Failed to export payrolls');
+      showToast("error", "Failed to export payrolls");
     }
   };
 
   const handleCSVImportSuccess = () => {
-    setShowCSVImport(false);
-    fetchPayrolls(); // Refresh the payroll list
+    fetchPayrolls();
   };
 
   useEffect(() => {
@@ -1078,23 +1024,18 @@ const Payroll = () => {
     try {
       setLoading(true);
       setError(null);
-
-      const url = `${backendUrl}/api/hrm/payroll`;
-      const response = await axios.get(url);
-      
+      const response = await axios.get(`${backendUrl}/api/hrm/payroll`);
       if (response.data.success) {
         const payrollData = response.data.data || [];
         setAllPayrolls(payrollData);
+        // Re-apply the active filter after refresh
         setPayrolls(payrollData);
-
-        if (response.data.nextPayrollCode) {
+        if (response.data.nextPayrollCode)
           setNextPayrollCode(response.data.nextPayrollCode);
-        }
       } else {
         throw new Error(response.data.message || "Failed to fetch payrolls");
       }
     } catch (err) {
-      console.error("Error fetching payrolls:", err);
       setError(err.message || "Something went wrong");
       showToast("error", "Failed to load payroll data");
     } finally {
@@ -1102,125 +1043,103 @@ const Payroll = () => {
     }
   };
 
-  // Function to filter payrolls by date range - FIXED VERSION
   const filterPayrollsByDateRange = (
     dateRange,
-    payrollsToFilter = allPayrolls
+    payrollsToFilter = allPayrolls,
   ) => {
-    if (!dateRange || !dateRange.start || !dateRange.end) {
+    if (!dateRange || !dateRange.start || !dateRange.end)
       return payrollsToFilter;
-    }
-
     const startDate = new Date(dateRange.start);
     const endDate = new Date(dateRange.end);
-
-    // Set time to beginning and end of day for proper comparison
     startDate.setHours(0, 0, 0, 0);
     endDate.setHours(23, 59, 59, 999);
-
-    const filteredPayrolls = payrollsToFilter.filter((payroll) => {
+    return payrollsToFilter.filter((payroll) => {
       if (!payroll.period) return false;
-
-      // Parse payroll period (format: "YYYY-MM")
       const [year, month] = payroll.period.split("-").map(Number);
-
-      // Create date for the first day of the payroll period month
-      const payrollDate = new Date(year, month - 1, 1); // month is 0-indexed in Date
-
-      // Check if payroll date falls within the selected date range
-      const isInRange = payrollDate >= startDate && payrollDate <= endDate;
-
-      return isInRange;
+      const payrollDate = new Date(year, month - 1, 1);
+      return payrollDate >= startDate && payrollDate <= endDate;
     });
-
-    return filteredPayrolls;
   };
 
-  // Handle date range selection - now filters on client side
+  // ── Date range handler — clears year filter ──
   const handleDateRangeSelect = (dateRange) => {
     setSelectedDateRange(dateRange);
+    setSelectedYear(null); // clear year filter
     setCurrentPage(1);
-
-    // Apply the filter to all payrolls
-    const filtered = filterPayrollsByDateRange(dateRange, allPayrolls);
-
-    setPayrolls(filtered);
+    setPayrolls(filterPayrollsByDateRange(dateRange, allPayrolls));
   };
 
-  // Reset to show all payrolls
   const handleClearDateFilter = () => {
     setSelectedDateRange(null);
-    setPayrolls(allPayrolls); // Reset to show all payrolls
+    setPayrolls(allPayrolls);
     setCurrentPage(1);
+  };
+
+  // ── Year filter handler — clears date range ──
+  const handleYearSelect = (year) => {
+    setSelectedYear(year);
+    setSelectedDateRange(null); // clear date range filter
+    setCurrentPage(1);
+    if (year === null) {
+      setPayrolls(allPayrolls);
+    } else {
+      setPayrolls(
+        allPayrolls.filter((p) => {
+          if (!p.period) return false;
+          return parseInt(p.period.split("-")[0], 10) === year;
+        }),
+      );
+    }
   };
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedDateRange]);
+  }, [searchTerm, selectedDateRange, selectedYear]);
 
   const filteredPayrolls = useMemo(() => {
     if (!payrolls.length) return [];
-
-    let filtered = payrolls.filter(
+    return payrolls.filter(
       (r) =>
         r.employeeName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.department?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.paymentMethod?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         r.status?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.payrollCode?.toLowerCase().includes(searchTerm.toLowerCase())
+        r.payrollCode?.toLowerCase().includes(searchTerm.toLowerCase()),
     );
-
-    return filtered;
   }, [payrolls, searchTerm]);
 
-  // Pagination calculations
   const totalPages = Math.ceil(filteredPayrolls.length / payrollsPerPage);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentPayrolls = filteredPayrolls.slice(
     (currentPage - 1) * payrollsPerPage,
-    currentPage * payrollsPerPage
+    currentPage * payrollsPerPage,
   );
 
   function getVisiblePages(currentPage, totalPages) {
-    if (totalPages <= 5) {
+    if (totalPages <= 5)
       return Array.from({ length: totalPages }, (_, i) => i + 1);
-    }
-
-    if (currentPage <= 3) {
-      return [1, 2, 3, "...", totalPages];
-    }
-
-    if (currentPage >= totalPages - 2) {
+    if (currentPage <= 3) return [1, 2, 3, "...", totalPages];
+    if (currentPage >= totalPages - 2)
       return [1, "...", totalPages - 2, totalPages - 1, totalPages];
-    }
-
     return [1, "...", currentPage, "...", totalPages];
   }
 
-  // Select/unselect a payroll by id
+  const visiblePages = getVisiblePages(currentPage, totalPages);
+
   const toggleSelect = (payroll) => {
     setSelected((prev) => {
       const exists = prev.some((p) => p.id === payroll._id);
-
-      if (exists) {
-        return prev.filter((p) => p.id !== payroll._id);
-      } else {
-        return [...prev, { id: payroll._id, name: payroll.employeeName }];
-      }
+      if (exists) return prev.filter((p) => p.id !== payroll._id);
+      return [...prev, { id: payroll._id, name: payroll.employeeName }];
     });
   };
 
   const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentPayrolls.map((s) => ({
-        id: s._id,
-        name: s.employeeName,
-      }));
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
-    }
+    if (checked)
+      setSelected(
+        currentPayrolls.map((s) => ({ id: s._id, name: s.employeeName })),
+      );
+    else setSelected([]);
   };
 
   const handleDeleteSelected = async () => {
@@ -1228,38 +1147,34 @@ const Payroll = () => {
       showToast("warning", "Please select payroll records to delete");
       return;
     }
-
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete ${selected.length} payroll records?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/hrm/payroll`, {
           data: { ids: selected.map((s) => s.id) },
         });
-
         if (res.data.success) {
           showToast("success", "Selected payroll records deleted successfully");
           await fetchPayrolls();
           setSelected([]);
-        } else {
-          throw new Error(res.data.message);
-        }
+        } else throw new Error(res.data.message);
       } catch (error) {
-        console.error("Delete error:", error);
-        showToast("error", error.response?.data?.message || "Failed to delete selected payroll records");
+        showToast(
+          "error",
+          error.response?.data?.message ||
+            "Failed to delete selected payroll records",
+        );
       }
     }
   };
 
-  // Delete single payroll
   const deletePayroll = async (payroll) => {
     if (!payroll._id) return;
-    
     const confirmDelete = await confirmDialog({
       title: "Delete Payroll",
       text: `Are you sure you want to delete payroll record for <b>${payroll.employeeName}</b>?`,
@@ -1267,36 +1182,32 @@ const Payroll = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirmDelete.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/hrm/payroll/${payroll._id}`
+          `${backendUrl}/api/hrm/payroll/${payroll._id}`,
         );
-
         if (res.data.success) {
           showToast(
             "success",
-            `Payroll record for <b>${payroll.employeeName}</b> deleted successfully`
+            `Payroll record for <b>${payroll.employeeName}</b> deleted successfully`,
           );
           await fetchPayrolls();
-          setSelected((prev) => prev.filter(p => p.id !== payroll._id));
-        } else {
-          throw new Error(res.data.message);
-        }
+          setSelected((prev) => prev.filter((p) => p.id !== payroll._id));
+        } else throw new Error(res.data.message);
       } catch (error) {
-        console.error("Delete error:", error);
-        showToast("error", error.response?.data?.message || "Failed to delete payroll record");
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to delete payroll record",
+        );
       }
     }
   };
 
-  // Function to format period to month name (e.g., "2024-10" -> "Oct")
   const formatPeriodToMonth = (period) => {
     if (!period) return "N/A";
-
     try {
-      const [year, month] = period.split("-").map(Number);
+      const [, month] = period.split("-").map(Number);
       const monthNames = [
         "Jan",
         "Feb",
@@ -1311,53 +1222,41 @@ const Payroll = () => {
         "Nov",
         "Dec",
       ];
-
-      if (month >= 1 && month <= 12) {
-        return monthNames[month - 1];
-      }
-      return "N/A";
-    } catch (error) {
-      console.error("Error formatting period:", error);
+      return month >= 1 && month <= 12 ? monthNames[month - 1] : "N/A";
+    } catch {
       return "N/A";
     }
   };
 
-  // Open edit modal with selected payroll data
+  // ── Extract year from period ──
+  const formatPeriodToYear = (period) => {
+    if (!period) return "N/A";
+    return period.split("-")[0] || "N/A";
+  };
+
   const editPayroll = async (payroll) => {
     try {
-      // Convert allowances from backend format to array format
       let allowances = [];
-      if (Array.isArray(payroll.allowances)) {
-        allowances = payroll.allowances;
-      } else if (typeof payroll.allowances === "string") {
+      if (Array.isArray(payroll.allowances)) allowances = payroll.allowances;
+      else if (typeof payroll.allowances === "string") {
         try {
           allowances = JSON.parse(payroll.allowances);
-        } catch (e) {
-          // If it's a string but not JSON, treat it as a single amount
-          const amount = parseFloat(payroll.allowances);
-          if (!isNaN(amount)) {
-            allowances = [{ type: "Total Allowance", amount: amount }];
-          }
+        } catch {
+          const amt = parseFloat(payroll.allowances);
+          if (!isNaN(amt))
+            allowances = [{ type: "Total Allowance", amount: amt }];
         }
-      } else if (typeof payroll.allowances === "number") {
+      } else if (typeof payroll.allowances === "number")
         allowances = [{ type: "Total Allowance", amount: payroll.allowances }];
-      }
-
-      // Ensure allowances is an array of objects with type and amount
-      if (!Array.isArray(allowances)) {
-        allowances = [];
-      }
-
-      // Fetch MR list to ensure we have the latest data
+      if (!Array.isArray(allowances)) allowances = [];
       await fetchMRList();
-
       setForm({
         ...payroll,
         employeeId: payroll.employeeId || "",
         employeeName: payroll.employeeName || "",
         period: payroll.period || "",
         basicSalary: payroll.basicSalary?.toString() || "",
-        allowances: allowances,
+        allowances,
         deductions: payroll.deductions?.toString() || "",
         netSalary: payroll.netSalary?.toString() || "0.00",
         status: payroll.status || "pending",
@@ -1366,53 +1265,40 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
-        // Handle source object properly
         source:
           (typeof payroll.source === "object"
             ? payroll.source._id
             : payroll.source) || "",
         _id: payroll._id,
       });
-
       setIsEditModalOpen(true);
     } catch (error) {
-      console.error("Error preparing edit form:", error);
       showToast("error", "Failed to load payroll data for editing");
     }
   };
 
   const handleView = async (payroll) => {
     try {
-      // Convert allowances from backend format to array format
       let allowances = [];
-      if (Array.isArray(payroll.allowances)) {
-        allowances = payroll.allowances;
-      } else if (typeof payroll.allowances === "string") {
+      if (Array.isArray(payroll.allowances)) allowances = payroll.allowances;
+      else if (typeof payroll.allowances === "string") {
         try {
           allowances = JSON.parse(payroll.allowances);
-        } catch (e) {
-          // If it's a string but not JSON, treat it as a single amount
-          const amount = parseFloat(payroll.allowances);
-          if (!isNaN(amount)) {
-            allowances = [{ type: "Total Allowance", amount: amount }];
-          }
+        } catch {
+          const amt = parseFloat(payroll.allowances);
+          if (!isNaN(amt))
+            allowances = [{ type: "Total Allowance", amount: amt }];
         }
-      } else if (typeof payroll.allowances === "number") {
+      } else if (typeof payroll.allowances === "number")
         allowances = [{ type: "Total Allowance", amount: payroll.allowances }];
-      }
-
-      // Ensure allowances is an array of objects with type and amount
-      if (!Array.isArray(allowances)) {
-        allowances = [];
-      }
-
+      if (!Array.isArray(allowances)) allowances = [];
       setForm({
         ...payroll,
         employeeId: payroll.employeeId || "",
         employeeName: payroll.employeeName || "",
         period: payroll.period || "",
         basicSalary: payroll.basicSalary?.toString() || "",
-        allowances: allowances,
+        allowances,
         deductions: payroll.deductions?.toString() || "",
         netSalary: payroll.netSalary?.toString() || "0.00",
         status: payroll.status || "pending",
@@ -1421,39 +1307,31 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
-        // Handle source object properly
         source:
           (typeof payroll.source === "object"
             ? payroll.source._id
             : payroll.source) || "",
         _id: payroll._id,
       });
-
       setIsViewModalOpen(true);
     } catch (error) {
-      console.error("Error preparing view form:", error);
       showToast("error", "Failed to load payroll data for viewing");
     }
   };
 
   const handleViewAllowances = (payroll) => {
     let allowances = [];
-
-    if (Array.isArray(payroll.allowances)) {
-      allowances = payroll.allowances;
-    } else if (typeof payroll.allowances === "string") {
+    if (Array.isArray(payroll.allowances)) allowances = payroll.allowances;
+    else if (typeof payroll.allowances === "string") {
       try {
         allowances = JSON.parse(payroll.allowances);
-      } catch (e) {
-        const amount = parseFloat(payroll.allowances);
-        if (!isNaN(amount)) {
-          allowances = [{ type: "Total Allowance", amount: amount }];
-        }
+      } catch {
+        const amt = parseFloat(payroll.allowances);
+        if (!isNaN(amt))
+          allowances = [{ type: "Total Allowance", amount: amt }];
       }
-    } else if (typeof payroll.allowances === "number") {
+    } else if (typeof payroll.allowances === "number")
       allowances = [{ type: "Total Allowance", amount: payroll.allowances }];
-    }
-
     setCurrentAllowances(allowances);
     setIsAllowanceModalOpen(true);
   };
@@ -1464,7 +1342,6 @@ const Payroll = () => {
     setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
   };
 
-  // Handle update payroll
   const handleUpdatePayroll = async (e) => {
     e.preventDefault();
     try {
@@ -1473,136 +1350,92 @@ const Payroll = () => {
         totalAllowance: totalAllowance.toFixed(2),
         allowances: form.allowances,
       };
-
       const res = await axios.put(
         `${backendUrl}/api/hrm/payroll/${form._id}`,
-        payload
+        payload,
       );
-
       if (res.data.success) {
         showToast(
           "success",
-          `Payroll record for <b>${form.employeeName}</b> updated successfully`
+          `Payroll record for <b>${form.employeeName}</b> updated successfully`,
         );
         setIsEditModalOpen(false);
         await fetchPayrolls();
-      } else {
-        throw new Error(res.data.message);
-      }
+      } else throw new Error(res.data.message);
     } catch (err) {
-      console.error("Update error:", err);
-      showToast("error", err.response?.data?.message || "Failed to update payroll record.");
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to update payroll record.",
+      );
     }
   };
 
-  // Format currency
-  const formatCurrency = (amount) => {
-    const num = parseFloat(amount) || 0;
-    return new Intl.NumberFormat("en-US", {
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(num);
-  };
+    }).format(parseFloat(amount) || 0);
 
-  // Helper function to get total allowance amount
   const getTotalAllowance = (payroll) => {
-    if (Array.isArray(payroll.allowances)) {
+    if (Array.isArray(payroll.allowances))
       return payroll.allowances.reduce(
-        (total, allowance) => total + (allowance.amount || 0),
-        0
+        (total, a) => total + (a.amount || 0),
+        0,
       );
-    } else if (typeof payroll.allowances === "number") {
-      return payroll.allowances;
-    } else if (typeof payroll.allowances === "string") {
+    if (typeof payroll.allowances === "number") return payroll.allowances;
+    if (typeof payroll.allowances === "string") {
       try {
-        const parsed = JSON.parse(payroll.allowances);
-        if (Array.isArray(parsed)) {
-          return parsed.reduce(
-            (total, allowance) => total + (allowance.amount || 0),
-            0
-          );
-        }
-        return parseFloat(payroll.allowances) || 0;
-      } catch (e) {
+        const p = JSON.parse(payroll.allowances);
+        return Array.isArray(p)
+          ? p.reduce((t, a) => t + (a.amount || 0), 0)
+          : parseFloat(payroll.allowances) || 0;
+      } catch {
         return parseFloat(payroll.allowances) || 0;
       }
     }
     return 0;
   };
 
-  // MR options for dropdown
   const mrOptions = useMemo(() => {
     if (isMrListEmpty) {
-      // If no employees available but we have a current employee in form, include it
-      if (form.employeeId && form.employeeName) {
-        return [
-          {
-            value: form.employeeId,
-            label: form.employeeName,
-          },
-        ];
-      }
-      return [
-        {
-          value: "",
-          label: "No Employees Available",
-          disabled: true,
-        },
-      ];
+      if (form.employeeId && form.employeeName)
+        return [{ value: form.employeeId, label: form.employeeName }];
+      return [{ value: "", label: "No Employees Available", disabled: true }];
     }
-
     let options = mrList.map((mr) => ({
       value: mr._id,
       label: mr.medicalRepName || mr.employeeName || `Employee ${mr._id}`,
     }));
-
-    // Add current employee if it's not in the list (for edit mode)
     if (
       form.employeeId &&
       form.employeeName &&
       !options.some((opt) => opt.value === form.employeeId)
-    ) {
+    )
       options = [
         ...options,
-        {
-          value: form.employeeId,
-          label: form.employeeName,
-        },
+        { value: form.employeeId, label: form.employeeName },
       ];
-    }
-
     return options;
   }, [mrList, isMrListEmpty, form.employeeId, form.employeeName]);
 
-  // Get selected allowance types
-  const selectedAllowanceTypes = useMemo(() => {
-    return (form.allowances || []).map((allowance) => allowance.type);
-  }, [form.allowances]);
+  const selectedAllowanceTypes = useMemo(
+    () => (form.allowances || []).map((a) => a.type),
+    [form.allowances],
+  );
 
-  // Get source label for display - handle objects properly
   const getSourceLabel = (sourceId) => {
     if (!sourceId) return "Not specified";
-
-    // Handle case where sourceId might be an object
     if (typeof sourceId === "object") {
-      // If it's an object with the structure from the error, use the name property
-      if (sourceId.name) {
-        return sourceId.name.toString();
-      }
-      if (sourceId.destinationName) {
-        return sourceId.destinationName.toString();
-      }
+      if (sourceId.name) return sourceId.name.toString();
+      if (sourceId.destinationName) return sourceId.destinationName.toString();
       return `Destination ${sourceId._id || sourceId.id || "Unknown"}`;
     }
-
-    // If it's a string ID, find the corresponding option
     const source = sourceOptions.find((opt) => opt.value === sourceId);
     return source ? source.label.toString() : sourceId.toString();
   };
 
-  // Add keyboard navigation support
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Escape") {
@@ -1611,10 +1444,8 @@ const Payroll = () => {
         setIsAllowanceModalOpen(false);
         setShowImportModal(false);
         setShowAllowanceBreakdown(false);
-        setShowCSVImport(false);
       }
     };
-
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
@@ -1643,7 +1474,7 @@ const Payroll = () => {
 
   return (
     <div className="p-6">
-      {/* Header Section */}
+      {/* ── Header ── */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div className="flex flex-wrap gap-3">
           <button
@@ -1662,7 +1493,6 @@ const Payroll = () => {
           >
             <Download size={18} /> Export CSV
           </button>
-
           {selected.length > 0 && (
             <button
               className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
@@ -1701,14 +1531,43 @@ const Payroll = () => {
         </div>
       </div>
 
-      {/* Date Selection Tabs */}
+      {/* ── Year Filter Buttons (NEW) ── */}
+      <YearFilterButtons
+        allPayrolls={allPayrolls}
+        selectedYear={selectedYear}
+        onYearSelect={handleYearSelect}
+      />
+
+      {/* ── Month Range Tabs ── */}
       <DateSelectionTabs
         onDateRangeSelect={handleDateRangeSelect}
         selectedRange={selectedDateRange}
       />
 
-      {/* Clear Date Filter Button */}
-      {selectedDateRange && (
+      {/* ── Active filter badge ── */}
+      {(selectedYear !== null || selectedDateRange) && (
+        <div className="mb-4 flex items-center gap-3">
+          <span className="text-sm text-indigo-700 font-medium bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">
+            {selectedYear !== null
+              ? `Showing payrolls for ${selectedYear}`
+              : `Showing: ${selectedDateRange?.label}`}
+          </span>
+          <button
+            onClick={() => {
+              setSelectedYear(null);
+              setSelectedDateRange(null);
+              setPayrolls(allPayrolls);
+              setCurrentPage(1);
+            }}
+            className="text-sm text-gray-500 hover:text-red-600 font-medium flex items-center gap-1"
+          >
+            <X size={14} /> Clear filter
+          </button>
+        </div>
+      )}
+
+      {/* ── Clear date filter (legacy button kept for compatibility) ── */}
+      {selectedDateRange && !selectedYear && (
         <div className="mb-4">
           <button
             onClick={handleClearDateFilter}
@@ -1719,7 +1578,7 @@ const Payroll = () => {
         </div>
       )}
 
-      {/* Payroll Table */}
+      {/* ── Payroll Table ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1741,6 +1600,8 @@ const Payroll = () => {
                 </div>
               </th>
               <th className="p-3 text-sm font-medium">Month</th>
+              {/* ── NEW Year column ── */}
+              <th className="p-3 text-sm font-medium">Year</th>
               <th className="p-3 text-sm font-medium">Team Name</th>
               <th className="p-3 text-sm font-medium">Contact No</th>
               <th className="p-3 text-sm font-medium">Basic Salary</th>
@@ -1753,19 +1614,19 @@ const Payroll = () => {
           <tbody>
             {currentPayrolls.length === 0 ? (
               <tr>
-                <td colSpan={9} className="p-4 text-center text-gray-500">
-                  {selectedDateRange
-                    ? "No payroll records found for the selected date range."
-                    : "No payroll records found."}
+                <td colSpan={10} className="p-6 text-center text-gray-500">
+                  {selectedYear !== null
+                    ? `No payroll records found for ${selectedYear}.`
+                    : selectedDateRange
+                      ? "No payroll records found for the selected date range."
+                      : "No payroll records found."}
                 </td>
               </tr>
             ) : (
               currentPayrolls.map((payroll, idx) => (
                 <tr
                   key={payroll._id}
-                  className={`hover:bg-gray-50 ${
-                    idx < currentPayrolls.length - 1 ? "border-b" : ""
-                  }`}
+                  className={`hover:bg-gray-50 ${idx < currentPayrolls.length - 1 ? "border-b" : ""}`}
                 >
                   <td className="p-3 text-left">
                     <div className="flex items-center gap-4">
@@ -1783,11 +1644,17 @@ const Payroll = () => {
                   <td className="p-3 text-gray-600 font-medium">
                     {formatPeriodToMonth(payroll.period)}
                   </td>
+                  {/* ── Year cell ── */}
+                  <td className="p-3 text-gray-600 font-medium">
+                    {formatPeriodToYear(payroll.period)}
+                  </td>
                   <td className="p-3 text-gray-600 capitalize">
-                    {payroll.employeeId?.teamName || "N/A"}
+                    {payroll.employeeId?.teamName || payroll.teamName || "N/A"}
                   </td>
                   <td className="p-3 text-gray-600">
-                    {payroll.employeeId?.contactNo || "N/A"}
+                    {payroll.employeeId?.contactNo ||
+                      payroll.contactNo ||
+                      "N/A"}
                   </td>
                   <td className="p-3 text-gray-600">
                     {formatCurrency(payroll.basicSalary)}
@@ -1820,13 +1687,6 @@ const Payroll = () => {
                     >
                       <Eye size={18} />
                     </button>
-                    {/* <button
-                      onClick={() => editPayroll(payroll)}
-                      className="text-green-600 hover:text-green-800 cursor-pointer"
-                      title="Edit"
-                    >
-                      <Edit size={18} />
-                    </button> */}
                     <button
                       onClick={() => deletePayroll(payroll)}
                       className="text-red-600 hover:text-red-800 cursor-pointer"
@@ -1860,8 +1720,8 @@ const Payroll = () => {
                   p === "..."
                     ? "bg-gray-200 cursor-not-allowed"
                     : currentPage === p
-                    ? "bg-indigo-600 text-white cursor-pointer"
-                    : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+                      ? "bg-indigo-600 text-white cursor-pointer"
+                      : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
                 }`}
               >
                 {p}
@@ -1878,7 +1738,7 @@ const Payroll = () => {
         )}
       </div>
 
-      {/* Allowance Details Modal */}
+      {/* ── Allowance Details Modal ── */}
       {isAllowanceModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
@@ -1894,7 +1754,6 @@ const Payroll = () => {
                   <X size={24} />
                 </button>
               </div>
-
               <div className="flex-1 overflow-y-auto p-6">
                 {currentAllowances.length === 0 ? (
                   <div className="text-center py-8">
@@ -1940,18 +1799,15 @@ const Payroll = () => {
                             <td className="px-4 py-3 text-sm font-semibold text-right text-green-600">
                               {formatCurrency(
                                 currentAllowances.reduce(
-                                  (total, allowance) =>
-                                    total + (allowance.amount || 0),
-                                  0
-                                )
+                                  (total, a) => total + (a.amount || 0),
+                                  0,
+                                ),
                               )}
                             </td>
                           </tr>
                         </tfoot>
                       </table>
                     </div>
-
-                    {/* Summary Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                       <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                         <p className="text-sm font-medium text-blue-800">
@@ -1968,10 +1824,9 @@ const Payroll = () => {
                         <p className="text-2xl font-bold text-green-900">
                           {formatCurrency(
                             currentAllowances.reduce(
-                              (total, allowance) =>
-                                total + (allowance.amount || 0),
-                              0
-                            )
+                              (total, a) => total + (a.amount || 0),
+                              0,
+                            ),
                           )}
                         </p>
                       </div>
@@ -1983,11 +1838,10 @@ const Payroll = () => {
                           {formatCurrency(
                             currentAllowances.length > 0
                               ? currentAllowances.reduce(
-                                  (total, allowance) =>
-                                    total + (allowance.amount || 0),
-                                  0
+                                  (t, a) => t + (a.amount || 0),
+                                  0,
                                 ) / currentAllowances.length
-                              : 0
+                              : 0,
                           )}
                         </p>
                       </div>
@@ -1995,7 +1849,6 @@ const Payroll = () => {
                   </>
                 )}
               </div>
-
               <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
                 <button
                   onClick={() => setIsAllowanceModalOpen(false)}
@@ -2006,10 +1859,10 @@ const Payroll = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
-      {/* Edit Payroll Modal */}
+      {/* ── Edit Payroll Modal ── */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
@@ -2025,11 +1878,9 @@ const Payroll = () => {
                   <X size={24} />
                 </button>
               </div>
-
               <div className="flex-1 overflow-y-auto p-6">
                 <form onSubmit={handleUpdatePayroll}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    {/* Payroll Code - Readonly */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Payroll Code
@@ -2041,8 +1892,6 @@ const Payroll = () => {
                         disabled
                       />
                     </div>
-
-                    {/* Employee Name - Searchable Dropdown - DISABLED */}
                     <div className="flex flex-col">
                       <label className="text-sm font-medium text-gray-700 mb-1">
                         Employee Name
@@ -2056,7 +1905,6 @@ const Payroll = () => {
                     </div>
                   </div>
 
-                  {/* Salary Information */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                     <InputField
                       label="Basic Salary"
@@ -2085,7 +1933,6 @@ const Payroll = () => {
                     />
                   </div>
 
-                  {/* Allowances Section */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     <MultipleSelectDropdown
                       label="Allowance Type"
@@ -2116,30 +1963,8 @@ const Payroll = () => {
                         </button>
                       </div>
                     </div>
-                    {/* <div className="flex flex-col">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Status
-                      </label>
-                      <select
-                        name="status"
-                        value={form.status}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            status: e.target.value,
-                          }))
-                        }
-                        disabled={isMrListEmpty}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                      >
-                        <option value="pending">Pending</option>
-                        <option value="approved">Approved</option>
-                        <option value="paid">Paid</option>
-                      </select>
-                    </div> */}
                   </div>
 
-                  {/* Source Field - SearchableDropdown */}
                   <div className="mb-6">
                     <SearchableDropdown
                       label="Source"
@@ -2149,7 +1974,7 @@ const Payroll = () => {
                       placeholder={
                         sourceLoading ? "Loading sources..." : "Select Source"
                       }
-                      required={true}
+                      required
                       loading={sourceLoading}
                       error={errors.source}
                       disabled={isMrListEmpty || sourceLoading}
@@ -2173,7 +1998,6 @@ const Payroll = () => {
                     />
                   </div>
 
-                  {/* Salary Summary */}
                   <div className="mt-8 p-4 bg-white rounded-md shadow-md">
                     <h3 className="text-lg font-semibold mb-4 text-center">
                       Salary Summary
@@ -2233,10 +2057,10 @@ const Payroll = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
-      {/* View Payroll Modal */}
+      {/* ── View Payroll Modal ── */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
@@ -2271,7 +2095,6 @@ const Payroll = () => {
                     </p>
                   </div>
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -2298,13 +2121,8 @@ const Payroll = () => {
                     </p>
                   </div>
                 </div>
-
                 <div
-                  className={`grid gap-4 mb-6 ${
-                    form.status === "paid"
-                      ? "grid-cols-1 md:grid-cols-2"
-                      : "grid-cols-1 md:grid-cols-3"
-                  }`}
+                  className={`grid gap-4 mb-6 ${form.status === "paid" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1 md:grid-cols-3"}`}
                 >
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -2314,8 +2132,6 @@ const Payroll = () => {
                       {formatCurrency(form.netSalary)}
                     </p>
                   </div>
-
-                  {/* Show Source in view modal */}
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Source
@@ -2324,26 +2140,17 @@ const Payroll = () => {
                       {getSourceLabel(form.source)}
                     </p>
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Status
                     </label>
                     <p
-                      className={`border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize ${
-                        form.status === "paid"
-                          ? "text-green-600"
-                          : form.status === "pending"
-                          ? "text-yellow-600"
-                          : "text-red-600"
-                      }`}
+                      className={`border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize ${form.status === "paid" ? "text-green-600" : form.status === "pending" ? "text-yellow-600" : "text-red-600"}`}
                     >
                       {form.status || "N/A"}
                     </p>
                   </div>
                 </div>
-
-                {/* Allowance Details in View Mode */}
                 {form.allowances && form.allowances.length > 0 && (
                   <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-600 mb-2">
@@ -2387,7 +2194,6 @@ const Payroll = () => {
                     </div>
                   </div>
                 )}
-
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
                     Remarks
@@ -2407,10 +2213,10 @@ const Payroll = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
-      {/* Allowance Breakdown Modal */}
+      {/* ── Allowance Breakdown Modal (edit mode) ── */}
       {showAllowanceBreakdown && (
         <AllowanceBreakdownModal
           allowances={form.allowances || []}
@@ -2420,8 +2226,6 @@ const Payroll = () => {
           onRemove={removeAllowance}
         />
       )}
-
-
     </div>
   );
 };
