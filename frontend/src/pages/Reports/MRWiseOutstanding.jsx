@@ -9,6 +9,7 @@ import {
   Search,
   X,
   FileText,
+  Eye,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -46,6 +47,12 @@ const MRWiseOutstanding = () => {
     hasPrev: false,
   });
   const inputRef = useRef(null);
+
+  // State for customer modal
+  const [selectedMR, setSelectedMR] = useState(null);
+  const [customerDetails, setCustomerDetails] = useState([]);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
@@ -139,7 +146,6 @@ const MRWiseOutstanding = () => {
         limit: 7,
       };
 
-      // Only add date parameters for tabs that require them
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -153,7 +159,6 @@ const MRWiseOutstanding = () => {
           return;
         }
 
-        // Add date parameters for all non-"all" tabs
         params = {
           ...params,
           startDate: dateRange.startDate,
@@ -186,7 +191,6 @@ const MRWiseOutstanding = () => {
       console.error("Error fetching MR wise outstanding:", error);
       showToast("error", "Failed to fetch MR wise outstanding data");
 
-      // Reset data on error
       setData({
         summary: {
           totalOutstandingAmount: 0,
@@ -207,14 +211,46 @@ const MRWiseOutstanding = () => {
     }
   };
 
+  // Fetch customer details for a specific MR
+  const fetchCustomerDetails = async (mrName) => {
+    setLoadingCustomers(true);
+    try {
+      const dateRange = getDateRange();
+      const params = {};
+      if (selectedTab !== "all") {
+        params.startDate = dateRange.startDate;
+        params.endDate = dateRange.endDate;
+      }
+      const response = await axios.get(
+        `${backendUrl}/api/reports/mr-wise-outstanding/customers/${encodeURIComponent(mrName)}`,
+        { params },
+      );
+      if (response.data.success) {
+        setCustomerDetails(response.data.data);
+      } else {
+        showToast("error", "Failed to load customer details");
+      }
+    } catch (error) {
+      console.error("Error fetching customer details:", error);
+      showToast("error", "Failed to load customer details");
+    } finally {
+      setLoadingCustomers(false);
+    }
+  };
+
+  // Handle row click to open customer modal
+  const handleRowClick = (mr) => {
+    setSelectedMR(mr);
+    setCustomerModalOpen(true);
+    fetchCustomerDetails(mr.mrName);
+  };
+
   // Fetch data when tab changes
   useEffect(() => {
     if (selectedTab === "custom") {
-      // For custom tab, don't fetch until dates are selected
       if (customDateRange.startDate && customDateRange.endDate) {
         fetchMRWiseOutstanding(1);
       } else {
-        // Clear data when custom tab is selected but no dates are chosen
         setData({
           summary: {
             totalOutstandingAmount: 0,
@@ -225,7 +261,6 @@ const MRWiseOutstanding = () => {
         });
       }
     } else {
-      // For other tabs, fetch immediately
       fetchMRWiseOutstanding(1);
     }
   }, [selectedTab]);
@@ -288,7 +323,6 @@ const MRWiseOutstanding = () => {
 
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    // Data will be fetched automatically by the useEffect
   };
 
   const handleTabChange = (tab) => {
@@ -300,7 +334,6 @@ const MRWiseOutstanding = () => {
         startDate: null,
         endDate: null,
       });
-      // Data will be fetched automatically by the useEffect
     }
   };
 
@@ -316,10 +349,7 @@ const MRWiseOutstanding = () => {
   const exportToExcel = async () => {
     setExporting(true);
     try {
-      // Get the date range based on selected tab
       const dateRange = getDateRange();
-
-      // Build query parameters
       const params = new URLSearchParams();
 
       if (searchTerm) {
@@ -335,7 +365,6 @@ const MRWiseOutstanding = () => {
         }
       }
 
-      // Make the export request
       const response = await axios.get(
         `${backendUrl}/api/reports/mr-wise-outstanding/export/excel`,
         {
@@ -344,12 +373,10 @@ const MRWiseOutstanding = () => {
         },
       );
 
-      // Create a download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
 
-      // Extract filename from Content-Disposition header or use default
       let fileName = "mr-wise-outstanding.xlsx";
       const contentDisposition = response.headers["content-disposition"];
       if (contentDisposition) {
@@ -358,7 +385,6 @@ const MRWiseOutstanding = () => {
           fileName = fileNameMatch[1];
         }
       } else {
-        // Fallback filename based on current tab
         const currentDate = new Date();
         const formattedDate = currentDate.toISOString().split("T")[0];
 
@@ -421,7 +447,6 @@ const MRWiseOutstanding = () => {
     }
   };
 
-  // Render Pagination Component
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
 
@@ -440,7 +465,6 @@ const MRWiseOutstanding = () => {
           Prev
         </button>
 
-        {/* Page Numbers */}
         <div className="flex gap-1">
           {visiblePages.map((page, index) => (
             <button
@@ -462,7 +486,6 @@ const MRWiseOutstanding = () => {
           ))}
         </div>
 
-        {/* Next Button */}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
@@ -580,7 +603,6 @@ const MRWiseOutstanding = () => {
           </button>
         </div>
 
-        {/* Active Filter Display */}
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <Filter size={16} />
           <span>Active Filter: </span>
@@ -640,12 +662,13 @@ const MRWiseOutstanding = () => {
               <th className="p-3 text-sm font-medium">Contact</th>
               <th className="p-3 text-sm font-medium">Total Customers</th>
               <th className="p-3 text-sm font-medium">Total Outstanding ($)</th>
+              <th className="p-3 text-sm font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="6" className="p-3 text-center">
+                <td colSpan="7" className="p-3 text-center">
                   <div className="flex justify-center items-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
                     <span className="ml-2">Loading...</span>
@@ -656,9 +679,10 @@ const MRWiseOutstanding = () => {
               data.records.map((mr, index) => (
                 <tr
                   key={index}
-                  className={`hover:bg-gray-50 ${
+                  className={`hover:bg-gray-50 cursor-pointer ${
                     index === data.records.length - 1 ? "" : "border-b"
                   }`}
+                  onClick={() => handleRowClick(mr)}
                 >
                   <td className="p-3">
                     <div className="text-sm text-gray-600 font-medium">
@@ -695,11 +719,23 @@ const MRWiseOutstanding = () => {
                       maximumFractionDigits: 2,
                     }) || "0.00"}
                   </td>
+                  <td className="p-3">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRowClick(mr);
+                      }}
+                      className="text-blue-600 hover:text-blue-800"
+                      title="View Customer Details"
+                    >
+                      <Eye size={18} />
+                    </button>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="6" className="p-3 text-center text-gray-500">
+                <td colSpan="7" className="p-3 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -712,6 +748,117 @@ const MRWiseOutstanding = () => {
       </div>
 
       {renderPagination()}
+
+      {/* Customer Details Modal */}
+      {customerModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
+              <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                <h2 className="text-xl font-semibold text-gray-800">
+                  Customer Details - {selectedMR?.mrName}
+                </h2>
+                <button
+                  onClick={() => setCustomerModalOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6">
+                {loadingCustomers ? (
+                  <div className="flex justify-center items-center h-40">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                    <span className="ml-2">Loading customer details...</span>
+                  </div>
+                ) : customerDetails.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-500">
+                      No customers found with outstanding amounts for this MR.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Customer Name
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Contact
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Address
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Province
+                          </th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Unpaid Amount ($)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {customerDetails.map((customer, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                              {customer.customerName || "N/A"}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {customer.contact || "N/A"}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {customer.address || "N/A"}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-600">
+                              {customer.province || "N/A"}
+                            </td>
+                            <td className="px-4 py-3 text-sm font-semibold text-right text-red-600">
+                              $
+                              {customer.totalDue?.toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              }) || "0.00"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-gray-50">
+                        <tr>
+                          <td
+                            colSpan="4"
+                            className="px-4 py-3 text-sm font-semibold text-gray-900 text-right"
+                          >
+                            Total Unpaid:
+                          </td>
+                          <td className="px-4 py-3 text-sm font-bold text-right text-red-600">
+                            $
+                            {customerDetails
+                              .reduce((sum, c) => sum + (c.totalDue || 0), 0)
+                              .toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
+                <button
+                  onClick={() => setCustomerModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {showCustomFilter &&
         ReactDOM.createPortal(
@@ -733,7 +880,6 @@ const MRWiseOutstanding = () => {
               </h2>
 
               <div className="space-y-4 mb-6">
-                {/* Date Range */}
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">

@@ -41,9 +41,6 @@ router.get("/", async (req, res) => {
     }
 
     // Base aggregation pipeline
-    // Key fix: normalize mrName (trim + toLower) BEFORE grouping so that
-    // "John Doe", " john doe ", "JOHN DOE" etc. all collapse into one group.
-    // We keep the original (first seen) mrName for display.
     const basePipeline = [
       { $match: matchConditions },
 
@@ -199,6 +196,71 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET /customers/:mrName – fetch customer details for a specific MR
+router.get("/customers/:mrName", async (req, res) => {
+  try {
+    const { mrName } = req.params;
+    const { startDate, endDate } = req.query;
+
+    if (!mrName) {
+      return res.status(400).json({ error: "MR name is required" });
+    }
+
+    const matchConditions = { dueAmount: { $gt: 0 } };
+
+    // Decode URI component if needed
+    const decodedMrName = decodeURIComponent(mrName).trim();
+
+    // Match by mrName (case-insensitive)
+    matchConditions.mrName = { $regex: new RegExp(`^${decodedMrName}$`, 'i') };
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ error: "Invalid date format" });
+      }
+      matchConditions.invoiceDate = { $gte: start, $lte: end };
+    }
+
+    // Aggregate to get customer details with unpaid amounts
+    const customers = await SaleSummary.aggregate([
+      { $match: matchConditions },
+      {
+        $group: {
+          _id: "$customerCode",
+          customerName: { $first: "$customerName" },
+          totalDue: { $sum: "$dueAmount" },
+        }
+      },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "_id",
+          foreignField: "customerCode",
+          as: "customerInfo"
+        }
+      },
+      {
+        $project: {
+          customerCode: "$_id",
+          customerName: 1,
+          totalDue: { $round: ["$totalDue", 2] },
+          contact: { $ifNull: [{ $arrayElemAt: ["$customerInfo.phone", 0] }, "N/A"] },
+          address: { $ifNull: [{ $arrayElemAt: ["$customerInfo.address", 0] }, "N/A"] },
+          province: { $ifNull: [{ $arrayElemAt: ["$customerInfo.province", 0] }, "N/A"] }
+        }
+      },
+      { $sort: { totalDue: -1 } }
+    ]);
+
+    res.json({ success: true, data: customers });
+  } catch (err) {
+    console.error("Error fetching MR customers:", err);
+    res.status(500).json({ error: "Server error", message: err.message });
+  }
+});
+
 // GET /export/excel – Excel export with working contact info
 router.get("/export/excel", async (req, res) => {
   try {
@@ -228,7 +290,7 @@ router.get("/export/excel", async (req, res) => {
     const mrData = await SaleSummary.aggregate([
       { $match: matchConditions },
 
-      // Normalise mrName before grouping (same fix as the GET route above)
+      // Normalise mrName before grouping
       {
         $addFields: {
           _mrNameNormalized: {
