@@ -20,7 +20,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 function MRCash() {
   const [mrCashes, setMrCashes] = useState([]);
-  const [allMRCashes, setAllMRCashes] = useState([]); // Store all data
+  const [allMRCashes, setAllMRCashes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -29,25 +29,21 @@ function MRCash() {
   const [totalCount, setTotalCount] = useState(0);
   const [activeTab, setActiveTab] = useState("carry");
 
-  // Totals from backend
   const [totals, setTotals] = useState({
     totalCurrentCash: 0,
     totalTransferred: 0,
     totalAll: 0,
   });
 
-  // Modal states
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [selectedMRCash, setSelectedMRCash] = useState(null);
 
-  // Transfer history state
   const [transferHistory, setTransferHistory] = useState([]);
   const [transferHistoryLoading, setTransferHistoryLoading] = useState(false);
 
-  // Form states
   const [formData, setFormData] = useState({
     mrCashId: "",
     transferAmount: "",
@@ -59,13 +55,11 @@ function MRCash() {
     notes: "",
   });
 
-  // MR List for dropdown
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(false);
 
   const inputRef = useRef(null);
 
-  // Format currency
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return "$0.00";
     return new Intl.NumberFormat("en-US", {
@@ -76,7 +70,6 @@ function MRCash() {
     }).format(value);
   };
 
-  // Format date
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     try {
@@ -86,12 +79,11 @@ function MRCash() {
     }
   };
 
-  // Fetch MR list for dropdown
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
       const response = await axios.get(
-        `${backendUrl}/api/mr-cash/mr-list-with-cash`
+        `${backendUrl}/api/mr-cash/mr-list-with-cash`,
       );
       if (response.data.success) {
         setMrList(response.data.data || []);
@@ -104,18 +96,12 @@ function MRCash() {
     }
   }, []);
 
-  // Fetch transfer history for a specific MR
   const fetchTransferHistory = useCallback(async (mrCashId) => {
     try {
       setTransferHistoryLoading(true);
       const response = await axios.get(
         `${backendUrl}/api/mr-cash/${mrCashId}/transfers`,
-        {
-          params: {
-            limit: 30,
-            page: 1,
-          },
-        }
+        { params: { limit: 30, page: 1 } },
       );
       if (response.data.success) {
         setTransferHistory(response.data.data || []);
@@ -129,33 +115,26 @@ function MRCash() {
     }
   }, []);
 
-  // Fetch all MR Cash records (no pagination from backend)
+  // Fetch all MR Cash records filtered by send-type stock transfers (done in backend now)
   const fetchAllMRCashes = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
       const response = await axios.get(`${backendUrl}/api/mr-cash`, {
-        params: {
-          limit: 1000, // Get all records in one request
-          page: 1,
-        },
+        params: { limit: 1000, page: 1 },
       });
 
       if (response.data.success) {
         const allData = response.data.data || [];
-        setAllMRCashes(allData); // Store all data
-
-        // Set totals from backend
+        setAllMRCashes(allData);
         setTotals(
           response.data.totals || {
             totalCurrentCash: 0,
             totalTransferred: 0,
             totalAll: 0,
-          }
+          },
         );
-
-        // Apply initial filter and pagination
         filterAndPaginateData(allData, currentPage, activeTab, searchTerm);
       } else {
         throw new Error(response.data.message || "Failed to fetch data");
@@ -164,7 +143,7 @@ function MRCash() {
       setError(
         error.response?.data?.message ||
           error.message ||
-          "Failed to load MR Cash data"
+          "Failed to load MR Cash data",
       );
       showToast("error", "Failed to load MR Cash data");
     } finally {
@@ -172,88 +151,71 @@ function MRCash() {
     }
   }, []);
 
-  // Filter and paginate data locally
   const filterAndPaginateData = (data, page, tab, search = "") => {
-    // Apply search filter
     let filteredData = data;
     if (search) {
       filteredData = data.filter(
         (record) =>
           record.mrName?.toLowerCase().includes(search.toLowerCase()) ||
-          record.notes?.toLowerCase().includes(search.toLowerCase())
+          record.notes?.toLowerCase().includes(search.toLowerCase()),
       );
     }
 
-    // Apply tab filter
     if (tab === "carry") {
       filteredData = filteredData.filter((record) => record.currentCash > 0);
     } else {
       filteredData = filteredData.filter(
-        (record) => record.cashTransferredToAdmin > 0
+        (record) => record.cashTransferredToAdmin > 0,
       );
     }
 
-    // Calculate pagination
     const total = filteredData.length;
     const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
     const startIndex = (page - 1) * ITEMS_PER_PAGE;
     const endIndex = startIndex + ITEMS_PER_PAGE;
     const paginatedData = filteredData.slice(startIndex, endIndex);
 
-    // Update state
     setMrCashes(paginatedData);
     setTotalCount(total);
     setTotalPages(totalPages);
   };
 
-  // Handle tab change
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setCurrentPage(1);
     filterAndPaginateData(allMRCashes, 1, tab, searchTerm);
   };
 
-  // Handle search
   const handleSearch = useCallback(() => {
     setCurrentPage(1);
     filterAndPaginateData(allMRCashes, 1, activeTab, searchTerm);
   }, [allMRCashes, activeTab, searchTerm]);
 
-  // Initial load
   useEffect(() => {
     fetchAllMRCashes();
     fetchMRList();
   }, [fetchAllMRCashes, fetchMRList]);
 
-  // Handle search with debounce
   useEffect(() => {
     const timer = setTimeout(() => {
       handleSearch();
     }, 500);
-
     return () => clearTimeout(timer);
   }, [searchTerm, handleSearch]);
 
-  // Handle add new MR Cash transfer
   const handleAdd = () => {
-    setFormData({
-      mrCashId: "",
-      transferAmount: "",
-      notes: "",
-    });
+    setFormData({ mrCashId: "", transferAmount: "", notes: "" });
     setSelectedMRCash(null);
     setIsAddModalOpen(true);
     fetchMRList();
   };
 
-  // Handle view details
   const handleView = async (record) => {
     setSelectedRecord(record);
     setIsViewModalOpen(true);
     await fetchTransferHistory(record._id);
   };
 
-  // Handle delete
   const handleDelete = async (record) => {
     const confirm = await confirmDialog({
       title: "Delete MR Cash Record",
@@ -272,13 +234,12 @@ function MRCash() {
       } catch (error) {
         showToast(
           "error",
-          error.response?.data?.message || "Failed to delete record"
+          error.response?.data?.message || "Failed to delete record",
         );
       }
     }
   };
 
-  // Handle form input changes for Add Modal
   const handleFormChange = (e) => {
     const { name, value } = e.target;
 
@@ -289,30 +250,20 @@ function MRCash() {
       if (inputAmount > maxAmount) {
         showToast(
           "error",
-          `Cannot transfer more than available cash (${formatCurrency(
-            maxAmount
-          )})`
+          `Cannot transfer more than available cash (${formatCurrency(maxAmount)})`,
         );
         return;
       }
     }
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Handle transfer form changes
   const handleTransferFormChange = (e) => {
     const { name, value } = e.target;
-    setTransferForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setTransferForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Handle MR selection in Add Modal
   const handleMRSelect = (value) => {
     const selectedMR = mrList.find((mr) => mr.value === value);
     if (selectedMR) {
@@ -327,7 +278,6 @@ function MRCash() {
     }
   };
 
-  // Submit add form (for transferring cash to admin)
   const handleSubmitTransferToAdmin = async (e) => {
     e.preventDefault();
 
@@ -338,7 +288,7 @@ function MRCash() {
     ) {
       showToast(
         "error",
-        "Please select an MR and enter a valid transfer amount"
+        "Please select an MR and enter a valid transfer amount",
       );
       return;
     }
@@ -349,9 +299,7 @@ function MRCash() {
     if (selectedMR && transferAmount > selectedMR.currentCash) {
       showToast(
         "error",
-        `Insufficient cash available. Available: ${formatCurrency(
-          selectedMR.currentCash
-        )}, Requested: ${formatCurrency(transferAmount)}`
+        `Insufficient cash available. Available: ${formatCurrency(selectedMR.currentCash)}, Requested: ${formatCurrency(transferAmount)}`,
       );
       return;
     }
@@ -359,23 +307,14 @@ function MRCash() {
     try {
       const response = await axios.post(
         `${backendUrl}/api/mr-cash/${formData.mrCashId}/transfer`,
-        {
-          amount: transferAmount,
-          notes: formData.notes,
-        }
+        { amount: transferAmount, notes: formData.notes },
       );
 
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsAddModalOpen(false);
-        // Reset form
-        setFormData({
-          mrCashId: "",
-          transferAmount: "",
-          notes: "",
-        });
+        setFormData({ mrCashId: "", transferAmount: "", notes: "" });
         setSelectedMRCash(null);
-        // Refresh data
         fetchAllMRCashes();
         fetchMRList();
       }
@@ -385,12 +324,11 @@ function MRCash() {
         "error",
         error.response?.data?.message ||
           error.message ||
-          "Failed to transfer cash"
+          "Failed to transfer cash",
       );
     }
   };
 
-  // Submit transfer form (from table row)
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
 
@@ -399,9 +337,7 @@ function MRCash() {
     if (transferAmount > selectedRecord.currentCash) {
       showToast(
         "error",
-        `Insufficient cash available. Available: ${formatCurrency(
-          selectedRecord.currentCash
-        )}, Requested: ${formatCurrency(transferAmount)}`
+        `Insufficient cash available. Available: ${formatCurrency(selectedRecord.currentCash)}, Requested: ${formatCurrency(transferAmount)}`,
       );
       return;
     }
@@ -409,17 +345,13 @@ function MRCash() {
     try {
       const response = await axios.post(
         `${backendUrl}/api/mr-cash/${selectedRecord._id}/transfer`,
-        {
-          amount: transferAmount,
-          notes: transferForm.notes,
-        }
+        { amount: transferAmount, notes: transferForm.notes },
       );
 
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsTransferModalOpen(false);
         setTransferForm({ amount: "", notes: "" });
-        // Refresh data
         fetchAllMRCashes();
         fetchMRList();
       }
@@ -429,12 +361,11 @@ function MRCash() {
         "error",
         error.response?.data?.message ||
           error.message ||
-          "Failed to transfer cash"
+          "Failed to transfer cash",
       );
     }
   };
 
-  // Handle opening transfer modal from table
   const handleOpenTransferModal = (record) => {
     setSelectedRecord(record);
     setTransferForm({
@@ -444,7 +375,6 @@ function MRCash() {
     setIsTransferModalOpen(true);
   };
 
-  // Handle page change
   const handlePageChange = (newPage) => {
     setCurrentPage(newPage);
     filterAndPaginateData(allMRCashes, newPage, activeTab, searchTerm);
@@ -568,7 +498,7 @@ function MRCash() {
                         .includes(searchTerm.toLowerCase()) ||
                       record.notes
                         ?.toLowerCase()
-                        .includes(searchTerm.toLowerCase()))
+                        .includes(searchTerm.toLowerCase())),
                 ).length
               }
             </span>
@@ -593,7 +523,7 @@ function MRCash() {
                         .includes(searchTerm.toLowerCase()) ||
                       record.notes
                         ?.toLowerCase()
-                        .includes(searchTerm.toLowerCase()))
+                        .includes(searchTerm.toLowerCase())),
                 ).length
               }
             </span>
@@ -650,17 +580,15 @@ function MRCash() {
                     {searchTerm
                       ? "No matching records found"
                       : activeTab === "carry"
-                      ? "No MRs with current cash available"
-                      : "No MRs with transferred cash to admin"}
+                        ? "No MRs with current cash available"
+                        : "No MRs with transferred cash to admin"}
                   </td>
                 </tr>
               ) : (
                 mrCashes.map((record, index) => (
                   <tr
                     key={record._id}
-                    className={`hover:bg-gray-50 ${
-                      index < mrCashes.length - 1 ? "border-b" : ""
-                    }`}
+                    className={`hover:bg-gray-50 ${index < mrCashes.length - 1 ? "border-b" : ""}`}
                   >
                     <td className="py-3 px-4 text-center">
                       <div className="font-medium text-gray-900">
@@ -737,7 +665,7 @@ function MRCash() {
         </div>
       </div>
 
-      {/* Pagination - FIXED */}
+      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 mt-6">
           <div className="flex items-center gap-4">
@@ -789,6 +717,7 @@ function MRCash() {
         </div>
       )}
 
+      {/* View Modal */}
       {isViewModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -800,7 +729,6 @@ function MRCash() {
                 setTransferHistory([]);
               }}
             />
-
             <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => {
@@ -817,7 +745,6 @@ function MRCash() {
                   <h2 className="text-xl font-semibold text-gray-800 mb-4">
                     MR Cash Details
                   </h2>
-
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                     <div>
                       <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -827,7 +754,6 @@ function MRCash() {
                         {selectedRecord.mrName}
                       </p>
                     </div>
-
                     <div>
                       <label className="block text-sm font-medium text-gray-600 mb-1">
                         Current Cash
@@ -837,7 +763,6 @@ function MRCash() {
                       </p>
                     </div>
                   </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     <div>
                       <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -856,7 +781,6 @@ function MRCash() {
                   <h2 className="text-xl font-semibold text-gray-800 mb-4">
                     MR Transfer History - {selectedRecord.mrName}
                   </h2>
-
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     <div>
                       <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -866,7 +790,6 @@ function MRCash() {
                         {selectedRecord.mrName}
                       </p>
                     </div>
-
                     <div>
                       <label className="block text-sm font-medium text-gray-600 mb-1">
                         Total Transferred to Admin
@@ -875,7 +798,6 @@ function MRCash() {
                         {formatCurrency(selectedRecord.cashTransferredToAdmin)}
                       </p>
                     </div>
-
                     <div>
                       <label className="block text-sm font-medium text-gray-600 mb-1">
                         Last Transfer Date
@@ -888,12 +810,10 @@ function MRCash() {
                     </div>
                   </div>
 
-                  {/* Transfer History Table */}
                   <div className="mb-6">
                     <h3 className="text-lg font-medium text-gray-700 mb-3">
                       Last 30 Transfer Records
                     </h3>
-
                     {transferHistoryLoading ? (
                       <div className="text-center py-4">
                         <div className="text-gray-600">
@@ -929,11 +849,7 @@ function MRCash() {
                             {transferHistory.map((transfer, index) => (
                               <tr
                                 key={transfer._id}
-                                className={`hover:bg-gray-50 ${
-                                  index < transferHistory.length - 1
-                                    ? "border-b"
-                                    : ""
-                                }`}
+                                className={`hover:bg-gray-50 ${index < transferHistory.length - 1 ? "border-b" : ""}`}
                               >
                                 <td className="py-3 px-4">
                                   {formatDate(transfer.transferredAt)}
@@ -970,8 +886,10 @@ function MRCash() {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
+
+      {/* Add / Transfer to Admin Modal */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1021,7 +939,6 @@ function MRCash() {
                   )}
                 </div>
 
-                {/* Show selected MR's current cash */}
                 {selectedMRCash && (
                   <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <div className="flex justify-between items-center">
@@ -1108,8 +1025,10 @@ function MRCash() {
               </form>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
+
+      {/* Transfer Modal (from table row) */}
       {isTransferModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -1205,7 +1124,7 @@ function MRCash() {
               </form>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

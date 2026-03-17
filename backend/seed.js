@@ -75,6 +75,7 @@ async function seedCategoryTypes() {
     { name: "Cash Sale", code: "cash_sale" },
     { name: "Credit Collections", code: "credit_collections" },
     { name: "Payment Inward", code: "payment_inward" },
+     { name: "To Collection", code: "collection" },
   ];
   await CategoryType.insertMany(categoryTypes);
 }

@@ -104,15 +104,6 @@ const SalaryCOGSRatio = () => {
     const y = today.getFullYear(),
       m = today.getMonth();
     switch (selectedTab) {
-      case "today": {
-        const s = today.toISOString().split("T")[0];
-        return {
-          startDate: s,
-          endDate: s,
-          period: getYearMonthFromDate(today),
-          displayDate: s,
-        };
-      }
       case "all":
         return {
           startDate: null,
@@ -485,18 +476,17 @@ const SalaryCOGSRatio = () => {
         </div>
       </div>
 
-      {/* ── Date tabs ── */}
+      {/* ── Date tabs (Today removed) ── */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           {[
-            { id: "today", label: "Today" },
-            { id: "all", label: "All Records" },
             {
               id: "currentMonth",
               label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
             },
             { id: "janToPreviousMonth", label: getJanToPreviousMonthDisplay() },
             { id: "custom", label: "Custom Filter" },
+            { id: "all", label: "All Records" },
           ].map(({ id, label }) => (
             <button
               key={id}
@@ -609,26 +599,7 @@ const SalaryCOGSRatio = () => {
       </div>
 
       {/* ── Column legend ── */}
-      <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" />
-          <b>Salary ($)</b> — adjusted/prorated salary (current-month) or
-          entered salary (previous-month)
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
-          <b>Incentive ($)</b> — allowance type "Incentive" only
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" />
-          <b>Allowance ($)</b> — all allowances except Incentive &amp; Travel
-          Allowance
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />
-          <b>Tour Expense ($)</b> — allowance type "Travel Allowance" only
-        </span>
-      </div>
+
 
       {/* ── Table ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">

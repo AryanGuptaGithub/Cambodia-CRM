@@ -67,6 +67,8 @@ import SaleSummaryReport from "./routers/reports/SaleSummary.js";
 import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js";
 import outstanding from "./routers/sale/outstanding.js";
 import averagePrice from "./routers/reports/averagePrice.js";
+import mrAdvanceRoutes from './routers/hrm/mrAdvance.js';
+
 
 // Import StockInHand routes
 import stockInHandRoutes from "./routers/reports/stockInHand.js";
@@ -148,6 +150,9 @@ app.use("/api/order-status", orderStatus);
 
 // Stock In Hand Routes - CRITICAL FOR YOUR ERROR
 app.use("/api/stock-in-hand", stockInHandRoutes);
+
+
+app.use('/api/hrm/mr-advance', mrAdvanceRoutes);
 
 // Accounts Routes
 app.use("/api/accounts", Accounts);

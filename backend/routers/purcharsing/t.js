@@ -1,12 +1,10 @@
 import express from "express";
+import SaleSummary from "../../models/sale/saleSummary.js";
+import PurchaseInventory from "../../models/purcharsing/purchaseInventory.js";
+import Expense from "../../models/expenses/addExpense.js";
+import Payroll from "../../models/Hrm/Payroll.js";
 import mongoose from "mongoose";
-import purchaseInventory from "../../models/purcharsing/purchaseInventory.js";
-import ReportInHand from "../../models/reports/reportsInHand.js";
-import Product from "../../models/projectManger/product.js";
-import ExcelJS from "exceljs";
-import dayjs from "dayjs";
-import { protect } from "../../middleware/auth.js";
-import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import ExcelJS from 'exceljs';
 
 const router = express.Router();
 
@@ -14,9 +12,13 @@ const router = express.Router();
 
 
 
-// POST /purchase/import (Excel import) – ensure sellingPrice is passed correctly
 
 
-// All other routes (GET /, /invoice, /reports-in-hand, /debug, etc.) remain unchanged.
+
+
+
+
+
+
 
 export default router;

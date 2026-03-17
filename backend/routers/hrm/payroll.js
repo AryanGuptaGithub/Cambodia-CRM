@@ -5,6 +5,7 @@ import MrBasicPayroll from "../../models/Hrm/MRBasicPayroll.js";
 import Account from "../../models/accounts/Destination.js";
 import Attendance from "../../models/Hrm/Attendance.js";
 import Leave from "../../models/Hrm/Leaves.js";
+import MrAdvance from "../../models/Hrm/MrAdvance.js";
 import mongoose from "mongoose";
 import { Parser } from "json2csv";
 
@@ -47,6 +48,27 @@ const updateAccountBalance = async (
   }
   await account.save({ session });
   return account;
+};
+
+// ✅ FIXED: fetch total pending advance with safe session handling
+const getPendingAdvance = async (employeeId, session = null) => {
+  try {
+    let aggregation = MrAdvance.aggregate([
+      {
+        $match: {
+          employeeId: new mongoose.Types.ObjectId(employeeId),
+          status: "pending",
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    if (session) aggregation = aggregation.session(session);
+    const result = await aggregation;
+    return result[0]?.total || 0;
+  } catch (error) {
+    console.error("Error fetching pending advance:", error);
+    return 0; // fallback – advance deduction will not be applied, but calculation won't crash
+  }
 };
 
 const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
@@ -164,19 +186,19 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
   const unpaidLeaveDeduction = unpaidLeaveDays * perDaySalary;
 
   // ── Adjusted = prorated minus unpaid-leave deduction + extra time ─────────
-  // This is the value shown as "Basic Salary ($)" in the UI.
-  // The full/contracted salary is stored separately as basicSalary in the DB.
   const adjustedBasicSalary =
     proratedBasicSalary - unpaidLeaveDeduction + extraTimeAmount;
 
-  // totalSalary here = adjustedBasicSalary (allowances added later in the route)
-  const totalSalary = adjustedBasicSalary;
+  // ── Advance Deduction ────────────────────────────────────────────────────
+  const advanceDeduction = await getPendingAdvance(employeeId, session);
+
+  // ── Total Salary = adjustedBasicSalary - advanceDeduction ────────────────
+  const totalSalary = adjustedBasicSalary - advanceDeduction;
 
   return {
     employee: {
       id: employee._id,
       name: employee.medicalRepName,
-      // The full contracted salary
       basicSalary: fullBasicSalary,
     },
     period,
@@ -197,12 +219,11 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
       swapLeaves: swapLeaveDays,
       leaveDeduction: unpaidLeaveDeduction,
       proratedBasicSalary,
-      // ── Adjusted salary (prorated − unpaid leave + extra time) ───────────
-      // This is what the UI should display as "Basic Salary ($)"
       adjustedBasicSalary,
       extraMinutes: totalExtraMinutes,
       extraTimeAmount,
-      // totalSalary = adjustedBasicSalary (before adding allowances)
+      // ── Advance deduction (from pending advances) ────────────────────────
+      advanceDeduction,
       totalSalary,
       calculationStartDate: startDate.toISOString().split("T")[0],
       calculationEndDate: calculationEndDate.toISOString().split("T")[0],
@@ -375,7 +396,6 @@ router.get("/", async (req, res) => {
         obj.joiningDate = obj.employeeId.date;
         obj.employeeEnabled = obj.employeeId.enabled;
         obj.MRId = obj.employeeId.MRId;
-        // Full contracted salary from basic payroll master
         obj.employeeBasicSalary = basicSalaryMap[obj.employeeId._id] || 0;
       } else {
         obj.employeeName = "Unknown";
@@ -388,11 +408,7 @@ router.get("/", async (req, res) => {
         obj.employeeBasicSalary = 0;
       }
 
-      // ── displayBasicSalary ─────────────────────────────────────────────
-      // For CURRENT-month payrolls: show adjustedBasicSalary (prorated − unpaid
-      // leave + extra time). Example: $604.31 when the MR was absent some days.
-      // For PREVIOUS-month bulk payrolls: basicSalary IS what was entered
-      // manually, so display it as-is.
+      // displayBasicSalary: for current-month show adjustedBasicSalary, else basicSalary
       obj.displayBasicSalary =
         obj.payrollType === "current" && obj.adjustedBasicSalary != null
           ? obj.adjustedBasicSalary
@@ -511,7 +527,7 @@ router.get("/export/csv", async (req, res) => {
         obj.MRId = "N/A";
         obj.employeeBasicSalary = 0;
       }
-      // Show adjusted salary in the export too
+
       obj.displayBasicSalary =
         obj.payrollType === "current" && obj.adjustedBasicSalary != null
           ? obj.adjustedBasicSalary
@@ -528,7 +544,6 @@ router.get("/export/csv", async (req, res) => {
       { label: "Employee Name", value: "employeeName" },
       { label: "Team", value: "teamName" },
       { label: "Period", value: "period" },
-      // Export shows BOTH the contracted salary and the displayed (adjusted) salary
       { label: "Contracted Basic Salary", value: "basicSalary" },
       {
         label: "Basic Salary (Adjusted/Displayed)",
@@ -665,7 +680,6 @@ router.get("/:id", async (req, res) => {
       data.email = data.employeeId.email;
       data.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0;
     }
-    // Add displayBasicSalary for single-fetch as well
     data.displayBasicSalary =
       data.payrollType === "current" && data.adjustedBasicSalary != null
         ? data.adjustedBasicSalary
@@ -779,14 +793,10 @@ router.post("/bulk", async (req, res) => {
             }))
         : [];
 
-      // For previous-month bulk payrolls:
-      // basicSalary stores the manually-entered salary (could be full or partial — user's choice)
-      // adjustedBasicSalary = same as basicSalary (no auto-proration for manual entries)
       const payrollData = {
         employeeId,
         period,
         basicSalary: basicNum,
-        // For previous-month manual entries the "adjusted" value is what the user typed
         adjustedBasicSalary: basicNum,
         proratedBasicSalary: basicNum,
         extraTimeAmount: 0,
@@ -824,13 +834,11 @@ router.post("/bulk", async (req, res) => {
 
     if (results.length === 0) {
       await session.abortTransaction();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "No records could be saved. See errors for details.",
-          errors,
-        });
+      return res.status(400).json({
+        success: false,
+        message: "No records could be saved. See errors for details.",
+        errors,
+      });
     }
 
     await session.commitTransaction();
@@ -850,21 +858,17 @@ router.post("/bulk", async (req, res) => {
     } catch (_) {}
     console.error("Bulk payroll fatal error:", error);
     if (error.name === "ValidationError") {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Validation error",
-          errors: Object.values(error.errors).map((v) => v.message),
-        });
-    }
-    res
-      .status(500)
-      .json({
+      return res.status(400).json({
         success: false,
-        message: "Failed to create bulk payroll",
-        error: error.message,
+        message: "Validation error",
+        errors: Object.values(error.errors).map((v) => v.message),
       });
+    }
+    res.status(500).json({
+      success: false,
+      message: "Failed to create bulk payroll",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -892,12 +896,10 @@ router.post("/", async (req, res) => {
     } = req.body;
 
     if (!employeeId || !period || !source)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Employee ID, period, and source account are required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID, period, and source account are required",
+      });
     if (!/^\d{4}-\d{2}$/.test(period))
       return res
         .status(400)
@@ -913,13 +915,11 @@ router.post("/", async (req, res) => {
       session,
     );
     if (!basicPayroll)
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message:
-            "Basic payroll record not found for employee. Please set basic salary first.",
-        });
+      return res.status(404).json({
+        success: false,
+        message:
+          "Basic payroll record not found for employee. Please set basic salary first.",
+      });
 
     const sourceAccount = await Account.findById(source).session(session);
     if (!sourceAccount)
@@ -932,13 +932,11 @@ router.post("/", async (req, res) => {
       period,
     }).session(session);
     if (existingPayroll)
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message:
-            "Payroll record already exists for this employee in the selected period",
-        });
+      return res.status(409).json({
+        success: false,
+        message:
+          "Payroll record already exists for this employee in the selected period",
+      });
 
     const salaryCalculation = await calculateSalaryForPeriod(
       employeeId,
@@ -946,15 +944,11 @@ router.post("/", async (req, res) => {
       session,
     );
 
-    // ── The ADJUSTED basic salary (prorated − unpaid leave + extra time) ──
-    // This is what gets shown in the UI as "Basic Salary ($)".
-    // e.g. $604.31 when the MR was absent for some days.
     const adjustedBasicSalaryNum =
       salaryCalculation.salaryCalculation.adjustedBasicSalary;
-
-    // ── The FULL contracted salary — stored in basicSalary field ───────────
-    // e.g. $1000. This is the "whole month salary" that is kept for reference.
     const fullBasicSalaryNum = salaryCalculation.salaryCalculation.basicSalary;
+    const advanceDeduction =
+      salaryCalculation.salaryCalculation.advanceDeduction;
 
     const deductionsNum = parseFloat(deductions) || 0;
     const leaveDeduction = salaryCalculation.salaryCalculation.leaveDeduction;
@@ -965,29 +959,27 @@ router.post("/", async (req, res) => {
     if (allowances && Array.isArray(allowances)) {
       for (const allowance of allowances) {
         if (!allowance.type || allowance.amount === undefined)
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: "Each allowance must have type and amount",
-            });
+          return res.status(400).json({
+            success: false,
+            message: "Each allowance must have type and amount",
+          });
         const amt = parseFloat(allowance.amount);
         if (isNaN(amt) || amt < 0)
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: "Allowance amount must be a valid non-negative number",
-            });
+          return res.status(400).json({
+            success: false,
+            message: "Allowance amount must be a valid non-negative number",
+          });
         totalAllowance += amt;
         processedAllowances.push({ type: allowance.type.trim(), amount: amt });
       }
     }
 
-    // ── Net salary = adjusted basic + allowances − deductions ─────────────
-    // Uses adjustedBasicSalary (e.g. $604.31), NOT the full $1000.
-    // This means the employee is paid what they actually earned.
-    const netSalary = adjustedBasicSalaryNum + totalAllowance - deductionsNum;
+    // Net salary after advance deduction
+    const netSalary =
+      adjustedBasicSalaryNum +
+      totalAllowance -
+      deductionsNum -
+      advanceDeduction;
     if (netSalary < 0)
       return res
         .status(400)
@@ -998,10 +990,7 @@ router.post("/", async (req, res) => {
     const payroll = new Payroll({
       employeeId,
       period,
-      // Store the FULL contracted salary so it's always on record
       basicSalary: fullBasicSalaryNum,
-      // Store the adjusted (prorated - unpaid leave + extra time) salary
-      // This is what the frontend should display as "Basic Salary ($)"
       adjustedBasicSalary: adjustedBasicSalaryNum,
       proratedBasicSalary:
         salaryCalculation.salaryCalculation.proratedBasicSalary,
@@ -1009,7 +998,6 @@ router.post("/", async (req, res) => {
       allowances: processedAllowances,
       totalAllowance,
       deductions: deductionsNum,
-      // netSalary uses the ADJUSTED salary, not the full salary
       netSalary,
       status: status || "pending",
       paymentMethod: paymentMethod || "bank",
@@ -1039,8 +1027,20 @@ router.post("/", async (req, res) => {
     });
 
     await payroll.save({ session });
-    // Deduct ACTUAL net salary (based on adjusted basic) from account
+    // Deduct the final net salary (after advance) from source account
     await updateAccountBalance(source, netSalary, "subtract", session);
+
+    // ─────────────────────────────────────────────────────────────────────
+    // NEW: Mark all pending advances for this employee as "adjusted"
+    // ─────────────────────────────────────────────────────────────────────
+    if (advanceDeduction > 0) {
+      await MrAdvance.updateMany(
+        { employeeId, status: "pending" },
+        { $set: { status: "adjusted" } },
+        { session }
+      );
+    }
+
     await session.commitTransaction();
 
     await payroll.populate(
@@ -1055,7 +1055,6 @@ router.post("/", async (req, res) => {
       responseData.teamName = responseData.employeeId.teamName;
       responseData.employeeBasicSalary = basicPayroll.currentBasicSalary;
     }
-    // Add displayBasicSalary to response
     responseData.displayBasicSalary = adjustedBasicSalaryNum;
 
     res.status(201).json({
@@ -1068,31 +1067,25 @@ router.post("/", async (req, res) => {
       await session.abortTransaction();
     } catch (_) {}
     if (error.name === "ValidationError")
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Validation error",
-          errors: Object.values(error.errors).map((v) => v.message),
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: Object.values(error.errors).map((v) => v.message),
+      });
     if (error.code === 11000)
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "Payroll record already exists for this period",
-        });
+      return res.status(409).json({
+        success: false,
+        message: "Payroll record already exists for this period",
+      });
     if (error.message.includes("Insufficient balance"))
       return res.status(400).json({ success: false, message: error.message });
     if (error.message.includes("not found"))
       return res.status(404).json({ success: false, message: error.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to create payroll",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to create payroll",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -1152,12 +1145,11 @@ router.put("/:id", async (req, res) => {
       );
     }
 
-    // For updates: if adjustedBasicSalary is being changed, use it; otherwise keep existing
+    // For updates, we don't recalc advance deduction; just use existing adjustedBasicSalary.
     if (req.body.adjustedBasicSalary !== undefined) {
       payroll.adjustedBasicSalary = parseFloat(req.body.adjustedBasicSalary);
     }
 
-    // Net salary uses adjustedBasicSalary for current-month, basicSalary for previous-month
     const baseForNet =
       payroll.payrollType === "current" && payroll.adjustedBasicSalary != null
         ? payroll.adjustedBasicSalary
@@ -1217,38 +1209,32 @@ router.put("/:id", async (req, res) => {
         ? responseData.adjustedBasicSalary
         : responseData.basicSalary;
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Payroll updated successfully",
-        data: responseData,
-      });
+    res.status(200).json({
+      success: true,
+      message: "Payroll updated successfully",
+      data: responseData,
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
     if (error.name === "ValidationError")
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Validation error",
-          errors: Object.values(error.errors).map((v) => v.message),
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: Object.values(error.errors).map((v) => v.message),
+      });
     if (error.name === "CastError")
       return res
         .status(400)
         .json({ success: false, message: "Invalid payroll ID" });
     if (error.message.includes("Insufficient balance"))
       return res.status(400).json({ success: false, message: error.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to update payroll",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to update payroll",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -1277,13 +1263,11 @@ router.delete("/:id", async (req, res) => {
       );
     await Payroll.findByIdAndDelete(req.params.id).session(session);
     await session.commitTransaction();
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Payroll deleted successfully",
-        data: { id: req.params.id },
-      });
+    res.status(200).json({
+      success: true,
+      message: "Payroll deleted successfully",
+      data: { id: req.params.id },
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
@@ -1292,13 +1276,11 @@ router.delete("/:id", async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Invalid payroll ID" });
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete payroll",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete payroll",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -1338,24 +1320,20 @@ router.delete("/", async (req, res) => {
       session,
     );
     await session.commitTransaction();
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: `${result.deletedCount} payroll(s) deleted successfully`,
-        data: { deletedCount: result.deletedCount },
-      });
+    res.status(200).json({
+      success: true,
+      message: `${result.deletedCount} payroll(s) deleted successfully`,
+      data: { deletedCount: result.deletedCount },
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete payrolls",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete payrolls",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }

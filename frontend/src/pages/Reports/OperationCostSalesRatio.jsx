@@ -1,20 +1,15 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import {
   TrendingDown,
   DollarSign,
   Calculator,
-  Download,
-  Search,
-  X,
-  Filter,
-  Calendar,
-  BarChart3,
-  Percent,
   FileDown,
+  Filter,
   Scale,
+  BarChart3,
+  X,
   ChevronLeft,
   ChevronRight,
-  Users,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -25,12 +20,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const OperationCostSalesRatio = () => {
   const [data, setData] = useState({
-    summary: {
-      operationCost: 0,
-      totalSales: 0,
-      ratio: 0,
-      totalProfit: 0,
-    },
+    summary: { operationCost: 0, totalSales: 0, ratio: 0, totalProfit: 0 },
     records: [],
     totals: {
       totalSale: 0,
@@ -44,14 +34,12 @@ const OperationCostSalesRatio = () => {
 
   const [loading, setLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
   const [selectedTab, setSelectedTab] = useState("currentMonth");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
     startDate: null,
     endDate: null,
   });
-
   const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -60,37 +48,28 @@ const OperationCostSalesRatio = () => {
     hasPrev: false,
   });
 
-  const inputRef = useRef(null);
   const itemsPerPage = 7;
 
-  const getSerialNumber = (index) => {
-    return (pagination.currentPage - 1) * itemsPerPage + index + 1;
-  };
+  const getSerialNumber = (index) =>
+    (pagination.currentPage - 1) * itemsPerPage + index + 1;
 
-  const getCurrentMonthName = () => {
-    return new Date().toLocaleString("default", { month: "long" });
-  };
+  const getCurrentMonthName = () =>
+    new Date().toLocaleString("default", { month: "long" });
 
-  const getCurrentYear = () => {
-    return new Date().getFullYear();
-  };
+  const getCurrentYear = () => new Date().getFullYear();
 
   const getPreviousMonthName = () => {
-    const previousMonth = new Date();
-    previousMonth.setMonth(previousMonth.getMonth() - 1);
-    return previousMonth.toLocaleString("default", { month: "long" });
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toLocaleString("default", { month: "long" });
   };
 
   const getJanToPreviousMonthDisplay = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
-    
-    if (currentMonth === 0) {
-      return `Jan - Dec ${currentYear - 1}`;
-    } else {
-      return `Jan - ${getPreviousMonthName()} ${currentYear}`;
-    }
+    if (currentMonth === 0) return `Jan - Dec ${currentYear - 1}`;
+    return `Jan - ${getPreviousMonthName()} ${currentYear}`;
   };
 
   const getDateRange = () => {
@@ -99,22 +78,7 @@ const OperationCostSalesRatio = () => {
     const currentMonth = today.getMonth();
 
     switch (selectedTab) {
-      case "today":
-        const todayStr = today.toISOString().split("T")[0];
-        return {
-          startDate: todayStr,
-          endDate: todayStr,
-          displayDate: todayStr,
-        };
-
-      case "all":
-        return {
-          startDate: null,
-          endDate: null,
-          displayDate: "All Records",
-        };
-
-      case "currentMonth":
+      case "currentMonth": {
         const firstDay = new Date(currentYear, currentMonth, 1);
         const lastDay = new Date(currentYear, currentMonth + 1, 0);
         return {
@@ -122,8 +86,8 @@ const OperationCostSalesRatio = () => {
           endDate: lastDay.toISOString().split("T")[0],
           displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`,
         };
-
-      case "janToPreviousMonth":
+      }
+      case "janToPreviousMonth": {
         const janFirst = new Date(currentYear, 0, 1);
         const lastMonthLastDay = new Date(currentYear, currentMonth, 0);
         return {
@@ -131,80 +95,63 @@ const OperationCostSalesRatio = () => {
           endDate: lastMonthLastDay.toISOString().split("T")[0],
           displayDate: getJanToPreviousMonthDisplay(),
         };
-
-      case "custom":
+      }
+      case "all":
+        return { startDate: null, endDate: null, displayDate: "All Records" };
+      case "custom": {
         const startStr = customDateRange.startDate
           ? customDateRange.startDate.toISOString().split("T")[0]
           : "";
         const endStr = customDateRange.endDate
           ? customDateRange.endDate.toISOString().split("T")[0]
           : "";
-
         return {
           startDate: startStr,
           endDate: endStr,
           displayDate:
-            customDateRange.startDate && customDateRange.endDate
+            startStr && endStr
               ? `${startStr} - ${endStr}`
               : "Select custom dates",
         };
-
+      }
       default:
-        return {
-          startDate: null,
-          endDate: null,
-          displayDate: "Current Month",
-        };
+        return { startDate: null, endDate: null, displayDate: "All Records" };
     }
   };
 
-  const fetchOperationCostSalesData = async (page = 1, search = searchTerm) => {
+  const fetchData = async (page = 1) => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
 
-      let params = {
-        page: page,
-        limit: itemsPerPage,
-        dateFilter: selectedTab,
-      };
+      if (
+        selectedTab === "custom" &&
+        (!customDateRange.startDate || !customDateRange.endDate)
+      ) {
+        setLoading(false);
+        return;
+      }
 
+      const params = { page, limit: itemsPerPage, dateFilter: selectedTab };
       if (selectedTab !== "all") {
-        if (selectedTab === "custom" && (!dateRange.startDate || !dateRange.endDate)) {
-          setLoading(false);
-          showToast("warning", "Please select both start and end dates for custom filter");
-          return;
-        }
-
         if (dateRange.startDate) params.startDate = dateRange.startDate;
         if (dateRange.endDate) params.endDate = dateRange.endDate;
       }
 
-      if (search && search.trim() !== "") {
-        params.search = search.trim();
-      }
-
-      const response = await axios.get(`${backendUrl}/api/reports/operation-cost-sales-ratio`, {
-        params,
-      });
+      const response = await axios.get(
+        `${backendUrl}/api/reports/operation-cost-sales-ratio`,
+        { params },
+      );
 
       if (response.data.success) {
-        const summary = response.data.data?.summary || {
-          operationCost: 0,
-          totalSales: 0,
-          ratio: 0,
-          totalProfit: 0,
-        };
-
-        const safeSummary = {
-          operationCost: parseFloat(summary.operationCost) || 0,
-          totalSales: parseFloat(summary.totalSales) || 0,
-          ratio: parseFloat(summary.ratio) || 0,
-          totalProfit: parseFloat(summary.totalProfit) || 0,
-        };
-
+        const summary = response.data.data?.summary || {};
         setData({
-          summary: safeSummary,
+          summary: {
+            operationCost: parseFloat(summary.operationCost) || 0,
+            totalSales: parseFloat(summary.totalSales) || 0,
+            ratio: parseFloat(summary.ratio) || 0,
+            totalProfit: parseFloat(summary.totalProfit) || 0,
+          },
           records: response.data.data?.records || [],
           totals: response.data.data?.totals || {
             totalSale: 0,
@@ -213,9 +160,8 @@ const OperationCostSalesRatio = () => {
             totalPayroll: 0,
             totalProfit: 0,
             totalSaleCount: 0,
-          }
+          },
         });
-
         setPagination(
           response.data.pagination || {
             currentPage: 1,
@@ -223,21 +169,19 @@ const OperationCostSalesRatio = () => {
             totalRecords: 0,
             hasNext: false,
             hasPrev: false,
-          }
+          },
         );
       } else {
         throw new Error(response.data.message || "Failed to fetch data");
       }
     } catch (error) {
-      console.error("Error fetching operation cost sales ratio data:", error);
-      showToast("error", error.response?.data?.message || "Failed to fetch operation cost sales ratio data");
+      console.error("Error fetching data:", error);
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to fetch data",
+      );
       setData({
-        summary: {
-          operationCost: 0,
-          totalSales: 0,
-          ratio: 0,
-          totalProfit: 0,
-        },
+        summary: { operationCost: 0, totalSales: 0, ratio: 0, totalProfit: 0 },
         records: [],
         totals: {
           totalSale: 0,
@@ -263,7 +207,7 @@ const OperationCostSalesRatio = () => {
   useEffect(() => {
     if (selectedTab === "custom") {
       if (customDateRange.startDate && customDateRange.endDate) {
-        fetchOperationCostSalesData(1);
+        fetchData(1);
       } else {
         setData({
           summary: {
@@ -291,78 +235,47 @@ const OperationCostSalesRatio = () => {
         });
       }
     } else {
-      fetchOperationCostSalesData(1);
+      fetchData(1);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab]);
 
   useEffect(() => {
-    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
-      fetchOperationCostSalesData(1);
+    if (
+      selectedTab === "custom" &&
+      customDateRange.startDate &&
+      customDateRange.endDate
+    ) {
+      fetchData(1);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customDateRange.startDate, customDateRange.endDate]);
-
-  const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) {
-      fetchOperationCostSalesData(page);
-    }
-  };
-
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-  };
-
-  const handleClearSearch = () => {
-    setSearchTerm("");
-    fetchOperationCostSalesData(1);
-  };
-
-  const handleCustomDateChange = (name, date) => {
-    setCustomDateRange((prev) => ({ ...prev, [name]: date }));
-  };
-
-  useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      fetchOperationCostSalesData(1, searchTerm);
-    }, 500);
-
-    return () => clearTimeout(delayDebounce);
-  }, [searchTerm]);
-
-  const handleApplyCustomFilter = () => {
-    if (!customDateRange.startDate || !customDateRange.endDate) {
-      showToast("warning", "Please select both start and end dates");
-      return;
-    }
-
-    if (customDateRange.startDate > customDateRange.endDate) {
-      showToast("warning", "Start date cannot be after end date");
-      return;
-    }
-
-    setSelectedTab("custom");
-    setShowCustomFilter(false);
-    fetchOperationCostSalesData(1);
-  };
 
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
     if (tab === "custom") {
       setShowCustomFilter(true);
     } else {
-      setCustomDateRange({
-        startDate: null,
-        endDate: null,
-      });
+      setCustomDateRange({ startDate: null, endDate: null });
       setShowCustomFilter(false);
     }
   };
 
+  const handleApplyCustomFilter = () => {
+    if (!customDateRange.startDate || !customDateRange.endDate) {
+      showToast("warning", "Please select both start and end dates");
+      return;
+    }
+    if (customDateRange.startDate > customDateRange.endDate) {
+      showToast("warning", "Start date cannot be after end date");
+      return;
+    }
+    setShowCustomFilter(false);
+    fetchData(1);
+  };
+
   const handleClearFilters = () => {
-    setCustomDateRange({
-      startDate: null,
-      endDate: null,
-    });
-    setSearchTerm("");
+    setCustomDateRange({ startDate: null, endDate: null });
     setSelectedTab("currentMonth");
     setShowCustomFilter(false);
   };
@@ -372,38 +285,24 @@ const OperationCostSalesRatio = () => {
       showToast("warning", "No data found to export");
       return;
     }
-
     setExportLoading(true);
     try {
       const dateRange = getDateRange();
-
-      const params = {
-        dateFilter: selectedTab,
-        search: searchTerm.trim() || undefined,
-      };
-
+      const params = { dateFilter: selectedTab };
       if (selectedTab !== "all") {
         if (dateRange.startDate) params.startDate = dateRange.startDate;
         if (dateRange.endDate) params.endDate = dateRange.endDate;
       }
-
       const response = await axios.get(
         `${backendUrl}/api/reports/operation-cost-sales-ratio/export`,
-        {
-          params,
-          responseType: "blob",
-        }
+        { params, responseType: "blob" },
       );
-
       let filename = "operation-cost-sales-ratio-report.xlsx";
-      const contentDisposition = response.headers["content-disposition"];
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
-        if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1];
-        }
+      const cd = response.headers["content-disposition"];
+      if (cd) {
+        const match = cd.match(/filename="(.+)"/);
+        if (match?.[1]) filename = match[1];
       }
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -412,11 +311,9 @@ const OperationCostSalesRatio = () => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-
       showToast("success", "Excel report downloaded successfully");
     } catch (error) {
-      console.error("Error exporting to Excel:", error);
-      if (error.response && error.response.status === 404) {
+      if (error.response?.status === 404) {
         showToast("warning", "No data found for the selected filters");
       } else {
         showToast("error", "Failed to export Excel report");
@@ -424,11 +321,6 @@ const OperationCostSalesRatio = () => {
     } finally {
       setExportLoading(false);
     }
-  };
-
-  const getActiveFilterDisplay = () => {
-    const dateRange = getDateRange();
-    return dateRange.displayDate || "Current Month";
   };
 
   const formatCurrency = (amount) => {
@@ -443,8 +335,7 @@ const OperationCostSalesRatio = () => {
 
   const formatPercentage = (value) => {
     const num = parseFloat(value);
-    if (isNaN(num)) return "0.00%";
-    return `${num.toFixed(2)}%`;
+    return isNaN(num) ? "0.00%" : `${num.toFixed(2)}%`;
   };
 
   const formatRatio = (value) => {
@@ -458,47 +349,31 @@ const OperationCostSalesRatio = () => {
     return "text-red-600";
   };
 
-  const getPercentageColor = (percentage) => {
-    if (percentage <= 10) return "text-green-600";
-    if (percentage <= 20) return "text-yellow-600";
-    return "text-red-600";
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric"
-      });
-    } catch {
-      return dateString;
-    }
-  };
-
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
-
-    const maxVisiblePages = 5;
-    let startPage = Math.max(1, pagination.currentPage - Math.floor(maxVisiblePages / 2));
-    let endPage = Math.min(pagination.totalPages, startPage + maxVisiblePages - 1);
-
-    if (endPage - startPage + 1 < maxVisiblePages) {
-      startPage = Math.max(1, endPage - maxVisiblePages + 1);
-    }
-
+    const maxVisible = 5;
+    let start = Math.max(
+      1,
+      pagination.currentPage - Math.floor(maxVisible / 2),
+    );
+    let end = Math.min(pagination.totalPages, start + maxVisible - 1);
+    if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1);
     const pages = [];
-    for (let i = startPage; i <= endPage; i++) {
-      pages.push(i);
-    }
+    for (let i = start; i <= end; i++) pages.push(i);
 
     return (
       <div className="flex items-center justify-between mt-6">
+        <div className="text-sm text-gray-700">
+          Showing {(pagination.currentPage - 1) * itemsPerPage + 1} to{" "}
+          {Math.min(
+            pagination.currentPage * itemsPerPage,
+            pagination.totalRecords,
+          )}{" "}
+          of {pagination.totalRecords} entries
+        </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => handlePageChange(pagination.currentPage - 1)}
+            onClick={() => fetchData(pagination.currentPage - 1)}
             disabled={!pagination.hasPrev}
             className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
               pagination.hasPrev
@@ -506,15 +381,13 @@ const OperationCostSalesRatio = () => {
                 : "bg-gray-100 text-gray-400 cursor-not-allowed"
             }`}
           >
-            <ChevronLeft className="w-4 h-4" />
-            Prev
+            <ChevronLeft className="w-4 h-4" /> Prev
           </button>
-
           <div className="flex gap-1">
             {pages.map((page) => (
               <button
                 key={page}
-                onClick={() => handlePageChange(page)}
+                onClick={() => fetchData(page)}
                 className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
                   page === pagination.currentPage
                     ? "bg-indigo-600 text-white"
@@ -525,9 +398,8 @@ const OperationCostSalesRatio = () => {
               </button>
             ))}
           </div>
-
           <button
-            onClick={() => handlePageChange(pagination.currentPage + 1)}
+            onClick={() => fetchData(pagination.currentPage + 1)}
             disabled={!pagination.hasNext}
             className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
               pagination.hasNext
@@ -535,164 +407,26 @@ const OperationCostSalesRatio = () => {
                 : "bg-gray-100 text-gray-400 cursor-not-allowed"
             }`}
           >
-            Next
-            <ChevronRight className="w-4 h-4" />
+            Next <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       </div>
     );
   };
 
-  const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Operation Cost</p>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                formatCurrency(data.summary.operationCost)
-              )}
-            </div>
-            <div className="flex gap-2 mt-1">
-              <p className="text-xs text-gray-500">
-                Expense: {formatCurrency(data.totals.totalExpense)}
-              </p>
-              <p className="text-xs text-gray-500">
-                Payroll: {formatCurrency(data.totals.totalPayroll)}
-              </p>
-            </div>
-          </div>
-          <TrendingDown className="w-8 h-8 text-red-500" />
-        </div>
-      </div>
-      
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Total Sales</p>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                formatCurrency(data.summary.totalSales)
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {data.totals.totalSaleCount} invoices
-            </p>
-          </div>
-          <DollarSign className="w-8 h-8 text-blue-500" />
-        </div>
-      </div>
-      
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Operation Cost/Sales Ratio</p>
-            <div className={`text-2xl font-bold mt-1 ${getRatioColor(data.summary.ratio)}`}>
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                formatRatio(data.summary.ratio)
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {formatPercentage(data.summary.ratio * 100)}
-            </p>
-          </div>
-          <Scale className="w-8 h-8 text-purple-500" />
-        </div>
-      </div>
-      
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Profit</p>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                formatCurrency(data.summary.totalProfit)
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              COGS: {formatCurrency(data.totals.totalCOG)}
-            </p>
-          </div>
-          <BarChart3 className="w-8 h-8 text-green-500" />
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderTableHeaders = () => (
-    <thead className="bg-gray-100 text-gray-700 border-b">
-      <tr>
-        <th className="p-3 text-sm font-medium">Sr.No</th>
-        <th className="p-3 text-sm font-medium">Date</th>
-        <th className="p-3 text-sm font-medium">Sale ($)</th>
-        <th className="p-3 text-sm font-medium">COG ($)</th>
-        <th className="p-3 text-sm font-medium">Expense ($)</th>
-        <th className="p-3 text-sm font-medium">Payroll ($)</th>
-        <th className="p-3 text-sm font-medium">Percentage (%)</th>
-        <th className="p-3 text-sm font-medium">Profit ($)</th>
-      </tr>
-    </thead>
-  );
-
-  const renderTableRow = (record, index) => {
-    return (
-      <tr
-        key={`${record.date}-${index}`}
-        className={`hover:bg-gray-50 ${index === data.records.length - 1 ? "" : "border-b"}`}
-      >
-        <td className="p-3">
-          <div className="text-sm text-gray-600 font-medium">
-            {getSerialNumber(index)}
-          </div>
-        </td>
-        <td className="p-3 text-sm text-gray-600">
-          {formatDate(record.date)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-blue-600">
-          {formatCurrency(record.sale)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-red-600">
-          {formatCurrency(record.cog)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-orange-600">
-          {formatCurrency(record.expense)}
-        </td>
-        <td className="p-3 text-sm font-semibold text-purple-600">
-          {formatCurrency(record.payroll)}
-        </td>
-        <td className="p-3">
-          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-            record.percentage < 10
-              ? "bg-green-100 text-green-800"
-              : record.percentage < 20
-              ? "bg-yellow-100 text-yellow-800"
-              : "bg-red-100 text-red-800"
-          }`}>
-            {formatPercentage(record.percentage)}
-          </span>
-        </td>
-        <td className="p-3 text-sm font-semibold text-green-600">
-          {formatCurrency(record.profit)}
-        </td>
-      </tr>
-    );
-  };
-
-  const getColSpan = () => {
-    return 8; // Number of columns in the table
-  };
+  const tabs = [
+    {
+      key: "currentMonth",
+      label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
+    },
+    { key: "janToPreviousMonth", label: getJanToPreviousMonthDisplay() },
+    { key: "all", label: "All Records" },
+    { key: "custom", label: "Custom Filter" },
+  ];
 
   return (
     <div className="p-6">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div className="flex items-center gap-3">
           <Calculator className="w-8 h-8 text-indigo-600" />
@@ -701,109 +435,167 @@ const OperationCostSalesRatio = () => {
               Operation Cost / Sales Ratio Report
             </h1>
             <p className="text-sm text-gray-600">
-              Analyze operational efficiency by comparing operation costs to total sales
+              Analyze operational efficiency by comparing operation costs to
+              total sales
             </p>
           </div>
         </div>
-
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-          <button
-            onClick={exportToExcel}
-            disabled={exportLoading || data.records.length === 0}
-            className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg shadow-md transition-colors min-w-[140px]"
-          >
-            {exportLoading ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                <span>Exporting...</span>
-              </>
-            ) : (
-              <>
-                <FileDown size={18} />
-                <span>Export Excel</span>
-              </>
-            )}
-          </button>
-        </div>
+        <button
+          onClick={exportToExcel}
+          disabled={exportLoading || data.records.length === 0}
+          className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg shadow-md transition-colors min-w-[140px]"
+        >
+          {exportLoading ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+              <span>Exporting...</span>
+            </>
+          ) : (
+            <>
+              <FileDown size={18} />
+              <span>Export Excel</span>
+            </>
+          )}
+        </button>
       </div>
 
-      {/* Time Filter Tabs */}
+      {/* Date Filter Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            onClick={() => handleTabChange("today")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "today"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Today
-          </button>
-          <button
-            onClick={() => handleTabChange("all")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "all"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            All Records
-          </button>
-          <button
-            onClick={() => handleTabChange("currentMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "currentMonth"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Current Month ({getCurrentMonthName()} {getCurrentYear()})
-          </button>
-          <button
-            onClick={() => handleTabChange("janToPreviousMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "janToPreviousMonth"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            {getJanToPreviousMonthDisplay()}
-          </button>
-          <button
-            onClick={() => handleTabChange("custom")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "custom"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Custom Filter
-          </button>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {tabs.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => handleTabChange(key)}
+              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
+                selectedTab === key
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-
-        {/* Active Filter Display */}
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <Filter size={16} />
-          <span>Active Filter: </span>
-          <span className="font-medium">{getActiveFilterDisplay()}</span>
+          <span>Active Filter:</span>
+          <span className="font-medium text-indigo-700">
+            {getDateRange().displayDate}
+          </span>
         </div>
       </div>
 
-      {renderSummaryCards()}
-      
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Operation Cost</p>
+              <div className="text-2xl font-bold text-gray-800">
+                {loading ? (
+                  <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  formatCurrency(data.summary.operationCost)
+                )}
+              </div>
+              <div className="flex gap-2 mt-1">
+                <p className="text-xs text-gray-500">
+                  Expense: {formatCurrency(data.totals.totalExpense)}
+                </p>
+                <p className="text-xs text-gray-500">
+                  Payroll: {formatCurrency(data.totals.totalPayroll)}
+                </p>
+              </div>
+            </div>
+            <TrendingDown className="w-8 h-8 text-red-500" />
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Total Sales</p>
+              <div className="text-2xl font-bold text-gray-800">
+                {loading ? (
+                  <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  formatCurrency(data.summary.totalSales)
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {data.totals.totalSaleCount} invoices
+              </p>
+            </div>
+            <DollarSign className="w-8 h-8 text-blue-500" />
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">
+                Operation Cost / Sales Ratio
+              </p>
+              <div
+                className={`text-2xl font-bold mt-1 ${getRatioColor(
+                  data.summary.ratio,
+                )}`}
+              >
+                {loading ? (
+                  <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  formatRatio(data.summary.ratio)
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {formatPercentage(data.summary.ratio * 100)}
+              </p>
+            </div>
+            <Scale className="w-8 h-8 text-purple-500" />
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Profit</p>
+              <div className="text-2xl font-bold text-gray-800">
+                {loading ? (
+                  <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  formatCurrency(data.summary.totalProfit)
+                )}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                COGS: {formatCurrency(data.totals.totalCOG)}
+              </p>
+            </div>
+            <BarChart3 className="w-8 h-8 text-green-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Table — NO Date column */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          {renderTableHeaders()}
+          <thead className="bg-gray-100 text-gray-700 border-b">
+            <tr>
+              <th className="p-3 text-sm font-medium">Sr.No</th>
+              <th className="p-3 text-sm font-medium">Sale ($)</th>
+              <th className="p-3 text-sm font-medium">COG ($)</th>
+              <th className="p-3 text-sm font-medium">Expense ($)</th>
+              <th className="p-3 text-sm font-medium">Payroll ($)</th>
+              <th className="p-3 text-sm font-medium">Percentage (%)</th>
+              <th className="p-3 text-sm font-medium">Profit ($)</th>
+            </tr>
+          </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={getColSpan()} className="p-8 text-center">
+                <td colSpan={7} className="p-8 text-center">
                   <div className="flex flex-col items-center justify-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
-                    <span className="text-gray-600">
-                      Loading operation cost sales ratio data...
-                    </span>
+                    <span className="text-gray-600">Loading data...</span>
                     <span className="text-sm text-gray-500 mt-2">
                       Please wait while we fetch the latest data
                     </span>
@@ -811,10 +603,49 @@ const OperationCostSalesRatio = () => {
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
-              data.records.map((record, index) => renderTableRow(record, index))
+              data.records.map((record, index) => (
+                <tr
+                  key={index}
+                  className={`hover:bg-gray-50 ${
+                    index === data.records.length - 1 ? "" : "border-b"
+                  }`}
+                >
+                  <td className="p-3 text-sm text-gray-600 font-medium">
+                    {getSerialNumber(index)}
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-blue-600">
+                    {formatCurrency(record.sale)}
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-red-600">
+                    {formatCurrency(record.cog)}
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-orange-600">
+                    {formatCurrency(record.expense)}
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-purple-600">
+                    {formatCurrency(record.payroll)}
+                  </td>
+                  <td className="p-3">
+                    <span
+                      className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                        record.percentage < 10
+                          ? "bg-green-100 text-green-800"
+                          : record.percentage < 20
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-red-100 text-red-800"
+                      }`}
+                    >
+                      {formatPercentage(record.percentage)}
+                    </span>
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-green-600">
+                    {formatCurrency(record.profit)}
+                  </td>
+                </tr>
+              ))
             ) : (
               <tr>
-                <td colSpan={getColSpan()} className="p-8 text-center">
+                <td colSpan={7} className="p-8 text-center">
                   <Calculator className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
                     No data found
@@ -822,10 +653,8 @@ const OperationCostSalesRatio = () => {
                   <p className="text-gray-500 max-w-md mx-auto">
                     {selectedTab === "custom" &&
                     (!customDateRange.startDate || !customDateRange.endDate)
-                      ? "Please select start and end dates"
-                      : searchTerm
-                      ? `No data found for "${searchTerm}". Try a different search term.`
-                      : "No operation cost sales ratio data available for the selected date range."}
+                      ? "Please select start and end dates to view data."
+                      : "No data available for the selected date range."}
                   </p>
                 </td>
               </tr>
@@ -836,6 +665,7 @@ const OperationCostSalesRatio = () => {
 
       {renderPagination()}
 
+      {/* Custom Filter Modal */}
       {showCustomFilter && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
           <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg">
@@ -850,7 +680,6 @@ const OperationCostSalesRatio = () => {
                 <X size={20} />
               </button>
             </div>
-
             <div className="space-y-4 mb-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -858,7 +687,9 @@ const OperationCostSalesRatio = () => {
                 </label>
                 <DatePicker
                   selected={customDateRange.startDate}
-                  onChange={(date) => handleCustomDateChange("startDate", date)}
+                  onChange={(date) =>
+                    setCustomDateRange((prev) => ({ ...prev, startDate: date }))
+                  }
                   selectsStart
                   startDate={customDateRange.startDate}
                   endDate={customDateRange.endDate}
@@ -868,14 +699,15 @@ const OperationCostSalesRatio = () => {
                   isClearable
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   End Date
                 </label>
                 <DatePicker
                   selected={customDateRange.endDate}
-                  onChange={(date) => handleCustomDateChange("endDate", date)}
+                  onChange={(date) =>
+                    setCustomDateRange((prev) => ({ ...prev, endDate: date }))
+                  }
                   selectsEnd
                   startDate={customDateRange.startDate}
                   endDate={customDateRange.endDate}
@@ -887,7 +719,6 @@ const OperationCostSalesRatio = () => {
                 />
               </div>
             </div>
-
             <div className="flex justify-between gap-3">
               <button
                 onClick={handleClearFilters}

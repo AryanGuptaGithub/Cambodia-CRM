@@ -194,7 +194,6 @@ const DailyReports = () => {
           return;
         }
 
-        // Add date parameters for all non-"all" tabs
         if (dateRange.startDate && dateRange.endDate) {
           params = {
             ...params,
@@ -208,7 +207,6 @@ const DailyReports = () => {
         params.search = search.trim();
       }
 
-      // Handle sale type filtering - pass the active sale type tab
       if (selectedSaleType !== "Total sales") {
         params.saleType = selectedSaleType;
       }
@@ -220,7 +218,6 @@ const DailyReports = () => {
         },
       );
 
-      // Add custom date display to records if it's a custom filter
       let records = response.data.data?.records || [];
 
       // If it's a custom date filter, override the date with the selected range
@@ -231,7 +228,7 @@ const DailyReports = () => {
       ) {
         records = records.map((record) => ({
           ...record,
-          date: dateRange.displayDate, // Use the custom date range as display
+          date: dateRange.displayDate,
         }));
       }
 
@@ -260,7 +257,6 @@ const DailyReports = () => {
       console.error("Error fetching daily reports:", error);
       showToast("error", "Failed to fetch daily reports data");
 
-      // Reset data on error
       setData({
         summary: {
           totalSalesAmount: 0,
@@ -290,8 +286,7 @@ const DailyReports = () => {
         `${backendUrl}/api/reports/daily-reports/types`,
       );
       const types = response.data || [];
-      const allTypes = [...types];
-      setSaleTypes(allTypes);
+      setSaleTypes(types);
     } catch (error) {
       console.error("Error fetching sale types:", error);
       showToast("error", "Failed to fetch sale types");
@@ -299,7 +294,6 @@ const DailyReports = () => {
   };
 
   useEffect(() => {
-    // Automatically select the type with sequenceNumber === 1 on first load
     const defaultType = saleTypes.find(
       (typeObj) => typeObj.sequenceNumber === 1,
     );
@@ -308,14 +302,11 @@ const DailyReports = () => {
     }
   }, [saleTypes]);
 
-  // Fetch data when ANY tab changes (both date and sale type tabs)
   useEffect(() => {
     if (selectedTab === "custom") {
-      // For custom tab, don't fetch until dates are selected
       if (customDateRange.startDate && customDateRange.endDate) {
         fetchDailyReports(1);
       } else {
-        // Clear data when custom tab is selected but no dates are chosen
         setData({
           summary: {
             totalSalesAmount: 0,
@@ -329,12 +320,10 @@ const DailyReports = () => {
         });
       }
     } else {
-      // For other tabs, fetch immediately with current active values
       fetchDailyReports(1);
     }
   }, [selectedTab, selectedSaleType]);
 
-  // Fetch data when custom dates change (only for custom tab)
   useEffect(() => {
     if (
       selectedTab === "custom" &&
@@ -345,7 +334,6 @@ const DailyReports = () => {
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
 
-  // Fetch sale types on component mount and set default
   useEffect(() => {
     fetchSaleTypes();
   }, []);
@@ -369,7 +357,7 @@ const DailyReports = () => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   };
 
-  // Debounced search effect
+  // Debounced search
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       fetchDailyReports(1, searchTerm);
@@ -427,7 +415,6 @@ const DailyReports = () => {
   };
 
   const exportToExcel = async () => {
-    // Check if there's data to export
     if (data.records.length === 0) {
       showToast("warning", "No data found to export");
       return;
@@ -437,31 +424,27 @@ const DailyReports = () => {
     try {
       const dateRange = getDateRange();
 
-      // Prepare export parameters
       const exportParams = {
         saleType:
           selectedSaleType !== "Total sales" ? selectedSaleType : undefined,
         dateFilter: selectedTab,
         search: searchTerm.trim() || undefined,
-        export: true, // Flag to indicate this is an export request
+        export: true,
       };
 
-      // Add date parameters for non-"all" tabs
       if (selectedTab !== "all" && dateRange.startDate && dateRange.endDate) {
         exportParams.startDate = dateRange.startDate;
         exportParams.endDate = dateRange.endDate;
       }
 
-      // Make request to export endpoint
       const response = await axios.get(
         `${backendUrl}/api/reports/daily-reports/export`,
         {
           params: exportParams,
-          responseType: "blob", // Important for file download
+          responseType: "blob",
         },
       );
 
-      // Get filename from response headers or create one
       let filename = "daily_reports.xlsx";
       const contentDisposition = response.headers["content-disposition"];
       if (contentDisposition) {
@@ -471,15 +454,12 @@ const DailyReports = () => {
         }
       }
 
-      // Create download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute("download", filename);
       document.body.appendChild(link);
       link.click();
-
-      // Clean up
       link.remove();
       window.URL.revokeObjectURL(url);
 
@@ -496,16 +476,11 @@ const DailyReports = () => {
     }
   };
 
-  const formatDateForDisplay = (date) => {
-    return date ? formatDateToReadable(date) : "";
-  };
-
   const getActiveFilterDisplay = () => {
     const dateRange = getDateRange();
     return dateRange.displayDate || "Today";
   };
 
-  // Render Pagination Component
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
 
@@ -523,7 +498,6 @@ const DailyReports = () => {
           ← Prev
         </button>
 
-        {/* Page Numbers */}
         <div className="flex gap-1">
           {visiblePages.map((page, index) => (
             <button
@@ -545,7 +519,6 @@ const DailyReports = () => {
           ))}
         </div>
 
-        {/* Next Button */}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
@@ -628,7 +601,6 @@ const DailyReports = () => {
     </div>
   );
 
-  // Add credit and cash breakdown section - show/hide based on selected sale type
   const renderPaymentBreakdown = () => {
     const columns = getTableColumns();
 
@@ -733,10 +705,8 @@ const DailyReports = () => {
     );
   };
 
-  // Calculate colspan for loading and empty states
   const getColSpan = () => {
     const columns = getTableColumns();
-    // Base columns: Sr.No, MR Name, Contact, Total Sales, Date = 5 columns
     let colCount = 5;
     if (columns.includes("credits")) colCount++;
     if (columns.includes("cash")) colCount++;
@@ -949,7 +919,6 @@ const DailyReports = () => {
               </h2>
 
               <div className="space-y-4 mb-6">
-                {/* Date Range */}
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">

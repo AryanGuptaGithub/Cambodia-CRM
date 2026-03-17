@@ -56,7 +56,7 @@ const MultipleSelectDropdown = ({
   const dropdownRef = useRef(null);
 
   const filteredOptions = options.filter((o) =>
-    o.label.toLowerCase().includes(searchTerm.toLowerCase())
+    o.label.toLowerCase().includes(searchTerm.toLowerCase()),
   );
   const toggleOption = (v) =>
     onChange(value.includes(v) ? value.filter((x) => x !== v) : [...value, v]);
@@ -228,17 +228,10 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
     const n = typeof v === "number" ? v : parseFloat(v);
     return isNaN(n) ? 0 : n;
   };
-  const rows = [
-    ["Basic Salary", `$${fmt(calculation.basicSalary)}`],
-    ["Per Day Salary", `$${fmt(calculation.perDaySalary)}`],
-    ["Per Minute Salary", `$${fmt(calculation.perMinuteSalary)}`],
-    ["Working Days", fmtN(calculation.totalWorkingDays)],
-    ["Present Days", fmtN(calculation.presentDays)],
-    ["Total Leaves", fmtN(calculation.totalLeaves)],
-    ["Paid Leaves", fmtN(calculation.paidLeaves)],
-    ["Unpaid Leaves", fmtN(calculation.unpaidLeaves)],
-    ["Swap Leaves", fmtN(calculation.swapLeaves)],
-  ];
+
+  const advanceDeduction = calculation.advanceDeduction || 0;
+  const totalAfterAdvance = (calculation.totalSalary || 0) - advanceDeduction;
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md">
@@ -252,38 +245,78 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
           </button>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {rows.map(([k, v]) => (
-            <React.Fragment key={k}>
-              <div className="text-sm font-medium text-gray-700">{k}:</div>
-              <div className="text-sm">{v}</div>
-            </React.Fragment>
-          ))}
+          <div className="text-sm font-medium text-gray-700">Basic Salary:</div>
+          <div className="text-sm">${fmt(calculation.basicSalary)}</div>
+
+          <div className="text-sm font-medium text-gray-700">
+            Per Day Salary:
+          </div>
+          <div className="text-sm">${fmt(calculation.perDaySalary)}</div>
+
+          <div className="text-sm font-medium text-gray-700">
+            Per Minute Salary:
+          </div>
+          <div className="text-sm">${fmt(calculation.perMinuteSalary)}</div>
+
+          <div className="text-sm font-medium text-gray-700">Working Days:</div>
+          <div className="text-sm">{fmtN(calculation.totalWorkingDays)}</div>
+
+          <div className="text-sm font-medium text-gray-700">Present Days:</div>
+          <div className="text-sm">{fmtN(calculation.presentDays)}</div>
+
+          <div className="text-sm font-medium text-gray-700">Total Leaves:</div>
+          <div className="text-sm">{fmtN(calculation.totalLeaves)}</div>
+
+          <div className="text-sm font-medium text-gray-700">Paid Leaves:</div>
+          <div className="text-sm">{fmtN(calculation.paidLeaves)}</div>
+
+          <div className="text-sm font-medium text-gray-700">
+            Unpaid Leaves:
+          </div>
+          <div className="text-sm">{fmtN(calculation.unpaidLeaves)}</div>
+
+          <div className="text-sm font-medium text-gray-700">Swap Leaves:</div>
+          <div className="text-sm">{fmtN(calculation.swapLeaves)}</div>
+
           <div className="text-sm font-medium text-red-600">
             Leave Deduction:
           </div>
           <div className="text-sm text-red-600">
             -${fmt(calculation.leaveDeduction)}
           </div>
+
           <div className="text-sm font-medium text-gray-700">
             Adjusted Basic Salary:
           </div>
           <div className="text-sm">${fmt(calculation.adjustedBasicSalary)}</div>
+
           <div className="text-sm font-medium text-green-600">
             Extra Minutes:
           </div>
           <div className="text-sm text-green-600">
             {fmt(calculation.extraMinutes)} mins
           </div>
+
           <div className="text-sm font-medium text-green-600">
             Extra Time Amount:
           </div>
           <div className="text-sm text-green-600">
             +${fmt(calculation.extraTimeAmount)}
           </div>
+
+          {advanceDeduction > 0 && (
+            <>
+              <div className="text-sm font-medium text-red-600">
+                Advance Deduction:
+              </div>
+              <div className="text-sm text-red-600">
+                -${fmt(advanceDeduction)}
+              </div>
+            </>
+          )}
+
           <div className="text-sm font-medium text-gray-700">Total Salary:</div>
-          <div className="text-sm font-semibold">
-            ${fmt(calculation.totalSalary)}
-          </div>
+          <div className="text-sm font-semibold">${fmt(totalAfterAdvance)}</div>
         </div>
         <div className="mt-4 flex justify-end">
           <button
@@ -300,9 +333,7 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
 
 // ─────────────────────────────────────────────
 // HOOK: fetch ALL MRs from Staff collection
-// Used exclusively by the Previous Month tab
 // ─────────────────────────────────────────────
-
 const useAllMRList = () => {
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(true);
@@ -311,7 +342,6 @@ const useAllMRList = () => {
     const load = async () => {
       try {
         setMrListLoading(true);
-        // Primary: dedicated endpoint that returns ALL staff members
         const res = await axios.get(`${backendUrl}/api/hrm/payroll/mrs/all`);
         if (res.data.success) {
           setMrList(res.data.data || []);
@@ -319,7 +349,6 @@ const useAllMRList = () => {
           throw new Error("Primary endpoint failed");
         }
       } catch {
-        // Fallback: try general staff endpoint
         try {
           const fb = await axios.get(`${backendUrl}/api/staff`);
           const raw = Array.isArray(fb.data) ? fb.data : fb.data?.data || [];
@@ -327,7 +356,7 @@ const useAllMRList = () => {
             raw.map((s) => ({
               _id: s._id,
               medicalRepName: s.medicalRepName || s.name || `MR ${s._id}`,
-            }))
+            })),
           );
         } catch {
           showToast("error", "Failed to load MR list");
@@ -346,7 +375,6 @@ const useAllMRList = () => {
 // ─────────────────────────────────────────────
 // CURRENT MONTH — hook
 // ─────────────────────────────────────────────
-
 const usePayrollForm = () => {
   const navigate = useNavigate();
   const [form, setForm] = useState({
@@ -376,7 +404,7 @@ const usePayrollForm = () => {
     try {
       setMrListLoading(true);
       const res = await axios.get(
-        `${backendUrl}/api/hrm/payroll/mrs/from-basic-payroll`
+        `${backendUrl}/api/hrm/payroll/mrs/from-basic-payroll`,
       );
       if (res.data.success) {
         const d = res.data.data || [];
@@ -388,7 +416,7 @@ const usePayrollForm = () => {
           setIsMrListEmpty(true);
           showToast(
             "error",
-            "No MRs found with basic salary. Please add basic salary for MRs first."
+            "No MRs found with basic salary. Please add basic salary for MRs first.",
           );
         }
       } else throw new Error("Failed");
@@ -424,18 +452,21 @@ const usePayrollForm = () => {
       let destinations = Array.isArray(rd.data)
         ? rd.data
         : Array.isArray(rd.destinations)
-        ? rd.destinations
-        : Array.isArray(rd)
-        ? rd
-        : Array.isArray(rd.results)
-        ? rd.results
-        : [];
+          ? rd.destinations
+          : Array.isArray(rd)
+            ? rd
+            : Array.isArray(rd.results)
+              ? rd.results
+              : [];
       const options = destinations
         .filter((d) => (d.totalAmount || d.amount || d.balance || 0) > 0)
         .map((d) => ({
           value: d._id || d.id,
           label: `${d.name || `Account ${d.code || d._id || d.id}`} ($${(
-            d.totalAmount || d.amount || d.balance || 0
+            d.totalAmount ||
+            d.amount ||
+            d.balance ||
+            0
           ).toFixed(2)})`,
           ...d,
         }));
@@ -456,7 +487,7 @@ const usePayrollForm = () => {
       setErrors((p) => ({ ...p, source: "" }));
       setSelectedSourceAccount(sourceOptions.find((o) => o.value === sourceId));
     },
-    [sourceOptions]
+    [sourceOptions],
   );
 
   const calculateSalary = useCallback(async (employeeId, period) => {
@@ -468,7 +499,7 @@ const usePayrollForm = () => {
     try {
       setCalculatingSalary(true);
       const res = await axios.get(
-        `${backendUrl}/api/hrm/payroll/calculate/${employeeId}/${period}`
+        `${backendUrl}/api/hrm/payroll/calculate/${employeeId}/${period}`,
       );
       if (res.data.success && res.data.data) {
         const sc = res.data.data.salaryCalculation;
@@ -481,7 +512,7 @@ const usePayrollForm = () => {
         setErrors((p) => ({ ...p, basicSalary: "", deductions: "" }));
         showToast(
           "success",
-          "Salary calculated successfully based on attendance and leaves"
+          "Salary calculated successfully based on attendance and leaves",
         );
       }
     } catch (err) {
@@ -490,7 +521,7 @@ const usePayrollForm = () => {
           "error",
           err.response.data?.message?.includes("Basic payroll")
             ? "Basic payroll record not found. Please set basic salary first."
-            : "Employee or payroll data not found"
+            : "Employee or payroll data not found",
         );
       } else showToast("error", "Failed to calculate salary");
       setSalaryCalculation(null);
@@ -517,7 +548,7 @@ const usePayrollForm = () => {
         0;
       if (bal < net)
         e.source = `Insufficient balance. Available: $${bal.toFixed(
-          2
+          2,
         )}, Required: $${net.toFixed(2)}`;
     }
     setErrors(e);
@@ -534,13 +565,13 @@ const usePayrollForm = () => {
 
   const allowanceOptions = useMemo(
     () => allowanceTypes.map((t) => ({ value: t, label: t })),
-    []
+    [],
   );
 
   const handleAllowanceChange = useCallback((selectedTypes) => {
     setForm((p) => {
       const updated = (p.allowances || []).filter((a) =>
-        selectedTypes.includes(a.type)
+        selectedTypes.includes(a.type),
       );
       selectedTypes.forEach((type) => {
         if (!updated.some((a) => a.type === type))
@@ -555,10 +586,10 @@ const usePayrollForm = () => {
       setForm((p) => ({
         ...p,
         allowances: p.allowances.map((a) =>
-          a.type === type ? { ...a, amount } : a
+          a.type === type ? { ...a, amount } : a,
         ),
       })),
-    []
+    [],
   );
   const removeAllowance = useCallback(
     (type) =>
@@ -566,7 +597,7 @@ const usePayrollForm = () => {
         ...p,
         allowances: p.allowances.filter((a) => a.type !== type),
       })),
-    []
+    [],
   );
 
   const handleEmployeeChange = useCallback(
@@ -576,7 +607,7 @@ const usePayrollForm = () => {
       setSalaryCalculation(null);
       if (employeeId && form.period) calculateSalary(employeeId, form.period);
     },
-    [form.period, calculateSalary]
+    [form.period, calculateSalary],
   );
 
   const handlePeriodChange = useCallback(
@@ -586,16 +617,16 @@ const usePayrollForm = () => {
       setSalaryCalculation(null);
       if (form.employeeId && period) calculateSalary(form.employeeId, period);
     },
-    [form.employeeId, calculateSalary]
+    [form.employeeId, calculateSalary],
   );
 
   const totalAllowance = useMemo(
     () =>
       (form.allowances || []).reduce(
         (t, a) => t + (parseFloat(a.amount) || 0),
-        0
+        0,
       ),
-    [form.allowances]
+    [form.allowances],
   );
   const netSalary = useMemo(
     () =>
@@ -604,7 +635,7 @@ const usePayrollForm = () => {
         totalAllowance -
         (parseFloat(form.deductions) || 0)
       ).toFixed(2),
-    [form.basicSalary, totalAllowance, form.deductions]
+    [form.basicSalary, totalAllowance, form.deductions],
   );
   useEffect(() => setForm((p) => ({ ...p, netSalary })), [netSalary]);
 
@@ -638,14 +669,14 @@ const usePayrollForm = () => {
       if (err.response?.status === 400) {
         if (err.response.data?.errors)
           err.response.data.errors.forEach((e) =>
-            showToast("error", e.message || e.msg)
+            showToast("error", e.message || e.msg),
           );
         else showToast("error", err.response.data?.message || "Invalid data.");
       } else if (err.response?.status === 409)
         showToast(
           "error",
           err.response.data?.message ||
-            "Payroll already exists for this period"
+            "Payroll already exists for this period",
         );
       else showToast("error", err.message || "Failed to save payroll");
     } finally {
@@ -690,9 +721,8 @@ const usePayrollForm = () => {
 };
 
 // ─────────────────────────────────────────────
-// CURRENT MONTH TAB
+// CURRENT MONTH TAB (with Advance Deduction as a column)
 // ─────────────────────────────────────────────
-
 const CurrentMonthTab = () => {
   const {
     form,
@@ -724,6 +754,12 @@ const CurrentMonthTab = () => {
   } = usePayrollForm();
   const navigate = useNavigate();
 
+  // Local currency formatter
+  const formatCurrency = (amount) => {
+    const num = parseFloat(amount) || 0;
+    return `$${num.toFixed(2)}`;
+  };
+
   useEffect(() => {
     setForm((p) => ({ ...p, period: getCurrentMonth() }));
   }, [setForm]);
@@ -741,7 +777,7 @@ const CurrentMonthTab = () => {
 
   const selectedAllowanceTypes = useMemo(
     () => (form.allowances || []).map((a) => a.type),
-    [form.allowances]
+    [form.allowances],
   );
   const isFormValid = useMemo(
     () =>
@@ -753,7 +789,7 @@ const CurrentMonthTab = () => {
       !errors.employeeId &&
       !errors.basicSalary &&
       !errors.source,
-    [form, errors]
+    [form, errors],
   );
   const srcBal = selectedSourceAccount
     ? selectedSourceAccount.totalAmount ||
@@ -761,6 +797,8 @@ const CurrentMonthTab = () => {
       selectedSourceAccount.balance ||
       0
     : 0;
+
+  const hasAdvance = salaryCalculation?.advanceDeduction > 0;
 
   return (
     <>
@@ -800,8 +838,8 @@ const CurrentMonthTab = () => {
               mrListLoading
                 ? "Loading..."
                 : isMrListEmpty
-                ? "No MRs Available"
-                : "Select MR"
+                  ? "No MRs Available"
+                  : "Select MR"
             }
             required
             loading={mrListLoading}
@@ -841,8 +879,8 @@ const CurrentMonthTab = () => {
                 sourceLoading
                   ? "Loading sources..."
                   : sourceOptions.length === 0
-                  ? "No accounts available"
-                  : "Select Source"
+                    ? "No accounts available"
+                    : "Select Source"
               }
               required
               loading={sourceLoading}
@@ -897,7 +935,13 @@ const CurrentMonthTab = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        {/* Salary fields grid – adapts to show Advance Deduction when present */}
+        <div
+          className={`grid grid-cols-1 gap-6 mb-6 ${
+            hasAdvance ? "md:grid-cols-4" : "md:grid-cols-3"
+          }`}
+        >
+          {/* Basic Salary */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Basic Salary ($) <span className="text-red-500">*</span>
@@ -923,6 +967,24 @@ const CurrentMonthTab = () => {
               <p className="mt-1 text-sm text-red-600">{errors.basicSalary}</p>
             )}
           </div>
+
+          {/* Advance Deduction (only if present) */}
+          {hasAdvance && (
+            <div>
+              <label className="block text-sm font-medium text-red-700 mb-1">
+                Advance Deduction ($)
+              </label>
+              <input
+                type="text"
+                value={formatCurrency(salaryCalculation.advanceDeduction)}
+                readOnly
+                className="w-full px-3 py-2 border border-red-300 rounded-lg bg-red-100 text-red-700 font-semibold cursor-not-allowed"
+              />
+              <p className="text-xs text-red-600 mt-1">Deducted from salary</p>
+            </div>
+          )}
+
+          {/* Deductions */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Deductions ($)
@@ -935,10 +997,10 @@ const CurrentMonthTab = () => {
               placeholder="0.00"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Automatically calculated based on unpaid leaves
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Based on unpaid leaves</p>
           </div>
+
+          {/* Net Salary */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Net Salary ($)
@@ -951,7 +1013,7 @@ const CurrentMonthTab = () => {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed font-semibold"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Basic Salary + Allowances - Deductions
+              Basic + Allowances - Deductions - Advance
             </p>
           </div>
         </div>
@@ -1095,10 +1157,10 @@ const CurrentMonthTab = () => {
             {loading
               ? "Saving…"
               : calculatingSalary
-              ? "Calculating…"
-              : sourceOptions.length === 0
-              ? "No Source Account"
-              : "Save Payroll"}
+                ? "Calculating…"
+                : sourceOptions.length === 0
+                  ? "No Source Account"
+                  : "Save Payroll"}
           </button>
         </div>
       </form>
@@ -1120,9 +1182,281 @@ const CurrentMonthTab = () => {
 };
 
 // ─────────────────────────────────────────────
+// MR ADVANCE TAB
+// ─────────────────────────────────────────────
+const MrAdvanceTab = () => {
+  const navigate = useNavigate();
+  const { mrList, mrListLoading } = useAllMRList();
+  const [sourceOptions, setSourceOptions] = useState([]);
+  const [sourceLoading, setSourceLoading] = useState(true);
+  const [form, setForm] = useState({
+    employeeId: "",
+    date: new Date().toISOString().split("T")[0],
+    sourceAccount: "",
+    amount: "",
+    remarks: "",
+  });
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+
+  // Fetch source accounts (same as in CurrentMonthTab)
+  useEffect(() => {
+    const fetchSourceOptions = async () => {
+      try {
+        setSourceLoading(true);
+        const res = await axios.get(`${backendUrl}/api/accounts/destinations`);
+        const data = res.data.data || [];
+        const options = data
+          .filter((d) => (d.totalAmount || 0) > 0)
+          .map((d) => ({
+            value: d._id,
+            label: `${d.name} ($${d.totalAmount.toFixed(2)})`,
+            balance: d.totalAmount,
+          }));
+        setSourceOptions(options);
+      } catch (error) {
+        showToast("error", "Failed to load source accounts");
+      } finally {
+        setSourceLoading(false);
+      }
+    };
+    fetchSourceOptions();
+  }, []);
+
+  const mrOptions = useMemo(() => {
+    if (mrListLoading)
+      return [{ value: "", label: "Loading MRs...", disabled: true }];
+    if (mrList.length === 0)
+      return [{ value: "", label: "No MRs Available", disabled: true }];
+    return mrList.map((mr) => ({
+      value: mr._id,
+      label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
+    }));
+  }, [mrList, mrListLoading]);
+
+  const validate = () => {
+    const e = {};
+    if (!form.employeeId) e.employeeId = "MR is required";
+    if (!form.date) e.date = "Date is required";
+    if (!form.sourceAccount) e.sourceAccount = "Source account is required";
+    if (!form.amount) e.amount = "Amount is required";
+    else if (parseFloat(form.amount) <= 0)
+      e.amount = "Amount must be greater than 0";
+    else {
+      const selected = sourceOptions.find(
+        (s) => s.value === form.sourceAccount,
+      );
+      if (selected && parseFloat(form.amount) > selected.balance) {
+        e.amount = `Insufficient balance. Available: $${selected.balance.toFixed(2)}`;
+      }
+    }
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleNumeric = (e) => {
+    const { name, value } = e.target;
+    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+      setForm((prev) => ({ ...prev, [name]: value }));
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+    setSubmitting(true);
+    try {
+      const payload = {
+        employeeId: form.employeeId,
+        date: form.date,
+        sourceAccount: form.sourceAccount,
+        amount: parseFloat(form.amount),
+        remarks: form.remarks,
+      };
+      const res = await axios.post(`${backendUrl}/api/hrm/mr-advance`, payload);
+      if (res.data.success) {
+        showToast("success", "Advance recorded successfully");
+        // Reset form and refresh source balances
+        setForm({
+          employeeId: "",
+          date: new Date().toISOString().split("T")[0],
+          sourceAccount: "",
+          amount: "",
+          remarks: "",
+        });
+        // Re‑fetch source options to update balances
+        const fetchOptions = async () => {
+          const res2 = await axios.get(
+            `${backendUrl}/api/accounts/destinations`,
+          );
+          const data = res2.data.data || [];
+          const options = data
+            .filter((d) => (d.totalAmount || 0) > 0)
+            .map((d) => ({
+              value: d._id,
+              label: `${d.name} ($${d.totalAmount.toFixed(2)})`,
+              balance: d.totalAmount,
+            }));
+          setSourceOptions(options);
+        };
+        fetchOptions();
+      } else {
+        throw new Error(res.data.message);
+      }
+    } catch (error) {
+      showToast(
+        "error",
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to record advance",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <form onSubmit={handleSubmit}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          {/* MR Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              MR Name <span className="text-red-500">*</span>
+            </label>
+            <SearchableDropdown
+              value={form.employeeId}
+              onChange={(val) => {
+                setForm((prev) => ({ ...prev, employeeId: val }));
+                setErrors((prev) => ({ ...prev, employeeId: "" }));
+              }}
+              options={mrOptions}
+              placeholder={mrListLoading ? "Loading..." : "Select MR"}
+              loading={mrListLoading}
+              error={errors.employeeId}
+            />
+            {errors.employeeId && (
+              <p className="text-red-500 text-xs mt-1">{errors.employeeId}</p>
+            )}
+          </div>
+
+          {/* Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Date <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              name="date"
+              value={form.date}
+              onChange={(e) => {
+                setForm((prev) => ({ ...prev, date: e.target.value }));
+                setErrors((prev) => ({ ...prev, date: "" }));
+              }}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none ${
+                errors.date
+                  ? "border-red-500 focus:ring-red-200"
+                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+              }`}
+            />
+            {errors.date && (
+              <p className="text-red-500 text-xs mt-1">{errors.date}</p>
+            )}
+          </div>
+
+          {/* Source Account */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Source Account <span className="text-red-500">*</span>
+            </label>
+            <SearchableDropdown
+              value={form.sourceAccount}
+              onChange={(val) => {
+                setForm((prev) => ({ ...prev, sourceAccount: val }));
+                setErrors((prev) => ({ ...prev, sourceAccount: "" }));
+              }}
+              options={sourceOptions}
+              placeholder={
+                sourceLoading ? "Loading..." : "Select Source Account"
+              }
+              loading={sourceLoading}
+              error={errors.sourceAccount}
+            />
+            {errors.sourceAccount && (
+              <p className="text-red-500 text-xs mt-1">
+                {errors.sourceAccount}
+              </p>
+            )}
+          </div>
+
+          {/* Amount */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Amount ($) <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              name="amount"
+              value={form.amount}
+              onChange={handleNumeric}
+              placeholder="0.00"
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none ${
+                errors.amount
+                  ? "border-red-500 focus:ring-red-200"
+                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+              }`}
+            />
+            {errors.amount && (
+              <p className="text-red-500 text-xs mt-1">{errors.amount}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Remarks */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Remarks
+          </label>
+          <textarea
+            name="remarks"
+            value={form.remarks}
+            onChange={(e) =>
+              setForm((prev) => ({ ...prev, remarks: e.target.value }))
+            }
+            rows="3"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 focus:outline-none"
+          />
+        </div>
+
+        <div className="flex justify-end gap-4 mt-6">
+          <button
+            type="button"
+            onClick={() => navigate("/hrmlayout/payroll")}
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-3 rounded-lg transition-colors text-lg font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className={`px-6 py-3 rounded-lg shadow text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              submitting
+                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer focus:ring-green-500"
+            }`}
+          >
+            {submitting ? "Saving…" : "Record Advance"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
 // PREVIOUS MONTH TAB
 // ─────────────────────────────────────────────
-
 const PREV_INITIAL_ROW = {
   employeeId: "",
   period: "",
@@ -1271,19 +1605,19 @@ const PreviousMonthTab = () => {
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
-        { headers: { "Content-Type": "application/json" } }
+        { headers: { "Content-Type": "application/json" } },
       );
       if (res.status === 201 || res.status === 200) {
         showToast(
           "success",
-          res.data.message || "Previous month payroll saved successfully"
+          res.data.message || "Previous month payroll saved successfully",
         );
         setTimeout(() => navigate("/hrmlayout/payroll"), 1000);
       } else throw new Error(res.data.message || "Failed to save payroll");
     } catch (err) {
       showToast(
         "error",
-        err.response?.data?.message || err.message || "Failed to save payroll"
+        err.response?.data?.message || err.message || "Failed to save payroll",
       );
     } finally {
       setSubmitting(false);
@@ -1308,7 +1642,9 @@ const PreviousMonthTab = () => {
       const mrSheet = workbook.addWorksheet("MR List");
       mrSheet.columns = [{ header: "MR Name", key: "name", width: 30 }];
       mrList.forEach((mr) => {
-        mrSheet.addRow({ name: mr.medicalRepName || mr.employeeName || "Unknown" });
+        mrSheet.addRow({
+          name: mr.medicalRepName || mr.employeeName || "Unknown",
+        });
       });
 
       // 3. Add dropdown validation to "MR Name" column in main sheet (starting from row 2)
@@ -1367,20 +1703,20 @@ const PreviousMonthTab = () => {
             const found = mrList.find(
               (m) =>
                 (m.medicalRepName || m.employeeName || "").toLowerCase() ===
-                row.mrName.toLowerCase()
+                row.mrName.toLowerCase(),
             );
             if (!found)
               errors.push(
-                `Row ${row.rowIndex}: MR "${row.mrName}" not found in system`
+                `Row ${row.rowIndex}: MR "${row.mrName}" not found in system`,
               );
           }
           if (!row.period || !/^\d{4}-\d{2}$/.test(row.period))
             errors.push(
-              `Row ${row.rowIndex}: Pay Period must be YYYY-MM format`
+              `Row ${row.rowIndex}: Pay Period must be YYYY-MM format`,
             );
           else if (row.period >= getCurrentMonth())
             errors.push(
-              `Row ${row.rowIndex}: Pay Period must be a previous month`
+              `Row ${row.rowIndex}: Pay Period must be a previous month`,
             );
           if (!row.salary || isNaN(parseFloat(row.salary)))
             errors.push(`Row ${row.rowIndex}: Salary must be a valid number`);
@@ -1390,7 +1726,7 @@ const PreviousMonthTab = () => {
       } catch {
         showToast(
           "error",
-          "Failed to parse Excel file. Please use the template."
+          "Failed to parse Excel file. Please use the template.",
         );
         setExcelRows([]);
         setExcelErrors(["Failed to parse file"]);
@@ -1416,7 +1752,7 @@ const PreviousMonthTab = () => {
         const mr = mrList.find(
           (m) =>
             (m.medicalRepName || m.employeeName || "").toLowerCase() ===
-            row.mrName.toLowerCase()
+            row.mrName.toLowerCase(),
         );
         return {
           employeeId: mr?._id || null,
@@ -1442,19 +1778,21 @@ const PreviousMonthTab = () => {
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
-        { headers: { "Content-Type": "application/json" } }
+        { headers: { "Content-Type": "application/json" } },
       );
       if (res.status === 201 || res.status === 200) {
         showToast(
           "success",
-          res.data.message || "Payroll uploaded successfully"
+          res.data.message || "Payroll uploaded successfully",
         );
         setTimeout(() => navigate("/hrmlayout/payroll"), 1000);
       } else throw new Error(res.data.message || "Failed to upload payroll");
     } catch (err) {
       showToast(
         "error",
-        err.response?.data?.message || err.message || "Failed to upload payroll"
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to upload payroll",
       );
     } finally {
       setUploading(false);
@@ -1466,14 +1804,14 @@ const PreviousMonthTab = () => {
       rows
         .reduce((s, r) => s + (parseFloat(computeTotal(r)) || 0), 0)
         .toFixed(2),
-    [rows]
+    [rows],
   );
   const excelTotalSum = useMemo(
     () =>
       excelRows
         .reduce((s, r) => s + (parseFloat(computeTotal(r)) || 0), 0)
         .toFixed(2),
-    [excelRows]
+    [excelRows],
   );
 
   return (
@@ -1737,25 +2075,6 @@ const PreviousMonthTab = () => {
       {/* ── EXCEL UPLOAD ── */}
       {entryMode === "excel" && (
         <form onSubmit={handleExcelSubmit}>
-          {/* MR name reference chip list */}
-          {mrList.length > 0 && (
-            <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <p className="text-xs text-gray-600 font-medium mb-2">
-                Available MR names (copy exactly into Excel):
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {mrList.map((mr) => (
-                  <span
-                    key={mr._id}
-                    className="text-xs bg-white border border-gray-300 rounded px-2 py-1 text-gray-700"
-                  >
-                    {mr.medicalRepName || mr.employeeName}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center mb-6 bg-gray-50">
             <svg
               className="mx-auto h-12 w-12 text-gray-400 mb-4"
@@ -1914,7 +2233,6 @@ const PreviousMonthTab = () => {
 // ─────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
-
 const AddPayroll = () => {
   const [activeTab, setActiveTab] = useState("current");
   return (
@@ -1926,6 +2244,7 @@ const AddPayroll = () => {
         {[
           ["current", "Current Month"],
           ["previous", "Previous Month"],
+          ["advance", "MR Advance"],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -1943,6 +2262,7 @@ const AddPayroll = () => {
       </div>
       {activeTab === "current" && <CurrentMonthTab />}
       {activeTab === "previous" && <PreviousMonthTab />}
+      {activeTab === "advance" && <MrAdvanceTab />}
     </div>
   );
 };

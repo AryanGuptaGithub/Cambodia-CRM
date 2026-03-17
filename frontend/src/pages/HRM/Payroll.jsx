@@ -19,7 +19,6 @@ import {
   Calendar,
   Download,
 } from "lucide-react";
-
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import axios from "axios";
@@ -38,6 +37,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const payrollsPerPage = 7;
+const advancesPerPage = 7;
 
 // Allowance types array
 const allowanceTypes = [
@@ -53,7 +53,7 @@ const allowanceTypes = [
   "Other",
 ];
 
-// Custom hook for form management
+// ─── Custom hook for payroll form (unchanged) ─────────────────────────────
 const usePayrollForm = (initialForm = {}) => {
   const [form, setForm] = useState({
     employeeId: "",
@@ -209,7 +209,7 @@ const usePayrollForm = (initialForm = {}) => {
   };
 };
 
-// MultipleSelectDropdown Component
+// ─── MultipleSelectDropdown Component (unchanged) ─────────────────────────
 const MultipleSelectDropdown = ({
   label,
   value = [],
@@ -328,7 +328,7 @@ const MultipleSelectDropdown = ({
   );
 };
 
-// Allowance Breakdown Modal Component
+// ─── AllowanceBreakdownModal (unchanged) ─────────────────────────────────
 const AllowanceBreakdownModal = ({
   allowances,
   isOpen,
@@ -424,7 +424,7 @@ const AllowanceBreakdownModal = ({
   );
 };
 
-// Custom Date Range Modal Component
+// ─── CustomDateRangeModal (unchanged) ────────────────────────────────────
 const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
@@ -532,7 +532,7 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
   );
 };
 
-// Date Selection Tabs Component
+// ─── DateSelectionTabs (unchanged) ───────────────────────────────────────
 const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
   const [activeTab, setActiveTab] = useState("previousMonth");
   const [showCustomModal, setShowCustomModal] = useState(false);
@@ -653,26 +653,19 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
   );
 };
 
-// ─────────────────────────────────────────────
-// YearFilterButtons — NEW
-// Shows year pill buttons. Always includes the
-// current year (2026) plus every year that exists
-// in the payroll data, sorted newest-first.
-// Clicking a year filters the table to that year only.
-// ─────────────────────────────────────────────
+// ─── YearFilterButtons (unchanged) ───────────────────────────────────────
 const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
   const currentYear = new Date().getFullYear();
 
-  // Build year list: always start with current year, then add years from data
   const years = useMemo(() => {
-    const yearSet = new Set([currentYear]); // always include current year
+    const yearSet = new Set([currentYear]);
     allPayrolls.forEach((p) => {
       if (p.period) {
         const yr = parseInt(p.period.split("-")[0], 10);
         if (!isNaN(yr)) yearSet.add(yr);
       }
     });
-    return Array.from(yearSet).sort((a, b) => b - a); // newest first
+    return Array.from(yearSet).sort((a, b) => b - a);
   }, [allPayrolls, currentYear]);
 
   return (
@@ -681,7 +674,6 @@ const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
         Filter by Year
       </h3>
       <div className="flex flex-wrap gap-2">
-        {/* All Years pill */}
         <button
           onClick={() => onYearSelect(null)}
           className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
@@ -692,8 +684,6 @@ const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
         >
           All Years
         </button>
-
-        {/* One pill per year */}
         {years.map((yr) => (
           <button
             key={yr}
@@ -712,9 +702,434 @@ const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
   );
 };
 
+// ─── CSVImportModal (unchanged) ──────────────────────────────────────────
+const CSVImportModal = ({ isOpen, onClose, onImport }) => {
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    if (selectedFile) {
+      if (
+        selectedFile.type === "text/csv" ||
+        selectedFile.name.endsWith(".csv")
+      ) {
+        setFile(selectedFile);
+        setImportResult(null);
+      } else {
+        showToast("error", "Please select a CSV file");
+      }
+    }
+  };
+
+  const handleImport = async () => {
+    if (!file) {
+      showToast("error", "Please select a CSV file first");
+      return;
+    }
+    try {
+      setLoading(true);
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await axios.post(
+        `${backendUrl}/api/hrm/payroll/import/csv`,
+        formData,
+        { headers: { "Content-Type": "multipart/form-data" } },
+      );
+      if (response.data.success) {
+        setImportResult(response.data.data);
+        showToast(
+          "success",
+          `Imported ${response.data.data.success} payrolls successfully`,
+        );
+        if (response.data.data.failed > 0)
+          showToast(
+            "error",
+            `${response.data.data.failed} payrolls failed to import`,
+          );
+        if (onImport) onImport();
+      }
+    } catch (error) {
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to import CSV",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadTemplate = async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/hrm/payroll/import/template`,
+        { responseType: "blob" },
+      );
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "payroll_import_template.csv");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      showToast("success", "Template downloaded successfully");
+    } catch {
+      showToast("error", "Failed to download template");
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">Import Payrolls from CSV</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Upload CSV File
+            </label>
+            <div
+              className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer ${
+                file
+                  ? "border-green-500 bg-green-50"
+                  : "border-gray-300 hover:border-gray-400"
+              }`}
+              onClick={() => fileInputRef.current.click()}
+            >
+              {file ? (
+                <div>
+                  <p className="text-green-600 font-medium">{file.name}</p>
+                  <p className="text-sm text-gray-500">
+                    {(file.size / 1024).toFixed(2)} KB
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-gray-600">Click to select CSV file</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    or drag and drop here
+                  </p>
+                </div>
+              )}
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".csv"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+            </div>
+          </div>
+          {importResult && (
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <h4 className="font-medium text-gray-800 mb-2">Import Results</h4>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Total:</span>
+                  <span className="font-medium">{importResult.total}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-green-600">Successful:</span>
+                  <span className="font-medium text-green-600">
+                    {importResult.success}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-red-600">Failed:</span>
+                  <span className="font-medium text-red-600">
+                    {importResult.failed}
+                  </span>
+                </div>
+              </div>
+              {importResult.errors && importResult.errors.length > 0 && (
+                <div className="mt-3">
+                  <h5 className="text-sm font-medium text-gray-700 mb-1">
+                    Errors:
+                  </h5>
+                  <div className="max-h-40 overflow-y-auto text-xs">
+                    {importResult.errors.map((error, index) => (
+                      <p key={index} className="text-red-600 mb-1">
+                        {error}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="flex justify-between items-center pt-2">
+            <button
+              type="button"
+              onClick={downloadTemplate}
+              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+            >
+              Download Template
+            </button>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={!file || loading}
+            className={`px-4 py-2 rounded-md text-white ${
+              !file || loading
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            {loading ? "Importing..." : "Import CSV"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
+// ============================================================================
+// Simplified Advance List Component (no date/year filters)
+// ============================================================================
+const AdvanceList = ({ onDelete }) => {
+  const [advances, setAdvances] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+
+  const fetchAdvances = async (page = 1) => {
+    try {
+      setLoading(true);
+      const params = { page, limit: advancesPerPage };
+      const res = await axios.get(`${backendUrl}/api/hrm/mr-advance`, {
+        params,
+      });
+      if (res.data.success) {
+        setAdvances(res.data.data);
+        setTotalPages(res.data.pagination.pages);
+        setTotalItems(res.data.pagination.total);
+      } else {
+        throw new Error(res.data.message);
+      }
+    } catch (err) {
+      setError(err.message);
+      showToast("error", "Failed to load advances");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAdvances(1);
+  }, []);
+
+  const filteredAdvances = useMemo(() => {
+    if (!advances.length) return [];
+    return advances.filter(
+      (a) =>
+        a.employeeId?.medicalRepName
+          ?.toLowerCase()
+          .includes(searchTerm.toLowerCase()) ||
+        a.sourceAccount?.name
+          ?.toLowerCase()
+          .includes(searchTerm.toLowerCase()) ||
+        a.remarks?.toLowerCase().includes(searchTerm.toLowerCase()),
+    );
+  }, [advances, searchTerm]);
+
+  const currentAdvances = filteredAdvances.slice(
+    (currentPage - 1) * advancesPerPage,
+    currentPage * advancesPerPage,
+  );
+
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(amount || 0);
+
+  const getStatusBadge = (status) => {
+    const colors = {
+      pending: "bg-yellow-100 text-yellow-800",
+      adjusted: "bg-green-100 text-green-800",
+      cancelled: "bg-red-100 text-red-800",
+    };
+    return colors[status] || "bg-gray-100 text-gray-800";
+  };
+
+  const handleDelete = async (adv) => {
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete advance of $${adv.amount} for ${adv.employeeId?.medicalRepName}?`,
+    });
+    if (confirm.isConfirmed) {
+      try {
+        await axios.delete(`${backendUrl}/api/hrm/mr-advance/${adv._id}`);
+        showToast("success", "Advance deleted");
+        fetchAdvances(currentPage); // refresh
+      } catch (err) {
+        showToast("error", err.response?.data?.message || "Delete failed");
+      }
+    }
+  };
+
+  if (loading)
+    return <div className="text-center py-8">Loading advances...</div>;
+  if (error)
+    return <div className="text-center py-8 text-red-600">Error: {error}</div>;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+        <div className="relative w-64">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+            size={16}
+          />
+          <input
+            type="text"
+            placeholder="Search advances..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+          />
+        </div>
+        <div className="bg-blue-50 px-4 py-2 rounded-lg">
+          <p className="text-sm font-medium text-blue-800">
+            Total Count: <span className="font-bold">{totalItems}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
+          <thead className="bg-gray-100 text-gray-700 border-b">
+            <tr>
+              <th className="p-3 text-left">Employee</th>
+              <th className="p-3">Date</th>
+              <th className="p-3">Source Account</th>
+              <th className="p-3">Amount</th>
+              <th className="p-3">Remarks</th>
+              <th className="p-3">Status</th>
+              <th className="p-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {currentAdvances.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="p-6 text-gray-500">
+                  No advances found.
+                </td>
+              </tr>
+            ) : (
+              currentAdvances.map((adv, idx) => (
+                <tr
+                  key={adv._id}
+                  className={`hover:bg-gray-50 ${
+                    idx < currentAdvances.length - 1 ? "border-b" : ""
+                  }`}
+                >
+                  <td className="p-3 text-left font-medium">
+                    {adv.employeeId?.medicalRepName ||
+                      adv.employeeId?.name ||
+                      "Unknown"}
+                  </td>
+                  <td className="p-3">
+                    {formatDateToReadable(adv.date)}
+                  </td>
+                  <td className="p-3">{adv.sourceAccount?.name || "N/A"}</td>
+                  <td className="p-3 font-semibold">
+                    {formatCurrency(adv.amount)}
+                  </td>
+                  <td className="p-3">{adv.remarks || "-"}</td>
+                  <td className="p-3">
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(
+                        adv.status,
+                      )}`}
+                    >
+                      {adv.status}
+                    </span>
+                  </td>
+                  <td className="p-3">
+                    <button
+                      onClick={() => handleDelete(adv)}
+                      className="text-red-600 hover:text-red-800 mx-1"
+                      title="Delete"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="mt-4 flex justify-center gap-2">
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          >
+            Prev
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+            <button
+              key={p}
+              onClick={() => setCurrentPage(p)}
+              className={`px-3 py-1 rounded ${
+                currentPage === p
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// MAIN Payroll Component with Tabs
+// ============================================================================
 const Payroll = () => {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("payroll"); // 'payroll' or 'advance'
 
+  // ─── All existing payroll state and functions ───────────────────────────
   const [payrolls, setPayrolls] = useState([]);
   const [allPayrolls, setAllPayrolls] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -722,9 +1137,7 @@ const Payroll = () => {
   const [sourceOptions, setSourceOptions] = useState([]);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [selectedDateRange, setSelectedDateRange] = useState(null);
-  // ── NEW: year filter state ──
   const [selectedYear, setSelectedYear] = useState(null);
-
   const [selected, setSelected] = useState([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [parsedData, setParsedData] = useState([]);
@@ -759,201 +1172,7 @@ const Payroll = () => {
     fetchMRList,
   } = usePayrollForm();
 
-  // CSVImportModal (kept inside component to match original structure)
-  const CSVImportModal = ({ isOpen, onClose, onImport }) => {
-    const [file, setFile] = useState(null);
-    const [loading, setLoading] = useState(false);
-    const [importResult, setImportResult] = useState(null);
-    const fileInputRef = useRef(null);
-
-    const handleFileChange = (e) => {
-      const selectedFile = e.target.files[0];
-      if (selectedFile) {
-        if (
-          selectedFile.type === "text/csv" ||
-          selectedFile.name.endsWith(".csv")
-        ) {
-          setFile(selectedFile);
-          setImportResult(null);
-        } else {
-          showToast("error", "Please select a CSV file");
-        }
-      }
-    };
-
-    const handleImport = async () => {
-      if (!file) {
-        showToast("error", "Please select a CSV file first");
-        return;
-      }
-      try {
-        setLoading(true);
-        const formData = new FormData();
-        formData.append("file", file);
-        const response = await axios.post(
-          `${backendUrl}/api/hrm/payroll/import/csv`,
-          formData,
-          { headers: { "Content-Type": "multipart/form-data" } },
-        );
-        if (response.data.success) {
-          setImportResult(response.data.data);
-          showToast(
-            "success",
-            `Imported ${response.data.data.success} payrolls successfully`,
-          );
-          if (response.data.data.failed > 0)
-            showToast(
-              "error",
-              `${response.data.data.failed} payrolls failed to import`,
-            );
-          if (onImport) onImport();
-        }
-      } catch (error) {
-        showToast(
-          "error",
-          error.response?.data?.message || "Failed to import CSV",
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const downloadTemplate = async () => {
-      try {
-        const response = await axios.get(
-          `${backendUrl}/api/hrm/payroll/import/template`,
-          { responseType: "blob" },
-        );
-        const url = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement("a");
-        link.href = url;
-        link.setAttribute("download", "payroll_import_template.csv");
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        showToast("success", "Template downloaded successfully");
-      } catch {
-        showToast("error", "Failed to download template");
-      }
-    };
-
-    if (!isOpen) return null;
-
-    return ReactDOM.createPortal(
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 w-full max-w-md">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">Import Payrolls from CSV</h3>
-            <button
-              onClick={onClose}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Upload CSV File
-              </label>
-              <div
-                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer ${file ? "border-green-500 bg-green-50" : "border-gray-300 hover:border-gray-400"}`}
-                onClick={() => fileInputRef.current.click()}
-              >
-                {file ? (
-                  <div>
-                    <p className="text-green-600 font-medium">{file.name}</p>
-                    <p className="text-sm text-gray-500">
-                      {(file.size / 1024).toFixed(2)} KB
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-gray-600">Click to select CSV file</p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      or drag and drop here
-                    </p>
-                  </div>
-                )}
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept=".csv"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-              </div>
-            </div>
-            {importResult && (
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <h4 className="font-medium text-gray-800 mb-2">
-                  Import Results
-                </h4>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Total:</span>
-                    <span className="font-medium">{importResult.total}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-green-600">Successful:</span>
-                    <span className="font-medium text-green-600">
-                      {importResult.success}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-red-600">Failed:</span>
-                    <span className="font-medium text-red-600">
-                      {importResult.failed}
-                    </span>
-                  </div>
-                </div>
-                {importResult.errors && importResult.errors.length > 0 && (
-                  <div className="mt-3">
-                    <h5 className="text-sm font-medium text-gray-700 mb-1">
-                      Errors:
-                    </h5>
-                    <div className="max-h-40 overflow-y-auto text-xs">
-                      {importResult.errors.map((error, index) => (
-                        <p key={index} className="text-red-600 mb-1">
-                          {error}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="flex justify-between items-center pt-2">
-              <button
-                type="button"
-                onClick={downloadTemplate}
-                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-              >
-                Download Template
-              </button>
-            </div>
-          </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleImport}
-              disabled={!file || loading}
-              className={`px-4 py-2 rounded-md text-white ${!file || loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
-            >
-              {loading ? "Importing..." : "Import CSV"}
-            </button>
-          </div>
-        </div>
-      </div>,
-      document.body,
-    );
-  };
-
+  // ─── Functions ──────────────────────────────────────────────────────────
   const fetchSourceOptions = useCallback(async () => {
     try {
       setSourceLoading(true);
@@ -1028,7 +1247,6 @@ const Payroll = () => {
       if (response.data.success) {
         const payrollData = response.data.data || [];
         setAllPayrolls(payrollData);
-        // Re-apply the active filter after refresh
         setPayrolls(payrollData);
         if (response.data.nextPayrollCode)
           setNextPayrollCode(response.data.nextPayrollCode);
@@ -1061,10 +1279,9 @@ const Payroll = () => {
     });
   };
 
-  // ── Date range handler — clears year filter ──
   const handleDateRangeSelect = (dateRange) => {
     setSelectedDateRange(dateRange);
-    setSelectedYear(null); // clear year filter
+    setSelectedYear(null);
     setCurrentPage(1);
     setPayrolls(filterPayrollsByDateRange(dateRange, allPayrolls));
   };
@@ -1075,10 +1292,9 @@ const Payroll = () => {
     setCurrentPage(1);
   };
 
-  // ── Year filter handler — clears date range ──
   const handleYearSelect = (year) => {
     setSelectedYear(year);
-    setSelectedDateRange(null); // clear date range filter
+    setSelectedDateRange(null);
     setCurrentPage(1);
     if (year === null) {
       setPayrolls(allPayrolls);
@@ -1228,7 +1444,6 @@ const Payroll = () => {
     }
   };
 
-  // ── Extract year from period ──
   const formatPeriodToYear = (period) => {
     if (!period) return "N/A";
     return period.split("-")[0] || "N/A";
@@ -1450,14 +1665,14 @@ const Payroll = () => {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  if (loading)
+  if (loading && activeTab === "payroll")
     return (
       <div className="p-6 flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
     );
 
-  if (error)
+  if (error && activeTab === "payroll")
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -1474,793 +1689,833 @@ const Payroll = () => {
 
   return (
     <div className="p-6">
-      {/* ── Header ── */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() =>
-              navigate("/hrmlayout/payroll/new", {
-                state: { payrollCode: nextPayrollCode },
-              })
-            }
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
-          >
-            <UserPlus size={18} /> Add New Payroll
-          </button>
-          <button
-            onClick={exportToCSV}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
-          >
-            <Download size={18} /> Export CSV
-          </button>
-          {selected.length > 0 && (
-            <button
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
-              onClick={handleDeleteSelected}
-            >
-              <Trash2 size={18} /> Delete Selected ({selected.length})
-            </button>
-          )}
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
-          <div className="bg-blue-50 px-4 py-2 rounded-lg">
-            <p className="text-sm font-medium text-blue-800">
-              Total Count:{" "}
-              <span className="font-bold">{filteredPayrolls.length}</span>
-            </p>
-          </div>
-          <div className="relative w-full sm:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search payrolls..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 transition-colors"
-            />
-          </div>
-        </div>
+      {/* Tab Switcher */}
+      <div className="flex border-b border-gray-200 mb-6">
+        <button
+          onClick={() => setActiveTab("payroll")}
+          className={`py-2 px-4 font-medium text-sm focus:outline-none transition-colors ${
+            activeTab === "payroll"
+              ? "border-b-2 border-blue-600 text-blue-600"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Payroll
+        </button>
+        <button
+          onClick={() => setActiveTab("advance")}
+          className={`py-2 px-4 font-medium text-sm focus:outline-none transition-colors ${
+            activeTab === "advance"
+              ? "border-b-2 border-blue-600 text-blue-600"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Advance
+        </button>
       </div>
 
-      {/* ── Year Filter Buttons (NEW) ── */}
-      <YearFilterButtons
-        allPayrolls={allPayrolls}
-        selectedYear={selectedYear}
-        onYearSelect={handleYearSelect}
-      />
-
-      {/* ── Month Range Tabs ── */}
-      <DateSelectionTabs
-        onDateRangeSelect={handleDateRangeSelect}
-        selectedRange={selectedDateRange}
-      />
-
-      {/* ── Active filter badge ── */}
-      {(selectedYear !== null || selectedDateRange) && (
-        <div className="mb-4 flex items-center gap-3">
-          <span className="text-sm text-indigo-700 font-medium bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">
-            {selectedYear !== null
-              ? `Showing payrolls for ${selectedYear}`
-              : `Showing: ${selectedDateRange?.label}`}
-          </span>
-          <button
-            onClick={() => {
-              setSelectedYear(null);
-              setSelectedDateRange(null);
-              setPayrolls(allPayrolls);
-              setCurrentPage(1);
-            }}
-            className="text-sm text-gray-500 hover:text-red-600 font-medium flex items-center gap-1"
-          >
-            <X size={14} /> Clear filter
-          </button>
-        </div>
-      )}
-
-      {/* ── Clear date filter (legacy button kept for compatibility) ── */}
-      {selectedDateRange && !selectedYear && (
-        <div className="mb-4">
-          <button
-            onClick={handleClearDateFilter}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-          >
-            Clear Date Filter
-          </button>
-        </div>
-      )}
-
-      {/* ── Payroll Table ── */}
-      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-left">
-                <div className="flex items-center gap-4">
-                  {currentPayrolls.length > 0 && (
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.length === currentPayrolls.length &&
-                        currentPayrolls.length > 0
-                      }
-                      onChange={(e) => toggleSelectAll(e.target.checked)}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                  )}
-                  <span className="text-sm font-medium">Employee</span>
-                </div>
-              </th>
-              <th className="p-3 text-sm font-medium">Month</th>
-              {/* ── NEW Year column ── */}
-              <th className="p-3 text-sm font-medium">Year</th>
-              <th className="p-3 text-sm font-medium">Team Name</th>
-              <th className="p-3 text-sm font-medium">Contact No</th>
-              <th className="p-3 text-sm font-medium">Basic Salary</th>
-              <th className="p-3 text-sm font-medium">Allowances</th>
-              <th className="p-3 text-sm font-medium">Deductions</th>
-              <th className="p-3 text-sm font-medium">Net Salary</th>
-              <th className="p-3 text-sm font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentPayrolls.length === 0 ? (
-              <tr>
-                <td colSpan={10} className="p-6 text-center text-gray-500">
-                  {selectedYear !== null
-                    ? `No payroll records found for ${selectedYear}.`
-                    : selectedDateRange
-                      ? "No payroll records found for the selected date range."
-                      : "No payroll records found."}
-                </td>
-              </tr>
-            ) : (
-              currentPayrolls.map((payroll, idx) => (
-                <tr
-                  key={payroll._id}
-                  className={`hover:bg-gray-50 ${idx < currentPayrolls.length - 1 ? "border-b" : ""}`}
-                >
-                  <td className="p-3 text-left">
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selected.some((s) => s.id === payroll._id)}
-                        onChange={() => toggleSelect(payroll)}
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="font-medium text-gray-900 capitalize">
-                        {payroll.employeeName}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="p-3 text-gray-600 font-medium">
-                    {formatPeriodToMonth(payroll.period)}
-                  </td>
-                  {/* ── Year cell ── */}
-                  <td className="p-3 text-gray-600 font-medium">
-                    {formatPeriodToYear(payroll.period)}
-                  </td>
-                  <td className="p-3 text-gray-600 capitalize">
-                    {payroll.employeeId?.teamName || payroll.teamName || "N/A"}
-                  </td>
-                  <td className="p-3 text-gray-600">
-                    {payroll.employeeId?.contactNo ||
-                      payroll.contactNo ||
-                      "N/A"}
-                  </td>
-                  {/* displayBasicSalary = adjustedBasicSalary for current-month payrolls
-                      (prorated − unpaid leave + extra time, e.g. $604.31).
-                      For previous-month manual entries it equals basicSalary.
-                      Hover tooltip shows the full contracted salary for reference. */}
-                  <td className="p-3 text-gray-600">
-                    <span
-                      title={
-                        payroll.payrollType === "current" &&
-                        payroll.adjustedBasicSalary != null &&
-                        payroll.adjustedBasicSalary !== payroll.basicSalary
-                          ? `Full salary: ${formatCurrency(payroll.basicSalary)}`
-                          : undefined
-                      }
-                      className={
-                        payroll.payrollType === "current" &&
-                        payroll.adjustedBasicSalary != null &&
-                        payroll.adjustedBasicSalary !== payroll.basicSalary
-                          ? "cursor-help border-b border-dashed border-gray-400"
-                          : ""
-                      }
-                    >
-                      {formatCurrency(
-                        payroll.displayBasicSalary != null
-                          ? payroll.displayBasicSalary
-                          : payroll.basicSalary,
-                      )}
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    <div className="flex gap-1 justify-center">
-                      <span className="text-gray-600">
-                        {formatCurrency(getTotalAllowance(payroll))}
-                      </span>
-                      <button
-                        onClick={() => handleViewAllowances(payroll)}
-                        className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50"
-                        title="View Allowance Details"
-                      >
-                        <Eye size={18} />
-                      </button>
-                    </div>
-                  </td>
-                  <td className="p-3 text-red-600">
-                    {formatCurrency(payroll.deductions)}
-                  </td>
-                  <td className="p-3 font-semibold text-green-600">
-                    {formatCurrency(payroll.netSalary)}
-                  </td>
-                  <td className="p-3 flex items-center justify-center gap-3">
-                    <button
-                      onClick={() => handleView(payroll)}
-                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                      title="View Details"
-                    >
-                      <Eye size={18} />
-                    </button>
-                    <button
-                      onClick={() => deletePayroll(payroll)}
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                      title="Delete"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-
-        {/* Pagination */}
-        {currentPayrolls.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Prev
-            </button>
-            {visiblePages.map((p, index) => (
+      {activeTab === "payroll" ? (
+        // ── Existing Payroll Content ────────────────────────────────────────
+        <>
+          {/* Header */}
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+            <div className="flex flex-wrap gap-3">
               <button
-                key={index}
-                onClick={() => typeof p === "number" && setCurrentPage(p)}
-                disabled={p === "..."}
-                className={`px-3 py-1 rounded ${
-                  p === "..."
-                    ? "bg-gray-200 cursor-not-allowed"
-                    : currentPage === p
-                      ? "bg-indigo-600 text-white cursor-pointer"
-                      : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-                }`}
+                onClick={() =>
+                  navigate("/hrmlayout/payroll/new", {
+                    state: { payrollCode: nextPayrollCode },
+                  })
+                }
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
               >
-                {p}
+                <UserPlus size={18} /> Add New Payroll
               </button>
-            ))}
-            <button
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* ── Allowance Details Modal ── */}
-      {isAllowanceModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
-            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-800">
-                  Allowance Details
-                </h2>
+              <button
+                onClick={exportToCSV}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
+              >
+                <Download size={18} /> Export CSV
+              </button>
+              {selected.length > 0 && (
                 <button
-                  onClick={() => setIsAllowanceModalOpen(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
+                  onClick={handleDeleteSelected}
                 >
-                  <X size={24} />
+                  <Trash2 size={18} /> Delete Selected ({selected.length})
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+              <div className="bg-blue-50 px-4 py-2 rounded-lg">
+                <p className="text-sm font-medium text-blue-800">
+                  Total Count:{" "}
+                  <span className="font-bold">{filteredPayrolls.length}</span>
+                </p>
+              </div>
+              <div className="relative w-full sm:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={handleIconClick}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search payrolls..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 transition-colors"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Year Filter Buttons */}
+          <YearFilterButtons
+            allPayrolls={allPayrolls}
+            selectedYear={selectedYear}
+            onYearSelect={handleYearSelect}
+          />
+
+          {/* Month Range Tabs */}
+          <DateSelectionTabs
+            onDateRangeSelect={handleDateRangeSelect}
+            selectedRange={selectedDateRange}
+          />
+
+          {/* Active filter badge */}
+          {(selectedYear !== null || selectedDateRange) && (
+            <div className="mb-4 flex items-center gap-3">
+              <span className="text-sm text-indigo-700 font-medium bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">
+                {selectedYear !== null
+                  ? `Showing payrolls for ${selectedYear}`
+                  : `Showing: ${selectedDateRange?.label}`}
+              </span>
+              <button
+                onClick={() => {
+                  setSelectedYear(null);
+                  setSelectedDateRange(null);
+                  setPayrolls(allPayrolls);
+                  setCurrentPage(1);
+                }}
+                className="text-sm text-gray-500 hover:text-red-600 font-medium flex items-center gap-1"
+              >
+                <X size={14} /> Clear filter
+              </button>
+            </div>
+          )}
+
+          {selectedDateRange && !selectedYear && (
+            <div className="mb-4">
+              <button
+                onClick={handleClearDateFilter}
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Clear Date Filter
+              </button>
+            </div>
+          )}
+
+          {/* Payroll Table */}
+          <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+            <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
+              <thead className="bg-gray-100 text-gray-700 border-b">
+                <tr>
+                  <th className="p-3 text-left">
+                    <div className="flex items-center gap-4">
+                      {currentPayrolls.length > 0 && (
+                        <input
+                          type="checkbox"
+                          checked={
+                            selected.length === currentPayrolls.length &&
+                            currentPayrolls.length > 0
+                          }
+                          onChange={(e) => toggleSelectAll(e.target.checked)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      )}
+                      <span className="text-sm font-medium">Employee</span>
+                    </div>
+                  </th>
+                  <th className="p-3 text-sm font-medium">Month</th>
+                  <th className="p-3 text-sm font-medium">Year</th>
+                  <th className="p-3 text-sm font-medium">Team Name</th>
+                  <th className="p-3 text-sm font-medium">Contact No</th>
+                  <th className="p-3 text-sm font-medium">Basic Salary</th>
+                  <th className="p-3 text-sm font-medium">Allowances</th>
+                  <th className="p-3 text-sm font-medium">Deductions</th>
+                  <th className="p-3 text-sm font-medium">Net Salary</th>
+                  <th className="p-3 text-sm font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentPayrolls.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-6 text-center text-gray-500">
+                      {selectedYear !== null
+                        ? `No payroll records found for ${selectedYear}.`
+                        : selectedDateRange
+                          ? "No payroll records found for the selected date range."
+                          : "No payroll records found."}
+                    </td>
+                  </tr>
+                ) : (
+                  currentPayrolls.map((payroll, idx) => (
+                    <tr
+                      key={payroll._id}
+                      className={`hover:bg-gray-50 ${
+                        idx < currentPayrolls.length - 1 ? "border-b" : ""
+                      }`}
+                    >
+                      <td className="p-3 text-left">
+                        <div className="flex items-center gap-4">
+                          <input
+                            type="checkbox"
+                            checked={selected.some((s) => s.id === payroll._id)}
+                            onChange={() => toggleSelect(payroll)}
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="font-medium text-gray-900 capitalize">
+                            {payroll.employeeName}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-gray-600 font-medium">
+                        {formatPeriodToMonth(payroll.period)}
+                      </td>
+                      <td className="p-3 text-gray-600 font-medium">
+                        {formatPeriodToYear(payroll.period)}
+                      </td>
+                      <td className="p-3 text-gray-600 capitalize">
+                        {payroll.employeeId?.teamName ||
+                          payroll.teamName ||
+                          "N/A"}
+                      </td>
+                      <td className="p-3 text-gray-600">
+                        {payroll.employeeId?.contactNo ||
+                          payroll.contactNo ||
+                          "N/A"}
+                      </td>
+                      <td className="p-3 text-gray-600">
+                        <span
+                          title={
+                            payroll.payrollType === "current" &&
+                            payroll.adjustedBasicSalary != null &&
+                            payroll.adjustedBasicSalary !== payroll.basicSalary
+                              ? `Full salary: ${formatCurrency(payroll.basicSalary)}`
+                              : undefined
+                          }
+                          className={
+                            payroll.payrollType === "current" &&
+                            payroll.adjustedBasicSalary != null &&
+                            payroll.adjustedBasicSalary !== payroll.basicSalary
+                              ? "cursor-help"
+                              : ""
+                          }
+                        >
+                          {formatCurrency(
+                            payroll.displayBasicSalary != null
+                              ? payroll.displayBasicSalary
+                              : payroll.basicSalary,
+                          )}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex gap-1 justify-center">
+                          <span className="text-gray-600">
+                            {formatCurrency(getTotalAllowance(payroll))}
+                          </span>
+                          <button
+                            onClick={() => handleViewAllowances(payroll)}
+                            className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50"
+                            title="View Allowance Details"
+                          >
+                            <Eye size={18} />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="p-3 text-red-600">
+                        {formatCurrency(payroll.deductions)}
+                      </td>
+                      <td className="p-3 font-semibold text-green-600">
+                        {formatCurrency(payroll.netSalary)}
+                      </td>
+                      <td className="p-3 flex items-center justify-center gap-3">
+                        <button
+                          onClick={() => handleView(payroll)}
+                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                          title="View Details"
+                        >
+                          <Eye size={18} />
+                        </button>
+                        <button
+                          onClick={() => deletePayroll(payroll)}
+                          className="text-red-600 hover:text-red-800 cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+
+            {/* Pagination */}
+            {currentPayrolls.length > 0 && (
+              <div className="mt-4 p-5 flex justify-start gap-2">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                >
+                  Prev
+                </button>
+                {visiblePages.map((p, index) => (
+                  <button
+                    key={index}
+                    onClick={() => typeof p === "number" && setCurrentPage(p)}
+                    disabled={p === "..."}
+                    className={`px-3 py-1 rounded ${
+                      p === "..."
+                        ? "bg-gray-200 cursor-not-allowed"
+                        : currentPage === p
+                          ? "bg-indigo-600 text-white cursor-pointer"
+                          : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+                <button
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(p + 1, totalPages))
+                  }
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                >
+                  Next
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto p-6">
-                {currentAllowances.length === 0 ? (
-                  <div className="text-center py-8">
-                    <DollarSign
-                      className="mx-auto text-gray-400 mb-3"
-                      size={48}
-                    />
-                    <p className="text-gray-500 text-lg">
-                      No allowance details available
-                    </p>
+            )}
+          </div>
+
+          {/* Modals (unchanged) */}
+          {isAllowanceModalOpen &&
+            ReactDOM.createPortal(
+              <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
+                <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
+                  <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                    <h2 className="text-xl font-semibold text-gray-800">
+                      Allowance Details
+                    </h2>
+                    <button
+                      onClick={() => setIsAllowanceModalOpen(false)}
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <X size={24} />
+                    </button>
                   </div>
-                ) : (
-                  <>
-                    <div className="overflow-x-auto mb-6">
-                      <table className="w-full border-collapse">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                              Allowance Type
-                            </th>
-                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">
-                              Amount
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {currentAllowances.map((allowance, index) => (
-                            <tr key={index} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm font-medium text-gray-900 capitalize">
-                                {allowance.type || "Allowance"}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right font-semibold">
-                                {formatCurrency(allowance.amount)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="bg-gray-50 border-t border-gray-200">
-                          <tr>
-                            <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                  <div className="flex-1 overflow-y-auto p-6">
+                    {currentAllowances.length === 0 ? (
+                      <div className="text-center py-8">
+                        <DollarSign
+                          className="mx-auto text-gray-400 mb-3"
+                          size={48}
+                        />
+                        <p className="text-gray-500 text-lg">
+                          No allowance details available
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="overflow-x-auto mb-6">
+                          <table className="w-full border-collapse">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                                  Allowance Type
+                                </th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">
+                                  Amount
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {currentAllowances.map((allowance, index) => (
+                                <tr key={index} className="hover:bg-gray-50">
+                                  <td className="px-4 py-3 text-sm font-medium text-gray-900 capitalize">
+                                    {allowance.type || "Allowance"}
+                                  </td>
+                                  <td className="px-4 py-3 text-sm text-right font-semibold">
+                                    {formatCurrency(allowance.amount)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-50 border-t border-gray-200">
+                              <tr>
+                                <td className="px-4 py-3 text-sm font-semibold text-gray-900">
+                                  Total Allowances
+                                </td>
+                                <td className="px-4 py-3 text-sm font-semibold text-right text-green-600">
+                                  {formatCurrency(
+                                    currentAllowances.reduce(
+                                      (total, a) => total + (a.amount || 0),
+                                      0,
+                                    ),
+                                  )}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                          <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                            <p className="text-sm font-medium text-blue-800">
                               Total Allowances
-                            </td>
-                            <td className="px-4 py-3 text-sm font-semibold text-right text-green-600">
+                            </p>
+                            <p className="text-2xl font-bold text-blue-900">
+                              {currentAllowances.length}
+                            </p>
+                          </div>
+                          <div className="bg-green-50 p-4 rounded-lg border border-green-100">
+                            <p className="text-sm font-medium text-green-800">
+                              Total Amount
+                            </p>
+                            <p className="text-2xl font-bold text-green-900">
                               {formatCurrency(
                                 currentAllowances.reduce(
                                   (total, a) => total + (a.amount || 0),
                                   0,
                                 ),
                               )}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                        <p className="text-sm font-medium text-blue-800">
-                          Total Allowances
-                        </p>
-                        <p className="text-2xl font-bold text-blue-900">
-                          {currentAllowances.length}
-                        </p>
-                      </div>
-                      <div className="bg-green-50 p-4 rounded-lg border border-green-100">
-                        <p className="text-sm font-medium text-green-800">
-                          Total Amount
-                        </p>
-                        <p className="text-2xl font-bold text-green-900">
-                          {formatCurrency(
-                            currentAllowances.reduce(
-                              (total, a) => total + (a.amount || 0),
-                              0,
-                            ),
-                          )}
-                        </p>
-                      </div>
-                      <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
-                        <p className="text-sm font-medium text-purple-800">
-                          Average per Allowance
-                        </p>
-                        <p className="text-2xl font-bold text-purple-900">
-                          {formatCurrency(
-                            currentAllowances.length > 0
-                              ? currentAllowances.reduce(
-                                  (t, a) => t + (a.amount || 0),
-                                  0,
-                                ) / currentAllowances.length
-                              : 0,
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-              <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
-                <button
-                  onClick={() => setIsAllowanceModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
-
-      {/* ── Edit Payroll Modal ── */}
-      {isEditModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
-            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-800">
-                  Edit Payroll
-                </h2>
-                <button
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-6">
-                <form onSubmit={handleUpdatePayroll}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Payroll Code
-                      </label>
-                      <input
-                        type="text"
-                        value={form.payrollCode || ""}
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
-                        disabled
-                      />
-                    </div>
-                    <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">
-                        Employee Name
-                      </label>
-                      <input
-                        type="text"
-                        value={form.employeeName || ""}
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
-                        disabled
-                      />
-                    </div>
+                            </p>
+                          </div>
+                          <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
+                            <p className="text-sm font-medium text-purple-800">
+                              Average per Allowance
+                            </p>
+                            <p className="text-2xl font-bold text-purple-900">
+                              {formatCurrency(
+                                currentAllowances.length > 0
+                                  ? currentAllowances.reduce(
+                                      (t, a) => t + (a.amount || 0),
+                                      0,
+                                    ) / currentAllowances.length
+                                  : 0,
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                    <InputField
-                      label="Basic Salary"
-                      name="basicSalary"
-                      value={form.basicSalary}
-                      onChange={handleNumeric}
-                      placeholder="0.00"
-                      error={errors.basicSalary}
-                      required
-                      disabled={isMrListEmpty}
-                    />
-                    <InputField
-                      label="Deductions"
-                      name="deductions"
-                      value={form.deductions}
-                      onChange={handleNumeric}
-                      placeholder="0.00"
-                      disabled={isMrListEmpty}
-                    />
-                    <InputField
-                      label="Net Salary"
-                      name="netSalary"
-                      value={form.netSalary}
-                      className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 border-gray-300 bg-gray-200 cursor-not-allowed"
-                      disabled
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <MultipleSelectDropdown
-                      label="Allowance Type"
-                      value={selectedAllowanceTypes}
-                      onChange={handleAllowanceChange}
-                      options={allowanceOptions}
-                      placeholder="Select allowance types"
-                      disabled={isMrListEmpty}
-                    />
-                    <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">
-                        Total Allowance
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={totalAllowance.toFixed(2)}
-                          readOnly
-                          className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 cursor-not-allowed"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowAllowanceBreakdown(true)}
-                          disabled={isMrListEmpty}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                        >
-                          View
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mb-6">
-                    <SearchableDropdown
-                      label="Source"
-                      value={form.source}
-                      onChange={handleSourceChange}
-                      options={sourceOptions}
-                      placeholder={
-                        sourceLoading ? "Loading sources..." : "Select Source"
-                      }
-                      required
-                      loading={sourceLoading}
-                      error={errors.source}
-                      disabled={isMrListEmpty || sourceLoading}
-                    />
-                  </div>
-
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Remarks
-                    </label>
-                    <textarea
-                      value={form.remarks || ""}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          remarks: e.target.value,
-                        }))
-                      }
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      rows="3"
-                    />
-                  </div>
-
-                  <div className="mt-8 p-4 bg-white rounded-md shadow-md">
-                    <h3 className="text-lg font-semibold mb-4 text-center">
-                      Salary Summary
-                    </h3>
-                    <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
-                      <thead className="bg-gray-200 text-gray-700 border-b">
-                        <tr>
-                          <th className="p-3 font-medium text-gray-700">
-                            Basic Salary
-                          </th>
-                          <th className="p-3 font-medium text-gray-700">
-                            Allowance
-                          </th>
-                          <th className="p-3 font-medium text-gray-700">
-                            Deductions
-                          </th>
-                          <th className="p-3 font-medium text-gray-700">
-                            Net Salary
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="bg-white hover:bg-gray-50">
-                          <td className="p-3 font-semibold">
-                            {formatCurrency(form.basicSalary || 0)}
-                          </td>
-                          <td className="p-3 font-semibold">
-                            {formatCurrency(totalAllowance)}
-                          </td>
-                          <td className="p-3 font-semibold text-red-600">
-                            -{formatCurrency(form.deductions || 0)}
-                          </td>
-                          <td className="p-3 font-semibold text-green-600">
-                            {formatCurrency(form.netSalary || 0)}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
+                  <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
                     <button
-                      type="button"
+                      onClick={() => setIsAllowanceModalOpen(false)}
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg transition-colors"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )}
+
+          {isEditModalOpen &&
+            ReactDOM.createPortal(
+              <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
+                <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
+                  <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                    <h2 className="text-xl font-semibold text-gray-800">
+                      Edit Payroll
+                    </h2>
+                    <button
                       onClick={() => setIsEditModalOpen(false)}
-                      className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors"
+                      className="text-gray-400 hover:text-gray-600 transition-colors"
                     >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-6 py-2 text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
-                    >
-                      Update Payroll
+                      <X size={24} />
                     </button>
                   </div>
-                </form>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+                  <div className="flex-1 overflow-y-auto p-6">
+                    <form onSubmit={handleUpdatePayroll}>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Payroll Code
+                          </label>
+                          <input
+                            type="text"
+                            value={form.payrollCode || ""}
+                            className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
+                            disabled
+                          />
+                        </div>
+                        <div className="flex flex-col">
+                          <label className="text-sm font-medium text-gray-700 mb-1">
+                            Employee Name
+                          </label>
+                          <input
+                            type="text"
+                            value={form.employeeName || ""}
+                            className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
+                            disabled
+                          />
+                        </div>
+                      </div>
 
-      {/* ── View Payroll Modal ── */}
-      {isViewModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
-            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-800">
-                  View Payroll
-                </h2>
-                <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Payroll Code
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
-                      {form.payrollCode || "N/A"}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Employee Name
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
-                      {form.employeeName || "N/A"}
-                    </p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Basic Salary
-                      {form.payrollType === "current" &&
-                        form.adjustedBasicSalary != null &&
-                        form.adjustedBasicSalary !== form.basicSalary && (
-                          <span className="ml-1 text-xs text-gray-400 font-normal">
-                            (Full: {formatCurrency(form.basicSalary)})
-                          </span>
-                        )}
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
-                      {formatCurrency(
-                        form.displayBasicSalary != null
-                          ? form.displayBasicSalary
-                          : form.basicSalary,
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Total Allowances
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
-                      {formatCurrency(totalAllowance)}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Deductions
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
-                      {formatCurrency(form.deductions)}
-                    </p>
-                  </div>
-                </div>
-                <div
-                  className={`grid gap-4 mb-6 ${form.status === "paid" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1 md:grid-cols-3"}`}
-                >
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Net Salary
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 font-semibold">
-                      {formatCurrency(form.netSalary)}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Source
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
-                      {getSourceLabel(form.source)}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Status
-                    </label>
-                    <p
-                      className={`border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize ${form.status === "paid" ? "text-green-600" : form.status === "pending" ? "text-yellow-600" : "text-red-600"}`}
-                    >
-                      {form.status || "N/A"}
-                    </p>
-                  </div>
-                </div>
-                {form.allowances && form.allowances.length > 0 && (
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Allowance Breakdown
-                    </label>
-                    <div className="border border-gray-300 rounded-lg overflow-hidden">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">
-                              Allowance Type
-                            </th>
-                            <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">
-                              Amount
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {form.allowances.map((allowance, index) => (
-                            <tr key={index}>
-                              <td className="px-4 py-2 text-sm text-gray-900 capitalize">
-                                {allowance.type}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                        <InputField
+                          label="Basic Salary"
+                          name="basicSalary"
+                          value={form.basicSalary}
+                          onChange={handleNumeric}
+                          placeholder="0.00"
+                          error={errors.basicSalary}
+                          required
+                          disabled={isMrListEmpty}
+                        />
+                        <InputField
+                          label="Deductions"
+                          name="deductions"
+                          value={form.deductions}
+                          onChange={handleNumeric}
+                          placeholder="0.00"
+                          disabled={isMrListEmpty}
+                        />
+                        <InputField
+                          label="Net Salary"
+                          name="netSalary"
+                          value={form.netSalary}
+                          className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 border-gray-300 bg-gray-200 cursor-not-allowed"
+                          disabled
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <MultipleSelectDropdown
+                          label="Allowance Type"
+                          value={selectedAllowanceTypes}
+                          onChange={handleAllowanceChange}
+                          options={allowanceOptions}
+                          placeholder="Select allowance types"
+                          disabled={isMrListEmpty}
+                        />
+                        <div className="flex flex-col">
+                          <label className="text-sm font-medium text-gray-700 mb-1">
+                            Total Allowance
+                          </label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={totalAllowance.toFixed(2)}
+                              readOnly
+                              className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 cursor-not-allowed"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowAllowanceBreakdown(true)}
+                              disabled={isMrListEmpty}
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                            >
+                              View
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mb-6">
+                        <SearchableDropdown
+                          label="Source"
+                          value={form.source}
+                          onChange={handleSourceChange}
+                          options={sourceOptions}
+                          placeholder={
+                            sourceLoading
+                              ? "Loading sources..."
+                              : "Select Source"
+                          }
+                          required
+                          loading={sourceLoading}
+                          error={errors.source}
+                          disabled={isMrListEmpty || sourceLoading}
+                        />
+                      </div>
+
+                      <div className="mb-6">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Remarks
+                        </label>
+                        <textarea
+                          value={form.remarks || ""}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              remarks: e.target.value,
+                            }))
+                          }
+                          className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                          rows="3"
+                        />
+                      </div>
+
+                      <div className="mt-8 p-4 bg-white rounded-md shadow-md">
+                        <h3 className="text-lg font-semibold mb-4 text-center">
+                          Salary Summary
+                        </h3>
+                        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+                          <thead className="bg-gray-200 text-gray-700 border-b">
+                            <tr>
+                              <th className="p-3 font-medium text-gray-700">
+                                Basic Salary
+                              </th>
+                              <th className="p-3 font-medium text-gray-700">
+                                Allowance
+                              </th>
+                              <th className="p-3 font-medium text-gray-700">
+                                Deductions
+                              </th>
+                              <th className="p-3 font-medium text-gray-700">
+                                Net Salary
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="bg-white hover:bg-gray-50">
+                              <td className="p-3 font-semibold">
+                                {formatCurrency(form.basicSalary || 0)}
                               </td>
-                              <td className="px-4 py-2 text-sm text-right font-medium">
-                                {formatCurrency(allowance.amount)}
+                              <td className="p-3 font-semibold">
+                                {formatCurrency(totalAllowance)}
+                              </td>
+                              <td className="p-3 font-semibold text-red-600">
+                                -{formatCurrency(form.deductions || 0)}
+                              </td>
+                              <td className="p-3 font-semibold text-green-600">
+                                {formatCurrency(form.netSalary || 0)}
                               </td>
                             </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="bg-gray-50">
-                          <tr>
-                            <td className="px-4 py-2 text-sm font-semibold text-gray-900">
-                              Total Allowances
-                            </td>
-                            <td className="px-4 py-2 text-sm font-semibold text-right text-green-600">
-                              {formatCurrency(totalAllowance)}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditModalOpen(false)}
+                          className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-6 py-2 text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                        >
+                          Update Payroll
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )}
+
+          {isViewModalOpen &&
+            ReactDOM.createPortal(
+              <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
+                <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
+                  <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                    <h2 className="text-xl font-semibold text-gray-800">
+                      View Payroll
+                    </h2>
+                    <button
+                      onClick={() => setIsViewModalOpen(false)}
+                      className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+                    >
+                      <X size={24} />
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Payroll Code
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                          {form.payrollCode || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Employee Name
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
+                          {form.employeeName || "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Basic Salary
+                          {form.payrollType === "current" &&
+                            form.adjustedBasicSalary != null &&
+                            form.adjustedBasicSalary !== form.basicSalary && (
+                              <span className="ml-1 text-xs text-gray-400 font-normal">
+                                (Full: {formatCurrency(form.basicSalary)})
+                              </span>
+                            )}
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                          {formatCurrency(
+                            form.displayBasicSalary != null
+                              ? form.displayBasicSalary
+                              : form.basicSalary,
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Total Allowances
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                          {formatCurrency(totalAllowance)}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Deductions
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                          {formatCurrency(form.deductions)}
+                        </p>
+                      </div>
+                    </div>
+                    <div
+                      className={`grid gap-4 mb-6 ${
+                        form.status === "paid"
+                          ? "grid-cols-1 md:grid-cols-2"
+                          : "grid-cols-1 md:grid-cols-3"
+                      }`}
+                    >
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Net Salary
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 font-semibold">
+                          {formatCurrency(form.netSalary)}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Source
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
+                          {getSourceLabel(form.source)}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Status
+                        </label>
+                        <p
+                          className={`border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize ${
+                            form.status === "paid"
+                              ? "text-green-600"
+                              : form.status === "pending"
+                                ? "text-yellow-600"
+                                : "text-red-600"
+                          }`}
+                        >
+                          {form.status || "N/A"}
+                        </p>
+                      </div>
+                    </div>
+                    {form.allowances && form.allowances.length > 0 && (
+                      <div className="mb-6">
+                        <label className="block text-sm font-medium text-gray-600 mb-2">
+                          Allowance Breakdown
+                        </label>
+                        <div className="border border-gray-300 rounded-lg overflow-hidden">
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">
+                                  Allowance Type
+                                </th>
+                                <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">
+                                  Amount
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {form.allowances.map((allowance, index) => (
+                                <tr key={index}>
+                                  <td className="px-4 py-2 text-sm text-gray-900 capitalize">
+                                    {allowance.type}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-right font-medium">
+                                    {formatCurrency(allowance.amount)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-50">
+                              <tr>
+                                <td className="px-4 py-2 text-sm font-semibold text-gray-900">
+                                  Total Allowances
+                                </td>
+                                <td className="px-4 py-2 text-sm font-semibold text-right text-green-600">
+                                  {formatCurrency(totalAllowance)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Remarks
+                      </label>
+                      <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 min-h-[80px]">
+                        {form.remarks?.trim() ? form.remarks : "No Remarks"}
+                      </p>
                     </div>
                   </div>
-                )}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">
-                    Remarks
-                  </label>
-                  <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 min-h-[80px]">
-                    {form.remarks?.trim() ? form.remarks : "No Remarks"}
-                  </p>
+                  <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
+                    <button
+                      onClick={() => setIsViewModalOpen(false)}
+                      className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
-                <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
+              </div>,
+              document.body,
+            )}
 
-      {/* ── Allowance Breakdown Modal (edit mode) ── */}
-      {showAllowanceBreakdown && (
-        <AllowanceBreakdownModal
-          allowances={form.allowances || []}
-          isOpen={showAllowanceBreakdown}
-          onClose={() => setShowAllowanceBreakdown(false)}
-          onAmountChange={handleAllowanceAmountChange}
-          onRemove={removeAllowance}
-        />
+          {showAllowanceBreakdown && (
+            <AllowanceBreakdownModal
+              allowances={form.allowances || []}
+              isOpen={showAllowanceBreakdown}
+              onClose={() => setShowAllowanceBreakdown(false)}
+              onAmountChange={handleAllowanceAmountChange}
+              onRemove={removeAllowance}
+            />
+          )}
+        </>
+      ) : (
+        // ── Advance Tab Content (simplified) ────────────────────────────────
+        <AdvanceList />
       )}
     </div>
   );

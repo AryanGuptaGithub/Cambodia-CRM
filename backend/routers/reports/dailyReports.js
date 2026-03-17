@@ -8,35 +8,35 @@ const router = express.Router();
 
 // Helper function to format currency
 const formatCurrency = (value) => {
-  if (value === null || value === undefined) return '$0.00';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2
+  if (value === null || value === undefined) return "$0.00";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
   }).format(value);
 };
 
 // Helper function to generate filename
 const generateFilename = (selectedTab, selectedSaleType, dateRange) => {
-  const dateStr = new Date().toISOString().split('T')[0];
+  const dateStr = new Date().toISOString().split("T")[0];
   let filename = `Daily_Report_${dateStr}`;
-  
+
   if (selectedSaleType && selectedSaleType !== "Total sales") {
-    filename += `_${selectedSaleType.replace(/\s+/g, '_')}`;
+    filename += `_${selectedSaleType.replace(/\s+/g, "_")}`;
   }
-  
+
   if (selectedTab) {
     filename += `_${selectedTab}`;
   }
-  
+
   if (dateRange) {
     filename += `_${dateRange}`;
   }
-  
+
   return `${filename}.xlsx`;
 };
 
-// FIXED: Changed from '/dailyReports' to '/'
+// GET / - Daily Reports
 router.get("/", async (req, res) => {
   try {
     const {
@@ -53,12 +53,10 @@ router.get("/", async (req, res) => {
     const limitNum = Math.max(1, parseInt(limit, 10));
     const skip = (pageNum - 1) * limitNum;
 
-    console.log('values of starDate', startDate);
-    console.log('valueso f enddate', endDate);
     // Build match conditions
     const matchConditions = {};
 
-    // 1. Payment Status Condition based on active sale type tab
+    // 1. Payment Status Condition
     if (saleType && saleType !== "Total sales") {
       if (saleType.toLowerCase().includes("cash")) {
         matchConditions.paymentStatus = "Cash";
@@ -72,13 +70,12 @@ router.get("/", async (req, res) => {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // 3. Date Condition - USING invoiceDate INSTEAD OF recordingDate
+    // 3. Date Condition
     if (dateFilter && dateFilter !== "all") {
       const today = new Date();
-      
-      const todayStr = today.toISOString().split('T')[0];
+      const todayStr = today.toISOString().split("T")[0];
       let startDateStr, endDateStr;
-      
+
       switch (dateFilter) {
         case "today":
           startDateStr = todayStr;
@@ -88,21 +85,24 @@ router.get("/", async (req, res) => {
         case "currentMonth":
           const currentYear = today.getFullYear();
           const currentMonth = today.getMonth();
-          startDateStr = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
-          endDateStr = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
+          startDateStr = new Date(currentYear, currentMonth, 1)
+            .toISOString()
+            .split("T")[0];
+          endDateStr = new Date(currentYear, currentMonth + 1, 0)
+            .toISOString()
+            .split("T")[0];
           break;
 
         case "janToPreviousMonth":
           const year = today.getFullYear();
           const month = today.getMonth();
-          
           if (month === 0) {
             startDateStr = `${year - 1}-01-01`;
             endDateStr = `${year - 1}-12-31`;
           } else {
             startDateStr = `${year}-01-01`;
             const lastMonth = new Date(year, month, 0);
-            endDateStr = lastMonth.toISOString().split('T')[0];
+            endDateStr = lastMonth.toISOString().split("T")[0];
           }
           break;
 
@@ -121,7 +121,7 @@ router.get("/", async (req, res) => {
         const start = new Date(startDateStr);
         const end = new Date(endDateStr);
         end.setHours(23, 59, 59, 999);
-        
+
         matchConditions.invoiceDate = {
           $gte: start,
           $lte: end,
@@ -131,18 +131,17 @@ router.get("/", async (req, res) => {
 
     // Build base pipeline
     const basePipeline = [];
-    
+
     if (Object.keys(matchConditions).length > 0) {
       basePipeline.push({ $match: matchConditions });
     }
 
-    // Group by MR name and MR ID to preserve both
+    // FIX: Group only by mrName (case-insensitive) to avoid duplicate rows per MR
     basePipeline.push({
       $group: {
-        _id: {
-          mrName: "$mrName",
-          mrId: "$mrId"
-        },
+        _id: { $toLower: { $trim: { input: "$mrName" } } }, // group key = normalized name
+        mrName: { $first: "$mrName" },
+        mrId: { $first: "$mrId" },
         totalSalesAmount: { $sum: "$totalAmount" },
         totalOrders: { $sum: 1 },
         totalPaidAmount: { $sum: "$paidAmount" },
@@ -152,90 +151,73 @@ router.get("/", async (req, res) => {
         totalQty: { $sum: "$totalQty" },
         credits: {
           $sum: {
-            $cond: [
-              { $eq: ["$paymentStatus", "Credit"] },
-              "$totalAmount",
-              0,
-            ],
+            $cond: [{ $eq: ["$paymentStatus", "Credit"] }, "$totalAmount", 0],
           },
         },
         cash: {
           $sum: {
-            $cond: [
-              { $eq: ["$paymentStatus", "Cash"] },
-              "$totalAmount",
-              0,
-            ],
+            $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
           },
         },
         uniqueCustomers: { $addToSet: "$customerCode" },
-        latestInvoiceDate: { $max: "$invoiceDate" },
+        latestInvoiceDate: { $max: "$invoiceDate" }, // latest date
         earliestInvoiceDate: { $min: "$invoiceDate" },
       },
     });
 
-    // IMPROVED: Lookup staff details by MR name with case-insensitive matching
+    // Lookup staff details
     basePipeline.push({
       $lookup: {
         from: "staffs",
-        let: { 
-          mrName: "$_id.mrName",
-          mrId: "$_id.mrId" 
+        let: {
+          mrName: "$mrName",
+          mrId: "$mrId",
         },
         pipeline: [
           {
             $match: {
               $expr: {
                 $or: [
-                  // Match by MR name (case insensitive and trimmed)
                   {
                     $eq: [
                       { $toLower: { $trim: { input: "$medicalRepName" } } },
-                      { $toLower: { $trim: { input: "$$mrName" } } }
-                    ]
+                      { $toLower: { $trim: { input: "$$mrName" } } },
+                    ],
                   },
-                  // Match by _id if mrId is valid ObjectId
                   {
                     $and: [
                       { $ne: ["$$mrId", null] },
                       { $ne: ["$$mrId", ""] },
                       {
-                        $eq: [
-                          { $toString: "$_id" },
-                          { $toString: "$$mrId" }
-                        ]
-                      }
-                    ]
+                        $eq: [{ $toString: "$_id" }, { $toString: "$$mrId" }],
+                      },
+                    ],
                   },
-                  // Match by MRId field (if it's a number/string)
                   {
                     $and: [
                       { $ne: ["$$mrId", null] },
                       { $ne: ["$$mrId", ""] },
                       {
-                        $eq: [
-                          { $toString: "$MRId" },
-                          { $toString: "$$mrId" }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
+                        $eq: [{ $toString: "$MRId" }, { $toString: "$$mrId" }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
           },
-          { $limit: 1 }
+          { $limit: 1 },
         ],
         as: "staffDetails",
       },
     });
 
-    // Format output with staff details
+    // Project output
     basePipeline.push({
       $project: {
         _id: 0,
-        mrName: "$_id.mrName",
-        mrId: "$_id.mrId",
+        mrName: "$mrName",
+        mrId: "$mrId",
         totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
         totalOrders: 1,
         totalPaidAmount: { $round: ["$totalPaidAmount", 2] },
@@ -249,99 +231,93 @@ router.get("/", async (req, res) => {
         date: {
           $dateToString: {
             format: "%Y-%m-%d",
-            date: "$latestInvoiceDate",
-            timezone: "Asia/Dhaka"
-          }
+            date: "$latestInvoiceDate", // always the latest date
+            timezone: "Asia/Dhaka",
+          },
         },
         latestInvoiceDate: 1,
-        // Staff details - get contact number from staff collection
         mrContactNo: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
+            then: {
               $ifNull: [
                 { $arrayElemAt: ["$staffDetails.contactNo", 0] },
-                "Not Available"
-              ]
+                "Not Available",
+              ],
             },
-            else: "Not Available"
-          }
+            else: "Not Available",
+          },
         },
         mrEmail: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
+            then: {
               $ifNull: [
                 { $arrayElemAt: ["$staffDetails.email", 0] },
-                "Not Available"
-              ]
+                "Not Available",
+              ],
             },
-            else: "Not Available"
-          }
+            else: "Not Available",
+          },
         },
         mrTeamName: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
+            then: {
               $ifNull: [
                 { $arrayElemAt: ["$staffDetails.teamName", 0] },
-                "Not Available"
-              ]
+                "Not Available",
+              ],
             },
-            else: "Not Available"
-          }
+            else: "Not Available",
+          },
         },
         mrMedicalRepName: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
+            then: {
               $ifNull: [
                 { $arrayElemAt: ["$staffDetails.medicalRepName", 0] },
-                "Not Available"
-              ]
+                "Not Available",
+              ],
             },
-            else: "Not Available"
-          }
+            else: "Not Available",
+          },
         },
-        // Also include MRId from staff if available
         mrStaffMRId: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
-              $ifNull: [
-                { $arrayElemAt: ["$staffDetails.MRId", 0] },
-                null
-              ]
+            then: {
+              $ifNull: [{ $arrayElemAt: ["$staffDetails.MRId", 0] }, null],
             },
-            else: null
-          }
+            else: null,
+          },
         },
       },
     });
 
     basePipeline.push({ $sort: { totalSalesAmount: -1 } });
 
-    // Get total count
+    // FIX: Count pipeline also groups only by mrName
     const countPipeline = [
-      ...(Object.keys(matchConditions).length > 0 ? [{ $match: matchConditions }] : []),
+      ...(Object.keys(matchConditions).length > 0
+        ? [{ $match: matchConditions }]
+        : []),
       {
         $group: {
-          _id: {
-            mrName: "$mrName",
-            mrId: "$mrId"
-          },
-          count: { $sum: 1 }
-        }
+          _id: { $toLower: { $trim: { input: "$mrName" } } },
+          count: { $sum: 1 },
+        },
       },
       {
         $group: {
           _id: null,
-          totalCount: { $sum: 1 }
-        }
-      }
+          totalCount: { $sum: 1 },
+        },
+      },
     ];
 
-    // Execute pipelines
+    // Execute pipelines in parallel
     const [countResult, reportsData, summaryResult] = await Promise.all([
       SaleSummary.aggregate(countPipeline),
       SaleSummary.aggregate([
@@ -369,11 +345,7 @@ router.get("/", async (req, res) => {
             },
             cash: {
               $sum: {
-                $cond: [
-                  { $eq: ["$paymentStatus", "Cash"] },
-                  "$totalAmount",
-                  0,
-                ],
+                $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
               },
             },
             uniqueCustomers: { $addToSet: "$customerCode" },
@@ -400,8 +372,8 @@ router.get("/", async (req, res) => {
                   $dateToString: {
                     format: "%Y-%m-%d",
                     date: "$earliestInvoiceDate",
-                    timezone: "Asia/Dhaka"
-                  }
+                    timezone: "Asia/Dhaka",
+                  },
                 },
                 else: {
                   $concat: [
@@ -409,21 +381,21 @@ router.get("/", async (req, res) => {
                       $dateToString: {
                         format: "%Y-%m-%d",
                         date: "$earliestInvoiceDate",
-                        timezone: "Asia/Dhaka"
-                      }
+                        timezone: "Asia/Dhaka",
+                      },
                     },
                     " to ",
                     {
                       $dateToString: {
                         format: "%Y-%m-%d",
                         date: "$latestInvoiceDate",
-                        timezone: "Asia/Dhaka"
-                      }
-                    }
-                  ]
-                }
-              }
-            }
+                        timezone: "Asia/Dhaka",
+                      },
+                    },
+                  ],
+                },
+              },
+            },
           },
         },
       ]),
@@ -432,58 +404,56 @@ router.get("/", async (req, res) => {
     const totalRecords = countResult[0]?.totalCount || 0;
     const totalPages = Math.ceil(totalRecords / limitNum);
 
-    // Enhanced fallback: manually fetch staff details for any records with missing contact info
+    // Fallback: manually fetch staff details for records still missing contact info
     let enhancedRecords = [...reportsData];
-    
+
     const reportsMissingStaff = enhancedRecords.filter(
-      report => report.mrContactNo === "Not Available" && report.mrName
+      (report) => report.mrContactNo === "Not Available" && report.mrName,
     );
 
     if (reportsMissingStaff.length > 0) {
-      // Get all MR names that need lookup
-      const mrNamesToLookup = [...new Set(reportsMissingStaff.map(report => report.mrName))];
+      const mrNamesToLookup = [
+        ...new Set(reportsMissingStaff.map((report) => report.mrName)),
+      ];
       const mrIdsToLookup = reportsMissingStaff
-        .filter(report => report.mrId)
-        .map(report => report.mrId);
-      
-      // Build query for staff lookup
-      const staffQuery = {
-        $or: []
-      };
-      
-      // Add name matching condition
+        .filter((report) => report.mrId)
+        .map((report) => report.mrId);
+
+      const staffQuery = { $or: [] };
+
       if (mrNamesToLookup.length > 0) {
         staffQuery.$or.push({
-          medicalRepName: { 
-            $in: mrNamesToLookup.map(name => new RegExp(`^${name}$`, 'i'))
-          }
+          medicalRepName: {
+            $in: mrNamesToLookup.map((name) => new RegExp(`^${name}$`, "i")),
+          },
         });
       }
-      
-      // Add ID matching conditions
+
       if (mrIdsToLookup.length > 0) {
         const objectIdConditions = mrIdsToLookup
-          .filter(id => mongoose.Types.ObjectId.isValid(id))
-          .map(id => new mongoose.Types.ObjectId(id));
-        
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          .map((id) => new mongoose.Types.ObjectId(id));
+
         if (objectIdConditions.length > 0) {
           staffQuery.$or.push({ _id: { $in: objectIdConditions } });
         }
-        
+
         staffQuery.$or.push({ MRId: { $in: mrIdsToLookup } });
       }
 
-      // Fetch staff details
-      const staffDetails = staffQuery.$or.length > 0 
-        ? await mongoose.connection.db.collection("staffs").find(staffQuery).toArray()
-        : [];
+      const staffDetails =
+        staffQuery.$or.length > 0
+          ? await mongoose.connection.db
+              .collection("staffs")
+              .find(staffQuery)
+              .toArray()
+          : [];
 
-      // Create lookup maps
       const staffByNameMap = new Map();
       const staffByIdMap = new Map();
       const staffByMRIdMap = new Map();
-      
-      staffDetails.forEach(staff => {
+
+      staffDetails.forEach((staff) => {
         if (staff.medicalRepName) {
           staffByNameMap.set(staff.medicalRepName.toLowerCase().trim(), staff);
         }
@@ -495,22 +465,20 @@ router.get("/", async (req, res) => {
         }
       });
 
-      // Enhance the records with staff details
-      enhancedRecords = enhancedRecords.map(report => {
+      enhancedRecords = enhancedRecords.map((report) => {
         if (report.mrContactNo === "Not Available") {
           let staff = null;
-          
-          // Try to find staff by name
+
           if (report.mrName) {
             staff = staffByNameMap.get(report.mrName.toLowerCase().trim());
           }
-          
-          // Try to find by ID if not found by name
+
           if (!staff && report.mrId) {
-            staff = staffByIdMap.get(report.mrId.toString()) || 
-                   staffByMRIdMap.get(report.mrId.toString());
+            staff =
+              staffByIdMap.get(report.mrId.toString()) ||
+              staffByMRIdMap.get(report.mrId.toString());
           }
-          
+
           if (staff) {
             return {
               ...report,
@@ -541,7 +509,6 @@ router.get("/", async (req, res) => {
       cash: report.cash,
       totalCustomers: report.totalCustomers,
       date: report.date,
-      // Staff details - now properly populated from staff collection
       mrContactNo: report.mrContactNo,
       mrEmail: report.mrEmail,
       mrTeamName: report.mrTeamName,
@@ -559,7 +526,7 @@ router.get("/", async (req, res) => {
       totalMRs: 0,
       dateRange: "N/A",
     };
-    
+
     res.status(200).json({
       data: {
         summary,
@@ -582,17 +549,10 @@ router.get("/", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/dailyReports/export' to '/export'
-// Route for Excel export with staff contact lookup
+// GET /export - Excel Export
 router.get("/export", async (req, res) => {
   try {
-    const {
-      saleType,
-      startDate,
-      endDate,
-      dateFilter,
-      search,
-    } = req.query;
+    const { saleType, startDate, endDate, dateFilter, search } = req.query;
 
     // Build match conditions
     const matchConditions = {};
@@ -611,9 +571,9 @@ router.get("/export", async (req, res) => {
 
     if (dateFilter && dateFilter !== "all") {
       const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
+      const todayStr = today.toISOString().split("T")[0];
       let startDateStr, endDateStr;
-      
+
       switch (dateFilter) {
         case "today":
           startDateStr = todayStr;
@@ -622,8 +582,12 @@ router.get("/export", async (req, res) => {
         case "currentMonth":
           const currentYear = today.getFullYear();
           const currentMonth = today.getMonth();
-          startDateStr = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
-          endDateStr = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
+          startDateStr = new Date(currentYear, currentMonth, 1)
+            .toISOString()
+            .split("T")[0];
+          endDateStr = new Date(currentYear, currentMonth + 1, 0)
+            .toISOString()
+            .split("T")[0];
           break;
         case "janToPreviousMonth":
           const year = today.getFullYear();
@@ -634,7 +598,7 @@ router.get("/export", async (req, res) => {
           } else {
             startDateStr = `${year}-01-01`;
             const lastMonth = new Date(year, month, 0);
-            endDateStr = lastMonth.toISOString().split('T')[0];
+            endDateStr = lastMonth.toISOString().split("T")[0];
           }
           break;
         case "custom":
@@ -655,81 +619,81 @@ router.get("/export", async (req, res) => {
       }
     }
 
-    // Build export pipeline with staff lookup
+    // Build export pipeline
     const exportPipeline = [];
-    
+
     if (Object.keys(matchConditions).length > 0) {
       exportPipeline.push({ $match: matchConditions });
     }
 
+    // FIX: Group only by mrName to avoid duplicates
     exportPipeline.push({
       $group: {
-        _id: {
-          mrName: "$mrName",
-          mrId: "$mrId"
-        },
+        _id: { $toLower: { $trim: { input: "$mrName" } } },
+        mrName: { $first: "$mrName" },
+        mrId: { $first: "$mrId" },
         totalSalesAmount: { $sum: "$totalAmount" },
         totalOrders: { $sum: 1 },
         credits: {
           $sum: {
-            $cond: [
-              { $eq: ["$paymentStatus", "Credit"] },
-              "$totalAmount",
-              0,
-            ],
+            $cond: [{ $eq: ["$paymentStatus", "Credit"] }, "$totalAmount", 0],
           },
         },
         cash: {
           $sum: {
-            $cond: [
-              { $eq: ["$paymentStatus", "Cash"] },
-              "$totalAmount",
-              0,
-            ],
+            $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
           },
         },
-        latestInvoiceDate: { $max: "$invoiceDate" },
+        latestInvoiceDate: { $max: "$invoiceDate" }, // always the latest date
       },
     });
 
-    // Improved staff lookup
+    // Staff lookup
     exportPipeline.push({
       $lookup: {
         from: "staffs",
-        let: { 
-          mrName: "$_id.mrName",
-          mrId: "$_id.mrId" 
+        let: {
+          mrName: "$mrName",
+          mrId: "$mrId",
         },
         pipeline: [
           {
             $match: {
               $expr: {
                 $or: [
-                  // Match by MR name (case insensitive)
                   {
                     $eq: [
                       { $toLower: { $trim: { input: "$medicalRepName" } } },
-                      { $toLower: { $trim: { input: "$$mrName" } } }
-                    ]
+                      { $toLower: { $trim: { input: "$$mrName" } } },
+                    ],
                   },
-                  // Match by ID fields
                   {
                     $and: [
                       { $ne: ["$$mrId", null] },
                       { $ne: ["$$mrId", ""] },
                       {
                         $or: [
-                          { $eq: [{ $toString: "$_id" }, { $toString: "$$mrId" }] },
-                          { $eq: [{ $toString: "$MRId" }, { $toString: "$$mrId" }] }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
+                          {
+                            $eq: [
+                              { $toString: "$_id" },
+                              { $toString: "$$mrId" },
+                            ],
+                          },
+                          {
+                            $eq: [
+                              { $toString: "$MRId" },
+                              { $toString: "$$mrId" },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
           },
-          { $limit: 1 }
+          { $limit: 1 },
         ],
         as: "staffDetails",
       },
@@ -738,8 +702,8 @@ router.get("/export", async (req, res) => {
     exportPipeline.push({
       $project: {
         _id: 0,
-        mrName: "$_id.mrName",
-        mrId: "$_id.mrId",
+        mrName: "$mrName",
+        mrId: "$mrId",
         totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
         totalOrders: 1,
         credits: { $round: ["$credits", 2] },
@@ -747,45 +711,45 @@ router.get("/export", async (req, res) => {
         date: {
           $dateToString: {
             format: "%Y-%m-%d",
-            date: "$latestInvoiceDate",
-            timezone: "Asia/Dhaka"
-          }
+            date: "$latestInvoiceDate", // latest date
+            timezone: "Asia/Dhaka",
+          },
         },
         mrContactNo: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
+            then: {
               $ifNull: [
                 { $arrayElemAt: ["$staffDetails.contactNo", 0] },
-                "Not Available"
-              ]
+                "Not Available",
+              ],
             },
-            else: "Not Available"
-          }
+            else: "Not Available",
+          },
         },
         mrEmail: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
+            then: {
               $ifNull: [
                 { $arrayElemAt: ["$staffDetails.email", 0] },
-                "Not Available"
-              ]
+                "Not Available",
+              ],
             },
-            else: "Not Available"
-          }
+            else: "Not Available",
+          },
         },
         mrTeamName: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { 
+            then: {
               $ifNull: [
                 { $arrayElemAt: ["$staffDetails.teamName", 0] },
-                "Not Available"
-              ]
+                "Not Available",
+              ],
             },
-            else: "Not Available"
-          }
+            else: "Not Available",
+          },
         },
       },
     });
@@ -797,44 +761,44 @@ router.get("/export", async (req, res) => {
     if (!exportData || exportData.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No data found for the selected filters"
+        message: "No data found for the selected filters",
       });
     }
 
     // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Daily Report');
+    const worksheet = workbook.addWorksheet("Daily Report");
 
-    // Determine column count based on sale type
-    let columnCount = 7;
-    if (saleType === 'Cash Sales' || saleType === 'Credit Sales') {
-      columnCount = 6;
+    // Determine column count
+    let columnCount = 9;
+    if (saleType === "Cash Sales" || saleType === "Credit Sales") {
+      columnCount = 8;
     }
 
-    // Add title row
+    // Title row
     const titleRow = worksheet.getRow(1);
-    titleRow.getCell(1).value = 'DAILY REPORTS';
+    titleRow.getCell(1).value = "DAILY REPORTS";
     titleRow.getCell(1).font = { bold: true, size: 16 };
-    titleRow.getCell(1).alignment = { horizontal: 'center' };
+    titleRow.getCell(1).alignment = { horizontal: "center" };
     titleRow.height = 25;
     worksheet.mergeCells(1, 1, 1, columnCount);
 
-    // Add filter info
-    let filterInfo = `Filters: ${dateFilter || 'All Records'}`;
-    if (saleType && saleType !== 'Total sales') {
+    // Filter info row
+    let filterInfo = `Filters: ${dateFilter || "All Records"}`;
+    if (saleType && saleType !== "Total sales") {
       filterInfo += ` | ${saleType}`;
     }
     if (search) {
       filterInfo += ` | Search: ${search}`;
     }
-    
+
     const filterRow = worksheet.getRow(2);
     filterRow.getCell(1).value = filterInfo;
     filterRow.getCell(1).font = { italic: true };
-    filterRow.getCell(1).alignment = { horizontal: 'center' };
+    filterRow.getCell(1).alignment = { horizontal: "center" };
     worksheet.mergeCells(2, 1, 2, columnCount);
 
-    // Add summary
+    // Summary row
     const summaryPipeline = [
       { $match: matchConditions },
       {
@@ -844,20 +808,12 @@ router.get("/export", async (req, res) => {
           totalOrders: { $sum: 1 },
           credits: {
             $sum: {
-              $cond: [
-                { $eq: ["$paymentStatus", "Credit"] },
-                "$totalAmount",
-                0,
-              ],
+              $cond: [{ $eq: ["$paymentStatus", "Credit"] }, "$totalAmount", 0],
             },
           },
           cash: {
             $sum: {
-              $cond: [
-                { $eq: ["$paymentStatus", "Cash"] },
-                "$totalAmount",
-                0,
-              ],
+              $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
             },
           },
           uniqueCustomers: { $addToSet: "$customerCode" },
@@ -888,89 +844,125 @@ router.get("/export", async (req, res) => {
     };
 
     const summaryRow = worksheet.getRow(3);
-    summaryRow.getCell(1).value = `Summary: Total Sales: ${formatCurrency(summary.totalSalesAmount)} | Total Orders: ${summary.totalOrders} | Total MRs: ${summary.totalMRs} | Total Customers: ${summary.totalCustomers} | Credits: ${formatCurrency(summary.credits)} | Cash: ${formatCurrency(summary.cash)}`;
+    summaryRow.getCell(1).value =
+      `Summary: Total Sales: ${formatCurrency(summary.totalSalesAmount)} | Total Orders: ${summary.totalOrders} | Total MRs: ${summary.totalMRs} | Total Customers: ${summary.totalCustomers} | Credits: ${formatCurrency(summary.credits)} | Cash: ${formatCurrency(summary.cash)}`;
     summaryRow.getCell(1).font = { bold: true };
-    summaryRow.getCell(1).alignment = { horizontal: 'center' };
+    summaryRow.getCell(1).alignment = { horizontal: "center" };
     worksheet.mergeCells(3, 1, 3, columnCount);
 
     worksheet.getRow(4); // Empty row
 
-    // Define headers based on sale type
+    // Define headers
     let headers = [];
-    if (saleType === 'Cash Sales') {
-      headers = ['Sr.No', 'MR Name', 'Contact No.', 'Email', 'Team', 'Cash ($)', 'Total Sales ($)', 'Date'];
+    if (saleType === "Cash Sales") {
+      headers = [
+        "Sr.No",
+        "MR Name",
+        "Contact No.",
+        "Email",
+        "Team",
+        "Cash ($)",
+        "Total Sales ($)",
+        "Date",
+      ];
       columnCount = 8;
-    } else if (saleType === 'Credit Sales') {
-      headers = ['Sr.No', 'MR Name', 'Contact No.', 'Email', 'Team', 'Credits ($)', 'Total Sales ($)', 'Date'];
+    } else if (saleType === "Credit Sales") {
+      headers = [
+        "Sr.No",
+        "MR Name",
+        "Contact No.",
+        "Email",
+        "Team",
+        "Credits ($)",
+        "Total Sales ($)",
+        "Date",
+      ];
       columnCount = 8;
     } else {
-      headers = ['Sr.No', 'MR Name', 'Contact No.', 'Email', 'Team', 'Credits ($)', 'Cash ($)', 'Total Sales ($)', 'Date'];
+      headers = [
+        "Sr.No",
+        "MR Name",
+        "Contact No.",
+        "Email",
+        "Team",
+        "Credits ($)",
+        "Cash ($)",
+        "Total Sales ($)",
+        "Date",
+      ];
       columnCount = 9;
     }
 
-    // Add headers
+    // Header row
     const headerRow = worksheet.getRow(5);
     headers.forEach((header, index) => {
       const cell = headerRow.getCell(index + 1);
       cell.value = header;
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF4F81BD' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
       };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
       cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
       };
     });
 
-    // Add data rows
+    // Data rows
     exportData.forEach((record, index) => {
       const rowNumber = 6 + index;
       const row = worksheet.getRow(rowNumber);
-      
-      let col = 1;
-      row.getCell(col++).value = index + 1; // Sr.No
-      row.getCell(col++).value = record.mrName; // MR Name
-      row.getCell(col++).value = record.mrContactNo; // Contact No.
-      row.getCell(col++).value = record.mrEmail; // Email
-      row.getCell(col++).value = record.mrTeamName; // Team
-      
-      if (saleType === 'Cash Sales') {
-        row.getCell(col++).value = record.cash; // Cash
-        row.getCell(col++).value = record.totalSalesAmount; // Total Sales
-        row.getCell(col++).numFmt = '$#,##0.00'; // Cash
-        row.getCell(col++).numFmt = '$#,##0.00'; // Total Sales
-      } else if (saleType === 'Credit Sales') {
-        row.getCell(col++).value = record.credits; // Credits
-        row.getCell(col++).value = record.totalSalesAmount; // Total Sales
-        row.getCell(col - 2).numFmt = '$#,##0.00'; // Credits
-        row.getCell(col - 1).numFmt = '$#,##0.00'; // Total Sales
-      } else {
-        row.getCell(col++).value = record.credits; // Credits
-        row.getCell(col++).value = record.cash; // Cash
-        row.getCell(col++).value = record.totalSalesAmount; // Total Sales
-        row.getCell(col - 3).numFmt = '$#,##0.00'; // Credits
-        row.getCell(col - 2).numFmt = '$#,##0.00'; // Cash
-        row.getCell(col - 1).numFmt = '$#,##0.00'; // Total Sales
-      }
-      
-      row.getCell(col).value = record.date; // Date
 
-      // Add borders to all cells
+      let col = 1;
+      row.getCell(col++).value = index + 1;
+      row.getCell(col++).value = record.mrName;
+      row.getCell(col++).value = record.mrContactNo;
+      row.getCell(col++).value = record.mrEmail;
+      row.getCell(col++).value = record.mrTeamName;
+
+      if (saleType === "Cash Sales") {
+        row.getCell(col).value = record.cash;
+        row.getCell(col).numFmt = "$#,##0.00";
+        col++;
+        row.getCell(col).value = record.totalSalesAmount;
+        row.getCell(col).numFmt = "$#,##0.00";
+        col++;
+      } else if (saleType === "Credit Sales") {
+        row.getCell(col).value = record.credits;
+        row.getCell(col).numFmt = "$#,##0.00";
+        col++;
+        row.getCell(col).value = record.totalSalesAmount;
+        row.getCell(col).numFmt = "$#,##0.00";
+        col++;
+      } else {
+        row.getCell(col).value = record.credits;
+        row.getCell(col).numFmt = "$#,##0.00";
+        col++;
+        row.getCell(col).value = record.cash;
+        row.getCell(col).numFmt = "$#,##0.00";
+        col++;
+        row.getCell(col).value = record.totalSalesAmount;
+        row.getCell(col).numFmt = "$#,##0.00";
+        col++;
+      }
+
+      row.getCell(col).value = record.date;
+
+      // Borders and alignment for all cells
       for (let i = 1; i <= columnCount; i++) {
         const cell = row.getCell(i);
         cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
         };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
       }
     });
 
@@ -990,41 +982,37 @@ router.get("/export", async (req, res) => {
     }
 
     // Generate filename
-    const dateRangeStr = dateFilter === 'custom' && startDate && endDate 
-      ? `${startDate}_to_${endDate}`
-      : dateFilter || 'All_Records';
-    
+    const dateRangeStr =
+      dateFilter === "custom" && startDate && endDate
+        ? `${startDate}_to_${endDate}`
+        : dateFilter || "All_Records";
+
     const filename = generateFilename(dateFilter, saleType, dateRangeStr);
 
-    // Set response headers
     res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename}"`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
     await workbook.xlsx.write(res);
     res.end();
-
   } catch (error) {
     console.error("Error exporting to Excel:", error);
     res.status(500).json({
       success: false,
       message: "Failed to export data to Excel",
-      error: error.message
+      error: error.message,
     });
   }
 });
 
-// FIXED: Changed from '/dailyReports/types' to '/types'
+// GET /types - Sale Types
 router.get("/types", async (req, res) => {
   try {
     const types = await SaleType.find(
       {},
-      { type: 1, sequenceNumber: 1, _id: 0 }
+      { type: 1, sequenceNumber: 1, _id: 0 },
     ).sort({ sequenceNumber: 1 });
 
     res.json(types);

@@ -92,22 +92,6 @@ const SalesSalaryRatio = () => {
     const y = today.getFullYear();
     const m = today.getMonth();
     switch (selectedTab) {
-      case "today": {
-        const s = today.toISOString().split("T")[0];
-        return {
-          startDate: s,
-          endDate: s,
-          period: getYearMonthFromDate(today),
-          displayDate: s,
-        };
-      }
-      case "all":
-        return {
-          startDate: null,
-          endDate: null,
-          period: null,
-          displayDate: "All Records",
-        };
       case "currentMonth": {
         const f = new Date(y, m, 1);
         const l = new Date(y, m + 1, 0);
@@ -144,6 +128,13 @@ const SalesSalaryRatio = () => {
           displayDate: ss && es ? `${ss} - ${es}` : "Select custom dates",
         };
       }
+      case "all":
+        return {
+          startDate: null,
+          endDate: null,
+          period: null,
+          displayDate: "All Records",
+        };
       default:
         return {
           startDate: null,
@@ -512,14 +503,10 @@ const SalesSalaryRatio = () => {
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           {[
-            { id: "today", label: "Today" },
-            { id: "all", label: "All Records" },
-            {
-              id: "currentMonth",
-              label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
-            },
-            { id: "janToPreviousMonth", label: getJanToPreviousMonthDisplay() },
+            { id: "currentMonth", label: "Current Month" },
+            { id: "janToPreviousMonth", label: "Jan - Previous Month" },
             { id: "custom", label: "Custom Filter" },
+            { id: "all", label: "All Records" },
           ].map(({ id, label }) => (
             <button
               key={id}
@@ -589,24 +576,7 @@ const SalesSalaryRatio = () => {
         ))}
       </div>
 
-
-      {/* <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" />
-          <b>Incentive ($)</b> — allowance type "Incentive" only
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block" />
-          <b>Allowance ($)</b> — all allowances except Incentive &amp; Travel
-          Allowance
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
-          <b>Tour Expense ($)</b> — allowance type "Travel Allowance" only
-        </span>
-      </div> 
-
-   
+      {/* Performance legend (optional) */}
       <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
         <span className="font-semibold text-gray-600">
           Performance (Salary/Sale %):
@@ -724,7 +694,6 @@ const SalesSalaryRatio = () => {
                     >
                       {fmtPct(salarySaleRatio)}
                     </td>
-                    {/* Performance: label word based on salarySaleRatio range */}
                     <td className="p-3 text-sm font-semibold">
                       <span
                         className={`px-2.5 py-1 rounded-full text-xs font-bold ${perfBg} ${perfText}`}

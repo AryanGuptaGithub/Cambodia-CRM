@@ -1,17 +1,15 @@
 import mongoose from "mongoose";
-const { Schema } = mongoose;
 
-const MRCashSchema = new Schema(
+const mrCashSchema = new mongoose.Schema(
   {
     mrId: {
-      type: Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.ObjectId,
       ref: "Staff",
       required: true,
     },
     mrName: {
       type: String,
       required: true,
-      trim: true,
     },
     currentCash: {
       type: Number,
@@ -25,27 +23,32 @@ const MRCashSchema = new Schema(
     },
     lastTransferDate: {
       type: Date,
+      default: null,
     },
     notes: {
       type: String,
       default: "",
-      trim: true,
+    },
+    categoryType: {
+      // <-- NEW FIELD
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CategoryType",
+      default: null,
     },
     isActive: {
       type: Boolean,
       default: true,
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true },
 );
 
-// Index for efficient queries
-MRCashSchema.index({ mrId: 1 }, { unique: true });
-MRCashSchema.index({ mrName: 1 });
-MRCashSchema.index({ isActive: 1 });
-
-// Use singular collection name
-const MRCash = mongoose.model("MRCash", MRCashSchema);
-export default MRCash;
+export default mongoose.model("MRCash", mrCashSchema);

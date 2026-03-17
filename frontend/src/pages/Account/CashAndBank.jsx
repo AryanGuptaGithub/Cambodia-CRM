@@ -25,42 +25,26 @@ import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 7;
 
-// Helper function to convert date from "YYYY-MM-DD" to "DD MMM YYYY" format
 const formatDateForInput = (dateString) => {
   if (!dateString) return "";
-
   try {
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return dateString;
-
     const day = date.getDate().toString().padStart(2, "0");
     const month = date.toLocaleString("en", { month: "short" });
     const year = date.getFullYear();
-
     return `${day} ${month} ${year}`;
   } catch (error) {
-    console.error("Error formatting date:", error);
     return dateString;
   }
 };
 
-// Helper function to convert date from "DD MMM YYYY" back to "YYYY-MM-DD" for form submission
 const parseDateFromInput = (dateString) => {
   if (!dateString) return "";
-
   try {
-    // If it's already in YYYY-MM-DD format, return as is
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-      return dateString;
-    }
-
-    // Parse from "DD MMM YYYY" format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return dateString;
     const parts = dateString.split(" ");
     if (parts.length === 3) {
-      const day = parts[0];
-      const month = parts[1];
-      const year = parts[2];
-
       const monthNames = [
         "Jan",
         "Feb",
@@ -76,18 +60,15 @@ const parseDateFromInput = (dateString) => {
         "Dec",
       ];
       const monthIndex = monthNames.findIndex(
-        (m) => m.toLowerCase() === month.toLowerCase(),
+        (m) => m.toLowerCase() === parts[1].toLowerCase(),
       );
-
       if (monthIndex !== -1) {
-        const date = new Date(year, monthIndex, day);
+        const date = new Date(parts[2], monthIndex, parts[0]);
         return date.toISOString().split("T")[0];
       }
     }
-
     return dateString;
   } catch (error) {
-    console.error("Error parsing date:", error);
     return dateString;
   }
 };
@@ -95,38 +76,24 @@ const parseDateFromInput = (dateString) => {
 const getDisplayValue = (value, options) => {
   try {
     if (!value && value !== 0) return "--";
-
-    // If value is an object (populated data from backend)
     if (typeof value === "object" && value !== null) {
-      // Try different possible property names
       return (
         value.name || value.label || value.title || value.toString() || "--"
       );
     }
-
-    // If value is a string (could be ID), find the label from options
     if (typeof value === "string" && options && Array.isArray(options)) {
-      const option = options.find((opt) => {
-        // Handle both string and ObjectId comparisons
-        return opt.value === value || opt.value?.toString() === value;
-      });
+      const option = options.find(
+        (opt) => opt.value === value || opt.value?.toString() === value,
+      );
       return option ? option.label : value;
     }
-
-    // If value is a number, return it as string
-    if (typeof value === "number") {
-      return value.toString();
-    }
-
-    // Return the value as string for other cases
+    if (typeof value === "number") return value.toString();
     return value ? value.toString() : "--";
   } catch (error) {
-    console.error("Error in getDisplayValue:", error);
     return "--";
   }
 };
 
-// Custom hook to fetch dropdown options from backend
 const useDropdownOptions = () => {
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [sourceOptions, setSourceOptions] = useState([]);
@@ -137,59 +104,45 @@ const useDropdownOptions = () => {
 
   const fetchDropdownOptions = async () => {
     try {
-      setLoading(true); // Add this - you were setting it to false but never true
+      setLoading(true);
       setError(null);
 
-      // Fetch category options - FIXED: Handle different response structures
       const categoryResponse = await axios.get(
         `${backendUrl}/api/accounts/category-type`,
       );
-      console.log("values of categoryResponse", categoryResponse);
-
-      // Handle different possible response structures for categories
       let categoriesData = [];
-      if (categoryResponse.data && Array.isArray(categoryResponse.data)) {
+      if (categoryResponse.data && Array.isArray(categoryResponse.data))
         categoriesData = categoryResponse.data;
-      } else if (
-        categoryResponse.data &&
-        categoryResponse.data.data &&
+      else if (
+        categoryResponse.data?.data &&
         Array.isArray(categoryResponse.data.data)
-      ) {
+      )
         categoriesData = categoryResponse.data.data;
-      } else if (
+      else if (
         categoryResponse.data &&
         Array.isArray(categoryResponse.data.categories)
-      ) {
+      )
         categoriesData = categoryResponse.data.categories;
-      }
+      setCategoryOptions(
+        categoriesData.map((cat) => ({ value: cat._id, label: cat.name })),
+      );
 
-      const categories = categoriesData.map((cat) => ({
-        value: cat._id,
-        label: cat.name,
-      }));
-      setCategoryOptions(categories);
-
-      // Fetch destination options - FIXED: Add same protection
       const destinationResponse = await axios.get(
         `${backendUrl}/api/accounts/destinations`,
       );
-    
       let destinationsData = [];
-      if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
+      if (destinationResponse.data && Array.isArray(destinationResponse.data))
         destinationsData = destinationResponse.data;
-      } else if (
-        destinationResponse.data &&
-        destinationResponse.data.data &&
+      else if (
+        destinationResponse.data?.data &&
         Array.isArray(destinationResponse.data.data)
-      ) {
+      )
         destinationsData = destinationResponse.data.data;
-      } else if (
+      else if (
         destinationResponse.data &&
         Array.isArray(destinationResponse.data.destinations)
-      ) {
+      )
         destinationsData = destinationResponse.data.destinations;
-      }
-
       const destinations = destinationsData.map((dest) => ({
         value: dest._id,
         label: dest.name,
@@ -198,33 +151,24 @@ const useDropdownOptions = () => {
       setDestinationOptions(destinations);
       setSourceOptions(destinations);
 
-      // Fetch supplier options
       const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
-      console.log("values of supplierResponse", supplierResponse);
-
       let suppliers = [];
-      if (supplierResponse.data && Array.isArray(supplierResponse.data)) {
+      if (supplierResponse.data && Array.isArray(supplierResponse.data))
         suppliers = supplierResponse.data;
-      } else if (
-        supplierResponse.data &&
-        supplierResponse.data.data &&
+      else if (
+        supplierResponse.data?.data &&
         Array.isArray(supplierResponse.data.data)
-      ) {
+      )
         suppliers = supplierResponse.data.data;
-      } else if (
+      else if (
         supplierResponse.data &&
         Array.isArray(supplierResponse.data.suppliers)
-      ) {
+      )
         suppliers = supplierResponse.data.suppliers;
-      }
-
-      const supplierOpts = suppliers.map((supplier) => ({
-        value: supplier._id,
-        label: supplier.name,
-      }));
-      setSupplierOptions(supplierOpts);
+      setSupplierOptions(
+        suppliers.map((s) => ({ value: s._id, label: s.name })),
+      );
     } catch (err) {
-      console.error("Error fetching dropdown options:", err);
       setError(err.message);
       setCategoryOptions([]);
       setSourceOptions([]);
@@ -250,7 +194,6 @@ const useDropdownOptions = () => {
   };
 };
 
-// Custom dropdown component with limited visible items and scroll
 const CustomDropdown = ({
   value,
   onChange,
@@ -260,26 +203,17 @@ const CustomDropdown = ({
   placeholder,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-
   const handleSelect = (optionValue) => {
     onChange({ target: { value: optionValue } });
     setIsOpen(false);
   };
-
   const selectedOption = options.find((opt) => opt.value === value);
-
   return (
     <div className="relative w-full">
       <button
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${
-          disabled
-            ? "bg-gray-200 cursor-not-allowed"
-            : "bg-white cursor-pointer"
-        }`}
+        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left ${error ? "border-red-500" : "border-gray-300"} ${disabled ? "bg-gray-200 cursor-not-allowed" : "bg-white cursor-pointer"}`}
         disabled={disabled || options.length === 0}
       >
         {selectedOption
@@ -288,7 +222,6 @@ const CustomDropdown = ({
             ? "Loading..."
             : placeholder || "Select an option"}
       </button>
-
       {isOpen && !disabled && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
           {options.length === 0 ? (
@@ -298,9 +231,7 @@ const CustomDropdown = ({
               <div
                 key={option.value}
                 onClick={() => handleSelect(option.value)}
-                className={`p-2 cursor-pointer hover:bg-indigo-50 ${
-                  value === option.value ? "bg-indigo-100 text-indigo-700" : ""
-                }`}
+                className={`p-2 cursor-pointer hover:bg-indigo-50 ${value === option.value ? "bg-indigo-100 text-indigo-700" : ""}`}
               >
                 {option.label}
               </div>
@@ -312,7 +243,6 @@ const CustomDropdown = ({
   );
 };
 
-// New hook to fetch sales invoices with payment status filtering
 const useInvoiceOptions = (categoryName = "") => {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -322,14 +252,9 @@ const useInvoiceOptions = (categoryName = "") => {
     setLoading(true);
     try {
       const response = await axios.get(`${backendUrl}/api/sales/all`);
-      if (response.data && response.data.summaries) {
-        setSales(response.data.summaries);
-      } else {
-        setSales([]);
-      }
+      setSales(response.data?.summaries || []);
       setError(null);
     } catch (err) {
-      console.error("Error fetching sales:", err);
       setError(err.message);
       setSales([]);
     } finally {
@@ -341,83 +266,53 @@ const useInvoiceOptions = (categoryName = "") => {
     fetchSales();
   }, []);
 
-  // Get invoice options for dropdown with payment status filtering
   const getInvoiceOptions = useCallback(() => {
-    if (loading) {
+    if (loading)
       return [{ value: "", label: "Loading invoices...", disabled: true }];
-    }
-
-    if (error || sales.length === 0) {
+    if (error || sales.length === 0)
       return [{ value: "", label: "No invoices available", disabled: true }];
-    }
 
-    // Filter invoices based on category name and payment status
     let filteredSales = sales;
-
-    // Get the category name to understand the context
     const categoryNameLower = categoryName?.toLowerCase() || "";
 
     if (categoryNameLower.includes("cash sale")) {
-      // Filter for Cash Sale: invoices with payment status "cash" or "paid"
-      filteredSales = sales.filter((sale) => {
-        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
-        return paymentStatus === "cash" || paymentStatus === "paid";
+      filteredSales = sales.filter((s) => {
+        const ps = s.paymentStatus?.toLowerCase() || "";
+        return ps === "cash" || ps === "paid";
       });
     } else if (categoryNameLower.includes("credit collection")) {
-      // Filter for Credit Collection: invoices with payment status "credit" or "pending"
-      filteredSales = sales.filter((sale) => {
-        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
+      filteredSales = sales.filter((s) => {
+        const ps = s.paymentStatus?.toLowerCase() || "";
         return (
-          paymentStatus === "credit" ||
-          paymentStatus === "pending" ||
-          paymentStatus === "unpaid" ||
-          paymentStatus === "due"
+          ps === "credit" || ps === "pending" || ps === "unpaid" || ps === "due"
         );
       });
     }
-    // If no category specified or doesn't require filtering, show all
 
-    // Remove duplicates and format options
     const uniqueInvoices = [
-      ...new Set(
-        filteredSales.map((sale) => sale.invoiceNumber).filter(Boolean),
-      ),
+      ...new Set(filteredSales.map((s) => s.invoiceNumber).filter(Boolean)),
     ];
-
-    const options = [
+    return [
       { value: "", label: "Select Invoice Number" },
-      ...uniqueInvoices.map((invoice) => ({
-        value: invoice,
-        label: invoice,
-      })),
+      ...uniqueInvoices.map((inv) => ({ value: inv, label: inv })),
     ];
-
-    return options;
   }, [sales, loading, error, categoryName]);
 
-  // Also return filtered sales for use in findSaleByInvoice
   const getFilteredSales = useCallback(() => {
     if (!categoryName) return sales;
-
-    const categoryNameLower = categoryName.toLowerCase();
-
-    if (categoryNameLower.includes("cash sale")) {
-      return sales.filter((sale) => {
-        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
-        return paymentStatus === "cash" || paymentStatus === "paid";
+    const cn = categoryName.toLowerCase();
+    if (cn.includes("cash sale"))
+      return sales.filter((s) => {
+        const ps = s.paymentStatus?.toLowerCase() || "";
+        return ps === "cash" || ps === "paid";
       });
-    } else if (categoryNameLower.includes("credit collection")) {
-      return sales.filter((sale) => {
-        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
+    if (cn.includes("credit collection"))
+      return sales.filter((s) => {
+        const ps = s.paymentStatus?.toLowerCase() || "";
         return (
-          paymentStatus === "credit" ||
-          paymentStatus === "pending" ||
-          paymentStatus === "unpaid" ||
-          paymentStatus === "due"
+          ps === "credit" || ps === "pending" || ps === "unpaid" || ps === "due"
         );
       });
-    }
-
     return sales;
   }, [sales, categoryName]);
 
@@ -449,19 +344,20 @@ const AddTransactionModal = ({
   const [isFetchingSales, setIsFetchingSales] = useState(false);
   const [invoiceDataFetched, setInvoiceDataFetched] = useState(false);
   const [sourceAccountBalance, setSourceAccountBalance] = useState(0);
-  const [destinationAccountBalance, setDestinationAccountBalance] = useState(0); // ✅ ADDED
+  const [destinationAccountBalance, setDestinationAccountBalance] = useState(0);
   const [originalAmount, setOriginalAmount] = useState(0);
+  // FIX: Track whether the current invoice has been globally validated
+  const [invoiceGloballyChecked, setInvoiceGloballyChecked] = useState(false);
+  const [invoiceCheckLoading, setInvoiceCheckLoading] = useState(false);
 
-  // Get category name for filtering
   const getCategoryName = useMemo(() => {
     if (!form.categoryType) return "";
-    const category = categoryOptions.find(
-      (cat) => cat.value === form.categoryType,
+    return (
+      categoryOptions.find((cat) => cat.value === form.categoryType)?.label ||
+      ""
     );
-    return category?.label || "";
   }, [form.categoryType, categoryOptions]);
 
-  // Use the new invoice options hook with category filtering
   const {
     sales,
     filteredSales,
@@ -470,62 +366,40 @@ const AddTransactionModal = ({
     refetch: refetchSales,
   } = useInvoiceOptions(getCategoryName);
 
-  // Memoized helper functions
   const requiresSupplier = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return (
-      categoryName.includes("payment inward") ||
-      categoryName.includes("remittance")
-    );
+    const cn = getCategoryName.toLowerCase();
+    return cn.includes("payment inward") || cn.includes("remittance");
   }, [getCategoryName]);
-
-  const isRemittance = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("remittance");
-  }, [getCategoryName]);
-
-  const isPaymentInward = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("payment inward");
-  }, [getCategoryName]);
-
-  const isPaymentOutward = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("payment outward");
-  }, [getCategoryName]);
-
+  const isRemittance = useMemo(
+    () => getCategoryName.toLowerCase().includes("remittance"),
+    [getCategoryName],
+  );
+  const isPaymentInward = useMemo(
+    () => getCategoryName.toLowerCase().includes("payment inward"),
+    [getCategoryName],
+  );
+  const isPaymentOutward = useMemo(
+    () => getCategoryName.toLowerCase().includes("payment outward"),
+    [getCategoryName],
+  );
   const isDepositOrWithdraw = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return (
-      categoryName.includes("withdraw") || categoryName.includes("deposit")
-    );
+    const cn = getCategoryName.toLowerCase();
+    return cn.includes("withdraw") || cn.includes("deposit");
   }, [getCategoryName]);
-
-  const isDeposit = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("deposit");
-  }, [getCategoryName]);
-
-  const isWithdraw = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("withdraw");
-  }, [getCategoryName]);
-
-  // Check if category requires invoice dropdown
+  const isDeposit = useMemo(
+    () => getCategoryName.toLowerCase().includes("deposit"),
+    [getCategoryName],
+  );
+  const isWithdraw = useMemo(
+    () => getCategoryName.toLowerCase().includes("withdraw"),
+    [getCategoryName],
+  );
   const requiresInvoiceDropdown = useMemo(() => {
-    const categoryName = getCategoryName.toLowerCase();
-    return (
-      categoryName.includes("cash sale") ||
-      categoryName.includes("credit collection")
-    );
+    const cn = getCategoryName.toLowerCase();
+    return cn.includes("cash sale") || cn.includes("credit collection");
   }, [getCategoryName]);
-
-  // Check if category requires invoice fields (text input)
   const requiresInvoiceFields = useMemo(() => {
     if (!form.categoryType) return false;
-    const categoryName = getCategoryName.toLowerCase();
-
-    // Invoice fields for sales-related categories (except those with dropdown)
     return (
       !isDepositOrWithdraw &&
       !requiresSupplier &&
@@ -540,36 +414,25 @@ const AddTransactionModal = ({
     requiresInvoiceDropdown,
   ]);
 
-  // Get filtered source options (exclude destination account for deposit/withdraw)
   const getFilteredSourceOptions = useMemo(() => {
-    if (!isDepositOrWithdraw) {
-      return sourceOptions;
-    }
-
-    // For deposit/withdraw, exclude the selected destination account from source options
+    if (!isDepositOrWithdraw) return sourceOptions;
     return sourceOptions.filter(
-      (source) => !form.destination || source.value !== form.destination,
+      (s) => !form.destination || s.value !== form.destination,
     );
   }, [sourceOptions, form.destination, isDepositOrWithdraw]);
 
-  // Get filtered destination options (exclude source account for deposit/withdraw)
   const getFilteredDestinationOptions = useMemo(() => {
-    if (!isDepositOrWithdraw) {
-      return destinationOptions;
-    }
-
-    // For deposit/withdraw, exclude the selected source account from destination options
+    if (!isDepositOrWithdraw) return destinationOptions;
     return destinationOptions.filter(
-      (destination) => !form.source || destination.value !== form.source,
+      (d) => !form.source || d.value !== form.source,
     );
   }, [destinationOptions, form.source, isDepositOrWithdraw]);
 
-  // Get invoice options based on category
-  const invoiceOptions = useMemo(() => {
-    return getInvoiceOptions();
-  }, [getInvoiceOptions]);
+  const invoiceOptions = useMemo(
+    () => getInvoiceOptions(),
+    [getInvoiceOptions],
+  );
 
-  // Define form fields configuration with custom layout
   const formFields = useMemo(() => {
     const baseFields = [
       {
@@ -596,7 +459,6 @@ const AddTransactionModal = ({
       },
     ];
 
-    // Add supplier field for payment inward/remittance
     if (requiresSupplier) {
       baseFields.splice(1, 0, {
         key: "supplier",
@@ -606,8 +468,6 @@ const AddTransactionModal = ({
         options: supplierOptions,
         layout: "half",
       });
-
-      // For REMITTANCE: Use SOURCE account instead of destination
       if (isRemittance) {
         baseFields.splice(2, 0, {
           key: "source",
@@ -627,9 +487,7 @@ const AddTransactionModal = ({
           layout: "half",
         });
       }
-    }
-    // Add source field for payment outward
-    else if (isPaymentOutward) {
+    } else if (isPaymentOutward) {
       baseFields.splice(1, 0, {
         key: "supplier",
         label: "Payment To",
@@ -646,9 +504,7 @@ const AddTransactionModal = ({
         options: sourceOptions,
         layout: "half",
       });
-    }
-    // Add source/destination fields for deposit/withdraw
-    else if (isDepositOrWithdraw) {
+    } else if (isDepositOrWithdraw) {
       if (isDeposit) {
         baseFields.splice(1, 0, {
           key: "source",
@@ -666,7 +522,6 @@ const AddTransactionModal = ({
           options: getFilteredDestinationOptions,
           layout: "half",
         });
-        // Add exchange loss for deposit
         baseFields.push({
           key: "exchangeLoss",
           label: "Exchange Loss",
@@ -701,25 +556,17 @@ const AddTransactionModal = ({
           layout: "half",
         });
       }
-    }
-    // Add invoice fields for other categories
-    else {
-      // For Cash Sale and Credit Collection: use dropdown
+    } else {
       if (requiresInvoiceDropdown) {
-        const categoryName = getCategoryName.toLowerCase();
-        let paymentStatusNote = "";
-
         baseFields.splice(1, 0, {
           key: "invoiceNumber",
-          label: `Invoice Number ${paymentStatusNote}`,
+          label: "Invoice Number",
           type: "invoiceDropdown",
           required: true,
           options: invoiceOptions,
           layout: "half",
         });
-      }
-      // For other sales categories: use text input
-      else if (requiresInvoiceFields) {
+      } else if (requiresInvoiceFields) {
         baseFields.splice(1, 0, {
           key: "invoiceNumber",
           label: "Invoice Number",
@@ -728,8 +575,6 @@ const AddTransactionModal = ({
           layout: "half",
         });
       }
-
-      // Add destination account for invoice-based categories
       if (requiresInvoiceDropdown || requiresInvoiceFields) {
         baseFields.splice(2, 0, {
           key: "destination",
@@ -739,10 +584,6 @@ const AddTransactionModal = ({
           options: destinationOptions,
           layout: "half",
         });
-      }
-
-      // Add additional invoice fields for all invoice-based categories
-      if (requiresInvoiceDropdown || requiresInvoiceFields) {
         baseFields.push(
           {
             key: "invoiceDate",
@@ -772,7 +613,6 @@ const AddTransactionModal = ({
       }
     }
 
-    // Add remarks textarea for all category types (full width)
     baseFields.push({
       key: "remarks",
       label: "Remarks",
@@ -780,7 +620,6 @@ const AddTransactionModal = ({
       required: false,
       layout: "full",
     });
-
     return baseFields;
   }, [
     categoryOptions,
@@ -802,17 +641,13 @@ const AddTransactionModal = ({
     invoiceOptions,
   ]);
 
-  // Initialize form data
   const initializeFormData = () => {
     const initialData = {};
     formFields.forEach((field) => {
-      if (field.type === "date") {
+      if (field.type === "date")
         initialData[field.key] = new Date().toISOString().split("T")[0];
-      } else if (field.key === "finalAmount") {
-        initialData[field.key] = "0.00";
-      } else {
-        initialData[field.key] = "";
-      }
+      else if (field.key === "finalAmount") initialData[field.key] = "0.00";
+      else initialData[field.key] = "";
     });
     return initialData;
   };
@@ -820,42 +655,37 @@ const AddTransactionModal = ({
   useEffect(() => {
     if (isOpen) {
       if (isEdit && editData) {
-        const processedEditData = {
+        setForm({
           ...editData,
           categoryType: editData.categoryType?._id || editData.categoryType,
           source: editData.source?._id || editData.source,
           destination: editData.destination?._id || editData.destination,
           supplier: editData.supplier?._id || editData.supplier,
           remarks: editData.remarks || "",
-        };
-        setForm(processedEditData);
+        });
         setInvoiceDataFetched(true);
         setOriginalAmount(editData.amount || 0);
-
-        if (editData.source && editData.source.totalAmount !== undefined) {
+        setInvoiceGloballyChecked(true); // existing transaction's invoice is already valid
+        if (editData.source?.totalAmount !== undefined)
           setSourceAccountBalance(editData.source.totalAmount);
-        }
       } else {
         setForm(initializeFormData());
         setInvoiceDataFetched(false);
         setSourceAccountBalance(0);
-        setDestinationAccountBalance(0); // ✅ ADDED
+        setDestinationAccountBalance(0);
         setOriginalAmount(0);
+        setInvoiceGloballyChecked(false);
       }
       setErrors({});
-
-      // Refetch sales when modal opens
       refetchSales();
     }
   }, [isOpen, isEdit, editData, activeTab]);
 
-  // Calculate final amount for deposit transactions
   useEffect(() => {
     if (isDeposit) {
       const amount = parseFloat(form.amount) || 0;
       const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
       const finalAmount = amount - exchangeLoss;
-
       setForm((prev) => ({
         ...prev,
         finalAmount: isNaN(finalAmount) ? "0.00" : finalAmount.toFixed(2),
@@ -863,45 +693,28 @@ const AddTransactionModal = ({
     }
   }, [form.amount, form.exchangeLoss, isDeposit]);
 
-  // Update source account balance when source changes
   useEffect(() => {
     if (form.source) {
-      const selectedSource = sourceOptions.find(
-        (option) => option.value === form.source,
-      );
-      if (selectedSource) {
-        setSourceAccountBalance(selectedSource.totalAmount || 0);
-      }
-    } else {
-      setSourceAccountBalance(0);
-    }
+      const selected = sourceOptions.find((o) => o.value === form.source);
+      setSourceAccountBalance(selected?.totalAmount || 0);
+    } else setSourceAccountBalance(0);
   }, [form.source, sourceOptions]);
 
   useEffect(() => {
     if (form.destination) {
-      const selectedDestination = destinationOptions.find(
-        (option) => option.value === form.destination,
+      const selected = destinationOptions.find(
+        (o) => o.value === form.destination,
       );
-      if (selectedDestination) {
-        setDestinationAccountBalance(selectedDestination.totalAmount || 0);
-      }
-    } else {
-      setDestinationAccountBalance(0);
-    }
+      setDestinationAccountBalance(selected?.totalAmount || 0);
+    } else setDestinationAccountBalance(0);
   }, [form.destination, destinationOptions]);
 
-  // Handle category type change - reset relevant fields
   useEffect(() => {
     if (form.categoryType) {
       setForm((prev) => {
         const newForm = { ...prev };
-
-        // Reset supplier field when category changes away from supplier-required categories
-        if (!requiresSupplier && !isPaymentOutward && newForm.supplier) {
+        if (!requiresSupplier && !isPaymentOutward && newForm.supplier)
           newForm.supplier = "";
-        }
-
-        // Reset invoice fields when category changes to non-invoice categories
         if (
           !requiresInvoiceFields &&
           !requiresInvoiceDropdown &&
@@ -913,42 +726,69 @@ const AddTransactionModal = ({
           newForm.customerAddress = "";
           newForm.amount = "";
         }
-
-        // Reset source/destination for non-deposit/withdraw
-        if (!isDepositOrWithdraw && !isPaymentOutward && !isRemittance) {
-          if (newForm.source) newForm.source = "";
-        }
-
-        // Reset exchange loss and final amount for non-deposit
+        if (
+          !isDepositOrWithdraw &&
+          !isPaymentOutward &&
+          !isRemittance &&
+          newForm.source
+        )
+          newForm.source = "";
         if (!isDeposit) {
           if (newForm.exchangeLoss) newForm.exchangeLoss = "";
           if (newForm.finalAmount) newForm.finalAmount = "0.00";
         }
-
         return newForm;
       });
       setInvoiceDataFetched(false);
+      setInvoiceGloballyChecked(false);
+      setSourceAccountBalance(0);
+      setDestinationAccountBalance(0);
+      setOriginalAmount(0);
     }
   }, [form.categoryType]);
 
-  // Find sale data by invoice number
   const findSaleByInvoice = (invoiceNumber) => {
-    // First check filtered sales (already filtered by payment status)
-    let sale = filteredSales.find(
-      (sale) => sale.invoiceNumber === invoiceNumber,
+    return (
+      filteredSales.find((s) => s.invoiceNumber === invoiceNumber) ||
+      sales.find((s) => s.invoiceNumber === invoiceNumber)
     );
-
-    // If not found in filtered sales, check all sales (for edit mode)
-    if (!sale) {
-      sale = sales.find((sale) => sale.invoiceNumber === invoiceNumber);
-    }
-
-    return sale;
   };
 
-  // Check if invoice already has a transaction
-  const checkInvoiceExistsInCurrentData = (invoiceNumber) => {
-    return currentData.some((item) => item.invoiceNumber === invoiceNumber);
+  // ==========================================================================
+  // FIX: Check invoice globally via backend API — across ALL tabs/accountTypes
+  // ==========================================================================
+  const checkInvoiceGlobally = async (invoiceNumber) => {
+    if (!invoiceNumber || invoiceNumber.trim() === "") return true;
+    try {
+      setInvoiceCheckLoading(true);
+      const excludeId = isEdit && editData?._id ? editData._id : undefined;
+      const params = { invoiceNumber: invoiceNumber.trim() };
+      if (excludeId) params.excludeId = excludeId;
+
+      const response = await axios.get(
+        `${backendUrl}/api/transactions/check-invoice`,
+        { params },
+      );
+
+      if (response.data.exists) {
+        const existing = response.data.existingTransaction;
+        showToast(
+          "error",
+          `Invoice "${invoiceNumber}" already has a transaction in "${existing.accountType || "another tab"}" (${existing.categoryType}). Each invoice can only be added once across all accounts.`,
+        );
+        setInvoiceGloballyChecked(false);
+        return false;
+      }
+      setInvoiceGloballyChecked(true);
+      return true;
+    } catch (error) {
+      console.error("Invoice global check error:", error);
+      // Don't block submission if the check API fails — backend will catch it anyway
+      setInvoiceGloballyChecked(true);
+      return true;
+    } finally {
+      setInvoiceCheckLoading(false);
+    }
   };
 
   const fetchSalesData = async (invoiceNumber) => {
@@ -956,27 +796,18 @@ const AddTransactionModal = ({
       !invoiceNumber ||
       invoiceNumber.trim() === "" ||
       (!requiresInvoiceFields && !requiresInvoiceDropdown)
-    ) {
+    )
       return;
-    }
 
     try {
       setIsFetchingSales(true);
 
-      // For Cash Sale and Credit Collection: get data from filtered sales
       if (requiresInvoiceDropdown) {
         const saleRecord = findSaleByInvoice(invoiceNumber);
-         console.log('values of saleRecords 969', saleRecord);
         if (saleRecord) {
-          // Check if invoice already exists in current data
-          const existingTransaction =
-            checkInvoiceExistsInCurrentData(invoiceNumber);
-
-          if (existingTransaction) {
-            showToast(
-              "error",
-              `Invoice number ${invoiceNumber} already has a transaction`,
-            );
+          // FIX: Check globally first — not just currentData
+          const isGloballyUnique = await checkInvoiceGlobally(invoiceNumber);
+          if (!isGloballyUnique) {
             setForm((prev) => ({
               ...prev,
               invoiceNumber: "",
@@ -989,9 +820,6 @@ const AddTransactionModal = ({
             return;
           }
 
-          // ✅ FIXED: Log the sale record to debug
-          console.log("Sale Record Data:", saleRecord);
-
           setForm((prev) => ({
             ...prev,
             invoiceNumber: saleRecord.invoiceNumber || "",
@@ -1000,49 +828,44 @@ const AddTransactionModal = ({
               new Date().toISOString().split("T")[0],
             customerName:
               saleRecord.customerName || saleRecord.customer?.name || "",
-            // ✅ FIXED: Check multiple possible field names for customer address
             customerAddress:
               saleRecord.customerAddress ||
               saleRecord.customer?.address ||
               saleRecord.billingAddress ||
               saleRecord.shippingAddress ||
-              saleRecord.address || // ✅ ADDED THIS LINE
+              saleRecord.address ||
               "",
             amount: saleRecord.totalAmount || saleRecord.amount || "",
           }));
           setInvoiceDataFetched(true);
         } else {
-          // Check if invoice exists but doesn't match payment status filter
           const allSaleRecord = sales.find(
             (s) => s.invoiceNumber === invoiceNumber,
           );
           if (allSaleRecord) {
             const paymentStatus = allSaleRecord.paymentStatus || "Unknown";
-            const categoryName = getCategoryName.toLowerCase();
-
-            if (categoryName.includes("cash sale")) {
+            const cn = getCategoryName.toLowerCase();
+            if (cn.includes("cash sale"))
               showToast(
                 "error",
                 `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Cash Sale requires invoices with "Cash" or "Paid" status.`,
               );
-            } else if (categoryName.includes("credit collection")) {
+            else if (cn.includes("credit collection"))
               showToast(
                 "error",
                 `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Credit Collection requires invoices with "Credit" or "Pending" status.`,
               );
-            } else {
+            else
               showToast(
                 "error",
                 `Invoice ${invoiceNumber} not available for ${getCategoryName}`,
               );
-            }
           } else {
             showToast(
               "error",
               `Invoice ${invoiceNumber} not found in sales records`,
             );
           }
-
           setForm((prev) => ({
             ...prev,
             invoiceDate: "",
@@ -1052,25 +875,16 @@ const AddTransactionModal = ({
           }));
           setInvoiceDataFetched(false);
         }
-      }
-      // For other invoice-based categories: use API call
-      else if (requiresInvoiceFields) {
+      } else if (requiresInvoiceFields) {
         const salesResponse = await axios.get(
           `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`,
         );
-        console.log('values of salesResponse', salesResponse);
         const salesData = salesResponse.data;
 
         if (salesData.data && salesData.data.length > 0) {
-          const existingTransaction = currentData.find(
-            (item) => item.invoiceNumber === invoiceNumber,
-          );
-
-          if (existingTransaction) {
-            showToast(
-              "error",
-              `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTransaction.amount}`,
-            );
+          // FIX: Check globally — not just currentData
+          const isGloballyUnique = await checkInvoiceGlobally(invoiceNumber);
+          if (!isGloballyUnique) {
             setForm((prev) => ({
               ...prev,
               invoiceDate: "",
@@ -1083,10 +897,6 @@ const AddTransactionModal = ({
           }
 
           const saleRecord = salesData.data[0];
-
-          // ✅ FIXED: Log the API response to debug
-          console.log("API Sale Record Data:", saleRecord);
-
           setForm((prev) => ({
             ...prev,
             invoiceDate:
@@ -1094,7 +904,6 @@ const AddTransactionModal = ({
               new Date().toISOString().split("T")[0],
             customerName:
               saleRecord.customerName || saleRecord.customer?.name || "",
-            // ✅ FIXED: Check multiple possible field names for customer address
             customerAddress:
               saleRecord.customerAddress ||
               saleRecord.customer?.address ||
@@ -1118,21 +927,17 @@ const AddTransactionModal = ({
     } catch (error) {
       console.error("Error fetching sales data:", error);
       setInvoiceDataFetched(false);
-      if (requiresInvoiceFields) {
+      if (requiresInvoiceFields)
         showToast("error", "Error fetching invoice details");
-      }
     } finally {
       setIsFetchingSales(false);
     }
   };
 
-  // FIXED: Calculate available balance for updates
   const getAvailableBalanceForUpdate = useCallback(() => {
     if (!form.source) return sourceAccountBalance;
-
-    if (isEdit && (isDeposit || isWithdraw)) {
+    if (isEdit && (isDeposit || isWithdraw))
       return sourceAccountBalance + originalAmount;
-    }
     return sourceAccountBalance;
   }, [
     isEdit,
@@ -1143,20 +948,9 @@ const AddTransactionModal = ({
     isWithdraw,
   ]);
 
-  // Handle input change
   const handleInputChange = (field, value) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors((prev) => ({
-        ...prev,
-        [field]: "",
-      }));
-    }
+    setForm((prev) => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: "" }));
 
     if (field === "categoryType") {
       setForm((prev) => ({
@@ -1173,36 +967,31 @@ const AddTransactionModal = ({
         supplier: "",
       }));
       setInvoiceDataFetched(false);
+      setInvoiceGloballyChecked(false);
       setSourceAccountBalance(0);
-      setDestinationAccountBalance(0); // ✅ ADDED
+      setDestinationAccountBalance(0);
       setOriginalAmount(0);
     }
 
-    // When source changes, update source account balance
     if (field === "source" && value) {
-      const selectedSource = sourceOptions.find(
-        (option) => option.value === value,
-      );
-      if (selectedSource) {
-        setSourceAccountBalance(selectedSource.totalAmount || 0);
-      }
+      const selected = sourceOptions.find((o) => o.value === value);
+      if (selected) setSourceAccountBalance(selected.totalAmount || 0);
     }
-
     if (field === "destination" && value) {
-      const selectedDestination = destinationOptions.find(
-        (option) => option.value === value,
-      );
-      if (selectedDestination) {
-        setDestinationAccountBalance(selectedDestination.totalAmount || 0);
-      }
+      const selected = destinationOptions.find((o) => o.value === value);
+      if (selected) setDestinationAccountBalance(selected.totalAmount || 0);
     }
 
-    // When invoice number changes, fetch the details for invoice-required categories
     if (field === "invoiceNumber" && value) {
+      setInvoiceGloballyChecked(false);
       fetchSalesData(value);
     }
+    // Clear invoice global check if invoice is cleared
+    if (field === "invoiceNumber" && !value) {
+      setInvoiceGloballyChecked(false);
+      setInvoiceDataFetched(false);
+    }
 
-    // When amount changes, validate against source account balance
     if (
       field === "amount" &&
       value &&
@@ -1211,108 +1000,83 @@ const AddTransactionModal = ({
     ) {
       const amountValue = parseFloat(value) || 0;
       const availableBalance = getAvailableBalanceForUpdate();
-
       if (amountValue > availableBalance) {
         setErrors((prev) => ({
           ...prev,
-          amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(
-            2,
-          )}`,
+          amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(2)}`,
         }));
       } else if (errors.amount) {
-        setErrors((prev) => ({
-          ...prev,
-          amount: "",
-        }));
+        setErrors((prev) => ({ ...prev, amount: "" }));
       }
     }
 
-    // When exchange loss changes, validate it doesn't exceed amount for deposit
     if (field === "exchangeLoss" && value && isDeposit && form.amount) {
       const amountValue = parseFloat(form.amount) || 0;
       const exchangeLossValue = parseFloat(value) || 0;
       if (exchangeLossValue > amountValue) {
         setErrors((prev) => ({
           ...prev,
-          exchangeLoss: `Exchange loss cannot exceed amount`,
+          exchangeLoss: "Exchange loss cannot exceed amount",
         }));
       } else if (errors.exchangeLoss) {
-        setErrors((prev) => ({
-          ...prev,
-          exchangeLoss: "",
-        }));
+        setErrors((prev) => ({ ...prev, exchangeLoss: "" }));
       }
     }
   };
 
   const validateForm = () => {
     const newErrors = {};
-
     formFields.forEach((field) => {
-      // Skip validation for readonly and disabled fields
-      if (field.readonly || field.disabled) {
-        return;
-      }
-
-      if (field.required && !form[field.key]) {
+      if (field.readonly || field.disabled) return;
+      if (field.required && !form[field.key])
         newErrors[field.key] = `${field.label} is required`;
-      }
-
-      // Amount validation
       if (field.key === "amount" && form[field.key]) {
         const amountValue = parseFloat(form[field.key]);
-        if (isNaN(amountValue) || amountValue <= 0) {
+        if (isNaN(amountValue) || amountValue <= 0)
           newErrors[field.key] =
             `${field.label} must be a valid positive number`;
-        }
-
-        // For deposit/withdraw transactions, validate against available balance
         if ((isDeposit || isWithdraw) && form.source) {
-          const availableBalance = getAvailableBalanceForUpdate();
-
-          if (amountValue > availableBalance) {
+          const available = getAvailableBalanceForUpdate();
+          if (amountValue > available)
             newErrors[field.key] =
-              `Amount cannot exceed available balance of $${availableBalance.toFixed(
-                2,
-              )}`;
-          }
+              `Amount cannot exceed available balance of $${available.toFixed(2)}`;
         }
       }
-
-      // Exchange loss validation for deposit
       if (field.key === "exchangeLoss" && form[field.key] && isDeposit) {
-        const exchangeLossValue = parseFloat(form[field.key]);
-        const amountValue = parseFloat(form.amount) || 0;
-
-        if (isNaN(exchangeLossValue) || exchangeLossValue < 0) {
+        const v = parseFloat(form[field.key]);
+        const a = parseFloat(form.amount) || 0;
+        if (isNaN(v) || v < 0)
           newErrors[field.key] =
             `${field.label} must be a valid positive number`;
-        }
-
-        if (exchangeLossValue > amountValue) {
-          newErrors[field.key] = `Exchange loss cannot exceed amount`;
-        }
+        if (v > a) newErrors[field.key] = `Exchange loss cannot exceed amount`;
       }
     });
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     if (!validateForm()) return;
+
+    // ==========================================================================
+    // FIX: Final global invoice check before submit (catches any race conditions)
+    // Only needed for invoice-based categories
+    // ==========================================================================
+    if (
+      (requiresInvoiceDropdown || requiresInvoiceFields) &&
+      form.invoiceNumber
+    ) {
+      if (!invoiceGloballyChecked && !invoiceCheckLoading) {
+        const isUnique = await checkInvoiceGlobally(form.invoiceNumber);
+        if (!isUnique) return;
+      }
+    }
 
     const amount = parseFloat(form.amount) || 0;
     const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
+    let finalAmount = isDeposit ? amount - exchangeLoss : amount;
 
-    let finalAmount = amount;
-    if (isDeposit) {
-      finalAmount = amount - exchangeLoss;
-    }
-
-    // Prepare transaction data based on category type
     const transactionData = {
       categoryType: form.categoryType,
       date: form.date,
@@ -1324,28 +1088,18 @@ const AddTransactionModal = ({
       remarks: form.remarks || "",
     };
 
-    if (requiresSupplier || isPaymentOutward) {
+    if (requiresSupplier || isPaymentOutward)
       transactionData.supplier = form.supplier;
-    }
 
-    // Add source/destination based on category type
     if (requiresSupplier) {
-      if (isRemittance) {
-        // REMITTANCE: supplier + source
-        transactionData.source = form.source;
-      } else if (isPaymentInward) {
-        // PAYMENT INWARD: supplier + destination
-        transactionData.destination = form.destination;
-      }
+      if (isRemittance) transactionData.source = form.source;
+      else if (isPaymentInward) transactionData.destination = form.destination;
     } else if (isPaymentOutward) {
-      // Payment Outward: supplier + source
       transactionData.source = form.source;
     } else if (isDepositOrWithdraw) {
-      // Deposit/Withdraw: source + destination
       transactionData.source = form.source;
       transactionData.destination = form.destination;
     } else {
-      // Other categories: destination + invoice fields
       transactionData.destination = form.destination;
       transactionData.invoiceNumber = form.invoiceNumber;
       transactionData.invoiceDate = form.invoiceDate;
@@ -1366,27 +1120,23 @@ const AddTransactionModal = ({
           transactionData,
         );
       }
-
       if (response.data.success) {
         onAddTransaction(response.data.data, isEdit);
         onClose();
       }
     } catch (err) {
       console.error("Transaction submission error:", err);
-      alert(
-        "Failed to submit transaction: " +
-          (err.response?.data?.message || err.message),
+      // FIX: Show the backend error message (which now includes tab info)
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to submit transaction",
       );
     }
   };
 
-  // Handle numeric input for text fields with validation
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
-
-    // Allow only numbers and decimal point
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
-      // Additional validation for amount field
       if (
         field === "amount" &&
         value &&
@@ -1395,46 +1145,23 @@ const AddTransactionModal = ({
       ) {
         const numericValue = parseFloat(value);
         const availableBalance = getAvailableBalanceForUpdate();
-
         if (!isNaN(numericValue) && numericValue > availableBalance) {
           setErrors((prev) => ({
             ...prev,
-            amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(
-              2,
-            )}`,
+            amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(2)}`,
           }));
-          return; // Don't update the value if it exceeds the balance
+          return;
         }
-
-        // Clear amount error if validation passes
-        if (errors.amount) {
-          setErrors((prev) => ({
-            ...prev,
-            amount: "",
-          }));
-        }
+        if (errors.amount) setErrors((prev) => ({ ...prev, amount: "" }));
       }
-
       handleInputChange(field, value);
     }
   };
 
-  // Handle date input change - convert from display format to storage format
   const handleDateInputChange = (e, field) => {
-    const displayValue = e.target.value;
-
-    // Convert display format (DD MMM YYYY) to storage format (YYYY-MM-DD)
-    const storageValue = parseDateFromInput(displayValue);
-
-    handleInputChange(field, storageValue);
+    handleInputChange(field, parseDateFromInput(e.target.value));
   };
 
-  // Handle dropdown change
-  const handleDropdownChange = (e, field) => {
-    handleInputChange(field, e.target.value);
-  };
-
-  // Render form field based on type
   const renderFormField = (field) => {
     const value = form[field.key] || "";
     const fieldError = errors[field.key];
@@ -1451,7 +1178,6 @@ const AddTransactionModal = ({
               disabled={field.disabled || false}
               placeholder={field.placeholder || `Select ${field.label}`}
             />
-            {/* ✅ ADDED: Show balance for destination account */}
             {field.key === "destination" &&
               value &&
               destinationAccountBalance > 0 && (
@@ -1459,7 +1185,6 @@ const AddTransactionModal = ({
                   Current Balance: ${destinationAccountBalance.toFixed(2)}
                 </div>
               )}
-            {/* ✅ ADDED: Show balance for source account */}
             {field.key === "source" && value && sourceAccountBalance > 0 && (
               <div className="mt-1 text-xs text-green-600 font-medium">
                 Current Balance: ${sourceAccountBalance.toFixed(2)}
@@ -1467,7 +1192,6 @@ const AddTransactionModal = ({
             )}
           </div>
         );
-
       case "invoiceDropdown":
         return (
           <div>
@@ -1480,39 +1204,34 @@ const AddTransactionModal = ({
               disabled={field.disabled || salesLoading}
               loading={salesLoading}
             />
-            {isFetchingSales && (
+            {(isFetchingSales || invoiceCheckLoading) && (
               <div className="mt-1 text-xs text-gray-500">
-                Fetching invoice details...
+                {invoiceCheckLoading
+                  ? "Checking invoice availability..."
+                  : "Fetching invoice details..."}
               </div>
             )}
           </div>
         );
-
       case "date":
         return field.key === "date" ? (
           <input
             type="date"
             value={value}
             onChange={(e) => handleDateInputChange(e, field.key)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
-            placeholder="DD MMM YYYY"
           />
         ) : (
           <input
             type="text"
             value={formatDateForInput(value)}
             onChange={(e) => handleDateInputChange(e, field.key)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
             placeholder="DD MMM YYYY"
           />
         );
-
       case "number":
         return (
           <div>
@@ -1520,13 +1239,10 @@ const AddTransactionModal = ({
               type="text"
               value={value}
               onChange={(e) => handleNumericInputChange(e, field.key)}
-              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-                fieldError ? "border-red-500" : "border-gray-300"
-              } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
               disabled={field.disabled || false}
               placeholder={field.placeholder || ""}
             />
-            {/* Show available balance info below amount field when source is selected */}
             {field.key === "amount" &&
               form.source &&
               (isDeposit || isWithdraw) && (
@@ -1548,21 +1264,17 @@ const AddTransactionModal = ({
               )}
           </div>
         );
-
       case "textarea":
         return (
           <textarea
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
             rows={3}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
             placeholder={field.placeholder || ""}
           />
         );
-
       case "text":
       default:
         return (
@@ -1570,9 +1282,7 @@ const AddTransactionModal = ({
             type="text"
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
             placeholder={field.placeholder || ""}
           />
@@ -1600,15 +1310,12 @@ const AddTransactionModal = ({
             <X size={20} />
           </button>
         </div>
-
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {formFields.map((field) => (
               <div
                 key={field.key}
-                className={`space-y-2 ${
-                  field.layout === "full" ? "md:col-span-2" : "md:col-span-1"
-                }`}
+                className={`space-y-2 ${field.layout === "full" ? "md:col-span-2" : "md:col-span-1"}`}
               >
                 <label className="block text-sm font-medium text-gray-700">
                   {field.label}
@@ -1625,7 +1332,6 @@ const AddTransactionModal = ({
               </div>
             ))}
           </div>
-
           <div className="flex justify-end gap-3 pt-4">
             <button
               type="button"
@@ -1637,13 +1343,16 @@ const AddTransactionModal = ({
             <button
               type="submit"
               disabled={
-                categoryOptions.length === 0 || destinationOptions.length === 0
+                categoryOptions.length === 0 ||
+                destinationOptions.length === 0 ||
+                invoiceCheckLoading
               }
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center
-               gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus size={16} />
-              {isEdit ? "Update" : "Add"} Transaction
+              {invoiceCheckLoading
+                ? "Checking..."
+                : `${isEdit ? "Update" : "Add"} Transaction`}
             </button>
           </div>
         </form>
@@ -1653,94 +1362,69 @@ const AddTransactionModal = ({
   );
 };
 
-// ImportExcelModal Component - Update the template download section
+// ImportExcelModal — unchanged
 const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   const [uploading, setUploading] = useState(false);
   const [importSummary, setImportSummary] = useState(null);
-  const [step, setStep] = useState(1); // 1: Upload, 2: Preview, 3: Summary
+  const [step, setStep] = useState(1);
   const [importFile, setImportFile] = useState(null);
   const [importPreview, setImportPreview] = useState([]);
   const fileInputRef = useRef(null);
 
-  // Function to download template from backend
   const downloadTemplate = () => {
-    // Construct the URL with query parameters
     const templateUrl = `${backendUrl}/api/transactions/import-template?accountType=${encodeURIComponent(activeTab)}`;
-
-    // Create a temporary anchor element
     const link = document.createElement("a");
     link.href = templateUrl;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.download = `transaction-import-template-${activeTab.toLowerCase().replace(/\s+/g, "-")}.xlsx`;
-
-    // Append to body, click, and remove
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-
-    // Show success message
     showToast("success", "Template download started");
   };
 
-  // Handle file upload
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    // Check file type
     if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
       showToast("error", "Please upload Excel or CSV files only");
       return;
     }
-
     setImportFile(file);
-
-    // Read and preview the file
     const reader = new FileReader();
     reader.onload = (event) => {
       const data = new Uint8Array(event.target.result);
       const workbook = XLSX.read(data, { type: "array" });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-
-      // Preview first 5 rows
       setImportPreview(jsonData.slice(0, 5));
       setStep(2);
     };
     reader.readAsArrayBuffer(file);
   };
 
-  // Handle import
   const handleImport = async () => {
     if (!importFile) {
       showToast("error", "Please select a file first");
       return;
     }
-
     setUploading(true);
     const formData = new FormData();
     formData.append("file", importFile);
     formData.append("accountType", activeTab);
-
     try {
       const response = await axios.post(
         `${backendUrl}/api/transactions/import`,
         formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        },
+        { headers: { "Content-Type": "multipart/form-data" } },
       );
-
       if (response.data.success) {
         setImportSummary(response.data.summary);
         setStep(3);
         showToast("success", "Import completed successfully");
       }
     } catch (error) {
-      console.error("Import error:", error);
       showToast(
         "error",
         error.response?.data?.message || "Failed to import transactions",
@@ -1756,19 +1440,14 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
     setImportPreview([]);
     setImportSummary(null);
     onClose();
-    if (onImportComplete) {
-      onImportComplete();
-    }
+    if (onImportComplete) onImportComplete();
   };
-
   const resetImport = () => {
     setStep(1);
     setImportFile(null);
     setImportPreview([]);
     setImportSummary(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   if (!isOpen) return null;
@@ -1791,9 +1470,7 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
             <X size={20} />
           </button>
         </div>
-
         <div className="p-6">
-          {/* Step 1: Upload */}
           {step === 1 && (
             <div className="text-center">
               <div className="mb-6">
@@ -1805,8 +1482,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                   Upload an Excel file with transaction data. Download the
                   template for reference.
                 </p>
-
-                {/* Download Template Button - UPDATED */}
                 <div className="mb-6">
                   <button
                     onClick={downloadTemplate}
@@ -1821,7 +1496,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                   </p>
                 </div>
               </div>
-
               <div
                 className="border-2 border-dashed border-gray-300 rounded-lg p-8 hover:border-indigo-400 transition-colors cursor-pointer"
                 onClick={() => fileInputRef.current?.click()}
@@ -1841,7 +1515,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                   className="hidden"
                 />
               </div>
-
               {importFile && (
                 <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                   <p className="text-green-700">
@@ -1850,7 +1523,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                   </p>
                 </div>
               )}
-
               <div className="mt-8 text-left">
                 <h4 className="font-semibold mb-2">Expected Columns:</h4>
                 <div className="text-sm text-gray-600 grid grid-cols-2 gap-2">
@@ -1870,15 +1542,12 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
               </div>
             </div>
           )}
-
-          {/* Step 2: Preview */}
           {step === 2 && (
             <div>
               <h3 className="text-lg font-semibold mb-4">Preview Data</h3>
               <p className="text-gray-600 mb-4">
                 Preview of first 5 rows from your file:
               </p>
-
               <div className="overflow-x-auto mb-6">
                 <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm">
                   <thead className="bg-gray-100">
@@ -1907,7 +1576,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                   </tbody>
                 </table>
               </div>
-
               <div className="flex justify-between">
                 <button
                   onClick={resetImport}
@@ -1940,14 +1608,11 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
               </div>
             </div>
           )}
-
-          {/* Step 3: Summary */}
           {step === 3 && importSummary && (
             <div>
               <h3 className="text-lg font-semibold mb-4 text-green-600">
                 Import Successful!
               </h3>
-
               <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="text-center p-3 bg-white rounded-lg">
@@ -1963,7 +1628,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                     <div className="text-sm text-gray-600">Failed</div>
                   </div>
                 </div>
-
                 {importSummary.errors && importSummary.errors.length > 0 && (
                   <div className="mt-4">
                     <h4 className="font-semibold text-red-600 mb-2">Errors:</h4>
@@ -1977,7 +1641,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                   </div>
                 )}
               </div>
-
               <div className="flex justify-end gap-2">
                 <button
                   onClick={resetImport}
@@ -2036,7 +1699,6 @@ const CashAndBank = () => {
     "actions",
   ]);
 
-  // Fetch dropdown options from backend
   const {
     categoryOptions,
     sourceOptions,
@@ -2046,150 +1708,82 @@ const CashAndBank = () => {
     error: optionsError,
     refetch: refetchDropdownOptions,
   } = useDropdownOptions();
-
-  // Use the custom hook for visible pages
   const visiblePages = useVisiblePages(currentPage, totalPages);
 
   const allFields = useMemo(
     () => [
-      {
-        id: "invoiceNumber",
-        name: "Invoice No",
-        dbName: "invoiceNumber",
-      },
-      {
-        id: "categoryType",
-        name: "Category Type",
-        dbName: "categoryType",
-      },
-      {
-        id: "source",
-        name: "Source Account",
-        dbName: "source",
-      },
-      {
-        id: "destination",
-        name: "Destination Account",
-        dbName: "destination",
-      },
-      {
-        id: "invoiceDate",
-        name: "Invoice Date",
-        dbName: "invoiceDate",
-      },
-      {
-        id: "customerName",
-        name: "Customer Name",
-        dbName: "customerName",
-      },
+      { id: "invoiceNumber", name: "Invoice No", dbName: "invoiceNumber" },
+      { id: "categoryType", name: "Category Type", dbName: "categoryType" },
+      { id: "source", name: "Source Account", dbName: "source" },
+      { id: "destination", name: "Destination Account", dbName: "destination" },
+      { id: "invoiceDate", name: "Invoice Date", dbName: "invoiceDate" },
+      { id: "customerName", name: "Customer Name", dbName: "customerName" },
       {
         id: "customerAddress",
         name: "Customer Address",
         dbName: "customerAddress",
       },
-      {
-        id: "amount",
-        name: "Amount",
-        dbName: "amount",
-      },
-      {
-        id: "exchangeLoss",
-        name: "Exchange Loss",
-        dbName: "exchangeLoss",
-      },
-      {
-        id: "finalAmount",
-        name: "Final Amount",
-        dbName: "finalAmount",
-      },
-      {
-        id: "date",
-        name: "Date",
-        dbName: "date",
-      },
-      {
-        id: "description",
-        name: "Description",
-        dbName: "description",
-      },
-      {
-        id: "remarks",
-        name: "Remarks",
-        dbName: "remarks",
-      },
-      {
-        id: "actions",
-        name: "Actions",
-        dbName: "actions",
-      },
+      { id: "amount", name: "Amount", dbName: "amount" },
+      { id: "exchangeLoss", name: "Exchange Loss", dbName: "exchangeLoss" },
+      { id: "finalAmount", name: "Final Amount", dbName: "finalAmount" },
+      { id: "date", name: "Date", dbName: "date" },
+      { id: "description", name: "Description", dbName: "description" },
+      { id: "remarks", name: "Remarks", dbName: "remarks" },
+      { id: "actions", name: "Actions", dbName: "actions" },
     ],
     [],
   );
 
-  // Required columns that cannot be removed
   const requiredColumns = ["invoiceNumber", "actions"];
+  const availableColumns = useMemo(
+    () => allFields.filter((item) => !tableColumns.includes(item.id)),
+    [allFields, tableColumns],
+  );
+  const removableColumns = useMemo(
+    () =>
+      allFields.filter(
+        (item) =>
+          tableColumns.includes(item.id) && !requiredColumns.includes(item.id),
+      ),
+    [allFields, tableColumns],
+  );
 
-  // Get available columns for Add tab (columns not currently in table)
-  const availableColumns = useMemo(() => {
-    return allFields.filter((item) => !tableColumns.includes(item.id));
-  }, [allFields, tableColumns]);
-
-  // Get removable columns for Remove tab (columns in table except required ones)
-  const removableColumns = useMemo(() => {
-    return allFields.filter(
-      (item) =>
-        tableColumns.includes(item.id) && !requiredColumns.includes(item.id),
-    );
-  }, [allFields, tableColumns]);
-
-  // Chunk items for display in modal
   const chunkedItems = useMemo(() => {
     const items =
       activeColumnTab === "add" ? availableColumns : removableColumns;
     const chunks = [];
-    for (let i = 0; i < items.length; i += 2) {
+    for (let i = 0; i < items.length; i += 2)
       chunks.push(items.slice(i, i + 2));
-    }
     return chunks;
   }, [activeColumnTab, availableColumns, removableColumns]);
 
-  // Toggle item selection in column modal
   const toggleItem = (id) => {
     if (id === "all") {
       if (allSelected) {
         setSelectedItems([]);
         setAllSelected(false);
       } else {
-        const allIds = chunkedItems.flat().map((item) => item.id);
-        setSelectedItems(allIds);
+        setSelectedItems(chunkedItems.flat().map((item) => item.id));
         setAllSelected(true);
       }
     } else {
-      let updatedItems;
-      if (selectedItems.includes(id)) {
-        updatedItems = selectedItems.filter((itemId) => itemId !== id);
-      } else {
-        updatedItems = [...selectedItems, id];
-      }
-
-      setSelectedItems(updatedItems);
-      setAllSelected(updatedItems.length === chunkedItems.flat().length);
+      const updated = selectedItems.includes(id)
+        ? selectedItems.filter((i) => i !== id)
+        : [...selectedItems, id];
+      setSelectedItems(updated);
+      setAllSelected(updated.length === chunkedItems.flat().length);
     }
   };
 
-  // Handle save for column configuration
   const handleColumnSave = () => {
-    if (activeColumnTab === "add") {
-      // Add selected columns to table
-      const newColumns = [...tableColumns, ...selectedItems];
-      setTableColumns(newColumns);
-    } else {
-      // Remove selected columns from table (except required ones)
-      const newColumns = tableColumns.filter(
-        (id) => !selectedItems.includes(id) || requiredColumns.includes(id),
+    if (activeColumnTab === "add")
+      setTableColumns([...tableColumns, ...selectedItems]);
+    else
+      setTableColumns(
+        tableColumns.filter(
+          (id) => !selectedItems.includes(id) || requiredColumns.includes(id),
+        ),
       );
-      setTableColumns(newColumns);
-    }
     setSelectedItems([]);
     setAllSelected(false);
     setIsColumnModalOpen(false);
@@ -2198,7 +1792,6 @@ const CashAndBank = () => {
   const handleColumnReset = () => {
     setSelectedItems([]);
     setAllSelected(false);
-    // Reset to default columns
     setTableColumns([
       "invoiceNumber",
       "categoryType",
@@ -2212,81 +1805,52 @@ const CashAndBank = () => {
       "actions",
     ]);
   };
-
   const handleColumnCancel = () => {
     setSelectedItems([]);
     setAllSelected(false);
     setIsColumnModalOpen(false);
   };
 
-  // Update allSelected state when individual selections change
   useEffect(() => {
-    const currentItems = chunkedItems.flat();
-    if (
-      currentItems.length > 0 &&
-      selectedItems.length === currentItems.length
-    ) {
-      setAllSelected(true);
-    } else {
-      setAllSelected(false);
-    }
+    const current = chunkedItems.flat();
+    setAllSelected(
+      current.length > 0 && selectedItems.length === current.length,
+    );
   }, [selectedItems, chunkedItems]);
 
   const fetchTransactions = async () => {
     try {
-      // Remove all parameters including searchTerm
       const response = await axios.get(`${backendUrl}/api/transactions`);
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
-
-        // ✅ Filter transactions based on active tab - show both source AND destination entries
         const filteredData = transactions.filter((tx) => {
           const txCategoryName = tx.categoryType?.name?.toLowerCase() || "";
           const sourceName = tx.source?.name?.toLowerCase() || "";
           const destinationName = tx.destination?.name?.toLowerCase() || "";
           const activeTabLower = activeTab.toLowerCase();
-
-          // For deposit/withdraw transactions, show entries for both source and destination
-          if (txCategoryName === "deposit" || txCategoryName === "withdraw") {
+          if (txCategoryName === "deposit" || txCategoryName === "withdraw")
             return (
               sourceName === activeTabLower ||
               destinationName === activeTabLower
             );
-          }
-          // For remittance, match source instead of destination
-          else if (txCategoryName === "remittance") {
+          else if (txCategoryName === "remittance")
             return sourceName === activeTabLower;
-          }
-          // For other categories, match destination
-          else {
-            return destinationName === activeTabLower;
-          }
+          else return destinationName === activeTabLower;
         });
 
-        // ✅ Find totalAmount from destinations array
         const matchingDestination = destinations.find(
           (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),
         );
+        setTotalAmountTab(matchingDestination?.totalAmount || 0);
 
-        const totalAmount = matchingDestination?.totalAmount || 0;
-        setTotalAmountTab(totalAmount);
-
-        // Calculate pagination
         const totalCount = filteredData.length;
-        const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
-
-        setTotalPages(totalPages);
+        setTotalPages(Math.ceil(totalCount / ITEMS_PER_PAGE));
         setTotalCount(totalCount);
 
-        // Get current page data (only 7 records)
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        const endIndex = startIndex + ITEMS_PER_PAGE;
-        const currentPageData = filteredData.slice(startIndex, endIndex);
-
-        setData(currentPageData);
+        setData(filteredData.slice(startIndex, startIndex + ITEMS_PER_PAGE));
       }
     } catch (error) {
-      console.error("❌ Error fetching transactions:", error);
       showToast("error", "Failed to fetch transactions");
       setData([]);
       setTotalPages(0);
@@ -2309,7 +1873,6 @@ const CashAndBank = () => {
           `${backendUrl}/api/transactions/${editingTransaction._id}`,
           transactionData,
         );
-
         if (response.data.success) {
           showToast("success", "Transaction updated successfully");
           fetchTransactions();
@@ -2321,53 +1884,40 @@ const CashAndBank = () => {
         refetchDropdownOptions();
       }
     } catch (error) {
-      console.error("Error saving transaction:", error);
       showToast("error", "Failed to save transaction");
     }
   };
 
-  // Handle edit transaction
   const handleEdit = (transaction) => {
     setEditingTransaction(transaction);
     setIsEditModalOpen(true);
   };
 
-  // Handle delete transaction (single)
   const handleDelete = async (transaction) => {
     const confirm = await confirmDialog({
       title: "Delete Transaction",
-      text: `Are you sure you want to delete <b>${
-        transaction.title || "This transaction"
-      }</b>?`,
+      text: `Are you sure you want to delete <b>${transaction.title || "This transaction"}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (!confirm.isConfirmed) return;
-
     try {
       const response = await axios.delete(
         `${backendUrl}/api/transactions/${transaction._id}`,
       );
-
       if (response.data.success) {
         showToast("success", "Transaction deleted successfully");
         fetchTransactions();
-        refetchDropdownOptions(); // Refresh dropdown options after delete
-      } else {
-        showToast("error", "Failed to delete transaction");
-      }
+        refetchDropdownOptions();
+      } else showToast("error", "Failed to delete transaction");
     } catch (error) {
-      console.error("Error deleting transaction:", error);
       showToast("error", "Failed to delete transaction");
     }
   };
 
-  // Handle delete selected transactions (bulk)
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
-
     const confirm = await confirmDialog({
       title: "Delete Selected Transactions",
       text: `Are you sure you want to delete <b>${selected.length}</b> selected transaction(s)?`,
@@ -2375,28 +1925,23 @@ const CashAndBank = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (!confirm.isConfirmed) return;
-
     try {
       await axios.delete(`${backendUrl}/api/transactions`, {
         data: { ids: selected },
       });
-
       showToast(
         "success",
         `${selected.length} transaction(s) deleted successfully`,
       );
       setSelected([]);
       fetchTransactions();
-      refetchDropdownOptions(); // Refresh dropdown options after bulk delete
+      refetchDropdownOptions();
     } catch (error) {
-      console.error("Error deleting transactions:", error);
       showToast("error", "Failed to delete some transactions");
     }
   };
 
-  // Handle selection
   const toggleSelect = (item) => {
     setSelected((prev) =>
       prev.some((s) => s === item._id)
@@ -2404,18 +1949,13 @@ const CashAndBank = () => {
         : [...prev, item._id],
     );
   };
-
   const toggleSelectAll = (checked) => {
-    if (checked) {
-      setSelected(currentData.map((r) => r._id));
-    } else {
-      setSelected([]);
-    }
+    if (checked) setSelected(currentData.map((r) => r._id));
+    else setSelected([]);
   };
 
   const renderCellContent = (item, field) => {
     const value = item[field.dbName];
-
     if (field.id === "actions") {
       return (
         <div className="flex items-center justify-center gap-3 min-w-[150px]">
@@ -2436,53 +1976,32 @@ const CashAndBank = () => {
         </div>
       );
     }
-
-    if (field.dbName === "categoryType") {
-      const displayValue = getDisplayValue(value, categoryOptions);
+    if (field.dbName === "categoryType")
       return (
         <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-          {displayValue}
+          {getDisplayValue(value, categoryOptions)}
         </span>
       );
-    }
-
-    if (field.dbName === "amount") {
-      // Amount field - black color, no +- symbols
+    if (field.dbName === "amount")
       return (
         <span className="font-medium text-black">
           {(value || 0).toFixed(2)}
         </span>
       );
-    }
-
     if (field.dbName === "finalAmount") {
-      // Final Amount field - with +- symbols and color coding
       const categoryName = item.categoryType?.name?.toLowerCase() || "";
-
       const isNegativeDisplay =
         categoryName === "remittance" ||
         (categoryName === "withdraw" &&
           item.source?.name?.toLowerCase() === activeTab.toLowerCase()) ||
         (categoryName === "deposit" &&
           item.source?.name?.toLowerCase() === activeTab.toLowerCase());
-
       const isPositiveDisplay =
-        (categoryName === "withdraw" &&
-          item.destination?.name?.toLowerCase() === activeTab.toLowerCase()) ||
-        (categoryName === "deposit" &&
-          item.destination?.name?.toLowerCase() === activeTab.toLowerCase());
-
+        (categoryName === "withdraw" || categoryName === "deposit") &&
+        item.destination?.name?.toLowerCase() === activeTab.toLowerCase();
       return (
         <span
-          className={`font-medium ${
-            isNegativeDisplay
-              ? "text-red-600" // Red color for money going out
-              : isPositiveDisplay
-                ? "text-green-700" // Green color for money coming in
-                : value >= 0
-                  ? "text-green-700"
-                  : "text-red-600"
-          }`}
+          className={`font-medium ${isNegativeDisplay ? "text-red-600" : isPositiveDisplay ? "text-green-700" : value >= 0 ? "text-green-700" : "text-red-600"}`}
         >
           {isNegativeDisplay
             ? "-"
@@ -2495,9 +2014,7 @@ const CashAndBank = () => {
         </span>
       );
     }
-
     if (field.dbName === "source" || field.dbName === "destination") {
-      const displayValue = getDisplayValue(value, sourceOptions);
       const colorClass =
         field.dbName === "source"
           ? "bg-green-50 text-green-700"
@@ -2506,16 +2023,13 @@ const CashAndBank = () => {
         <span
           className={`px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}
         >
-          {displayValue}
+          {getDisplayValue(value, sourceOptions)}
         </span>
       );
     }
-
-    if (field.dbName === "date" || field.dbName === "invoiceDate") {
+    if (field.dbName === "date" || field.dbName === "invoiceDate")
       return value ? formatDateToReadable(value) : "--";
-    }
-
-    if (field.dbName === "remarks") {
+    if (field.dbName === "remarks")
       return value ? (
         <div className="max-w-xs truncate" title={value}>
           {value}
@@ -2523,8 +2037,6 @@ const CashAndBank = () => {
       ) : (
         "--"
       );
-    }
-
     return value ? value.toString() : "--";
   };
 
@@ -2541,24 +2053,19 @@ const CashAndBank = () => {
           responseType: "blob",
         },
       );
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute(
         "download",
-        `transactions_${activeTab}_${
-          new Date().toISOString().split("T")[0]
-        }.csv`,
+        `transactions_${activeTab}_${new Date().toISOString().split("T")[0]}.csv`,
       );
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-
       showToast("success", "Export completed successfully");
     } catch (error) {
-      console.error("Error exporting transactions:", error);
       showToast("error", "Failed to export transactions");
     } finally {
       setExportLoading(false);
@@ -2566,19 +2073,10 @@ const CashAndBank = () => {
   };
 
   const handleSearchChange = (e) => {
-    const searchValue = e.target.value;
-    setSearchTerm(searchValue);
+    setSearchTerm(e.target.value);
     setSelected([]);
     setCurrentPage(1);
   };
-
-  const getSearchPlaceholder = () => {
-    return activeTab === "Personal Account"
-      ? "Search by Description or Category"
-      : "Search by Invoice Number or Customer";
-  };
-
-  // Handle tab change
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setCurrentPage(1);
@@ -2586,7 +2084,6 @@ const CashAndBank = () => {
     setSelected([]);
     refetchDropdownOptions();
   };
-
   const accountTypes = ["Cash Balance", "Personal Account", "Company Account"];
 
   return (
@@ -2608,15 +2105,11 @@ const CashAndBank = () => {
             </div>
           </div>
         )}
-
-        {/* Show error state */}
         {optionsError && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center gap-3">
-              <span className="text-red-700">
-                Error loading dropdown options: {optionsError}
-              </span>
-            </div>
+            <span className="text-red-700">
+              Error loading dropdown options: {optionsError}
+            </span>
           </div>
         )}
 
@@ -2633,7 +2126,6 @@ const CashAndBank = () => {
             >
               <Plus size={18} /> Add New Transaction
             </button>
-
             <button
               onClick={() => setIsImportModalOpen(true)}
               disabled={importLoading}
@@ -2641,7 +2133,6 @@ const CashAndBank = () => {
             >
               <Upload size={18} /> Import Excel
             </button>
-
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
@@ -2651,7 +2142,6 @@ const CashAndBank = () => {
               </button>
             )}
           </div>
-
           <div className="flex gap-3 items-center">
             <button
               className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
@@ -2659,7 +2149,6 @@ const CashAndBank = () => {
             >
               <Settings size={18} /> Add / Remove Column
             </button>
-
             <button
               onClick={handleExport}
               disabled={exportLoading || currentData.length === 0}
@@ -2671,25 +2160,18 @@ const CashAndBank = () => {
           </div>
         </div>
 
-        {/* Tabs - CORRECTED LAYOUT */}
         <div className="flex justify-between items-center mb-6">
-          {/* Left side - Tabs */}
           <div className="flex gap-2 flex-1">
             {accountTypes.map((tab) => (
               <button
                 key={`tab-${tab}`}
                 onClick={() => handleTabChange(tab)}
-                className={`px-4 py-2 rounded-lg capitalize transition-colors ${
-                  activeTab === tab
-                    ? "bg-indigo-600 text-white shadow-md"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
+                className={`px-4 py-2 rounded-lg capitalize transition-colors ${activeTab === tab ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
               >
                 {tab}
               </button>
             ))}
           </div>
-
           {currentData.length > 0 && (
             <div className="flex items-center gap-4 ml-4">
               <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
@@ -2707,7 +2189,7 @@ const CashAndBank = () => {
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder={getSearchPlaceholder()}
+                  placeholder="Search by Invoice Number or Customer"
                   value={searchTerm}
                   onChange={handleSearchChange}
                   className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
@@ -2717,17 +2199,14 @@ const CashAndBank = () => {
           )}
         </div>
 
-        {/* Account Summary */}
         <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-semibold text-gray-800 mb-1">
                 {activeTab} Summary
               </h3>
-              <div className="flex items-center gap-4">
-                <div className="text-2xl font-bold text-indigo-700">
-                  ${totalAmountTab.toFixed(2)}
-                </div>
+              <div className="text-2xl font-bold text-indigo-700">
+                ${totalAmountTab.toFixed(2)}
               </div>
             </div>
           </div>
@@ -2749,7 +2228,7 @@ const CashAndBank = () => {
                           {currentData.length > 0 && (
                             <input
                               type="checkbox"
-                              aria-label="Select all transactions"
+                              aria-label="Select all"
                               checked={
                                 selected.length === currentData.length &&
                                 currentData.length > 0
@@ -2790,12 +2269,10 @@ const CashAndBank = () => {
                 currentData.map((item, index) => (
                   <tr
                     key={`row-${item._id || index}`}
-                    className={`hover:bg-gray-50 ${
-                      index < currentData.length - 1 ? "border-b" : ""
-                    }`}
+                    className={`hover:bg-gray-50 ${index < currentData.length - 1 ? "border-b" : ""}`}
                   >
                     {allFields
-                      .filter((item) => tableColumns.includes(item.id))
+                      .filter((f) => tableColumns.includes(f.id))
                       .map((field) => (
                         <td
                           key={`cell-${item._id}-${field.id}`}
@@ -2844,11 +2321,7 @@ const CashAndBank = () => {
                   <button
                     key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
+                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
                   >
                     {page}
                   </button>
@@ -2881,7 +2354,6 @@ const CashAndBank = () => {
                 <h2 className="text-xl font-semibold mb-4">
                   {activeColumnTab === "add" ? "Add Columns" : "Remove Columns"}
                 </h2>
-
                 <div className="flex w-full gap-2 mb-4">
                   <div className="w-1/2">
                     <button
@@ -2890,11 +2362,7 @@ const CashAndBank = () => {
                         setSelectedItems([]);
                         setAllSelected(false);
                       }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeColumnTab === "add"
-                          ? "bg-green-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
+                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "add" ? "bg-green-600 text-white" : "bg-gray-200 text-gray-700"}`}
                     >
                       Add Columns ({availableColumns.length})
                     </button>
@@ -2906,21 +2374,15 @@ const CashAndBank = () => {
                         setSelectedItems([]);
                         setAllSelected(false);
                       }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeColumnTab === "remove"
-                          ? "bg-red-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
+                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "remove" ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"}`}
                     >
                       Remove Columns ({removableColumns.length})
                     </button>
                   </div>
                 </div>
-
                 <div className="flex-1 overflow-y-auto">
                   {chunkedItems.length > 0 ? (
                     <div className="grid grid-cols-1 gap-3">
-                      {/* Select All option */}
                       {chunkedItems.flat().length > 0 && (
                         <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
                           <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
@@ -2934,7 +2396,6 @@ const CashAndBank = () => {
                           <div className="flex-1"></div>
                         </div>
                       )}
-
                       {chunkedItems.map((pair, index) => (
                         <div key={index} className="flex gap-4">
                           {pair.map(({ id, name }) => (
@@ -2953,8 +2414,6 @@ const CashAndBank = () => {
                           {pair.length === 1 && <div className="flex-1"></div>}
                         </div>
                       ))}
-
-                      {/* REQUIRED COLUMNS shown on Remove tab */}
                       {activeColumnTab === "remove" && (
                         <div className="mt-6 border-t pt-4">
                           <h3 className="text-sm font-semibold text-gray-600 mb-2">
@@ -2991,7 +2450,6 @@ const CashAndBank = () => {
                     </div>
                   )}
                 </div>
-
                 <div className="mt-4 pt-4 border-t flex justify-between items-center">
                   <button
                     onClick={handleColumnReset}
@@ -3032,7 +2490,6 @@ const CashAndBank = () => {
           supplierOptions={supplierOptions}
           currentData={currentData}
         />
-
         <AddTransactionModal
           key="edit-modal"
           isOpen={isEditModalOpen}
@@ -3050,14 +2507,13 @@ const CashAndBank = () => {
           supplierOptions={supplierOptions}
           currentData={currentData}
         />
-
         <ImportExcelModal
           isOpen={isImportModalOpen}
           onClose={() => setIsImportModalOpen(false)}
           activeTab={activeTab}
           onImportComplete={() => {
-            fetchTransactions(); // Refresh data after import
-            refetchDropdownOptions(); // Refresh dropdown options
+            fetchTransactions();
+            refetchDropdownOptions();
           }}
         />
       </div>
