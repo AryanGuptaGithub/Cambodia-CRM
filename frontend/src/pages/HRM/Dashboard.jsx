@@ -59,7 +59,7 @@ const formatDateToDDMMMYYYY = (dateString) => {
       // Try to parse the date string
       // First, check for DD/MM/YYYY format
       const ddmmyyyyMatch = dateString.match(
-        /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/
+        /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
       );
       if (ddmmyyyyMatch) {
         const day = parseInt(ddmmyyyyMatch[1], 10);
@@ -125,7 +125,7 @@ const parseDateFromString = (dateString) => {
 
     // Format: DD/MM/YYYY or DD-MM-YYYY
     const ddmmyyyyMatch = dateStr.match(
-      /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/
+      /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
     );
     if (ddmmyyyyMatch) {
       const day = parseInt(ddmmyyyyMatch[1], 10);
@@ -136,7 +136,7 @@ const parseDateFromString = (dateString) => {
 
     // Format: YYYY-MM-DD (ISO)
     const yyyymmddMatch = dateStr.match(
-      /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/
+      /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/,
     );
     if (yyyymmddMatch) {
       const year = parseInt(yyyymmddMatch[1], 10);
@@ -186,16 +186,15 @@ const Dashboard = () => {
     initials: "",
   });
 
-  // Form State - Updated to handle status correctly
+  // Form State - using isActive directly from staff
   const [form, setForm] = useState({
     medicalRepName: "",
     teamName: "",
     contactNo: "",
     email: "",
     date: "",
-    isActive: true, // Use isActive instead of enabled
+    isActive: true,
     _id: null,
-    userId: null,
   });
 
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -212,7 +211,7 @@ const Dashboard = () => {
       const previousMonth = new Date(
         currentDate.getFullYear(),
         currentDate.getMonth() - 1,
-        1
+        1,
       );
       const year = previousMonth.getFullYear();
       const month = previousMonth.getMonth() + 1;
@@ -224,7 +223,7 @@ const Dashboard = () => {
           headers: {
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       if (!response.ok) {
@@ -243,7 +242,7 @@ const Dashboard = () => {
         (contentType.includes("spreadsheet") ||
           contentType.includes("excel") ||
           contentType.includes(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           ));
 
       if (!isExcelFile) {
@@ -281,7 +280,7 @@ const Dashboard = () => {
       console.error("Export error:", error);
       showToast(
         "error",
-        error.message || "Failed to export data. Please try again."
+        error.message || "Failed to export data. Please try again.",
       );
     }
   };
@@ -293,7 +292,7 @@ const Dashboard = () => {
       const previousMonth = new Date(
         currentDate.getFullYear(),
         currentDate.getMonth() - 1,
-        1
+        1,
       );
       const year = previousMonth.getFullYear();
       const month = String(previousMonth.getMonth() + 1).padStart(2, "0");
@@ -336,7 +335,7 @@ const Dashboard = () => {
         const previousMonthDate = new Date(
           currentDate.getFullYear(),
           currentDate.getMonth() - 1,
-          1
+          1,
         );
         const formattedPreviousMonth = formatMonthYear(previousMonthDate);
         setPreviousMonthLabel(formattedPreviousMonth);
@@ -407,11 +406,11 @@ const Dashboard = () => {
     setCurrentPage(1);
   }, [searchTerm, activeTab]);
 
-  // Calculate dashboard stats using userId.isActive
+  // ✅ FIXED: Use mr.isActive (staff's own field)
   const dashboardStats = useMemo(() => {
     const totalMRs = mrList.length;
-    const enabledMRs = mrList.filter((mr) => mr.userId?.isActive).length;
-    const disabledMRs = mrList.filter((mr) => !mr.userId?.isActive).length;
+    const enabledMRs = mrList.filter((mr) => mr.isActive).length;
+    const disabledMRs = mrList.filter((mr) => !mr.isActive).length;
     const totalTeams = [
       ...new Set(mrList.map((mr) => mr.teamName).filter(Boolean)),
     ].length;
@@ -433,17 +432,17 @@ const Dashboard = () => {
     };
   }, [mrList]);
 
-  // Filter MR data based on active tab using userId.isActive
+  // ✅ FIXED: Filter using mr.isActive
   const filteredMR = useMemo(() => {
     const lowerSearch = searchTerm.toLowerCase();
 
     let filteredData = mrList;
 
-    // Apply tab filter using userId.isActive
+    // Apply tab filter using mr.isActive
     if (activeTab === "Active MRs") {
-      filteredData = filteredData.filter((mr) => mr.userId?.isActive === true);
+      filteredData = filteredData.filter((mr) => mr.isActive === true);
     } else if (activeTab === "Inactive MRs") {
-      filteredData = filteredData.filter((mr) => mr.userId?.isActive === false);
+      filteredData = filteredData.filter((mr) => mr.isActive === false);
     }
 
     // Apply search filter
@@ -460,13 +459,13 @@ const Dashboard = () => {
   const teamSuggestions = useMemo(() => {
     if (!form.teamName) return [];
     return allTeams.filter((team) =>
-      team.toLowerCase().includes(form.teamName.toLowerCase())
+      team.toLowerCase().includes(form.teamName.toLowerCase()),
     );
   }, [form.teamName, allTeams]);
 
   const totalPages = useMemo(
     () => Math.ceil(filteredMR.length / staffPerPage),
-    [filteredMR.length, staffPerPage]
+    [filteredMR.length, staffPerPage],
   );
 
   const currentMR = useMemo(() => {
@@ -497,7 +496,7 @@ const Dashboard = () => {
     setSelected((prev) =>
       prev.some((c) => c.id === mr._id)
         ? prev.filter((c) => c.id !== mr._id)
-        : [...prev, { id: mr._id, name: mr.medicalRepName }]
+        : [...prev, { id: mr._id, name: mr.medicalRepName }],
     );
   }, []);
 
@@ -510,25 +509,27 @@ const Dashboard = () => {
               name: mr.medicalRepName,
               team: mr.teamName,
             }))
-          : []
+          : [],
       );
     },
-    [currentMR]
+    [currentMR],
   );
 
+  // ✅ FIXED: Use mr.isActive
   const handleMRView = useCallback((mr) => {
     setForm({
       ...mr,
-      isActive: mr.userId?.isActive, // Use userId.isActive
+      isActive: mr.isActive,
       date: mr.date ? parseDateFromString(mr.date) : null,
     });
     setIsViewModalOpen(true);
   }, []);
 
+  // ✅ FIXED: Use mr.isActive
   const handleMREdit = useCallback((mr) => {
     setForm({
       ...mr,
-      isActive: mr.userId?.isActive, // Use userId.isActive
+      isActive: mr.isActive,
       date: mr.date ? parseDateFromString(mr.date) : null,
     });
     setIsEditModalOpen(true);
@@ -536,7 +537,7 @@ const Dashboard = () => {
 
   const refreshMRList = async () => {
     try {
-      const mrData = await fetchMRList();
+      const mrData = await fetchWholeMRList();
       setMrList(mrData.data);
       setSelected([]);
     } catch (err) {
@@ -584,7 +585,7 @@ const Dashboard = () => {
     } catch (err) {
       showToast(
         "error",
-        err?.response?.data?.message || "Failed to delete MR."
+        err?.response?.data?.message || "Failed to delete MR.",
       );
     }
   };
@@ -603,12 +604,11 @@ const Dashboard = () => {
     });
   };
 
-  // Status toggle function using userId.isActive
+  // ✅ FIXED: Status toggle updates mr.isActive (staff field)
   const handleStatusToggle = async (mr) => {
     try {
-      const newStatus = !mr.userId?.isActive;
-      
-      // Update both staff and user status
+      const newStatus = !mr.isActive;
+
       const res = await axios.put(`${backendUrl}/api/staff/status/${mr._id}`, {
         isActive: newStatus,
       });
@@ -616,22 +616,14 @@ const Dashboard = () => {
       if (res.status === 200) {
         setMrList((prev) =>
           prev.map((item) =>
-            item._id === mr._id
-              ? {
-                  ...item,
-                  userId: {
-                    ...item.userId,
-                    isActive: newStatus,
-                  },
-                }
-              : item
-          )
+            item._id === mr._id ? { ...item, isActive: newStatus } : item,
+          ),
         );
         showToast(
           "success",
           `MR <b>${mr.medicalRepName}</b> ${
             newStatus ? "enabled" : "disabled"
-          } successfully`
+          } successfully`,
         );
       }
     } catch (err) {
@@ -663,7 +655,7 @@ const Dashboard = () => {
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           const normalizedRow = row.map((cell) =>
-            cell.toString().trim().toLowerCase()
+            cell.toString().trim().toLowerCase(),
           );
 
           // Look for exact header names (case-insensitive)
@@ -672,17 +664,17 @@ const Dashboard = () => {
               (h) =>
                 h.includes("mr name") ||
                 h.includes("medicalrepname") ||
-                h.includes("name")
+                h.includes("name"),
             ) &&
             normalizedRow.some(
-              (h) => h.includes("team") && h.includes("name")
+              (h) => h.includes("team") && h.includes("name"),
             ) &&
             normalizedRow.some(
-              (h) => h.includes("contact") || h.includes("phone")
+              (h) => h.includes("contact") || h.includes("phone"),
             ) &&
             normalizedRow.some((h) => h.includes("email")) &&
             (normalizedRow.some(
-              (h) => h.includes("joining") && h.includes("date")
+              (h) => h.includes("joining") && h.includes("date"),
             ) ||
               normalizedRow.some((h) => h.includes("instance"))) &&
             normalizedRow.some((h) => h.includes("password"));
@@ -700,7 +692,7 @@ const Dashboard = () => {
         if (headerRowIndex === -1) {
           showToast(
             "error",
-            "Required headers missing! Please include: MR Name, Team Name, Contact No, Email, Joining Date, Password"
+            "Required headers missing! Please include: MR Name, Team Name, Contact No, Email, Joining Date, Password",
           );
           return;
         }
@@ -728,7 +720,7 @@ const Dashboard = () => {
             } else {
               // Try to find any column containing "date"
               const dateKey = Object.keys(item).find(
-                (key) => key.toLowerCase().includes("date") && item[key]
+                (key) => key.toLowerCase().includes("date") && item[key],
               );
               if (dateKey) joiningDateKey = dateKey;
             }
@@ -752,7 +744,7 @@ const Dashboard = () => {
                 else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
                   const [month, day, year] = dateStr.split("/");
                   parsedDate = new Date(
-                    `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
+                    `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
                   );
                 }
                 // Format 3: Excel serial number
@@ -789,7 +781,7 @@ const Dashboard = () => {
               password: (item["password"] || "123456").toString().trim(),
               date:
                 parsedDate && !isNaN(parsedDate.getTime())
-                  ? parsedDate.toISOString().split("T")[0] 
+                  ? parsedDate.toISOString().split("T")[0]
                   : new Date().toISOString().split("T")[0],
               isActive: true, // Default to active when importing
               rawDate: rawDate,
@@ -802,7 +794,7 @@ const Dashboard = () => {
               entry.name &&
               entry.name.trim() !== "" &&
               entry.teamName &&
-              entry.teamName.trim() !== ""
+              entry.teamName.trim() !== "",
           );
 
         setParsedData(mappedData);
@@ -851,13 +843,13 @@ const Dashboard = () => {
             item.medicalRepName &&
             item.medicalRepName.trim() !== "" &&
             item.teamName &&
-            item.teamName.trim() !== ""
+            item.teamName.trim() !== "",
         );
 
       if (validData.length === 0) {
         showToast(
           "error",
-          "No valid records found. Check that all required fields are filled."
+          "No valid records found. Check that all required fields are filled.",
         );
         setIsUploading(false);
         return;
@@ -871,13 +863,13 @@ const Dashboard = () => {
           headers: {
             "Content-Type": "application/json",
           },
-        }
+        },
       );
 
       if (res.data.success) {
         showToast(
           "success",
-          res.data.message || `${validData.length} MRs imported successfully!`
+          res.data.message || `${validData.length} MRs imported successfully!`,
         );
         setShowImportModal(false);
         setParsedData([]);
@@ -897,22 +889,22 @@ const Dashboard = () => {
           const duplicateMessages = [];
           if (data.duplicates.names && data.duplicates.names.length > 0) {
             duplicateMessages.push(
-              `Names: ${data.duplicates.names.join(", ")}`
+              `Names: ${data.duplicates.names.join(", ")}`,
             );
           }
           if (data.duplicates.emails && data.duplicates.emails.length > 0) {
             duplicateMessages.push(
-              `Emails: ${data.duplicates.emails.join(", ")}`
+              `Emails: ${data.duplicates.emails.join(", ")}`,
             );
           }
           if (data.duplicates.contacts && data.duplicates.contacts.length > 0) {
             duplicateMessages.push(
-              `Contacts: ${data.duplicates.contacts.join(", ")}`
+              `Contacts: ${data.duplicates.contacts.join(", ")}`,
             );
           }
 
           errorMessage = `Duplicate entries found: ${duplicateMessages.join(
-            "; "
+            "; ",
           )}`;
         } else if (data.message) {
           errorMessage = data.message;
@@ -941,12 +933,12 @@ const Dashboard = () => {
         contactNo: form.contactNo,
         email: form.email,
         date: form.date ? new Date(form.date).toISOString() : null,
-        isActive: form.isActive, // Use isActive
+        isActive: form.isActive,
       };
 
       const res = await axios.put(
         `${backendUrl}/api/staff/${form._id}`,
-        updatedData
+        updatedData,
       );
 
       if (res.status === 200) {
@@ -979,13 +971,13 @@ const Dashboard = () => {
       case "ArrowDown":
         e.preventDefault();
         setHighlightedIndex((prev) =>
-          prev < teamSuggestions.length - 1 ? prev + 1 : 0
+          prev < teamSuggestions.length - 1 ? prev + 1 : 0,
         );
         break;
       case "ArrowUp":
         e.preventDefault();
         setHighlightedIndex((prev) =>
-          prev > 0 ? prev - 1 : teamSuggestions.length - 1
+          prev > 0 ? prev - 1 : teamSuggestions.length - 1,
         );
         break;
       case "Enter":
@@ -1013,7 +1005,7 @@ const Dashboard = () => {
     searchInputRef.current?.classList.add("highlight");
     setTimeout(
       () => searchInputRef.current?.classList.remove("highlight"),
-      1000
+      1000,
     );
   };
 
@@ -1153,12 +1145,12 @@ const Dashboard = () => {
                   </p>
                   <span
                     className={`inline-block px-2 py-1 rounded-full text-xs ${
-                      mr.userId?.isActive
+                      mr.isActive
                         ? "bg-green-100 text-green-800"
                         : "bg-red-100 text-red-800"
                     }`}
                   >
-                    {mr.userId?.isActive ? "Active" : "Inactive"}
+                    {mr.isActive ? "Active" : "Inactive"}
                   </span>
                 </div>
               </div>
@@ -1467,12 +1459,12 @@ const Dashboard = () => {
           <button
             onClick={() => handleStatusToggle(item)}
             className={`px-3 py-1 rounded-full text-sm font-medium cursor-pointer transition-colors ${
-              item.userId?.isActive
+              item.isActive
                 ? "bg-green-100 text-green-800 hover:bg-green-200"
                 : "bg-red-100 text-red-800 hover:bg-red-200"
             }`}
           >
-            {item.userId?.isActive ? "Enabled" : "Disabled"}
+            {item.isActive ? "Enabled" : "Disabled"}
           </button>
         ),
       },
@@ -1542,12 +1534,12 @@ const Dashboard = () => {
                         >
                           {page}
                         </button>
-                      )
+                      ),
                     )}
                     <button
                       onClick={() => {
                         setCurrentPage((prev) =>
-                          Math.min(prev + 1, totalPages)
+                          Math.min(prev + 1, totalPages),
                         );
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
@@ -1699,7 +1691,7 @@ const Dashboard = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Edit Modal */}
@@ -1836,7 +1828,10 @@ const Dashboard = () => {
                     <select
                       value={form.isActive}
                       onChange={(e) =>
-                        setForm({ ...form, isActive: e.target.value === "true" })
+                        setForm({
+                          ...form,
+                          isActive: e.target.value === "true",
+                        })
                       }
                       className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                     >
@@ -1864,7 +1859,7 @@ const Dashboard = () => {
               </form>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Import Modal */}
@@ -1932,7 +1927,7 @@ const Dashboard = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

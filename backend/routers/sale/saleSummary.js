@@ -4427,7 +4427,45 @@ router.get("/analytics/custom-range", async (req, res) => {
 
 router.get("/credit-sale-not-received", async (req, res) => {
   try {
+    const { period, startDate, endDate } = req.query;
+
+    // --------------------------------------------------------
+    // Build date filter based on period or custom date range
+    // --------------------------------------------------------
+    let dateFilter = {};
+    const now = new Date();
+
+    if (period === "custom" && startDate && endDate) {
+      // Custom date range from the frontend calendar picker
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    } else if (period === "today") {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    } else if (period === "month") {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    } else if (period === "year") {
+      const start = new Date(now.getFullYear(), 0, 1);
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    }
+    // If no period provided, dateFilter stays {} → returns all records
+    // (keeps original behaviour when called without params)
+
+    // --------------------------------------------------------
+    // Query: credit sales with outstanding amount + date filter
+    // --------------------------------------------------------
     const creditSales = await SaleSummary.find({
+      ...dateFilter,
       $and: [
         {
           $or: [
@@ -4473,6 +4511,7 @@ router.get("/credit-sale-not-received", async (req, res) => {
       data: formattedSales,
       totalAmount: totalAmount.toFixed(2),
       count: formattedSales.length,
+      period: period || "all",
       message: `Found ${formattedSales.length} credit sales`,
     });
   } catch (error) {
@@ -4487,6 +4526,7 @@ router.get("/credit-sale-not-received", async (req, res) => {
   }
 });
 
+// ==================== UPDATED ROUTE ====================
 router.get("/table-data", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
@@ -4496,6 +4536,9 @@ router.get("/table-data", async (req, res) => {
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    } else if (period === "All") {
+      // No date filter – fetch all records
+      dateFilter = {};
     } else {
       const dateRange = getTableDateRanges(period);
       if (dateRange)

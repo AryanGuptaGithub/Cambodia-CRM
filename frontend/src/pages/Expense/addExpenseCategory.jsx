@@ -1,4 +1,3 @@
-// components/AddExpenseCategory.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { Save, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -79,21 +78,26 @@ const AddExpenseCategory = ({
 }) => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    _id: null,
     category: "",
     description: "",
   });
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Populate form data if editing
+  // Populate form data when editing
   useEffect(() => {
     if (initialData) {
+      // Handle both possible ID fields (_id or id) and both possible name/description keys
+      const categoryId = initialData._id || initialData.id;
       setFormData({
-        category: initialData.category || "",
-        description: initialData.description || "",
+        _id: categoryId,
+        category: initialData.category || initialData.Category || "",
+        description: initialData.description || initialData.Remarks || "",
       });
     } else {
       setFormData({
+        _id: null,
         category: "",
         description: "",
       });
@@ -110,7 +114,7 @@ const AddExpenseCategory = ({
         setErrors((prev) => ({ ...prev, [field]: "" }));
       }
     },
-    [errors]
+    [errors],
   );
 
   const validate = useCallback(() => {
@@ -146,16 +150,16 @@ const AddExpenseCategory = ({
 
       let response;
 
-      if (isEditing && initialData?._id) {
-        // Use backendUrl for consistency
+      if (isEditing && formData._id) {
+        // Use the stored ID for update
         response = await axios.put(
-          `${backendUrl}/api/expense-categories/${initialData._id}`,
-          submitData
+          `${backendUrl}/api/expense-categories/${formData._id}`,
+          submitData,
         );
       } else {
         response = await axios.post(
           `${backendUrl}/api/expense-categories`,
-          submitData
+          submitData,
         );
       }
 
@@ -261,8 +265,8 @@ const AddExpenseCategory = ({
                 {isSubmitting
                   ? "Saving..."
                   : isEditing
-                  ? "Save Changes"
-                  : "Add Category"}
+                    ? "Save Changes"
+                    : "Add Category"}
               </button>
               <button
                 type="button"

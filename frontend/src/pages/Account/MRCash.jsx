@@ -48,18 +48,23 @@ function MRCash() {
     mrCashId: "",
     transferAmount: "",
     notes: "",
+    destinationAccount: "", // NEW: destination account ID
   });
 
   const [transferForm, setTransferForm] = useState({
     amount: "",
     notes: "",
+    destinationAccount: "", // NEW: destination account ID
   });
 
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(false);
+  const [destinationOptions, setDestinationOptions] = useState([]); // NEW: destination accounts
+  const [destinationsLoading, setDestinationsLoading] = useState(false);
 
   const inputRef = useRef(null);
 
+  // Format currency
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return "$0.00";
     return new Intl.NumberFormat("en-US", {
@@ -79,6 +84,41 @@ function MRCash() {
     }
   };
 
+  // Fetch destinations
+  const fetchDestinations = useCallback(async () => {
+    try {
+      setDestinationsLoading(true);
+      const response = await axios.get(
+        `${backendUrl}/api/accounts/destinations`,
+      );
+      let destinations = [];
+      if (response.data && Array.isArray(response.data)) {
+        destinations = response.data;
+      } else if (response.data?.data && Array.isArray(response.data.data)) {
+        destinations = response.data.data;
+      } else if (
+        response.data?.destinations &&
+        Array.isArray(response.data.destinations)
+      ) {
+        destinations = response.data.destinations;
+      }
+      setDestinationOptions(
+        destinations.map((dest) => ({
+          value: dest._id,
+          label: dest.name,
+          code: dest.code,
+          totalAmount: dest.totalAmount || 0,
+        })),
+      );
+    } catch (error) {
+      console.error("Error fetching destinations:", error);
+      showToast("error", "Failed to load destination accounts");
+    } finally {
+      setDestinationsLoading(false);
+    }
+  }, []);
+
+  // Fetch MR list with cash
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
@@ -96,6 +136,7 @@ function MRCash() {
     }
   }, []);
 
+  // Fetch transfer history
   const fetchTransferHistory = useCallback(async (mrCashId) => {
     try {
       setTransferHistoryLoading(true);
@@ -115,7 +156,7 @@ function MRCash() {
     }
   }, []);
 
-  // Fetch all MR Cash records filtered by send-type stock transfers (done in backend now)
+  // Fetch all MR Cash records
   const fetchAllMRCashes = useCallback(async () => {
     try {
       setLoading(true);
@@ -194,7 +235,8 @@ function MRCash() {
   useEffect(() => {
     fetchAllMRCashes();
     fetchMRList();
-  }, [fetchAllMRCashes, fetchMRList]);
+    fetchDestinations(); // NEW
+  }, [fetchAllMRCashes, fetchMRList, fetchDestinations]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -204,7 +246,12 @@ function MRCash() {
   }, [searchTerm, handleSearch]);
 
   const handleAdd = () => {
-    setFormData({ mrCashId: "", transferAmount: "", notes: "" });
+    setFormData({
+      mrCashId: "",
+      transferAmount: "",
+      notes: "",
+      destinationAccount: destinationOptions[0]?.value || "",
+    });
     setSelectedMRCash(null);
     setIsAddModalOpen(true);
     fetchMRList();
@@ -240,28 +287,59 @@ function MRCash() {
     }
   };
 
+  // NEW: Numeric input validation (allows only digits and one decimal)
+  const validateNumericInput = (value) => {
+    const regex = /^\d*\.?\d*$/;
+    if (value === "" || regex.test(value)) {
+      return value;
+    }
+    return null;
+  };
+
   const handleFormChange = (e) => {
     const { name, value } = e.target;
 
-    if (name === "transferAmount" && selectedMRCash) {
-      const maxAmount = selectedMRCash.currentCash || 0;
-      const inputAmount = parseFloat(value) || 0;
+    if (name === "transferAmount") {
+      const validated = validateNumericInput(value);
+      if (validated === null) return;
+      setFormData((prev) => ({ ...prev, transferAmount: validated }));
 
-      if (inputAmount > maxAmount) {
-        showToast(
-          "error",
-          `Cannot transfer more than available cash (${formatCurrency(maxAmount)})`,
-        );
-        return;
+      if (selectedMRCash) {
+        const inputAmount = parseFloat(validated) || 0;
+        const maxAmount = selectedMRCash.currentCash || 0;
+        if (inputAmount > maxAmount) {
+          showToast(
+            "error",
+            `Cannot transfer more than available cash (${formatCurrency(maxAmount)})`,
+          );
+        }
       }
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
     }
-
-    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleTransferFormChange = (e) => {
     const { name, value } = e.target;
-    setTransferForm((prev) => ({ ...prev, [name]: value }));
+
+    if (name === "amount") {
+      const validated = validateNumericInput(value);
+      if (validated === null) return;
+      setTransferForm((prev) => ({ ...prev, amount: validated }));
+
+      if (selectedRecord) {
+        const inputAmount = parseFloat(validated) || 0;
+        const maxAmount = selectedRecord.currentCash || 0;
+        if (inputAmount > maxAmount) {
+          showToast(
+            "error",
+            `Cannot transfer more than available cash (${formatCurrency(maxAmount)})`,
+          );
+        }
+      }
+    } else {
+      setTransferForm((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleMRSelect = (value) => {
@@ -274,6 +352,8 @@ function MRCash() {
         transferAmount:
           selectedMR.currentCash > 0 ? selectedMR.currentCash.toString() : "0",
         notes: "",
+        destinationAccount:
+          prev.destinationAccount || destinationOptions[0]?.value || "",
       }));
     }
   };
@@ -293,6 +373,11 @@ function MRCash() {
       return;
     }
 
+    if (!formData.destinationAccount) {
+      showToast("error", "Please select a destination account");
+      return;
+    }
+
     const selectedMR = mrList.find((mr) => mr.value === formData.mrCashId);
     const transferAmount = parseFloat(formData.transferAmount);
 
@@ -307,16 +392,26 @@ function MRCash() {
     try {
       const response = await axios.post(
         `${backendUrl}/api/mr-cash/${formData.mrCashId}/transfer`,
-        { amount: transferAmount, notes: formData.notes },
+        {
+          amount: transferAmount,
+          notes: formData.notes,
+          destinationAccount: formData.destinationAccount, // send the selected destination ID
+        },
       );
 
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsAddModalOpen(false);
-        setFormData({ mrCashId: "", transferAmount: "", notes: "" });
+        setFormData({
+          mrCashId: "",
+          transferAmount: "",
+          notes: "",
+          destinationAccount: "",
+        });
         setSelectedMRCash(null);
         fetchAllMRCashes();
         fetchMRList();
+        fetchDestinations(); // refresh destination balances
       }
     } catch (error) {
       console.error("Transfer error:", error);
@@ -342,18 +437,28 @@ function MRCash() {
       return;
     }
 
+    if (!transferForm.destinationAccount) {
+      showToast("error", "Please select a destination account");
+      return;
+    }
+
     try {
       const response = await axios.post(
         `${backendUrl}/api/mr-cash/${selectedRecord._id}/transfer`,
-        { amount: transferAmount, notes: transferForm.notes },
+        {
+          amount: transferAmount,
+          notes: transferForm.notes,
+          destinationAccount: transferForm.destinationAccount,
+        },
       );
 
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsTransferModalOpen(false);
-        setTransferForm({ amount: "", notes: "" });
+        setTransferForm({ amount: "", notes: "", destinationAccount: "" });
         fetchAllMRCashes();
         fetchMRList();
+        fetchDestinations();
       }
     } catch (error) {
       console.error("Transfer error:", error);
@@ -371,6 +476,7 @@ function MRCash() {
     setTransferForm({
       amount: record.currentCash > 0 ? record.currentCash.toString() : "0",
       notes: "",
+      destinationAccount: destinationOptions[0]?.value || "",
     });
     setIsTransferModalOpen(true);
   };
@@ -838,6 +944,9 @@ function MRCash() {
                                 Amount
                               </th>
                               <th className="py-3 px-4 font-medium text-gray-700">
+                                Destination Account
+                              </th>
+                              <th className="py-3 px-4 font-medium text-gray-700">
                                 Notes
                               </th>
                               <th className="py-3 px-4 font-medium text-gray-700">
@@ -856,6 +965,9 @@ function MRCash() {
                                 </td>
                                 <td className="py-3 px-4 font-medium text-green-700">
                                   {formatCurrency(transfer.amount)}
+                                </td>
+                                <td className="py-3 px-4 text-gray-600">
+                                  {transfer.toAccountName || "N/A"}
                                 </td>
                                 <td className="py-3 px-4 text-gray-600">
                                   {transfer.notes || "N/A"}
@@ -906,6 +1018,7 @@ function MRCash() {
                       mrCashId: "",
                       transferAmount: "",
                       notes: "",
+                      destinationAccount: "",
                     });
                   }}
                   className="text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -954,16 +1067,34 @@ function MRCash() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Destination Account <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    name="destinationAccount"
+                    value={formData.destinationAccount}
+                    onChange={handleFormChange}
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                    disabled={destinationsLoading}
+                  >
+                    <option value="">Select Destination</option>
+                    {destinationOptions.map((acc) => (
+                      <option key={acc.value} value={acc.value}>
+                        {acc.label} (Balance: {formatCurrency(acc.totalAmount)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Transfer Amount ($) <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     name="transferAmount"
                     value={formData.transferAmount}
                     onChange={handleFormChange}
-                    min="0.01"
-                    max={selectedMRCash?.currentCash || 0}
-                    step="0.01"
                     className="w-full border px-3 py-2 rounded-lg"
                     placeholder="Enter amount to transfer"
                     required
@@ -1001,6 +1132,7 @@ function MRCash() {
                         mrCashId: "",
                         transferAmount: "",
                         notes: "",
+                        destinationAccount: "",
                       });
                     }}
                     className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
@@ -1016,7 +1148,8 @@ function MRCash() {
                       parseFloat(formData.transferAmount) <= 0 ||
                       (selectedMRCash &&
                         parseFloat(formData.transferAmount) >
-                          selectedMRCash.currentCash)
+                          selectedMRCash.currentCash) ||
+                      !formData.destinationAccount
                     }
                   >
                     Transfer to Admin
@@ -1067,16 +1200,34 @@ function MRCash() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Destination Account <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    name="destinationAccount"
+                    value={transferForm.destinationAccount}
+                    onChange={handleTransferFormChange}
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                    disabled={destinationsLoading}
+                  >
+                    <option value="">Select Destination</option>
+                    {destinationOptions.map((acc) => (
+                      <option key={acc.value} value={acc.value}>
+                        {acc.label} (Balance: {formatCurrency(acc.totalAmount)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Transfer Amount ($) <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     name="amount"
                     value={transferForm.amount}
                     onChange={handleTransferFormChange}
-                    min="0.01"
-                    max={selectedRecord.currentCash}
-                    step="0.01"
                     className="w-full border px-3 py-2 rounded-lg"
                     placeholder="Enter amount"
                     required
@@ -1115,7 +1266,8 @@ function MRCash() {
                       !transferForm.amount ||
                       parseFloat(transferForm.amount) <= 0 ||
                       parseFloat(transferForm.amount) >
-                        selectedRecord.currentCash
+                        selectedRecord.currentCash ||
+                      !transferForm.destinationAccount
                     }
                   >
                     Transfer

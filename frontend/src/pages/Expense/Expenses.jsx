@@ -26,7 +26,7 @@ const expensesAPI = {
   },
   fetchSourceAccounts: async () => {
     const resp = await axios.get(`${backendUrl}/api/accounts/destinations`);
-    return resp;
+    return resp.data; // ✅ return data directly
   },
   deleteExpense: async (id) => {
     const resp = await axios.delete(`${backendUrl}/api/expenses/${id}`);
@@ -80,25 +80,22 @@ const Expenses = () => {
       if (!categoriesResp.success) {
         throw new Error(categoriesResp.message || "Failed to fetch categories");
       }
-      if (accountsResp.status !== 200) {
-        throw new Error("Failed to fetch accounts");
+
+      // ✅ Extract the accounts array correctly
+      const accountsArray = accountsResp?.data || [];
+      if (!Array.isArray(accountsArray)) {
+        console.warn("Source accounts data is not an array, using empty array");
       }
 
-      const expData = expensesResp.data;
-      const catData = categoriesResp.data;
-      const accData = accountsResp.data;
-
-      setExpenses(expData);
-      setExpenseCategories(catData);
-      setSourceAccounts(accData);
+      setExpenses(expensesResp.data);
+      setExpenseCategories(categoriesResp.data);
+      setSourceAccounts(Array.isArray(accountsArray) ? accountsArray : []);
 
       // Build categoryBalances from categories' availableAmount
       const balances = {};
-      catData.forEach((cat) => {
-        // Use the availableAmount directly from the category
+      categoriesResp.data.forEach((cat) => {
         balances[cat._id] = cat.availableAmount || 0;
       });
-
       setCategoryBalances(balances);
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -117,7 +114,7 @@ const Expenses = () => {
       const cat = expenseCategories.find((c) => c._id === categoryId);
       return cat ? cat.category : "Unknown";
     },
-    [expenseCategories]
+    [expenseCategories],
   );
 
   const filteredExpenses = useMemo(() => {
@@ -141,7 +138,7 @@ const Expenses = () => {
   const indexOfFirstExpense = indexOfLastExpense - expensesPerPage;
   const currentExpenses = filteredExpenses.slice(
     indexOfFirstExpense,
-    indexOfLastExpense
+    indexOfLastExpense,
   );
   const totalPages = Math.ceil(filteredExpenses.length / expensesPerPage);
 
@@ -209,7 +206,7 @@ const Expenses = () => {
                 exp.category?.category || "Unknown"
               }</b> of <b>$${
                 exp.amount
-              }</b> from <b>${sourceName}</b> successfully`
+              }</b> from <b>${sourceName}</b> successfully`,
             );
             setExpenses((prev) => prev.filter((e) => e._id !== id));
 
@@ -231,16 +228,16 @@ const Expenses = () => {
         }
       }
     },
-    [expenses]
+    [expenses],
   );
 
   const handleSelectRow = useCallback(
     (id) => {
       setSelectedRows((prev) =>
-        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
       );
     },
-    [setSelectedRows]
+    [setSelectedRows],
   );
 
   const handleSelectAll = useCallback(() => {
@@ -277,7 +274,7 @@ const Expenses = () => {
 
     // Validation: entered amount must not exceed available
     const account = sourceAccounts.find(
-      (item) => item._id === editForm?.sourceAccount
+      (item) => item._id === editForm.sourceAccount,
     );
     const avail = account?.totalAmount ?? 0;
 
@@ -285,8 +282,8 @@ const Expenses = () => {
       showToast(
         "error",
         `Entered amount $${formatCurrency(
-          newAmt
-        )} exceeds available $${formatCurrency(avail)}`
+          newAmt,
+        )} exceeds available $${formatCurrency(avail)}`,
       );
       return;
     }
@@ -304,7 +301,7 @@ const Expenses = () => {
 
       const updateRes = await expensesAPI.updateExpense(
         editingExpense._id,
-        payload
+        payload,
       );
 
       if (updateRes.success) {
@@ -312,7 +309,7 @@ const Expenses = () => {
 
         setExpenses((prev) => {
           const updated = prev.map((e) =>
-            e._id === editingExpense._id ? { ...e, ...payload } : e
+            e._id === editingExpense._id ? { ...e, ...payload } : e,
           );
           return updated;
         });
@@ -482,14 +479,12 @@ const Expenses = () => {
                       </div>
                     </td>
                     <td className="p-3 capitalize">
-                      {/* More robust way to get source account name */}
                       {exp.sourceAccount?.name ||
                         (typeof exp.sourceAccount === "string"
                           ? exp.sourceAccount
                           : getSafeValue(exp, "sourceAccount.name", ""))}
                     </td>
                     <td className="p-3">
-                      {/* More robust way to get category name */}
                       {exp.category?.category ||
                         (typeof exp.category === "string"
                           ? getCategoryName(exp.category)
@@ -534,7 +529,7 @@ const Expenses = () => {
             disabled={currentPage === 1}
             className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-             ← Prev
+            ← Prev
           </button>
           <div className="flex gap-1">
             {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
@@ -556,7 +551,7 @@ const Expenses = () => {
             disabled={currentPage === totalPages}
             className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-             Next →
+            Next →
           </button>
         </div>
       )}
@@ -575,7 +570,7 @@ const Expenses = () => {
               <div className="text-2xl font-bold text-green-600">
                 ${" "}
                 {formatCurrency(
-                  filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0)
+                  filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0),
                 )}
               </div>
               <div className="text-sm text-green-800">Total Amount</div>
@@ -621,11 +616,12 @@ const Expenses = () => {
                     required
                   >
                     <option value="">Select Account</option>
-                    {sourceAccounts.map((account) => (
-                      <option key={account._id} value={account._id}>
-                        {account.name}
-                      </option>
-                    ))}
+                    {Array.isArray(sourceAccounts) &&
+                      sourceAccounts.map((account) => (
+                        <option key={account._id} value={account._id}>
+                          {account.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <div>
@@ -666,9 +662,11 @@ const Expenses = () => {
                     <p className="text-sm text-gray-500 mt-1">
                       Available: $
                       {formatCurrency(
-                        sourceAccounts.find(
-                          (item) => item._id === editForm?.sourceAccount
-                        )?.totalAmount ?? 0
+                        (Array.isArray(sourceAccounts)
+                          ? sourceAccounts.find(
+                              (item) => item._id === editForm.sourceAccount,
+                            )?.totalAmount
+                          : 0) ?? 0,
                       )}
                     </p>
                   )}
@@ -727,7 +725,7 @@ const Expenses = () => {
               </form>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

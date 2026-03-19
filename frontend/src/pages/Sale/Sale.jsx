@@ -3149,7 +3149,6 @@ const Sales = () => {
       }
 
       const data = await res.json();
-      console.log("Fetched sale summaries:", data); // Debug log
       processSalesData(data.summaries);
     } catch (error) {
       showToast("error", error.message || "Error fetching sale summaries");
@@ -3478,7 +3477,6 @@ const Sales = () => {
 
   // Debug log
   useEffect(() => {
-    console.log("values of filteredSales", filteredSales);
   }, [filteredSales]);
 
   const downloadData = useMemo(() => {

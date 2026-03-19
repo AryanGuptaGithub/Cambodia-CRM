@@ -7,6 +7,7 @@ import {
   DollarSign,
   AlertCircle,
   CreditCard,
+  Building2,
 } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
 
@@ -32,42 +33,32 @@ const DashboardCard = ({
     purple: { text: "text-purple-600", bg: "bg-purple-100" },
     indigo: { text: "text-indigo-600", bg: "bg-indigo-100" },
     pink: { text: "text-pink-600", bg: "bg-pink-100" },
+    teal: { text: "text-teal-600", bg: "bg-teal-100" },
   };
 
   const colors = colorClasses[color] || colorClasses.blue;
 
-  const showDateFilterButton = [
-    "Total Sales",
-    "Outstanding",
-    "Total Expense",
-    "Total Payroll",
-  ].includes(title);
+  // Smart date formatter for custom ranges
+  const formatDateRangeSmart = (start, end) => {
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const sameYear = startDate.getFullYear() === endDate.getFullYear();
+    const options = { day: "numeric", month: "short" };
+    if (!sameYear) options.year = "numeric";
+    const startStr = startDate.toLocaleDateString("en-US", options);
+    const endStr = endDate.toLocaleDateString("en-US", options);
+    return `${startStr} – ${endStr}`;
+  };
 
   const formatDateRange = () => {
     if (!isCustomDateActive || !customDateRanges[title]) return null;
     const start = customDateRanges[title]?.start;
     const end = customDateRanges[title]?.end;
     if (!start || !end) return null;
-    const formatDate = (dateString) => {
-      const date = new Date(dateString);
-      return date.toLocaleDateString("en-US", {
-        day: "numeric",
-        month: "short",
-      });
-    };
-    return `${formatDate(start)} - ${formatDate(end)}`;
+    return formatDateRangeSmart(start, end);
   };
 
   const customDateText = formatDateRange();
-
-  const handleDateFilterButtonClick = (e) => {
-    e.stopPropagation();
-    if (isCustomDateActive && onClearDateFilter) {
-      onClearDateFilter(title, e);
-    } else if (onDateFilterClick) {
-      onDateFilterClick(title);
-    }
-  };
 
   return (
     <div
@@ -129,16 +120,20 @@ export const DashboardCards = ({
   expenseData,
   totalPayroll,
   payrollYTDTotal,
+  companyBalance,
+  creditSaleTotal,
   activeSalesSubTab,
   activeOutstandingSubTab,
   activeExpenseSubTab,
   activePayrollSubTab,
   activeStockSubTab,
+  activePendingCollectionSubTab,
   onSalesSubTabChange,
   onExpenseSubTabChange,
   onPayrollSubTabChange,
   onOutstandingSubTabChange,
   onStockSubTabChange,
+  onPendingCollectionSubTabChange,
   dateRanges,
   prevMonthRanges,
   overdueTableData,
@@ -147,6 +142,7 @@ export const DashboardCards = ({
   onClearDateFilter,
   isCustomDateActive = {},
   customDateRanges = {},
+  onCurrentMonthSaleClick,
 }) => {
   const [highestPayrollValue, setHighestPayrollValue] = useState(0);
   const [hasPayrollDataLoaded, setHasPayrollDataLoaded] = useState(false);
@@ -160,22 +156,44 @@ export const DashboardCards = ({
 
   const getSafeNumber = (value) => (typeof value === "number" ? value : 0);
 
+  // Smart date formatter for custom ranges (used in getDateRangeText)
+  const formatDateRangeSmart = (start, end) => {
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const sameYear = startDate.getFullYear() === endDate.getFullYear();
+    const options = { day: "numeric", month: "short" };
+    if (!sameYear) options.year = "numeric";
+    const startStr = startDate.toLocaleDateString("en-US", options);
+    const endStr = endDate.toLocaleDateString("en-US", options);
+    return `${startStr} – ${endStr}`;
+  };
+
   const getDateRangeText = (cardId) => {
     if (!isCustomDateActive[cardId] || !customDateRanges[cardId]) return null;
     const start = customDateRanges[cardId]?.start;
     const end = customDateRanges[cardId]?.end;
     if (!start || !end) return null;
-    const formatDate = (dateString) => {
-      const date = new Date(dateString);
-      return date.toLocaleDateString("en-US", {
-        day: "numeric",
-        month: "short",
-      });
-    };
-    return `${formatDate(start)} - ${formatDate(end)}`;
+    return formatDateRangeSmart(start, end);
+  };
+
+  const getMonthName = () => {
+    return new Date().toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+  };
+
+  const getYTDRange = () => {
+    const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    const formatDate = (date) =>
+      date.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+    return `${formatDate(startOfYear)} – ${formatDate(now)}`;
   };
 
   const getCurrentSalesAmount = () => {
+    console.log("valuseo f salesData", salesData);
+    console.log("valueso f activeSalesSubTab", activeSalesSubTab);
     if (!salesData) return 0;
     if (
       isCustomDateActive["Total Sales"] &&
@@ -183,28 +201,18 @@ export const DashboardCards = ({
     )
       return getSafeNumber(salesData.customSales);
     switch (activeSalesSubTab) {
-      case "Today":
-        return getSafeNumber(salesData.todaySales);
       case "Month":
         return getSafeNumber(salesData.monthlySales);
       case "Year":
         return getSafeNumber(salesData.yearSales);
-      case "Credit_Sale":
-        return getSafeNumber(salesData.creditSale);
-      case "Pending":
-        return getSafeNumber(salesData.pendingSales);
-      case "Collected":
-        return getSafeNumber(salesData.collectedSales);
-      case "Overdue":
-        return getSafeNumber(salesData.overdueAmount);
-      case "Unreceive_Payment":
-        return getSafeNumber(salesData.unreceivePayment);
+      case "All":
+        return getSafeNumber(salesData.allSales);
       default:
-        return getSafeNumber(salesData.todaySales);
+        return 0;
     }
   };
 
-  const getCurrentGrowth = () => {
+  const getCurrentSalesGrowth = () => {
     if (!salesData) return 0;
     if (
       isCustomDateActive["Total Sales"] &&
@@ -212,18 +220,12 @@ export const DashboardCards = ({
     )
       return getSafeNumber(salesData.customGrowth);
     switch (activeSalesSubTab) {
-      case "Today":
-        return getSafeNumber(salesData.todayGrowth);
       case "Month":
         return getSafeNumber(salesData.monthlyGrowth);
-      case "Year":
-        return getSafeNumber(salesData.yearGrowth);
-      case "Overdue":
-        return getSafeNumber(salesData.overdueGrowth);
-      case "Unreceive_Payment":
-        return getSafeNumber(salesData.unreceivePaymentGrowth);
+      case "YTD":
+        return getSafeNumber(salesData.ytdGrowth);
       default:
-        return getSafeNumber(salesData.todayGrowth);
+        return 0;
     }
   };
 
@@ -235,24 +237,14 @@ export const DashboardCards = ({
     )
       return getSafeNumber(outstandingData.customOutstanding);
     switch (activeOutstandingSubTab) {
-      case "Today":
-        return getSafeNumber(outstandingData.todayOutstanding);
       case "Month":
         return getSafeNumber(outstandingData.monthlyOutstanding);
-      case "Year":
-        return getSafeNumber(outstandingData.yearOutstanding);
-      case "30+ Days":
-        return getSafeNumber(outstandingData.thirtyPlusDays);
-      case "60+ Days":
-        return getSafeNumber(outstandingData.sixtyPlusDays);
-      case "90+ Days":
-        return getSafeNumber(outstandingData.ninetyPlusDays);
-      case "Overdue":
-        return getSafeNumber(outstandingData.overdueAmount);
-      case "Unreceive_Payment":
-        return getSafeNumber(outstandingData.unreceivePayment);
+      case "YTD":
+        return getSafeNumber(outstandingData.ytdOutstanding);
+      case "All":
+        return getSafeNumber(outstandingData.allOutstanding);
       default:
-        return getSafeNumber(outstandingData.todayOutstanding);
+        return 0;
     }
   };
 
@@ -264,18 +256,12 @@ export const DashboardCards = ({
     )
       return getSafeNumber(outstandingData.customGrowth);
     switch (activeOutstandingSubTab) {
-      case "Today":
-        return getSafeNumber(outstandingData.todayGrowth);
       case "Month":
         return getSafeNumber(outstandingData.monthlyGrowth);
-      case "Year":
-        return getSafeNumber(outstandingData.yearGrowth);
-      case "Overdue":
-        return getSafeNumber(outstandingData.overdueGrowth);
-      case "Unreceive_Payment":
-        return getSafeNumber(outstandingData.unreceivePaymentGrowth);
+      case "YTD":
+        return getSafeNumber(outstandingData.ytdGrowth);
       default:
-        return getSafeNumber(outstandingData.todayGrowth);
+        return 0;
     }
   };
 
@@ -286,67 +272,16 @@ export const DashboardCards = ({
       expenseData.customExpenseTotal !== undefined
     )
       return getSafeNumber(expenseData.customExpenseTotal);
-    if (!expenseData.latestExpenses) return 0;
-
-    const currentDate = new Date();
-    let filteredExpenses = [];
-
     switch (activeExpenseSubTab) {
       case "Month":
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          const expenseDate = new Date(expense.date);
-          return (
-            expenseDate.getMonth() === currentDate.getMonth() &&
-            expenseDate.getFullYear() === currentDate.getFullYear()
-          );
-        });
-        break;
-      case "Year":
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          const expenseDate = new Date(expense.date);
-          return expenseDate.getFullYear() === currentDate.getFullYear();
-        });
-        break;
-      case "Pending":
-        filteredExpenses = expenseData.latestExpenses.filter(
-          (expense) => expense.status === "Pending",
-        );
-        break;
-      case "Approved":
-        filteredExpenses = expenseData.latestExpenses.filter(
-          (expense) => expense.status === "Approved",
-        );
-        break;
-      case "Rejected":
-        filteredExpenses = expenseData.latestExpenses.filter(
-          (expense) => expense.status === "Rejected",
-        );
-        break;
-      case "Overdue":
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          const dueDate = new Date(expense.dueDate || expense.date);
-          return dueDate < currentDate && expense.status !== "Paid";
-        });
-        break;
-      case "Unreceive_Payment":
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          return expense.status === "Pending" || expense.status === "Unpaid";
-        });
-        break;
+        return getSafeNumber(expenseData.monthlyExpense);
+      case "YTD":
+        return getSafeNumber(expenseData.ytdExpense);
+      case "All":
+        return getSafeNumber(expenseData.allExpense);
       default:
-        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
-          const expenseDate = new Date(expense.date);
-          return (
-            expenseDate.getMonth() === currentDate.getMonth() &&
-            expenseDate.getFullYear() === currentDate.getFullYear()
-          );
-        });
+        return getSafeNumber(expenseData.monthlyExpense);
     }
-
-    return filteredExpenses.reduce(
-      (sum, expense) => sum + getSafeNumber(expense.amount),
-      0,
-    );
   };
 
   const getCurrentPayrollAmount = () => {
@@ -357,30 +292,22 @@ export const DashboardCards = ({
       if (getSafeNumber(totalPayroll) > 0) return getSafeNumber(totalPayroll);
       return highestPayrollValue > 0 ? highestPayrollValue : 0;
     }
-    let amount = 0;
     switch (activePayrollSubTab) {
       case "YTD":
-        amount = getSafeNumber(payrollYTDTotal);
-        break;
+        return getSafeNumber(payrollYTDTotal);
       case "Pending":
-        amount = getSafeNumber(expenseData?.pendingPayroll);
-        break;
+        return getSafeNumber(expenseData?.pendingPayroll);
       case "Paid":
-        amount = getSafeNumber(expenseData?.paidPayroll);
-        break;
+        return getSafeNumber(expenseData?.paidPayroll);
       case "Overdue":
-        amount = getSafeNumber(expenseData?.overduePayroll);
-        break;
+        return getSafeNumber(expenseData?.overduePayroll);
       case "Unreceive_Payment":
-        amount = getSafeNumber(expenseData?.unpaidPayroll);
-        break;
+        return getSafeNumber(expenseData?.unpaidPayroll);
       default:
-        amount = getSafeNumber(totalPayroll);
+        return getSafeNumber(totalPayroll);
     }
-    return amount;
   };
 
-  // **UPDATED**: getCurrentStockAmount uses activeStockSubTab to pick correct value
   const getCurrentStockAmount = () => {
     if (!stockData) return 0;
     switch (activeStockSubTab) {
@@ -398,7 +325,7 @@ export const DashboardCards = ({
   const getOverdueAmount = () => {
     if (overdueTableData && overdueTableData.length > 0) {
       return overdueTableData.reduce((sum, invoice) => {
-        const overdueAmount = getSafeNumber(
+        const amt = getSafeNumber(
           invoice.overdueAmount ||
             (invoice.dueAmount > 0
               ? invoice.dueAmount
@@ -408,19 +335,22 @@ export const DashboardCards = ({
                     getSafeNumber(invoice.paidAmount),
                 )),
         );
-        return sum + overdueAmount;
+        return sum + amt;
       }, 0);
     }
     return getSafeNumber(salesData?.overdueAmount);
   };
 
   const getCreditSaleCashNotReceived = () => {
+    if (typeof creditSaleTotal === "number" && creditSaleTotal >= 0) {
+      return creditSaleTotal;
+    }
     if (creditSaleTableData && creditSaleTableData.length > 0) {
-      return creditSaleTableData.reduce((total, invoice) => {
-        return (
-          total + getSafeNumber(invoice.outstandingAmount || invoice.dueAmount)
-        );
-      }, 0);
+      return creditSaleTableData.reduce(
+        (total, invoice) =>
+          total + getSafeNumber(invoice.outstandingAmount || invoice.dueAmount),
+        0,
+      );
     }
     return getSafeNumber(salesData?.unreceivePayment || salesData?.creditSale);
   };
@@ -430,37 +360,63 @@ export const DashboardCards = ({
       const customRange = getDateRangeText(cardId);
       if (customRange) return customRange;
     }
+
     switch (cardId) {
       case "Total Sales":
+        if (activeSalesSubTab === "Month") return getMonthName();
+        if (activeSalesSubTab === "YTD") return getYTDRange();
+        if (activeSalesSubTab === "All") return "All Records";
         return activeSalesSubTab;
+
+      case "Current Month Sale":
+        return getMonthName();
+
       case "Outstanding":
+        if (activeOutstandingSubTab === "Month") return getMonthName();
+        if (activeOutstandingSubTab === "YTD") return getYTDRange();
+        if (activeOutstandingSubTab === "All") return "All Records";
         return activeOutstandingSubTab;
+
       case "Total Expense":
+        if (activeExpenseSubTab === "Month") return getMonthName();
+        if (activeExpenseSubTab === "YTD") return getYTDRange();
+        if (activeExpenseSubTab === "All") return "All Records";
         return activeExpenseSubTab;
+
       case "Total Payroll":
-        return activePayrollSubTab;
+        return activePayrollSubTab === "Prev Month"
+          ? "Previous Month"
+          : activePayrollSubTab;
+
       case "Stock in Hands":
         if (activeStockSubTab === "all") return "All Stock";
         if (activeStockSubTab === "mr") return "MR Stock";
         if (activeStockSubTab === "warehouse") return "Warehouse Stock";
         return activeStockSubTab;
+
+      case "Pending Collection":
+        if (activePendingCollectionSubTab === "Month") return getMonthName();
+        if (activePendingCollectionSubTab === "YTD") return getYTDRange();
+        if (activePendingCollectionSubTab === "All") return "All Records";
+        return activePendingCollectionSubTab;
+
       case "Overdue":
         return "Total Overdue";
-      case "Pending Collection":
-        return "Unreceive Payment";
+
+      case "Company Balance":
+        return "All Accounts";
+
       default:
         return "";
     }
   };
 
-  // **FIXED**: Remove mapping for "Stock in Hands"
   const getActiveTabForCard = (cardTitle) => {
     const mapping = {
       "Total Sales": "Sales",
       "Total Expense": "Expenses",
       "Total Payroll": "Total Payroll",
       "Pending Collection": "Credit Sale Cash Not Receive",
-      // "Stock in Hands" intentionally omitted → returns itself
     };
     return mapping[cardTitle] || cardTitle;
   };
@@ -473,16 +429,16 @@ export const DashboardCards = ({
       icon: ShoppingCart,
       color: "blue",
       subtitle: getSubtitle("Total Sales"),
-      growth: getCurrentGrowth(),
+      growth: getCurrentSalesGrowth(),
     },
     {
-      id: "Outstanding",
-      title: "Outstanding",
-      amount: getCurrentOutstandingAmount(),
+      id: "CurrentMonthSale",
+      title: "Current Month Sale",
+      amount: getSafeNumber(salesData?.monthlySales),
       icon: TrendingUp,
       color: "orange",
-      subtitle: getSubtitle("Outstanding"),
-      growth: getCurrentOutstandingGrowth(),
+      subtitle: getSubtitle("Current Month Sale"),
+      growth: getSafeNumber(salesData?.monthlyGrowth),
     },
     {
       id: "Stock in Hands",
@@ -526,41 +482,74 @@ export const DashboardCards = ({
       subtitle: getSubtitle("Pending Collection"),
       growth: getSafeNumber(salesData?.unreceivePaymentGrowth),
     },
+    {
+      id: "Company Balance",
+      title: "Company Balance",
+      amount: getSafeNumber(companyBalance),
+      icon: Building2,
+      color: "teal",
+      subtitle: getSubtitle("Company Balance"),
+    },
   ];
 
   const firstRowCards = cards.slice(0, 4);
-  const secondRowCards = cards.slice(4);
+  const secondRowCards = cards.slice(4, 8);
 
   return (
     <div className="space-y-6 mb-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {firstRowCards.map((card) => (
-          <DashboardCard
-            key={card.id}
-            {...card}
-            isActive={activeTab === getActiveTabForCard(card.title)}
-            onClick={() => onTabChange(getActiveTabForCard(card.title))}
-            onDateFilterClick={onDateFilterClick}
-            onClearDateFilter={onClearDateFilter}
-            isCustomDateActive={isCustomDateActive[card.title] || false}
-            customDateRanges={customDateRanges}
-          />
-        ))}
+        {firstRowCards.map((card) => {
+          // Determine active state for each card
+          let isCardActive = false;
+          if (card.id === "CurrentMonthSale") {
+            // Current Month Sale is active only when Sales tab is active and subtab is "Month"
+            isCardActive =
+              activeTab === "Sales" && activeSalesSubTab === "Month";
+          } else if (card.id === "Total Sales") {
+            // Total Sales is active when Sales tab is active and subtab is NOT "Month"
+            // (i.e., Today, YTD, All, or Custom)
+            isCardActive =
+              activeTab === "Sales" && activeSalesSubTab !== "Month";
+          } else {
+            // All other cards use the standard mapping
+            isCardActive = activeTab === getActiveTabForCard(card.title);
+          }
+
+          return (
+            <DashboardCard
+              key={card.id}
+              {...card}
+              isActive={isCardActive}
+              onClick={
+                card.id === "CurrentMonthSale"
+                  ? onCurrentMonthSaleClick
+                  : () => onTabChange(getActiveTabForCard(card.title))
+              }
+              onDateFilterClick={onDateFilterClick}
+              onClearDateFilter={onClearDateFilter}
+              isCustomDateActive={isCustomDateActive[card.title] || false}
+              customDateRanges={customDateRanges}
+            />
+          );
+        })}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {secondRowCards.map((card) => (
-          <DashboardCard
-            key={card.id}
-            {...card}
-            isActive={activeTab === getActiveTabForCard(card.title)}
-            onClick={() => onTabChange(getActiveTabForCard(card.title))}
-            onDateFilterClick={onDateFilterClick}
-            onClearDateFilter={onClearDateFilter}
-            isCustomDateActive={isCustomDateActive[card.title] || false}
-            customDateRanges={customDateRanges}
-          />
-        ))}
-        <div className="hidden lg:block"></div>
+        {secondRowCards.map((card) => {
+          // Second row cards use standard mapping (none of them are "CurrentMonthSale")
+          const isCardActive = activeTab === getActiveTabForCard(card.title);
+          return (
+            <DashboardCard
+              key={card.id}
+              {...card}
+              isActive={isCardActive}
+              onClick={() => onTabChange(getActiveTabForCard(card.title))}
+              onDateFilterClick={onDateFilterClick}
+              onClearDateFilter={onClearDateFilter}
+              isCustomDateActive={isCustomDateActive[card.title] || false}
+              customDateRanges={customDateRanges}
+            />
+          );
+        })}
       </div>
     </div>
   );

@@ -1,9 +1,6 @@
 import express from "express";
 import Transaction from "../../models/accounts/Transaction.js";
 import Destination from "../../models/accounts/Destination.js";
-import CategoryType from "../../models/accounts/CategoryType.js";
-import Supplier from "../../models/master/supplier.js";
-import Customer from "../../models/master/customer.js";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import multer from "multer";
@@ -40,81 +37,19 @@ const upload = multer({
     } else {
       cb(
         new Error(
-          `Invalid file type. Please upload Excel (.xlsx, .xls) or CSV files only.`,
+          "Invalid file type. Please upload Excel (.xlsx, .xls) or CSV files only.",
         ),
       );
     }
   },
 });
 
-// Helper function to determine transaction type from category
-async function getTransactionType(categoryTypeId) {
-  const category = await CategoryType.findById(categoryTypeId);
-  if (!category) throw new Error("Category type not found");
-  const categoryName = category.name.toLowerCase();
-  switch (categoryName) {
-    case "deposit":
-      return "deposit";
-    case "withdraw":
-      return "withdraw";
-    case "remittance":
-      return "remittance";
-    case "payment inward":
-      return "payment inward";
-    case "payment outward":
-      return "payment outward";
-    case "cash sale":
-      return "cash sale";
-    case "credit collection":
-      return "credit collection";
-    default:
-      return "sale";
-  }
-}
-
-function mapCategoryToTransactionType(categoryName) {
-  const name = categoryName.toLowerCase();
-  switch (name) {
-    case "deposit":
-      return "deposit";
-    case "withdraw":
-      return "withdraw";
-    case "remittance":
-      return "remittance";
-    case "payment inward":
-      return "payment inward";
-    case "payment outward":
-      return "payment outward";
-    case "cash sale":
-      return "cash sale";
-    case "credit collection":
-      return "credit collection";
-    default:
-      return "sale";
-  }
-}
-
-async function findOrCreateCategory(categoryName, userId) {
-  if (!categoryName || categoryName === "--") return null;
-  let category = await CategoryType.findOne({
-    name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
-  });
-  if (!category) {
-    category = new CategoryType({
-      name: categoryName.trim(),
-      createdBy: userId,
-      isActive: true,
-    });
-    await category.save();
-  }
-  return category;
-}
-
+// Helper: Update account balances by account name
 async function adjustBalances(transaction, session, isDelete = false) {
   const {
     transactionType,
     amount,
-    source,
+    sourceAccount,
     destination,
     finalAmount,
     categoryType,
@@ -123,12 +58,15 @@ async function adjustBalances(transaction, session, isDelete = false) {
   if (typeof amount !== "number" || amount <= 0)
     throw new Error("Invalid amount in transaction");
 
-  const sourceAcc = source
-    ? await Destination.findById(source).session(session)
-    : null;
-  const destAcc = destination
-    ? await Destination.findById(destination).session(session)
-    : null;
+  // Find source account by name (if provided and not "--")
+  const sourceAcc =
+    sourceAccount && sourceAccount !== "--"
+      ? await Destination.findOne({ name: sourceAccount }).session(session)
+      : null;
+  const destAcc =
+    destination && destination !== "--"
+      ? await Destination.findOne({ name: destination }).session(session)
+      : null;
 
   switch (transactionType) {
     case "deposit":
@@ -216,56 +154,31 @@ async function adjustBalances(transaction, session, isDelete = false) {
   }
 }
 
-const findOrCreateDestination = async (destinationName, userId) => {
-  if (!destinationName || destinationName === "--") return null;
-  let destination = await Destination.findOne({
-    name: { $regex: new RegExp(`^${destinationName.trim()}$`, "i") },
-  });
-  if (!destination) {
-    destination = new Destination({
-      name: destinationName.trim(),
-      accountType: "Cash Balance",
-      createdBy: userId,
-      isActive: true,
-      totalAmount: 0,
-    });
-    await destination.save();
+// Helper: Check if source account has sufficient balance (by name)
+async function checkSourceAccountBalance(
+  sourceAccountName,
+  amount,
+  transactionType,
+) {
+  if (!sourceAccountName || sourceAccountName === "--") return true;
+  const sourceAccount = await Destination.findOne({ name: sourceAccountName });
+  if (!sourceAccount)
+    throw new Error(`Source account not found: ${sourceAccountName}`);
+  const currentBalance = sourceAccount.totalAmount || 0;
+  if (
+    ["deposit", "withdraw", "remittance", "payment outward"].includes(
+      transactionType,
+    )
+  ) {
+    if (currentBalance < amount)
+      throw new Error(
+        `Insufficient balance in source account "${sourceAccountName}". Available: $${currentBalance.toFixed(2)}, Required: $${amount.toFixed(2)}`,
+      );
   }
-  return destination;
-};
+  return true;
+}
 
-const findOrCreateSupplier = async (supplierName, userId) => {
-  if (!supplierName || supplierName === "--") return null;
-  let supplier = await Supplier.findOne({
-    name: { $regex: new RegExp(`^${supplierName.trim()}$`, "i") },
-  });
-  if (!supplier) {
-    supplier = new Supplier({
-      name: supplierName.trim(),
-      createdBy: userId,
-      isActive: true,
-    });
-    await supplier.save();
-  }
-  return supplier;
-};
-
-const findOrCreateCustomer = async (customerName, userId) => {
-  if (!customerName || customerName === "--") return null;
-  let customer = await Customer.findOne({
-    name: { $regex: new RegExp(`^${customerName.trim()}$`, "i") },
-  });
-  if (!customer) {
-    customer = new Customer({
-      name: customerName.trim(),
-      createdBy: userId,
-      isActive: true,
-    });
-    await customer.save();
-  }
-  return customer;
-};
-
+// Helper: Parse date from various formats
 const parseDate = (dateValue) => {
   if (!dateValue) return null;
   if (dateValue instanceof Date) return dateValue;
@@ -296,6 +209,7 @@ const parseDate = (dateValue) => {
   return null;
 };
 
+// Helper: Get cell value from Excel
 const getCellValue = (cell) => {
   if (!cell) return null;
   if (cell.type === 6) return null;
@@ -320,6 +234,7 @@ const getCellValue = (cell) => {
   return value;
 };
 
+// Helper: Validate transaction by category
 const validateTransactionByCategory = (categoryName, rowData) => {
   const errors = [];
   const categoryLower = categoryName.toLowerCase();
@@ -379,32 +294,8 @@ const validateTransactionByCategory = (categoryName, rowData) => {
   return errors;
 };
 
-const checkSourceAccountBalance = async (
-  sourceAccountId,
-  amount,
-  transactionType,
-) => {
-  if (!sourceAccountId) return true;
-  const sourceAccount = await Destination.findById(sourceAccountId);
-  if (!sourceAccount)
-    throw new Error(`Source account not found: ${sourceAccountId}`);
-  const currentBalance = sourceAccount.totalAmount || 0;
-  if (
-    ["deposit", "withdraw", "remittance", "payment outward"].includes(
-      transactionType,
-    )
-  ) {
-    if (currentBalance < amount)
-      throw new Error(
-        `Insufficient balance in source account "${sourceAccount.name}". Available: $${currentBalance.toFixed(2)}, Required: $${amount.toFixed(2)}`,
-      );
-  }
-  return true;
-};
-
 // =============================================================================
-// FIX: New endpoint to check if an invoice number already exists globally
-// across ALL tabs/accountTypes — used by frontend before allowing submission
+// CHECK INVOICE UNIQUENESS
 // =============================================================================
 router.get("/check-invoice", async (req, res) => {
   try {
@@ -416,18 +307,12 @@ router.get("/check-invoice", async (req, res) => {
         .json({ success: false, message: "Invoice number is required" });
     }
 
-    // Build query — check across ALL transactions, no accountType filter
-    const query = { invoiceNumber: invoiceNumber.trim() };
-
-    // When editing, exclude the current transaction from the check
+    const query = { invoiceNo: invoiceNumber.trim() };
     if (excludeId && mongoose.Types.ObjectId.isValid(excludeId)) {
       query._id = { $ne: new mongoose.Types.ObjectId(excludeId) };
     }
 
-    const existing = await Transaction.findOne(query)
-      .populate("categoryType", "name")
-      .populate("destination", "name")
-      .lean();
+    const existing = await Transaction.findOne(query).lean();
 
     if (existing) {
       return res.status(200).json({
@@ -436,10 +321,10 @@ router.get("/check-invoice", async (req, res) => {
         message: `Invoice ${invoiceNumber} already has a transaction`,
         existingTransaction: {
           id: existing._id,
-          invoiceNumber: existing.invoiceNumber,
-          categoryType: existing.categoryType?.name || "N/A",
-          accountType: existing.accountType || "N/A",
-          destination: existing.destination?.name || "N/A",
+          invoiceNo: existing.invoiceNo,
+          categoryType: existing.categoryType,
+          accountType: existing.accountType,
+          destination: existing.destination,
           amount: existing.amount,
           date: existing.date,
         },
@@ -453,54 +338,132 @@ router.get("/check-invoice", async (req, res) => {
   }
 });
 
-// POST - Create transaction
+// =============================================================================
+// GET ALL TRANSACTIONS
+// =============================================================================
+router.get("/", async (req, res) => {
+  try {
+    const {
+      startDate,
+      endDate,
+      categoryType,
+      accountType,
+      page = 1,
+      limit = 50,
+    } = req.query;
+
+    let query = {};
+
+    // Safe date parsing
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) {
+        const parsedStart = new Date(startDate);
+        if (!isNaN(parsedStart.getTime())) {
+          query.date.$gte = parsedStart;
+        }
+      }
+      if (endDate) {
+        const parsedEnd = new Date(endDate);
+        if (!isNaN(parsedEnd.getTime())) {
+          query.date.$lte = parsedEnd;
+        }
+      }
+      if (Object.keys(query.date).length === 0) delete query.date;
+    }
+
+    if (categoryType) query.categoryType = categoryType;
+    if (accountType) query.accountType = accountType;
+
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, parseInt(limit) || 50);
+    const skip = (pageNum - 1) * limitNum;
+
+    const transactions = await Transaction.find(query)
+      .sort({ date: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    const total = await Transaction.countDocuments(query);
+    const destinations = await Destination.find();
+
+    res.json({
+      success: true,
+      data: transactions,
+      destinations,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    console.error("GET /transactions error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// GET single transaction
+router.get("/:id", async (req, res) => {
+  try {
+    const transaction = await Transaction.findById(req.params.id);
+    if (!transaction)
+      return res
+        .status(404)
+        .json({ success: false, message: "Transaction not found" });
+    res.json({ success: true, data: transaction });
+  } catch (error) {
+    console.error("GET /:id error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST create transaction
 router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   try {
     session.startTransaction();
     const {
       categoryType,
-      source,
-      destination,
-      supplier,
+      sourceAccount, // string (account name)
+      destination, // string (account name or "--")
+      supplier, // string (optional)
       amount,
       exchangeLoss = 0,
       finalAmount,
       date,
       invoiceDate,
-      invoiceNumber,
+      invoiceNo, // string
       customerName,
       customerAddress,
       accountType,
       description,
       remarks,
+      transactionType, // must be provided (e.g., "expense", "deposit", etc.)
     } = req.body;
 
-    const validateObjectId = (id, name) => {
-      if (id && !mongoose.Types.ObjectId.isValid(id))
-        throw new Error(`Invalid ${name} ID`);
-    };
-    validateObjectId(categoryType, "categoryType");
-    validateObjectId(source, "source");
-    validateObjectId(destination, "destination");
-    validateObjectId(supplier, "supplier");
+    // Basic validation
+    if (!categoryType || !amount || !date || !accountType || !transactionType) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
 
-    const transactionType = await getTransactionType(categoryType);
-
-    // ==========================================================================
-    // FIX: Check invoice uniqueness GLOBALLY (across all tabs/accountTypes)
-    // before creating the transaction
-    // ==========================================================================
-    if (invoiceNumber && invoiceNumber.trim() !== "") {
+    // Check invoice uniqueness globally
+    if (invoiceNo && invoiceNo.trim() !== "") {
       const duplicateInvoice = await Transaction.findOne({
-        invoiceNumber: invoiceNumber.trim(),
+        invoiceNo: invoiceNo.trim(),
       });
       if (duplicateInvoice) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
           success: false,
-          message: `Invoice number "${invoiceNumber}" already has a transaction in "${duplicateInvoice.accountType || "another tab"}". Each invoice can only be added once across all accounts.`,
+          message: `Invoice number "${invoiceNo}" already has a transaction in "${duplicateInvoice.accountType || "another tab"}".`,
         });
       }
     }
@@ -511,30 +474,30 @@ router.post("/", async (req, res) => {
       calculatedFinalAmount = parseFloat(amount) - exchangeLossValue;
     }
 
-    if (source)
+    if (sourceAccount && sourceAccount !== "--")
       await checkSourceAccountBalance(
-        source,
+        sourceAccount,
         parseFloat(amount),
         transactionType,
       );
 
     const transactionData = {
+      invoiceNo: invoiceNo?.trim() || "NA",
       categoryType,
-      source,
-      destination,
-      supplier,
-      transactionType,
+      sourceAccount: sourceAccount || "--",
+      destination: destination || "--",
+      supplier: supplier || "",
       amount: parseFloat(amount),
       exchangeLoss: parseFloat(exchangeLoss) || 0,
       finalAmount: calculatedFinalAmount,
       date: new Date(date),
       invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
-      invoiceNumber: invoiceNumber?.trim() || undefined,
       customerName,
       customerAddress,
       accountType,
       description,
       remarks,
+      transactionType,
     };
 
     const transaction = new Transaction(transactionData);
@@ -543,19 +506,11 @@ router.post("/", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    const populatedTransaction = await Transaction.findById(transaction._id)
-      .populate("categoryType", "name")
-      .populate("source", "name totalAmount")
-      .populate("destination", "name totalAmount")
-      .populate("supplier", "name");
-
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: populatedTransaction,
-        message: "Transaction created successfully",
-      });
+    res.status(201).json({
+      success: true,
+      data: transaction,
+      message: "Transaction created successfully",
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -564,6 +519,7 @@ router.post("/", async (req, res) => {
   }
 });
 
+// Helper: Check if row is template row
 const isTemplateRow = (rowData) => {
   const requiredFields = ["Category Type", "Amount", "Date", "Invoice Number"];
   for (const field of requiredFields) {
@@ -607,13 +563,11 @@ router.post("/import", upload.single("file"), async (req, res) => {
         });
       }
     } catch (excelError) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Error reading Excel file.",
-          error: excelError.message,
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Error reading Excel file.",
+        error: excelError.message,
+      });
     }
 
     const worksheet = workbook.worksheets[0];
@@ -725,19 +679,8 @@ router.post("/import", upload.single("file"), async (req, res) => {
         }
 
         const categoryName = rowData["Category Type"].trim();
-        const category = await findOrCreateCategory(categoryName, userId);
-        if (!category) {
-          errors.push({
-            row: rowNumber,
-            errors: [`Invalid category type: ${categoryName}`],
-            data: rowData,
-          });
-          rowNumber++;
-          continue;
-        }
-
         const categoryErrors = validateTransactionByCategory(
-          category.name,
+          categoryName,
           rowData,
         );
         if (categoryErrors.length > 0) {
@@ -750,30 +693,32 @@ router.post("/import", upload.single("file"), async (req, res) => {
           continue;
         }
 
-        const source = rowData["Source Account"]?.trim()
-          ? await findOrCreateDestination(
-              rowData["Source Account"].trim(),
-              userId,
-            )
-          : null;
-        const destination = rowData["Destination Account"]?.trim()
-          ? await findOrCreateDestination(
-              rowData["Destination Account"].trim(),
-              userId,
-            )
-          : null;
-        const supplier = rowData["Supplier Name"]?.trim()
-          ? await findOrCreateSupplier(rowData["Supplier Name"].trim(), userId)
-          : null;
-        const customer = rowData["Customer Name"]?.trim()
-          ? await findOrCreateCustomer(rowData["Customer Name"].trim(), userId)
-          : null;
+        // Determine transaction type based on category name
+        let transactionType = "sale";
+        const catLower = categoryName.toLowerCase();
+        if (catLower.includes("deposit")) transactionType = "deposit";
+        else if (catLower.includes("withdraw")) transactionType = "withdraw";
+        else if (catLower.includes("remittance"))
+          transactionType = "remittance";
+        else if (catLower.includes("payment inward"))
+          transactionType = "payment inward";
+        else if (catLower.includes("payment outward"))
+          transactionType = "payment outward";
+        else if (catLower.includes("cash sale")) transactionType = "cash sale";
+        else if (catLower.includes("credit collection"))
+          transactionType = "credit collection";
+
+        const sourceAccount = rowData["Source Account"]?.trim() || "";
+        const destination = rowData["Destination Account"]?.trim() || "";
+        const supplier = rowData["Supplier Name"]?.trim() || "";
+        const customerName = rowData["Customer Name"]?.trim() || "";
+        const customerAddress = rowData["Customer Address"]?.trim() || "";
         const invoiceDate = rowData["Invoice Date"]?.trim()
           ? parseDate(rowData["Invoice Date"])
           : date;
         const exchangeLoss = parseFloat(rowData["Exchange Loss"]) || 0;
         let finalAmount = amount;
-        if (category.name.toLowerCase() === "deposit") {
+        if (transactionType === "deposit") {
           finalAmount = amount - exchangeLoss;
           if (finalAmount < 0) {
             errors.push({
@@ -786,21 +731,15 @@ router.post("/import", upload.single("file"), async (req, res) => {
           }
         }
 
-        const transactionType = mapCategoryToTransactionType(category.name);
-
-        // ======================================================================
-        // FIX: Check invoice uniqueness GLOBALLY across all accountTypes/tabs
-        // ======================================================================
-        if (rowData["Invoice Number"]?.trim()) {
-          const invoiceNum = rowData["Invoice Number"].trim();
-          const exists = await Transaction.findOne({
-            invoiceNumber: invoiceNum,
-          });
+        // Check invoice uniqueness globally
+        const invoiceNo = rowData["Invoice Number"]?.trim() || "";
+        if (invoiceNo) {
+          const exists = await Transaction.findOne({ invoiceNo });
           if (exists) {
             errors.push({
               row: rowNumber,
               errors: [
-                `Invoice number "${invoiceNum}" already exists in "${exists.accountType || "another tab"}"`,
+                `Invoice number "${invoiceNo}" already exists in "${exists.accountType || "another tab"}"`,
               ],
               data: rowData,
             });
@@ -820,14 +759,15 @@ router.post("/import", upload.single("file"), async (req, res) => {
         }
 
         if (
-          source &&
+          sourceAccount &&
+          sourceAccount !== "--" &&
           ["deposit", "withdraw", "remittance", "payment outward"].includes(
             transactionType,
           )
         ) {
           try {
             await checkSourceAccountBalance(
-              source._id,
+              sourceAccount,
               amount,
               transactionType,
             );
@@ -843,22 +783,21 @@ router.post("/import", upload.single("file"), async (req, res) => {
         }
 
         const transaction = new Transaction({
-          invoiceNumber: rowData["Invoice Number"]?.trim() || "",
-          categoryType: category._id,
-          source: source?._id || null,
-          destination: destination?._id || null,
-          supplier: supplier?._id || null,
+          invoiceNo: invoiceNo || "NA",
+          categoryType: categoryName,
+          sourceAccount,
+          destination,
+          supplier,
           date,
           invoiceDate,
-          customerName:
-            customer?.name || rowData["Customer Name"]?.trim() || "",
-          customerAddress: rowData["Customer Address"]?.trim() || "",
+          customerName,
+          customerAddress,
           amount,
           exchangeLoss,
           finalAmount,
           remarks: rowData["Remarks"]?.trim() || "",
           transactionType,
-          accountType: "Cash Balance",
+          accountType: "Cash Balance", // or could be dynamic
           createdBy: userId,
           importBatchId: batchId,
           importStatus: "imported",
@@ -868,9 +807,9 @@ router.post("/import", upload.single("file"), async (req, res) => {
         await adjustBalances(transaction, session, false);
         importedTransactions.push({
           id: transaction._id,
-          invoiceNumber: transaction.invoiceNumber,
+          invoiceNo: transaction.invoiceNo,
           amount,
-          category: category.name,
+          category: categoryName,
         });
       } catch (err) {
         console.error(`Error processing row ${rowNumber}:`, err);
@@ -915,77 +854,35 @@ router.post("/import", upload.single("file"), async (req, res) => {
   } catch (error) {
     if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Import failed due to server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Import failed due to server error",
+      error: error.message,
+    });
   }
 });
 
-// GET all transactions
-router.get("/", async (req, res) => {
+// POST import test
+router.post("/import/test", upload.single("file"), async (req, res) => {
   try {
-    const {
-      startDate,
-      endDate,
-      categoryType,
-      accountType,
-      page = 1,
-      limit = 50,
-    } = req.query;
-    let query = {};
-    if (startDate || endDate) {
-      query.date = {};
-      if (startDate) query.date.$gte = new Date(startDate);
-      if (endDate) query.date.$lte = new Date(endDate);
-    }
-    if (categoryType) query.categoryType = categoryType;
-    if (accountType) query.accountType = accountType;
-    const skip = (page - 1) * limit;
-    const transactions = await Transaction.find(query)
-      .populate("categoryType", "name")
-      .populate("source", "name totalAmount")
-      .populate("destination", "name totalAmount")
-      .populate("supplier", "name")
-      .sort({ date: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-    const total = await Transaction.countDocuments(query);
-    const destinations = await Destination.find();
+    const file = req.file;
+    if (!file)
+      return res
+        .status(400)
+        .json({ success: false, message: "No file uploaded" });
     res.json({
       success: true,
-      data: transactions,
-      destinations,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(total / limit),
+      message: "File received successfully",
+      fileInfo: {
+        name: file.originalname,
+        size: file.size,
+        type: file.mimetype,
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET single transaction
-router.get("/:id", async (req, res) => {
-  try {
-    const transaction = await Transaction.findById(req.params.id)
-      .populate("categoryType", "name")
-      .populate("source", "name totalAmount")
-      .populate("destination", "name totalAmount")
-      .populate("supplier", "name");
-    if (!transaction)
-      return res
-        .status(404)
-        .json({ success: false, message: "Transaction not found" });
-    res.json({ success: true, data: transaction });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Test failed", error: error.message });
   }
 });
 
@@ -1012,16 +909,10 @@ router.put("/:id", async (req, res) => {
         .json({ success: false, message: "Transaction not found" });
     }
 
-    // ======================================================================
-    // FIX: When updating, check invoice uniqueness globally, excluding self
-    // ======================================================================
-    const newInvoiceNumber = req.body.invoiceNumber?.trim();
-    if (
-      newInvoiceNumber &&
-      newInvoiceNumber !== existingTransaction.invoiceNumber
-    ) {
+    const newInvoiceNo = req.body.invoiceNo?.trim();
+    if (newInvoiceNo && newInvoiceNo !== existingTransaction.invoiceNo) {
       const duplicateInvoice = await Transaction.findOne({
-        invoiceNumber: newInvoiceNumber,
+        invoiceNo: newInvoiceNo,
         _id: { $ne: new mongoose.Types.ObjectId(id) },
       }).session(session);
       if (duplicateInvoice) {
@@ -1029,83 +920,67 @@ router.put("/:id", async (req, res) => {
         session.endSession();
         return res.status(400).json({
           success: false,
-          message: `Invoice number "${newInvoiceNumber}" already has a transaction in "${duplicateInvoice.accountType || "another tab"}". Each invoice can only be added once across all accounts.`,
+          message: `Invoice number "${newInvoiceNo}" already has a transaction in "${duplicateInvoice.accountType || "another tab"}".`,
         });
       }
     }
 
-    const categoryTypeChanged =
-      req.body.categoryType &&
-      req.body.categoryType !== existingTransaction.categoryType.toString();
-    let newTransactionType = existingTransaction.transactionType;
-    if (categoryTypeChanged)
-      newTransactionType = await getTransactionType(req.body.categoryType);
-
+    // Reverse old balances
     await adjustBalances(existingTransaction, session, true);
 
-    let calculatedFinalAmount =
-      parseFloat(req.body.finalAmount) ||
-      parseFloat(req.body.amount) ||
-      existingTransaction.finalAmount;
-    if (newTransactionType === "deposit") {
-      const amountValue =
-        parseFloat(req.body.amount) || existingTransaction.amount;
-      const exchangeLossValue =
-        parseFloat(req.body.exchangeLoss) ||
-        existingTransaction.exchangeLoss ||
-        0;
-      calculatedFinalAmount = amountValue - exchangeLossValue;
-    }
-
-    if (req.body.source && req.body.amount)
-      await checkSourceAccountBalance(
-        req.body.source,
-        parseFloat(req.body.amount),
-        newTransactionType,
-      );
-
+    // Prepare update data
     const updateData = {
       ...req.body,
-      transactionType: newTransactionType,
       amount: parseFloat(req.body.amount || existingTransaction.amount),
       exchangeLoss: parseFloat(
         req.body.exchangeLoss || existingTransaction.exchangeLoss,
       ),
-      finalAmount: calculatedFinalAmount,
+      finalAmount: parseFloat(
+        req.body.finalAmount || existingTransaction.finalAmount,
+      ),
+      date: req.body.date ? new Date(req.body.date) : existingTransaction.date,
+      invoiceDate: req.body.invoiceDate
+        ? new Date(req.body.invoiceDate)
+        : existingTransaction.invoiceDate,
     };
 
-    await adjustBalances(
+    // Check new source account balance if changed
+    if (
+      updateData.sourceAccount &&
+      updateData.sourceAccount !== existingTransaction.sourceAccount
+    ) {
+      await checkSourceAccountBalance(
+        updateData.sourceAccount,
+        updateData.amount,
+        updateData.transactionType || existingTransaction.transactionType,
+      );
+    }
+
+    const updatedTransaction = await Transaction.findByIdAndUpdate(
+      id,
+      updateData,
       {
-        ...updateData,
-        _id: existingTransaction._id,
-        transactionType: newTransactionType,
+        new: true,
+        runValidators: true,
+        session,
       },
-      session,
-      false,
     );
 
-    const transaction = await Transaction.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-      session,
-    });
+    // Apply new balances
+    await adjustBalances(updatedTransaction, session, false);
+
     await session.commitTransaction();
     session.endSession();
 
-    const populatedTransaction = await Transaction.findById(transaction._id)
-      .populate("categoryType", "name")
-      .populate("source", "name totalAmount")
-      .populate("destination", "name totalAmount")
-      .populate("supplier", "name");
-
     res.json({
       success: true,
-      data: populatedTransaction,
+      data: updatedTransaction,
       message: "Transaction updated successfully",
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    console.error("PUT /:id error:", error);
     res.status(400).json({ success: false, message: error.message });
   }
 });
@@ -1142,13 +1017,12 @@ router.delete("/:id", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete transaction",
-        error: error.message,
-      });
+    console.error("DELETE /:id error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete transaction",
+      error: error.message,
+    });
   }
 });
 
@@ -1164,12 +1038,10 @@ router.delete("/bulk-delete", async (req, res) => {
     if (invalidIds.length > 0) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: `Invalid transaction ID(s): ${invalidIds.join(", ")}`,
-        });
+      return res.status(400).json({
+        success: false,
+        message: `Invalid transaction ID(s): ${invalidIds.join(", ")}`,
+      });
     }
     const transactions = await Transaction.find({ _id: { $in: ids } }).session(
       session,
@@ -1194,37 +1066,12 @@ router.delete("/bulk-delete", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete transactions",
-        error: error.message,
-      });
-  }
-});
-
-// POST import test
-router.post("/import/test", upload.single("file"), async (req, res) => {
-  try {
-    const file = req.file;
-    if (!file)
-      return res
-        .status(400)
-        .json({ success: false, message: "No file uploaded" });
-    res.json({
-      success: true,
-      message: "File received successfully",
-      fileInfo: {
-        name: file.originalname,
-        size: file.size,
-        type: file.mimetype,
-      },
+    console.error("DELETE /bulk-delete error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete transactions",
+      error: error.message,
     });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: "Test failed", error: error.message });
   }
 });
 

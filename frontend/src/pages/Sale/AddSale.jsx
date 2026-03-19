@@ -550,6 +550,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     try {
       setMrListLoading(true);
       const result = await fetchMRList();
+      console.log('values of result', result);
       if (result.success) {
         setMrList(result.data || []);
       } else {
@@ -1352,14 +1353,12 @@ const AddSale = () => {
 
   useEffect(() => {
     if (saleType === "mr") {
-      console.log("valuesof mr");
       const fetchMRStockList = async () => {
         setMrStockListLoading(true);
         try {
           const response = await axios.get(
             `${backendUrl}/api/sales/mr-stock/mrs-with-stock`,
           );
-          console.log("values of responst 1318", response);
           if (response.status === 200) {
             setMrStockList(response.data.data || []);
           } else {

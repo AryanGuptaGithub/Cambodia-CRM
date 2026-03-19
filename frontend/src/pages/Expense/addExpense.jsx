@@ -271,7 +271,6 @@ const AddExpense = ({
       const destResp = await axios.get(
         `${backendUrl}/api/accounts/destinations`
       );
-      console.log("values of destRes", destResp);
       let destinations = [];
 
       if (destResp.data) {

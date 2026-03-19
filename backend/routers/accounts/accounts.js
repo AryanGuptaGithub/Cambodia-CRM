@@ -4,10 +4,43 @@ import CategoryType from "../../models/accounts/CategoryType.js";
 import Destination from "../../models/accounts/Destination.js";
 import Sale from "../../models/sale/saleSummary.js";
 import Customer from "../../models/master/customer.js";
+import Transaction from "../../models/accounts/Transaction.js";
 
 const router = express.Router();
 
-// ========== SPECIFIC ROUTES FIRST ==========
+function formatTx(tx, direction) {
+  return {
+    _id: tx._id,
+    direction, // "credit" | "debit"
+
+    // ── Core display fields ──
+    transactionType: tx.transactionType || "transaction",
+    categoryTypeName: tx.categoryType?.name || null, // populated: "MR Transfer"
+    destinationName: tx.destination?.name || tx.accountType || null, // "Cash Balance"
+    sourceName: tx.source?.name || null, // source account name
+
+    // ── Amount ──
+    amount: tx.finalAmount || tx.amount || 0,
+    exchangeLoss: tx.exchangeLoss || 0,
+
+    // ── Dates ──
+    date: tx.date || tx.createdAt,
+    invoiceDate: tx.invoiceDate || null,
+
+    // ── Invoice / customer info ──
+    invoiceNumber: tx.invoiceNumber || null,
+    customerName: tx.customerName || null,
+    customerAddress: tx.customerAddress || null,
+
+    // ── Notes ──
+    remarks: tx.remarks || null,
+    description: tx.description || null,
+
+    // ── Meta ──
+    importStatus: tx.importStatus || null,
+    accountType: tx.accountType || null,
+  };
+}
 
 // Category Types
 router.get("/category-type", async (req, res) => {
@@ -251,16 +284,8 @@ router.post("/destinations", async (req, res) => {
 router.put("/destinations/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      name,
-      description,
-      code,
-      address,
-      city,
-      state,
-      pincode,
-      isActive,
-    } = req.body;
+    const { name, description, code, address, city, state, pincode, isActive } =
+      req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -279,8 +304,7 @@ router.put("/destinations/:id", async (req, res) => {
     }
 
     if (name !== undefined) destination.name = name.trim();
-    if (description !== undefined)
-      destination.description = description.trim();
+    if (description !== undefined) destination.description = description.trim();
     if (code !== undefined) destination.code = code.trim();
     if (address !== undefined) destination.address = address.trim();
     if (city !== undefined) destination.city = city.trim();
@@ -342,7 +366,83 @@ router.delete("/destinations/:id", async (req, res) => {
   }
 });
 
-// ========== GENERAL ROUTES (including /:id) ==========
+router.get("/balance", async (req, res) => {
+  try {
+    // 1. All active accounts
+    const destinations = await Destination.find({ isActive: true })
+      .sort({ name: 1 })
+      .lean();
+
+    // 2. Total balance = sum of all Destination.totalAmount
+    const totalBalance = destinations.reduce(
+      (sum, dest) => sum + (dest.totalAmount || 0),
+      0,
+    );
+
+    // 3. Per-account: fetch ALL transactions linked by destination OR source
+    //    Populate categoryType → name, destination → name, source → name
+    const accountsWithTransactions = await Promise.all(
+      destinations.map(async (dest) => {
+        const destId = dest._id;
+
+        // ── Money IN: destination === this account ──
+        const incomingRaw = await Transaction.find({ destination: destId })
+          .populate("categoryType", "name") // e.g. "MR Transfer"
+          .populate("destination", "name") // e.g. "Cash Balance"
+          .populate("source", "name") // e.g. source account name if any
+          .sort({ date: -1, createdAt: -1 })
+          .lean();
+
+        // ── Money OUT: source === this account ──
+        const outgoingRaw = await Transaction.find({ source: destId })
+          .populate("categoryType", "name")
+          .populate("destination", "name")
+          .populate("source", "name")
+          .sort({ date: -1, createdAt: -1 })
+          .lean();
+
+        // Format both arrays with full details
+        const formattedIncoming = incomingRaw.map((tx) =>
+          formatTx(tx, "credit"),
+        );
+        const formattedOutgoing = outgoingRaw.map((tx) =>
+          formatTx(tx, "debit"),
+        );
+
+        // Merge and sort newest first
+        const allTransactions = [
+          ...formattedIncoming,
+          ...formattedOutgoing,
+        ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        return {
+          _id: destId,
+          name: dest.name,
+          code: dest.code,
+          totalAmount: dest.totalAmount || 0,
+          transactions: allTransactions,
+          transactionCount: allTransactions.length,
+        };
+      }),
+    );
+
+    res.json({
+      success: true,
+      totalBalance,
+      accounts: accountsWithTransactions,
+      accountCount: destinations.length,
+    });
+  } catch (error) {
+    console.error("Error fetching company balance:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch company balance",
+      error: error.message,
+      totalBalance: 0,
+      accounts: [],
+    });
+  }
+});
 
 router.get("/", async (req, res) => {
   try {
@@ -408,7 +508,7 @@ router.get("/", async (req, res) => {
           paymentStatus: sale.paymentStatus || "Pending",
           remarks: sale.remarks || "",
         };
-      })
+      }),
     );
 
     const total = await Sale.countDocuments(query);

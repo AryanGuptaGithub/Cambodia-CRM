@@ -13,6 +13,7 @@ import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const expenseCategoryAPI = {
+  // Fetch categories with computed amounts (for display)
   fetchExpenseCategories: async () => {
     const response = await fetch(`${backendUrl}/api/expense-categories`);
     if (!response.ok) {
@@ -21,16 +22,7 @@ const expenseCategoryAPI = {
     return response.json();
   },
 
-  fetchOriginalCategories: async () => {
-    const response = await fetch(
-      `${backendUrl}/api/expense-categories-original`
-    );
-    if (!response.ok) {
-      throw new Error("Failed to fetch categories");
-    }
-    return response.json();
-  },
-
+  // Create new category
   createExpenseCategory: async (categoryData) => {
     const response = await fetch(`${backendUrl}/api/expense-categories`, {
       method: "POST",
@@ -74,19 +66,15 @@ const expenseCategoryAPI = {
 
 const ExpenseCategory = () => {
   const [categories, setCategories] = useState([]);
-  const [originalCategories, setOriginalCategories] = useState([]); // Store original categories for CRUD
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [editingId, setEditingId] = useState(null);
+  const [editingCategory, setEditingCategory] = useState(null); // store the whole category object for editing
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [form, setForm] = useState({
     category: "",
     description: "",
-    amountUntilYear: "",
-    amountMonthly: "",
-    isActive: true,
   });
   const inputRef = useRef(null);
 
@@ -101,22 +89,8 @@ const ExpenseCategory = () => {
       const result = await expenseCategoryAPI.fetchExpenseCategories();
 
       if (result.success) {
-        // Add unique IDs for React keys since the response doesn't have _id
-        const categoriesWithIds = result.data.map((cat, index) => ({
-          ...cat,
-          uniqueId: `cat-${index}-${cat.Category}`, // Create a unique ID for React keys
-          // Map the response fields to match your component expectations
-          category: cat.Category,
-          description: cat.Remarks,
-          amountUntilYear: cat["Amount Until Year ($)"],
-          amountMonthly: cat["Monthly Amount ($)"],
-        }));
-
-        setCategories(categoriesWithIds);
-
-        // If you need the original categories for editing, you might need a separate API call
-        // For now, we'll use the same data but you should create a separate endpoint
-        setOriginalCategories(categoriesWithIds);
+        // Backend now returns: _id, category, description, amountUntilYear, monthlyAmount, createdAt, updatedAt
+        setCategories(result.data);
       } else {
         throw new Error(result.message || "Failed to fetch categories");
       }
@@ -132,138 +106,79 @@ const ExpenseCategory = () => {
     fetchCategories();
   }, [fetchCategories]);
 
-  // Edit category function - UPDATED
-  const editCategory = (category) => {
-    // Since we don't have the original _id, we use the uniqueId
-    setForm({
-      category: category.category,
-      description: category.description,
-      amountUntilYear: category.amountUntilYear || "",
-      amountMonthly: category.amountMonthly || "",
-      isActive: true, // Default to true since response doesn't have this field
-    });
-    setEditingId(category.uniqueId);
-    setIsEditModalOpen(true);
-  };
-
-  // Handle form input changes
+  // Handle form input changes for edit modal
   const handleChange = useCallback((e) => {
-    const { name, value, type, checked } = e.target;
+    const { name, value } = e.target;
     setForm((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : value,
+      [name]: value,
     }));
   }, []);
 
-  // Handle numeric input changes
-  const handleNumericInputChange = useCallback((e, onChangeFunc) => {
-    const { name, value } = e.target;
-    // Allow only numbers and decimal point
-    const numericValue = value.replace(/[^0-9.]/g, "");
-    onChangeFunc({
-      target: { name, value: numericValue },
+  // Open edit modal with selected category
+  const handleEdit = useCallback((category) => {
+    setEditingCategory(category);
+    setForm({
+      category: category.category,
+      description: category.description,
     });
+    setIsEditModalOpen(true);
   }, []);
 
-  // Handle form submission for update - UPDATED
+  // Handle form submission for update
   const handleUpdateCategory = useCallback(
     async (e) => {
       e.preventDefault();
 
+      if (!editingCategory?._id) {
+        showToast("error", "Cannot update: missing category ID");
+        return;
+      }
+
       try {
         setLoading(true);
+        const updateData = {
+          category: form.category.trim(),
+          description: form.description.trim(),
+        };
 
-        // NOTE: Since your response data doesn't have IDs, you'll need to:
-        // 1. Either update using category name (not recommended)
-        // 2. Or create a separate endpoint to get original categories with IDs
-        // 3. Or modify your backend to return IDs in the expense summary
-
-        // For now, we'll show a message that this needs backend adjustment
-        showToast(
-          "info",
-          "Update functionality requires backend adjustment to include category IDs"
+        const response = await expenseCategoryAPI.updateExpenseCategory(
+          editingCategory._id,
+          updateData,
         );
-        setIsEditModalOpen(false);
 
-        // Temporary: Just refresh the data
-        fetchCategories();
+        if (response.success) {
+          showToast(
+            "success",
+            response.message || "Category updated successfully",
+          );
+          setIsEditModalOpen(false);
+          setEditingCategory(null);
+          // Refresh the list
+          await fetchCategories();
+        } else {
+          throw new Error(response.message || "Update failed");
+        }
       } catch (err) {
-        setError(err.message);
         console.error("Error updating category:", err);
         showToast("error", `Failed to update category: ${err.message}`);
+        // If duplicate name error (409), show specific message
+        if (err.message.includes("already exists")) {
+          setError("A category with this name already exists.");
+        }
       } finally {
         setLoading(false);
       }
     },
-    [form, editingId, fetchCategories]
+    [form, editingCategory, fetchCategories],
   );
 
-  // Filter categories based on search (client-side fallback)
-  const filteredCategories = useMemo(() => {
-    if (!search) return categories;
-
-    const searchLower = search.toLowerCase();
-    return categories.filter(
-      (cat) =>
-        cat.category?.toLowerCase().includes(searchLower) ||
-        cat.description?.toLowerCase().includes(searchLower)
-    );
-  }, [categories, search]);
-
-  // Pagination calculations
-  const totalPages = Math.ceil(filteredCategories.length / itemsPerPage);
-  const currentRows = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredCategories.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredCategories, currentPage, itemsPerPage]);
-
-  // Totals calculation - UPDATED to use the new field names
-  const totals = useMemo(
-    () => ({
-      totalCategories: categories.length,
-      totalYearlyAmount: categories.reduce(
-        (sum, cat) => sum + (cat.amountUntilYear || 0),
-        0
-      ),
-      totalMonthlyAmount: categories.reduce(
-        (sum, cat) => sum + (cat.amountMonthly || 0),
-        0
-      ),
-    }),
-    [categories]
-  );
-
-  // Utility function
-  const formatCurrency = useCallback((amount) => {
-    return new Intl.NumberFormat().format(amount);
-  }, []);
-
-  // CRUD operations - UPDATED
-
-  const handleEdit = useCallback(
-    (uniqueId) => {
-      const categoryToEdit = categories.find(
-        (cat) => cat.uniqueId === uniqueId
-      );
-      if (categoryToEdit) {
-        editCategory(categoryToEdit);
-      }
-    },
-    [categories]
-  );
-
+  // Handle delete
   const handleDelete = useCallback(
-    async (uniqueId) => {
-      // Find the category to get its name for the confirmation message
-      const categoryToDelete = categories.find(
-        (cat) => cat.uniqueId === uniqueId
-      );
-
-      if (!categoryToDelete) return;
-
+    async (category) => {
       const confirmDelete = await confirmDialog({
         title: "Delete Category",
-        text: `Are you sure you want to delete <b>${categoryToDelete.category}</b>?`,
+        text: `Are you sure you want to delete <b>${category.category}</b>?`,
         icon: "warning",
         confirmButtonText: "Yes, delete",
         cancelButtonText: "Cancel",
@@ -272,29 +187,25 @@ const ExpenseCategory = () => {
       if (confirmDelete.isConfirmed) {
         try {
           setLoading(true);
-
-          // NOTE: Since your response data doesn't have IDs, you'll need to:
-          // 1. Either delete using category name (not recommended)
-          // 2. Or create a separate endpoint to get original categories with IDs
-          // 3. Or modify your backend to return IDs in the expense summary
-
-          // For now, we'll show a message and just remove from UI
-          showToast(
-            "info",
-            "Delete functionality requires backend adjustment to include category IDs"
+          const response = await expenseCategoryAPI.deleteExpenseCategory(
+            category._id,
           );
 
-          // Temporary: Remove from local state only
-          setCategories((prev) =>
-            prev.filter((cat) => cat.uniqueId !== uniqueId)
-          );
-
-          // Reset to first page if current page becomes empty
-          if (currentRows.length === 1 && currentPage > 1) {
-            setCurrentPage((prev) => prev - 1);
+          if (response.success) {
+            showToast(
+              "success",
+              response.message || "Category deleted successfully",
+            );
+            // Remove from local state immediately
+            setCategories((prev) => prev.filter((c) => c._id !== category._id));
+            // Reset to first page if current page becomes empty
+            if (categories.length % itemsPerPage === 1 && currentPage > 1) {
+              setCurrentPage((prev) => prev - 1);
+            }
+          } else {
+            throw new Error(response.message || "Delete failed");
           }
         } catch (err) {
-          setError(err.message);
           console.error("Error deleting category:", err);
           showToast("error", `Failed to delete category: ${err.message}`);
         } finally {
@@ -302,13 +213,53 @@ const ExpenseCategory = () => {
         }
       }
     },
-    [categories, currentRows.length, currentPage]
+    [categories.length, currentPage, itemsPerPage],
   );
+
+  // Filter categories based on search
+  const filteredCategories = useMemo(() => {
+    if (!search) return categories;
+
+    const searchLower = search.toLowerCase();
+    return categories.filter(
+      (cat) =>
+        cat.category?.toLowerCase().includes(searchLower) ||
+        cat.description?.toLowerCase().includes(searchLower),
+    );
+  }, [categories, search]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredCategories.length / itemsPerPage);
+  const currentRows = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredCategories.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredCategories, currentPage, itemsPerPage]);
+
+  // Totals calculation
+  const totals = useMemo(
+    () => ({
+      totalCategories: categories.length,
+      totalYearlyAmount: categories.reduce(
+        (sum, cat) => sum + (cat.amountUntilYear || 0),
+        0,
+      ),
+      totalMonthlyAmount: categories.reduce(
+        (sum, cat) => sum + (cat.monthlyAmount || 0),
+        0,
+      ),
+    }),
+    [categories],
+  );
+
+  // Format currency
+  const formatCurrency = useCallback((amount) => {
+    return new Intl.NumberFormat().format(amount);
+  }, []);
 
   // Handle search change
   const handleSearchChange = useCallback((e) => {
     setSearch(e.target.value);
-    setCurrentPage(1); // Reset to first page when searching
+    setCurrentPage(1);
   }, []);
 
   if (loading && categories.length === 0) {
@@ -337,42 +288,38 @@ const ExpenseCategory = () => {
 
       {/* Top Bar */}
       <div className="flex justify-between items-center mb-6">
-        {/* Left side - Add New Category button */}
-        <div className="flex items-center">
-          <button
-            onClick={() => navigate("/expenselayout/expensecategories/new")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer`}
-          >
-            {loading ? (
-              <Loader className="animate-spin" size={18} />
-            ) : (
-              <Plus size={18} />
-            )}
-            Add New Category
-          </button>
-        </div>
+        <button
+          onClick={() => navigate("/expenselayout/expensecategories/new")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer`}
+        >
+          {loading ? (
+            <Loader className="animate-spin" size={18} />
+          ) : (
+            <Plus size={18} />
+          )}
+          Add New Category
+        </button>
 
         {categories.length > 0 && (
-          <div className="flex items-center gap-4">
-            <div className="relative w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                size={16}
-                onClick={() => inputRef.current?.focus()}
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search categories or descriptions..."
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-                value={search}
-                onChange={handleSearchChange}
-              />
-            </div>
+          <div className="relative w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={() => inputRef.current?.focus()}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search categories or descriptions..."
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              value={search}
+              onChange={handleSearchChange}
+            />
           </div>
         )}
       </div>
 
+      {/* Table */}
       <div className="bg-white shadow rounded-xl overflow-hidden w-full">
         <table className="w-full border-collapse table-fixed text-center">
           <thead className="bg-gray-50 border-b border-gray-200">
@@ -399,10 +346,7 @@ const ExpenseCategory = () => {
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {currentRows.map((cat, index) => (
-              <tr
-                key={cat.uniqueId}
-                className={`hover:bg-gray-50 transition-colors`}
-              >
+              <tr key={cat._id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
                   {(currentPage - 1) * itemsPerPage + index + 1}
                 </td>
@@ -414,26 +358,26 @@ const ExpenseCategory = () => {
                 </td>
                 <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                   {cat.amountUntilYear
-                    ? formatCurrency(cat.amountUntilYear)
+                    ? `$${formatCurrency(cat.amountUntilYear)}`
                     : "NO Expense Added"}
                 </td>
                 <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-blue-600">
-                  {cat.amountMonthly
-                    ? formatCurrency(cat.amountMonthly)
+                  {cat.monthlyAmount
+                    ? `$${formatCurrency(cat.monthlyAmount)}`
                     : "NO Expense Added"}
                 </td>
                 <td className="px-4 py-4 whitespace-nowrap text-sm">
                   <div className="flex justify-center gap-1">
                     <button
-                      onClick={() => handleEdit(cat.uniqueId)}
-                      className={`p-1 rounded-lg transition-colors text-green-600 hover:bg-green-100 cursor-pointer`}
+                      onClick={() => handleEdit(cat)}
+                      className="p-1 rounded-lg transition-colors text-green-600 hover:bg-green-100 cursor-pointer"
                       title="Edit category"
                     >
                       <Edit size={18} />
                     </button>
                     <button
-                      onClick={() => handleDelete(cat.uniqueId)}
-                      className={`p-1 rounded-lg transition-colors text-red-600 hover:bg-red-100 cursor-pointer`}
+                      onClick={() => handleDelete(cat)}
+                      className="p-1 rounded-lg transition-colors text-red-600 hover:bg-red-100 cursor-pointer"
                       title="Delete category"
                     >
                       <Trash2 size={18} />
@@ -463,7 +407,7 @@ const ExpenseCategory = () => {
         )}
       </div>
 
-      {/* Pagination - Only show when currentRows.length > 0 */}
+      {/* Pagination */}
       {currentRows.length > 0 && (
         <div className="flex justify-start items-center mt-3 gap-2">
           <button
@@ -475,7 +419,7 @@ const ExpenseCategory = () => {
                 : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
             }`}
           >
-             ← Prev
+            ← Prev
           </button>
 
           <div className="flex gap-1">
@@ -488,9 +432,7 @@ const ExpenseCategory = () => {
                   currentPage === i + 1
                     ? "bg-indigo-600 text-white"
                     : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                } ${
-                  loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-                }`}
+                } ${loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
               >
                 {i + 1}
               </button>
@@ -506,12 +448,12 @@ const ExpenseCategory = () => {
                 : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
             }`}
           >
-           Next →
+            Next →
           </button>
         </div>
       )}
 
-      {/* Summary - Only show when there are categories */}
+      {/* Summary */}
       {categories.length > 0 && (
         <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
           <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
@@ -560,7 +502,10 @@ const ExpenseCategory = () => {
                 Edit Expense Category
               </h2>
 
-              <form className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh]">
+              <form
+                onSubmit={handleUpdateCategory}
+                className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh]"
+              >
                 {/* Category Name */}
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700">
@@ -573,6 +518,7 @@ const ExpenseCategory = () => {
                     onChange={handleChange}
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     placeholder="Enter category name"
+                    required
                   />
                 </div>
 
@@ -588,53 +534,8 @@ const ExpenseCategory = () => {
                     rows={3}
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     placeholder="Enter category description"
+                    required
                   />
-                </div>
-
-                {/* Amount Until Year */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Amount Until Year ($)
-                  </label>
-                  <input
-                    type="text"
-                    name="amountUntilYear"
-                    value={form.amountUntilYear}
-                    onChange={(e) => handleNumericInputChange(e, handleChange)}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="0.00"
-                  />
-                </div>
-
-                {/* Monthly Amount */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Monthly Amount ($)
-                  </label>
-                  <input
-                    type="text"
-                    name="amountMonthly"
-                    value={form.amountMonthly}
-                    onChange={(e) => handleNumericInputChange(e, handleChange)}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="0.00"
-                  />
-                </div>
-
-                {/* Active Status */}
-                <div className="md:col-span-2">
-                  <label className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      name="isActive"
-                      checked={form.isActive}
-                      onChange={handleChange}
-                      className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                    />
-                    <span className="text-sm font-medium text-gray-700">
-                      Active Category
-                    </span>
-                  </label>
                 </div>
 
                 {/* Footer buttons */}
@@ -648,7 +549,6 @@ const ExpenseCategory = () => {
                   </button>
                   <button
                     type="submit"
-                    onClick={handleUpdateCategory}
                     disabled={loading}
                     className={`bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg transition-colors ${
                       loading
@@ -662,7 +562,7 @@ const ExpenseCategory = () => {
               </form>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

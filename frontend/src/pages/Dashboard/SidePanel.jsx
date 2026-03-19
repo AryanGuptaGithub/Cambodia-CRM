@@ -13,6 +13,7 @@ import {
   Calendar as CalendarIcon,
   Filter,
   CreditCard,
+  Building2,
 } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
 import { formatDateToReadable } from "../../utils/dateUtil";
@@ -113,7 +114,7 @@ const RecentSales = ({
   const currentMRs = showAllMRsInSidePanel
     ? mrWiseSales.slice(
         (sidePanelCurrentPage - 1) * sidePanelPerPage,
-        sidePanelCurrentPage * sidePanelPerPage
+        sidePanelCurrentPage * sidePanelPerPage,
       )
     : mrWiseSales.slice(0, 5);
 
@@ -131,7 +132,6 @@ const RecentSales = ({
                 ? (sidePanelCurrentPage - 1) * sidePanelPerPage + index + 1
                 : index + 1}
             </div>
-
             <div>
               <p className="text-sm font-medium text-gray-800">
                 {mrSale.mrName}
@@ -142,12 +142,10 @@ const RecentSales = ({
               </p>
             </div>
           </div>
-
           <div className="text-right flex items-center gap-2">
             <p className="text-sm font-semibold text-green-600">
               ${formatCurrency(mrSale.totalAmount)}
             </p>
-
             <button
               onClick={() => onViewProducts(mrSale.mrName, mrSale.products)}
               className="text-gray-400 hover:text-blue-600 transition-colors cursor-pointer p-1"
@@ -195,9 +193,8 @@ const RecentOutstanding = ({
       mrOutstanding[out.mrName].invoices.push(out);
       mrOutstanding[out.mrName].customerCount += 1;
     });
-
     return Object.values(mrOutstanding).sort(
-      (a, b) => b.totalOutstanding - a.totalOutstanding
+      (a, b) => b.totalOutstanding - a.totalOutstanding,
     );
   }, [outstandingTableData]);
 
@@ -206,7 +203,7 @@ const RecentOutstanding = ({
   const currentOutstanding = showAllMRsInSidePanel
     ? mrWiseOutstanding.slice(
         (sidePanelCurrentPage - 1) * sidePanelPerPage,
-        sidePanelCurrentPage * sidePanelPerPage
+        sidePanelCurrentPage * sidePanelPerPage,
       )
     : mrWiseOutstanding.slice(0, 5);
 
@@ -224,7 +221,6 @@ const RecentOutstanding = ({
                 ? (sidePanelCurrentPage - 1) * sidePanelPerPage + index + 1
                 : index + 1}
             </div>
-
             <div>
               <p className="text-sm font-medium text-gray-800 capitalize">
                 {mrOutstanding.mrName}
@@ -235,12 +231,10 @@ const RecentOutstanding = ({
               </p>
             </div>
           </div>
-
           <div className="text-right flex items-center gap-2">
             <p className="text-sm font-semibold text-orange-600">
               ${formatCurrency(mrOutstanding.totalOutstanding)}
             </p>
-
             <button
               onClick={() =>
                 onViewInvoices(mrOutstanding.mrName, mrOutstanding.invoices)
@@ -271,12 +265,10 @@ const RecentExpenses = ({
   loadingExpenseData = false,
 }) => {
   const highestExpense = React.useMemo(() => {
-    if (!expenseTableData || expenseTableData.length === 0) {
-      return null;
-    }
+    if (!expenseTableData || expenseTableData.length === 0) return null;
     return expenseTableData.reduce(
       (max, expense) => (expense.amount > max.amount ? expense : max),
-      expenseTableData[0]
+      expenseTableData[0],
     );
   }, [expenseTableData]);
 
@@ -360,13 +352,8 @@ const RecentOverdue = ({
   overdueTableData = [],
   loadingOverdueData = false,
 }) => {
-  // Get top 5 overdue invoices by amount
   const topOverdueInvoices = React.useMemo(() => {
-    if (!overdueTableData || overdueTableData.length === 0) {
-      return [];
-    }
-
-    // Sort by overdue amount in descending order and take top 5
+    if (!overdueTableData || overdueTableData.length === 0) return [];
     return [...overdueTableData]
       .sort((a, b) => {
         const amountA =
@@ -384,12 +371,8 @@ const RecentOverdue = ({
       .slice(0, 5);
   }, [overdueTableData]);
 
-  // Calculate total overdue amount
   const totalOverdueAmount = React.useMemo(() => {
-    if (!overdueTableData || overdueTableData.length === 0) {
-      return 0;
-    }
-
+    if (!overdueTableData || overdueTableData.length === 0) return 0;
     return overdueTableData.reduce((sum, invoice) => {
       const overdueAmount =
         invoice.overdueAmount ||
@@ -410,12 +393,11 @@ const RecentOverdue = ({
 
   return (
     <div className="space-y-3">
-      {/* Total Overdue Highlight */}
       {totalOverdueAmount > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-semibold">
+              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600">
                 <AlertCircle size={14} />
               </div>
               <div>
@@ -438,7 +420,6 @@ const RecentOverdue = ({
         </div>
       )}
 
-      {/* Top 5 Overdue Invoices */}
       <PanelContent
         data={topOverdueInvoices}
         loading={false}
@@ -448,9 +429,8 @@ const RecentOverdue = ({
           const today = new Date();
           const daysOverdue = Math.max(
             0,
-            Math.floor((today - dueDate) / (1000 * 60 * 60 * 24))
+            Math.floor((today - dueDate) / (1000 * 60 * 60 * 24)),
           );
-
           const overdueAmount =
             item.overdueAmount ||
             (item.dueAmount > 0
@@ -476,10 +456,10 @@ const RecentOverdue = ({
                       daysOverdue > 90
                         ? "bg-red-100 text-red-800"
                         : daysOverdue > 60
-                        ? "bg-orange-100 text-orange-800"
-                        : daysOverdue > 30
-                        ? "bg-yellow-100 text-yellow-800"
-                        : "bg-gray-100 text-gray-800"
+                          ? "bg-orange-100 text-orange-800"
+                          : daysOverdue > 30
+                            ? "bg-yellow-100 text-yellow-800"
+                            : "bg-gray-100 text-gray-800"
                     }`}
                   >
                     {daysOverdue} days overdue
@@ -513,7 +493,7 @@ const LowStock = ({ stockData = {} }) => (
     renderItem={(item) => (
       <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg">
         <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-semibold">
+          <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600">
             <AlertTriangle size={14} />
           </div>
           <div>
@@ -522,7 +502,6 @@ const LowStock = ({ stockData = {} }) => (
             </p>
           </div>
         </div>
-
         <div className="text-right">
           <p className="text-sm font-semibold text-red-700">
             {item.quantity?.boxes}
@@ -555,7 +534,6 @@ const RecentJoins = ({ mrList = [] }) => {
             <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-semibold">
               {mr.medicalRepName?.substring(0, 2).toUpperCase() || "MR"}
             </div>
-
             <div>
               <p className="text-sm font-medium text-gray-800 capitalize">
                 {mr.medicalRepName}
@@ -563,12 +541,10 @@ const RecentJoins = ({ mrList = [] }) => {
               <p className="text-xs text-gray-500">{mr.teamName}</p>
             </div>
           </div>
-
           <div className="text-right">
             <p className="text-xs text-gray-500">
               {formatDateToReadable(mr.date)}
             </p>
-
             <span
               className={`inline-block px-2 py-1 rounded-full text-xs ${
                 mr.enabled
@@ -585,33 +561,26 @@ const RecentJoins = ({ mrList = [] }) => {
   );
 };
 
+/* --------------------------------------------
+   RecentActivityPendingCollection
+--------------------------------------------- */
 const RecentActivityPendingCollection = ({
   pendingCollectionData = [],
   loadingPendingCollectionData = false,
 }) => {
-  // Moved ALL hooks to the top, before any conditional returns
   const todayPendingCollections = React.useMemo(() => {
-    // If data is undefined or null, return empty array
-    if (!pendingCollectionData || pendingCollectionData.length === 0) {
-      return [];
-    }
-
-    // Filter to show only invoices with due date TODAY
+    if (!pendingCollectionData || pendingCollectionData.length === 0) return [];
     const today = new Date();
-    const todayStr = today.toISOString().split("T")[0]; // Get YYYY-MM-DD format
-
+    const todayStr = today.toISOString().split("T")[0];
     return pendingCollectionData.filter((invoice) => {
       if (!invoice.dueDate) return false;
-
-      const invoiceDueDate = new Date(invoice.dueDate);
-      const invoiceDueDateStr = invoiceDueDate.toISOString().split("T")[0];
-
-      // Check if due date is exactly today
+      const invoiceDueDateStr = new Date(invoice.dueDate)
+        .toISOString()
+        .split("T")[0];
       return invoiceDueDateStr === todayStr;
     });
   }, [pendingCollectionData]);
 
-  // Calculate totals
   const calculateTotals = React.useMemo(() => {
     if (!todayPendingCollections || todayPendingCollections.length === 0) {
       return {
@@ -621,63 +590,44 @@ const RecentActivityPendingCollection = ({
         invoicesByStatus: {},
       };
     }
-
-    let totalAmount = 0;
-    let totalOutstanding = 0;
-    let totalPaid = 0;
+    let totalAmount = 0,
+      totalOutstanding = 0,
+      totalPaid = 0;
     const invoicesByStatus = {};
-
     todayPendingCollections.forEach((invoice) => {
-      // Use outstandingAmount from API response if available, otherwise calculate
       const outstanding =
         invoice.outstandingAmount ||
         invoice.dueAmount ||
         invoice.totalAmount - (invoice.paidAmount || 0);
-
       totalAmount += invoice.totalAmount || 0;
       totalOutstanding += outstanding;
       totalPaid += invoice.paidAmount || 0;
-
       const status = invoice.paymentStatus || "Unknown";
       invoicesByStatus[status] = (invoicesByStatus[status] || 0) + 1;
     });
-
-    return {
-      totalAmount,
-      totalOutstanding,
-      totalPaid,
-      invoicesByStatus,
-    };
+    return { totalAmount, totalOutstanding, totalPaid, invoicesByStatus };
   }, [todayPendingCollections]);
 
-  const totals = calculateTotals;
-
-  // Get top 5 by outstanding amount
   const topCollections = React.useMemo(() => {
-    if (!todayPendingCollections || todayPendingCollections.length === 0) {
+    if (!todayPendingCollections || todayPendingCollections.length === 0)
       return [];
-    }
-
     return [...todayPendingCollections]
       .sort((a, b) => {
-        const outstandingA =
+        const outA =
           a.outstandingAmount ||
           a.dueAmount ||
           a.totalAmount - (a.paidAmount || 0);
-        const outstandingB =
+        const outB =
           b.outstandingAmount ||
           b.dueAmount ||
           b.totalAmount - (b.paidAmount || 0);
-        return outstandingB - outstandingA;
+        return outB - outA;
       })
       .slice(0, 5);
   }, [todayPendingCollections]);
 
-  // Get today's date for display
-  const today = new Date();
-  const todayString = today.toLocaleDateString();
+  const totals = calculateTotals;
 
-  // Only AFTER all hooks are declared, we can have conditional returns
   if (loadingPendingCollectionData) {
     return (
       <p className="text-gray-500 text-center py-4">
@@ -688,9 +638,7 @@ const RecentActivityPendingCollection = ({
 
   return (
     <div className="space-y-3">
-      {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-2 mb-4">
-        {/* Total Outstanding for Today */}
         <div className="bg-red-50 border border-red-200 rounded-lg p-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -710,8 +658,6 @@ const RecentActivityPendingCollection = ({
             {todayPendingCollections.length !== 1 ? "s" : ""}
           </p>
         </div>
-
-        {/* Total Invoices for Today */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -732,7 +678,6 @@ const RecentActivityPendingCollection = ({
         </div>
       </div>
 
-      {/* Status Summary for Today */}
       {Object.keys(totals.invoicesByStatus).length > 0 && (
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3">
           <div className="flex items-center justify-between mb-2">
@@ -770,37 +715,28 @@ const RecentActivityPendingCollection = ({
             item.outstandingAmount ||
             item.dueAmount ||
             item.totalAmount - (item.paidAmount || 0);
-
-          // Format due date
           const dueDate = item.dueDate ? new Date(item.dueDate) : null;
           const isDueToday = dueDate
             ? dueDate.toISOString().split("T")[0] ===
               new Date().toISOString().split("T")[0]
             : false;
-
-          // Determine color based on payment status
-          let statusColor = "";
-          let statusBgColor = "";
-
           const paymentStatus = item.paymentStatus?.toLowerCase() || "";
-
-          switch (paymentStatus) {
-            case "credit":
-              statusColor = "text-red-800";
-              statusBgColor = "bg-red-100";
-              break;
-            case "partial":
-              statusColor = "text-yellow-800";
-              statusBgColor = "bg-yellow-100";
-              break;
-            case "pending":
-              statusColor = "text-orange-800";
-              statusBgColor = "bg-orange-100";
-              break;
-            default:
-              statusColor = "text-gray-800";
-              statusBgColor = "bg-gray-100";
-          }
+          const statusColor =
+            paymentStatus === "credit"
+              ? "text-red-800"
+              : paymentStatus === "partial"
+                ? "text-yellow-800"
+                : paymentStatus === "pending"
+                  ? "text-orange-800"
+                  : "text-gray-800";
+          const statusBgColor =
+            paymentStatus === "credit"
+              ? "bg-red-100"
+              : paymentStatus === "partial"
+                ? "bg-yellow-100"
+                : paymentStatus === "pending"
+                  ? "bg-orange-100"
+                  : "bg-gray-100";
 
           return (
             <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg border border-gray-200">
@@ -823,17 +759,13 @@ const RecentActivityPendingCollection = ({
                       {item.paymentStatus || "Unknown"}
                     </span>
                     <span
-                      className={`inline-block px-2 py-0.5 text-xs rounded-full ${
-                        isDueToday
-                          ? "bg-red-100 text-red-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`}
+                      className={`inline-block px-2 py-0.5 text-xs rounded-full ${isDueToday ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"}`}
                     >
                       {isDueToday
                         ? "Due: Today"
                         : dueDate
-                        ? `Due: ${dueDate.toLocaleDateString()}`
-                        : "No due date"}
+                          ? `Due: ${dueDate.toLocaleDateString()}`
+                          : "No due date"}
                     </span>
                   </div>
                 </div>
@@ -863,8 +795,7 @@ const RecentActivityPendingCollection = ({
                 {todayPendingCollections.length}
               </p>
               <p className="text-xs text-gray-400">
-                Due date: {formatDateToReadable(new Date())}{" "}
-                {/* Fixed this line */}
+                Due date: {formatDateToReadable(new Date())}
               </p>
             </div>
             <div className="text-right">
@@ -885,11 +816,131 @@ const RecentActivityPendingCollection = ({
     </div>
   );
 };
+
+const CompanyBalanceActivity = ({
+  companyBalanceData = [],
+  loadingBalance = false,
+}) => {
+  if (loadingBalance) {
+    return (
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!companyBalanceData || companyBalanceData.length === 0) {
+    return (
+      <p className="text-gray-500 text-center py-4">No account data found</p>
+    );
+  }
+
+  const totalBalance = companyBalanceData.reduce(
+    (sum, acc) => sum + (acc.totalAmount || 0),
+    0,
+  );
+
+  return (
+    <div className="space-y-3">
+      {/* Total row */}
+      <div className="bg-teal-50 border border-teal-200 rounded-lg p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center text-teal-600">
+              <Building2 size={14} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-teal-800">Total Balance</p>
+              <p className="text-xs text-teal-600">
+                {companyBalanceData.length} account
+                {companyBalanceData.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+          </div>
+          <p className="text-sm font-bold text-teal-700">
+            ${formatCurrency(totalBalance)}
+          </p>
+        </div>
+      </div>
+
+      {/* Individual accounts */}
+      {companyBalanceData.map((acc, index) => {
+        // Pick colour per index for visual variety
+        const colours = [
+          {
+            bg: "bg-blue-100",
+            text: "text-blue-600",
+            amount: "text-blue-700",
+            border: "border-blue-200",
+            pill: "bg-blue-50",
+          },
+          {
+            bg: "bg-purple-100",
+            text: "text-purple-600",
+            amount: "text-purple-700",
+            border: "border-purple-200",
+            pill: "bg-purple-50",
+          },
+          {
+            bg: "bg-green-100",
+            text: "text-green-600",
+            amount: "text-green-700",
+            border: "border-green-200",
+            pill: "bg-green-50",
+          },
+          {
+            bg: "bg-orange-100",
+            text: "text-orange-600",
+            amount: "text-orange-700",
+            border: "border-orange-200",
+            pill: "bg-orange-50",
+          },
+          {
+            bg: "bg-indigo-100",
+            text: "text-indigo-600",
+            amount: "text-indigo-700",
+            border: "border-indigo-200",
+            pill: "bg-indigo-50",
+          },
+        ];
+        const c = colours[index % colours.length];
+
+        return (
+          <div
+            key={String(acc._id || index)}
+            className={`flex items-center justify-between p-3 rounded-lg border ${c.border} ${c.pill}`}
+          >
+            <div className="flex items-center space-x-3">
+              <div
+                className={`w-8 h-8 ${c.bg} rounded-full flex items-center justify-center ${c.text} text-sm font-semibold`}
+              >
+                {acc.name?.substring(0, 2).toUpperCase() || "AC"}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-800">{acc.name}</p>
+                <p className="text-xs text-gray-500">
+                  {acc.transactionCount} transaction
+                  {acc.transactionCount !== 1 ? "s" : ""}
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className={`text-sm font-bold ${c.amount}`}>
+                ${formatCurrency(acc.totalAmount || 0)}
+              </p>
+              {acc.code && <p className="text-xs text-gray-400">{acc.code}</p>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 /* --------------------------------------------
-   Main SidePanel Export - Updated
---------------------------------------------- */
-/* --------------------------------------------
-   Main SidePanel Export - Updated
+   Main SidePanel Export
 --------------------------------------------- */
 export const SidePanel = ({
   activeTab,
@@ -911,10 +962,13 @@ export const SidePanel = ({
   onViewExpenseDetails,
   overdueTableData = [],
   loadingOverdueData = false,
-  pendingCollectionData = [], // Default to empty array
-  loadingPendingCollectionData = false, // Default to false
-  creditSaleTableData = [], // ADD THIS: Credit sale data prop
-  loadingCreditSaleData = false, // ADD THIS: Credit sale loading prop
+  pendingCollectionData = [],
+  loadingPendingCollectionData = false,
+  creditSaleTableData = [],
+  loadingCreditSaleData = false,
+  // NEW props for Company Balance activity panel
+  companyBalanceAccounts = [],
+  loadingCompanyBalance = false,
 }) => {
   const getPanelConfig = () => {
     const configs = {
@@ -1002,8 +1056,20 @@ export const SidePanel = ({
         icon: CreditCard,
         content: (
           <RecentActivityPendingCollection
-            pendingCollectionData={creditSaleTableData || []} // Use creditSaleTableData here
+            pendingCollectionData={creditSaleTableData || []}
             loadingPendingCollectionData={loadingCreditSaleData || false}
+          />
+        ),
+      },
+
+      // ── NEW: Company Balance activity panel ──
+      "Company Balance": {
+        title: "Account Balances",
+        icon: Building2,
+        content: (
+          <CompanyBalanceActivity
+            companyBalanceData={companyBalanceAccounts}
+            loadingBalance={loadingCompanyBalance}
           />
         ),
       },
@@ -1029,7 +1095,6 @@ export const SidePanel = ({
     <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6 mb-8">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
-
         <button
           onClick={onPanelIconClick}
           className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
@@ -1039,18 +1104,20 @@ export const SidePanel = ({
                 ? "Show Top 5"
                 : "Show All"
               : activeTab === "Pending Collection"
-              ? "View All Collections"
-              : activeTab === "Total Payroll"
-              ? "View All MRs"
-              : activeTab === "Overdue"
-              ? "View Details"
-              : "View Details"
+                ? "View All Collections"
+                : activeTab === "Total Payroll"
+                  ? "View All MRs"
+                  : activeTab === "Company Balance"
+                    ? "Refresh Balance"
+                    : "View Details"
           }
         >
           {activeTab === "Sales" || activeTab === "Outstanding" ? (
             <Users className="w-5 h-5" />
           ) : activeTab === "Pending Collection" ? (
             <Clock className="w-5 h-5" />
+          ) : activeTab === "Company Balance" ? (
+            <Building2 className="w-5 h-5" />
           ) : (
             <Icon className="w-5 h-5" />
           )}

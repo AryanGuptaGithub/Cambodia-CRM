@@ -1,7 +1,14 @@
 import React from "react";
 import { Calendar } from "lucide-react";
 
-const TabButton = ({ isActive, onClick, children, showCalendar = false, onCalendarClick, isCustomActive = false }) => {
+const TabButton = ({
+  isActive,
+  onClick,
+  children,
+  showCalendar = false,
+  onCalendarClick,
+  isCustomActive = false,
+}) => {
   return (
     <div className="relative flex items-center">
       <button
@@ -20,12 +27,16 @@ const TabButton = ({ isActive, onClick, children, showCalendar = false, onCalend
             e.stopPropagation();
             onCalendarClick();
           }}
-          className={`flex items-center justify-center h-7 rounded-md transition-colors cursor-pointer ${
+          className={`flex items-center justify-center h-7 rounded-md transition-colors cursor-pointer ml-1 px-1 ${
             isCustomActive
               ? "bg-white text-blue-600 shadow-sm border border-gray-200"
               : "text-gray-400 hover:text-blue-600 hover:bg-gray-50"
           }`}
-          title={isCustomActive ? "Custom date range active" : "Set custom date range"}
+          title={
+            isCustomActive
+              ? "Custom date range active"
+              : "Set custom date range"
+          }
         >
           <Calendar size={14} />
         </button>
@@ -39,59 +50,60 @@ export const SubTabs = ({
   activeSalesSubTab,
   activeExpenseSubTab,
   activePayrollSubTab,
-  activeOutstandingSubTab,
   activeStockSubTab,
+  activePendingCollectionSubTab,
   onSalesSubTabChange,
   onExpenseSubTabChange,
   onPayrollSubTabChange,
-  onOutstandingSubTabChange,
   onStockSubTabChange,
+  onPendingCollectionSubTabChange,
   dateRanges,
   prevMonthRanges,
   isCustomDateActive = {},
   customDateRanges = {},
   onDateFilterClick,
+  forceSalesMonthOnly = false,
 }) => {
-  if (
-    activeTab !== "Sales" &&
-    activeTab !== "Expenses" &&
-    activeTab !== "Total Payroll" &&
-    activeTab !== "Outstanding" &&
-    activeTab !== "Stock in Hands"
-  ) {
-    return null;
-  }
+  const TABS_WITH_SUBTABS = [
+    "Sales",
+    "Expenses",
+    "Total Payroll",
+    "Stock in Hands",
+    "Credit Sale Cash Not Receive",
+  ];
 
-  // Helper function to get formatted date range
-  const getFormattedDateRange = (cardTitle) => {
-    if (!isCustomDateActive[cardTitle] || !customDateRanges[cardTitle]) {
-      return null;
-    }
-    
-    const start = new Date(customDateRanges[cardTitle].start);
-    const end = new Date(customDateRanges[cardTitle].end);
-    
-    const formatDate = (date) => {
-      return date.toLocaleDateString("en-US", {
-        day: "numeric",
-        month: "short",
-      });
-    };
-    
-    return `${formatDate(start)} - ${formatDate(end)}`;
+  if (!TABS_WITH_SUBTABS.includes(activeTab)) return null;
+
+  // Smart date formatter for custom ranges
+  const formatDateRangeSmart = (start, end) => {
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    const sameYear = startDate.getFullYear() === endDate.getFullYear();
+    const options = { day: "numeric", month: "short" };
+    if (!sameYear) options.year = "numeric";
+    const startStr = startDate.toLocaleDateString("en-US", options);
+    const endStr = endDate.toLocaleDateString("en-US", options);
+    return `${startStr} – ${endStr}`;
   };
 
-  // Helper function to map activeTab to cardTitle
-  const getCardTitle = (activeTab) => {
-    switch (activeTab) {
+  const getFormattedDateRange = (cardTitle) => {
+    if (!isCustomDateActive[cardTitle] || !customDateRanges[cardTitle])
+      return null;
+    const start = new Date(customDateRanges[cardTitle].start);
+    const end = new Date(customDateRanges[cardTitle].end);
+    return formatDateRangeSmart(start, end);
+  };
+
+  const getCardTitle = (tab) => {
+    switch (tab) {
       case "Sales":
         return "Total Sales";
       case "Expenses":
         return "Total Expense";
       case "Total Payroll":
         return "Total Payroll";
-      case "Outstanding":
-        return "Outstanding";
+      case "Credit Sale Cash Not Receive":
+        return "Pending Collection";
       default:
         return "";
     }
@@ -100,24 +112,34 @@ export const SubTabs = ({
   const renderTabs = () => {
     const cardTitle = getCardTitle(activeTab);
     const isCustomActive = isCustomDateActive[cardTitle];
-    let tabs = [];
-
+    console.log("values of a ctive", activeTab);
     switch (activeTab) {
-      case "Sales":
-        tabs = [
-          { key: "Today", label: "Today" },
-          { key: "Month", label: dateRanges.month.label },
-          { key: "Year", label: dateRanges.year.rangeLabel },
-        ];
-        
-        // Always show Custom tab
-        const customRange = getFormattedDateRange(cardTitle);
-        tabs.push({ 
-          key: "Custom", 
-          label: customRange || "Custom", 
-          showCalendar: true 
-        });
-        
+      case "Sales": {
+        const tabs = forceSalesMonthOnly
+          ? [
+              {
+                key: "Month",
+                label: dateRanges?.month?.label || "This Month",
+              },
+            ]
+          : [
+              { key: "Today", label: "Today" },
+              {
+                key: "Month",
+                label: dateRanges?.month?.label || "This Month",
+              },
+              {
+                key: "Year",
+                label: dateRanges?.year?.rangeLabel || "This Year",
+              },
+              { key: "All", label: "All" }, // All records tab
+              {
+                key: "Custom",
+                label: getFormattedDateRange(cardTitle) || "Custom",
+                showCalendar: true,
+              },
+            ];
+
         return tabs.map((tab) => (
           <TabButton
             key={tab.key}
@@ -125,12 +147,8 @@ export const SubTabs = ({
             isCustomActive={tab.key === "Custom" && isCustomActive}
             onClick={() => {
               if (tab.key === "Custom") {
-                // If custom is not active yet, open the modal to set dates
-                if (!isCustomActive) {
-                  onDateFilterClick(cardTitle);
-                } else {
-                  onSalesSubTabChange(tab.key);
-                }
+                if (!isCustomActive) onDateFilterClick(cardTitle);
+                else onSalesSubTabChange(tab.key);
               } else {
                 onSalesSubTabChange(tab.key);
               }
@@ -141,20 +159,18 @@ export const SubTabs = ({
             {tab.label}
           </TabButton>
         ));
+      }
 
-      case "Expenses":
-        tabs = [
-          { key: "Month", label: dateRanges.month.label },
-          { key: "Year", label: dateRanges.year.rangeLabel },
+      case "Expenses": {
+        const tabs = [
+          { key: "Month", label: dateRanges?.month?.label || "This Month" },
+          { key: "Year", label: dateRanges?.year?.rangeLabel || "This Year" },
+          {
+            key: "Custom",
+            label: getFormattedDateRange(cardTitle) || "Custom",
+            showCalendar: true,
+          },
         ];
-        
-        const expenseCustomRange = getFormattedDateRange(cardTitle);
-        tabs.push({ 
-          key: "Custom", 
-          label: expenseCustomRange || "Custom", 
-          showCalendar: true 
-        });
-        
         return tabs.map((tab) => (
           <TabButton
             key={tab.key}
@@ -162,11 +178,8 @@ export const SubTabs = ({
             isCustomActive={tab.key === "Custom" && isCustomActive}
             onClick={() => {
               if (tab.key === "Custom") {
-                if (!isCustomActive) {
-                  onDateFilterClick(cardTitle);
-                } else {
-                  onExpenseSubTabChange(tab.key);
-                }
+                if (!isCustomActive) onDateFilterClick(cardTitle);
+                else onExpenseSubTabChange(tab.key);
               } else {
                 onExpenseSubTabChange(tab.key);
               }
@@ -177,20 +190,24 @@ export const SubTabs = ({
             {tab.label}
           </TabButton>
         ));
+      }
 
-      case "Total Payroll":
-        tabs = [
-          { key: "Prev Month", label: prevMonthRanges.prevMonth.label },
-          { key: "YTD", label: prevMonthRanges.ytd.rangeLabel },
+      case "Total Payroll": {
+        const tabs = [
+          {
+            key: "Prev Month",
+            label: prevMonthRanges?.prevMonth?.label || "Prev Month",
+          },
+          {
+            key: "YTD",
+            label: prevMonthRanges?.ytd?.rangeLabel || "YTD",
+          },
+          {
+            key: "Custom",
+            label: getFormattedDateRange(cardTitle) || "Custom",
+            showCalendar: true,
+          },
         ];
-        
-        const payrollCustomRange = getFormattedDateRange(cardTitle);
-        tabs.push({ 
-          key: "Custom", 
-          label: payrollCustomRange || "Custom", 
-          showCalendar: true 
-        });
-        
         return tabs.map((tab) => (
           <TabButton
             key={tab.key}
@@ -198,11 +215,8 @@ export const SubTabs = ({
             isCustomActive={tab.key === "Custom" && isCustomActive}
             onClick={() => {
               if (tab.key === "Custom") {
-                if (!isCustomActive) {
-                  onDateFilterClick(cardTitle);
-                } else {
-                  onPayrollSubTabChange(tab.key);
-                }
+                if (!isCustomActive) onDateFilterClick(cardTitle);
+                else onPayrollSubTabChange(tab.key);
               } else {
                 onPayrollSubTabChange(tab.key);
               }
@@ -213,46 +227,10 @@ export const SubTabs = ({
             {tab.label}
           </TabButton>
         ));
+      }
 
-      case "Outstanding":
-        tabs = [
-          { key: "Today", label: "Today" },
-          { key: "Month", label: dateRanges.month.label },
-          { key: "Year", label: dateRanges.year.rangeLabel },
-        ];
-        
-        const outstandingCustomRange = getFormattedDateRange(cardTitle);
-        tabs.push({ 
-          key: "Custom", 
-          label: outstandingCustomRange || "Custom", 
-          showCalendar: true 
-        });
-        
-        return tabs.map((tab) => (
-          <TabButton
-            key={tab.key}
-            isActive={activeOutstandingSubTab === tab.key}
-            isCustomActive={tab.key === "Custom" && isCustomActive}
-            onClick={() => {
-              if (tab.key === "Custom") {
-                if (!isCustomActive) {
-                  onDateFilterClick(cardTitle);
-                } else {
-                  onOutstandingSubTabChange(tab.key);
-                }
-              } else {
-                onOutstandingSubTabChange(tab.key);
-              }
-            }}
-            showCalendar={tab.showCalendar || false}
-            onCalendarClick={() => onDateFilterClick(cardTitle)}
-          >
-            {tab.label}
-          </TabButton>
-        ));
-
-      case "Stock in Hands":
-        return [{ key: "Today", label: "Today" }].map((tab) => (
+      case "Stock in Hands": {
+        return [{ key: "all", label: "All" }].map((tab) => (
           <TabButton
             key={tab.key}
             isActive={activeStockSubTab === tab.key}
@@ -261,6 +239,39 @@ export const SubTabs = ({
             {tab.label}
           </TabButton>
         ));
+      }
+
+      case "Credit Sale Cash Not Receive": {
+        const tabs = [
+          { key: "Today", label: "Today" },
+          { key: "Month", label: dateRanges?.month?.label || "This Month" },
+          { key: "Year", label: dateRanges?.year?.rangeLabel || "This Year" },
+          {
+            key: "Custom",
+            label: getFormattedDateRange(cardTitle) || "Custom",
+            showCalendar: true,
+          },
+        ];
+        return tabs.map((tab) => (
+          <TabButton
+            key={tab.key}
+            isActive={activePendingCollectionSubTab === tab.key}
+            isCustomActive={tab.key === "Custom" && isCustomActive}
+            onClick={() => {
+              if (tab.key === "Custom") {
+                if (!isCustomActive) onDateFilterClick(cardTitle);
+                else onPendingCollectionSubTabChange(tab.key);
+              } else {
+                onPendingCollectionSubTabChange(tab.key);
+              }
+            }}
+            showCalendar={tab.showCalendar || false}
+            onCalendarClick={() => onDateFilterClick(cardTitle)}
+          >
+            {tab.label}
+          </TabButton>
+        ));
+      }
 
       default:
         return null;

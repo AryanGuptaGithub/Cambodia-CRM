@@ -299,7 +299,6 @@ export const useDashboardData = () => {
       const response = await axios.get(
         `${backendUrl}/api/reports/stock-in-hand`,
       );
-      console.log("Stock API response:", response.data);
 
       // The API returns combined product list in 'reports' and summary fields
       const stockItems = Array.isArray(response.data.reports)

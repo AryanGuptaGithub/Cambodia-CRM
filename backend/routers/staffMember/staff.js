@@ -8,9 +8,9 @@ const router = express.Router();
 
 // Helper function to normalize strings (remove extra spaces)
 const normalizeString = (str) => {
-  if (!str || typeof str !== 'string') return '';
+  if (!str || typeof str !== "string") return "";
   // Replace multiple spaces with single space and trim
-  return str.replace(/\s+/g, ' ').trim();
+  return str.replace(/\s+/g, " ").trim();
 };
 
 // COMMON ERROR HANDLER
@@ -25,10 +25,7 @@ const sendError = (res, error, code = 400) => {
 // GET ALL STAFF
 router.get("/", async (_, res) => {
   try {
-    const staff = await staffSchema
-      .find()
-      .populate("userId", "name email role isActive")
-      .sort({ updatedAt: -1 });
+    const staff = await staffSchema.find().sort({ updatedAt: -1 });
     res.json(staff);
   } catch (error) {
     sendError(res, error, 500);
@@ -39,7 +36,9 @@ router.get("/", async (_, res) => {
 router.get("/teams", async (_, res) => {
   try {
     const staff = await staffSchema.find({}, "teamName");
-    const teams = [...new Set(staff.map((i) => normalizeString(i.teamName)).filter(Boolean))];
+    const teams = [
+      ...new Set(staff.map((i) => normalizeString(i.teamName)).filter(Boolean)),
+    ];
     res.json(teams);
   } catch (error) {
     sendError(res, error, 500);
@@ -49,11 +48,11 @@ router.get("/teams", async (_, res) => {
 // GET SINGLE STAFF
 router.get("/:id", async (req, res) => {
   try {
-    const staff = await staffSchema
-      .findById(req.params.id)
-      .populate("userId", "name email role isActive");
+    const staff = await staffSchema.findById(req.params.id);
     if (!staff) {
-      return res.status(404).json({ success: false, message: "Staff not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Staff not found" });
     }
     res.json(staff);
   } catch (error) {
@@ -66,7 +65,15 @@ router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { medicalRepName, teamName, contactNo, email, password, date, enabled } = req.body;
+    const {
+      medicalRepName,
+      teamName,
+      contactNo,
+      email,
+      password,
+      date,
+      enabled,
+    } = req.body;
 
     // Normalize all string inputs
     const name = normalizeString(medicalRepName);
@@ -79,19 +86,30 @@ router.post("/", async (req, res) => {
     }
 
     // Case-insensitive duplicate check for name
-    const existingByName = await staffSchema.findOne({ 
-      medicalRepNameLower: name.toLowerCase() 
-    }).session(session);
-    if (existingByName) throw new Error(`Staff name "${name}" already exists (case-insensitive).`);
+    const existingByName = await staffSchema
+      .findOne({
+        medicalRepNameLower: name.toLowerCase(),
+      })
+      .session(session);
+    if (existingByName)
+      throw new Error(
+        `Staff name "${name}" already exists (case-insensitive).`,
+      );
 
     if (emailLower) {
-      const existingByEmail = await User.findOne({ email: emailLower }).session(session);
-      if (existingByEmail) throw new Error(`Email "${emailLower}" already exists.`);
+      const existingByEmail = await User.findOne({ email: emailLower }).session(
+        session,
+      );
+      if (existingByEmail)
+        throw new Error(`Email "${emailLower}" already exists.`);
     }
 
     if (contact) {
-      const existingByContact = await staffSchema.findOne({ contactNo: contact }).session(session);
-      if (existingByContact) throw new Error(`Contact "${contact}" already exists.`);
+      const existingByContact = await staffSchema
+        .findOne({ contactNo: contact })
+        .session(session);
+      if (existingByContact)
+        throw new Error(`Contact "${contact}" already exists.`);
     }
 
     // Password hashing
@@ -110,35 +128,35 @@ router.post("/", async (req, res) => {
       finalEmail = candidate;
     }
 
-    const isActive = enabled === true || enabled === "true" || enabled === "enabled";
+    const isActive =
+      enabled === true || enabled === "true" || enabled === "enabled";
 
-    // CREATE USER
-    const newUser = await new User({
-      name,
-      email: finalEmail,
-      password: hashedPassword,
-      role: "user",
-      isActive,
-    }).save({ session });
-
-    // CREATE STAFF
+    // CREATE STAFF (no userId)
     const newStaff = await new staffSchema({
       medicalRepName: name,
       teamName: team,
       contactNo: contact,
       email: finalEmail,
       date: date ? new Date(date) : new Date(),
-      userId: newUser._id,
+      isActive: isActive,
     }).save({ session });
 
-    newUser.staffId = newStaff._id;
-    await newUser.save({ session });
+    // CREATE USER with staffId reference (optional but kept for login)
+    const newUser = await new User({
+      name,
+      email: finalEmail,
+      password: hashedPassword,
+      role: "user",
+      isActive: true,
+      staffId: newStaff._id, // user points to staff
+    }).save({ session });
+
     await session.commitTransaction();
 
     res.status(201).json({
       success: true,
       message: `Staff "${name}" created successfully.`,
-      staff: await staffSchema.findById(newStaff._id).populate("userId"),
+      staff: newStaff,
       userAccount: {
         email: finalEmail,
         password: finalPassword,
@@ -156,70 +174,80 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  
+
   try {
     const { id } = req.params;
-    const { medicalRepName, teamName, contactNo, email, date, isActive } = req.body;
+    const { medicalRepName, teamName, contactNo, email, date, isActive } =
+      req.body;
 
     // Normalize inputs
     const normalizedName = normalizeString(medicalRepName);
     const normalizedTeam = normalizeString(teamName);
-    const normalizedContact = contactNo ? normalizeString(contactNo.toString()) : "";
+    const normalizedContact = contactNo
+      ? normalizeString(contactNo.toString())
+      : "";
     const normalizedEmail = email ? normalizeString(email).toLowerCase() : "";
 
     // Check for duplicate name (case-insensitive), excluding current record
     if (normalizedName) {
-      const existingByName = await staffSchema.findOne({ 
-        medicalRepNameLower: normalizedName.toLowerCase(),
-        _id: { $ne: id }
-      }).session(session);
+      const existingByName = await staffSchema
+        .findOne({
+          medicalRepNameLower: normalizedName.toLowerCase(),
+          _id: { $ne: id },
+        })
+        .session(session);
       if (existingByName) {
-        throw new Error(`Staff name "${normalizedName}" already exists (case-insensitive).`);
-      }
-    }
-
-    // Update staff
-    const updatedStaff = await staffSchema.findByIdAndUpdate(
-      id,
-      {
-        medicalRepName: normalizedName,
-        teamName: normalizedTeam,
-        contactNo: normalizedContact,
-        email: normalizedEmail,
-        date,
-      },
-      { new: true, session }
-    ).populate("userId", "name email isActive");
-
-    // Update user's name and isActive status if changed
-    if (updatedStaff.userId) {
-      const updateData = {};
-      if (normalizedName) updateData.name = normalizedName;
-      if (isActive !== undefined) updateData.isActive = isActive;
-      if (Object.keys(updateData).length > 0) {
-        await User.findByIdAndUpdate(
-          updatedStaff.userId._id,
-          updateData,
-          { new: true, session }
+        throw new Error(
+          `Staff name "${normalizedName}" already exists (case-insensitive).`,
         );
       }
     }
 
+    // Update staff
+    const updateData = {
+      medicalRepName: normalizedName,
+      teamName: normalizedTeam,
+      contactNo: normalizedContact,
+      email: normalizedEmail,
+      date,
+    };
+    if (isActive !== undefined) {
+      updateData.isActive = isActive;
+    }
+
+    const updatedStaff = await staffSchema.findByIdAndUpdate(id, updateData, {
+      new: true,
+      session,
+    });
+
+    // Optionally update the linked user's name and email (if user exists)
+    if (normalizedEmail) {
+      await User.findOneAndUpdate(
+        { staffId: id },
+        { email: normalizedEmail, name: normalizedName },
+        { session },
+      );
+    } else if (normalizedName) {
+      await User.findOneAndUpdate(
+        { staffId: id },
+        { name: normalizedName },
+        { session },
+      );
+    }
+
     await session.commitTransaction();
 
-    // Re-populate to get updated user data
-    const finalStaff = await staffSchema.findById(id).populate("userId");
     res.json({
       success: true,
       message: "Staff updated successfully",
-      data: finalStaff
+      data: updatedStaff,
     });
   } catch (error) {
     await session.abortTransaction();
     console.error("Error updating staff:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || "Internal server error" 
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
     });
   } finally {
     session.endSession();
@@ -232,10 +260,13 @@ router.delete("/", async (req, res) => {
   session.startTransaction();
   try {
     const ids = req.body;
-    const staffList = await staffSchema.find({ _id: { $in: ids } }).session(session);
-    const linkedUsers = staffList.map((s) => s.userId);
+    const staffList = await staffSchema
+      .find({ _id: { $in: ids } })
+      .session(session);
+    // Delete staff
     await staffSchema.deleteMany({ _id: { $in: ids } }).session(session);
-    await User.deleteMany({ _id: { $in: linkedUsers } }).session(session);
+    // Delete linked users
+    await User.deleteMany({ staffId: { $in: ids } }).session(session);
     await session.commitTransaction();
     res.json({
       success: true,
@@ -257,7 +288,8 @@ router.delete("/:id", async (req, res) => {
     const staff = await staffSchema.findById(req.params.id).session(session);
     if (!staff) throw new Error("Staff not found");
     await staffSchema.findByIdAndDelete(req.params.id).session(session);
-    if (staff.userId) await User.findByIdAndDelete(staff.userId).session(session);
+    // Delete linked user if exists
+    await User.deleteOne({ staffId: req.params.id }).session(session);
     await session.commitTransaction();
     res.json({
       success: true,
@@ -291,14 +323,21 @@ router.post("/import", async (req, res) => {
     const duplicateEmails = [];
     const duplicateNames = [];
     const duplicateContacts = [];
-    const seenNames = new Map(); // Track normalized names to prevent duplicates in import batch
+    const seenNames = new Map();
 
     // First pass: Check for duplicates
     for (let i = 0; i < list.length; i++) {
       const row = list[i];
-      const medicalRepName = row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+      const medicalRepName =
+        row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
       const email = row.email || row.Email || "";
-      const contactNo = row.contactNo || row.phone || row["Contact No"] || row["contact no"] || row["Contact"] || row["contact"];
+      const contactNo =
+        row.contactNo ||
+        row.phone ||
+        row["Contact No"] ||
+        row["contact no"] ||
+        row["Contact"] ||
+        row["contact"];
 
       const name = normalizeString(medicalRepName);
       const nameLower = name.toLowerCase();
@@ -309,46 +348,46 @@ router.post("/import", async (req, res) => {
         throw new Error(`medicalRepName is required in row ${i + 1}`);
       }
 
-      // Check for duplicates within the import batch itself
       if (seenNames.has(nameLower)) {
-        if (!duplicateNames.includes(name)) {
-          duplicateNames.push(name);
-        }
+        if (!duplicateNames.includes(name)) duplicateNames.push(name);
       } else {
         seenNames.set(nameLower, name);
-        
-        // Check for duplicates in database (case-insensitive)
-        const existingStaffByName = await staffSchema.findOne({ 
-          medicalRepNameLower: nameLower 
-        }).session(session);
-        if (existingStaffByName && !duplicateNames.includes(name)) {
+        const existingStaffByName = await staffSchema
+          .findOne({ medicalRepNameLower: nameLower })
+          .session(session);
+        if (existingStaffByName && !duplicateNames.includes(name))
           duplicateNames.push(name);
-        }
       }
 
       if (emailLower) {
-        const existingUser = await User.findOne({ email: emailLower }).session(session);
-        if (existingUser && !duplicateEmails.includes(emailLower)) {
+        const existingUser = await User.findOne({ email: emailLower }).session(
+          session,
+        );
+        if (existingUser && !duplicateEmails.includes(emailLower))
           duplicateEmails.push(emailLower);
-        }
       }
 
       if (contact) {
-        const existingStaffByContact = await staffSchema.findOne({ contactNo: contact }).session(session);
-        if (existingStaffByContact && !duplicateContacts.includes(contact)) {
+        const existingStaffByContact = await staffSchema
+          .findOne({ contactNo: contact })
+          .session(session);
+        if (existingStaffByContact && !duplicateContacts.includes(contact))
           duplicateContacts.push(contact);
-        }
       }
     }
 
-    if (duplicateNames.length || duplicateEmails.length || duplicateContacts.length) {
+    if (
+      duplicateNames.length ||
+      duplicateEmails.length ||
+      duplicateContacts.length
+    ) {
       return res.status(400).json({
         success: false,
         message: "Duplicate entries found",
-        duplicates: { 
-          names: [...new Set(duplicateNames)], 
-          emails: [...new Set(duplicateEmails)], 
-          contacts: [...new Set(duplicateContacts)] 
+        duplicates: {
+          names: [...new Set(duplicateNames)],
+          emails: [...new Set(duplicateEmails)],
+          contacts: [...new Set(duplicateContacts)],
         },
       });
     }
@@ -360,25 +399,45 @@ router.post("/import", async (req, res) => {
     for (let i = 0; i < list.length; i++) {
       const row = list[i];
       try {
-        const medicalRepName = row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
-        const teamName = row.teamName || row["Team Name"] || row["team name"] || row.team;
+        const medicalRepName =
+          row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+        const teamName =
+          row.teamName || row["Team Name"] || row["team name"] || row.team;
         const email = row.email || row.Email || "";
-        const contactNo = row.contactNo || row.phone || row["Contact No"] || row["contact no"] || row["Contact"] || row["contact"];
+        const contactNo =
+          row.contactNo ||
+          row.phone ||
+          row["Contact No"] ||
+          row["contact no"] ||
+          row["Contact"] ||
+          row["contact"];
         const password = row.password || row.Password || "123456";
-        const date = row.date || row.Date || row["Joining Date"] || row["joining date"] || row["Instance of Joining Date"] || new Date();
+        const date =
+          row.date ||
+          row.Date ||
+          row["Joining Date"] ||
+          row["joining date"] ||
+          row["Instance of Joining Date"] ||
+          new Date();
         const enabled = row.enabled !== undefined ? row.enabled : true;
 
         const name = normalizeString(medicalRepName);
         const team = normalizeString(teamName);
         if (!team) {
-          failedImports.push({ row: i + 1, name, error: "Team name is required" });
+          failedImports.push({
+            row: i + 1,
+            name,
+            error: "Team name is required",
+          });
           continue;
         }
 
         const plaintextPassword = password;
         const hashedPassword = await bcrypt.hash(plaintextPassword, 10);
         const emailLower = email ? normalizeString(email).toLowerCase() : "";
-        const finalEmail = emailLower || `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
+        const finalEmail =
+          emailLower ||
+          `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
         const contact = contactNo ? normalizeString(contactNo.toString()) : "";
 
         let joinDate;
@@ -407,32 +466,41 @@ router.post("/import", async (req, res) => {
           joinDate = new Date();
         }
 
-        const newUser = new User({
-          name,
-          email: finalEmail,
-          password: hashedPassword,
-          role: "user",
-          isActive: enabled,
-        });
-        await newUser.save({ session });
-
+        // Create staff (no userId)
         const staff = new staffSchema({
           medicalRepName: name,
           teamName: team,
           contactNo: contact,
           email: finalEmail,
           date: joinDate,
-          userId: newUser._id,
+          isActive: enabled,
         });
         await staff.save({ session });
 
-        newUser.staffId = staff._id;
+        // Create user with staffId reference
+        const newUser = new User({
+          name,
+          email: finalEmail,
+          password: hashedPassword,
+          role: "user",
+          isActive: true,
+          staffId: staff._id,
+        });
         await newUser.save({ session });
 
-        importedStaff.push({ name, email: finalEmail, team, userId: newUser._id, staffId: staff._id });
+        importedStaff.push({
+          name,
+          email: finalEmail,
+          team,
+          staffId: staff._id,
+        });
       } catch (rowError) {
         console.error(`Error processing row ${i + 1}:`, rowError);
-        failedImports.push({ row: i + 1, name: row.medicalRepName || row.name || `Row ${i + 1}`, error: rowError.message });
+        failedImports.push({
+          row: i + 1,
+          name: row.medicalRepName || row.name || `Row ${i + 1}`,
+          error: rowError.message,
+        });
       }
     }
 
@@ -452,22 +520,26 @@ router.post("/import", async (req, res) => {
   }
 });
 
-// UPDATE STAFF STATUS
+// UPDATE STAFF STATUS (staff-specific)
 router.put("/status/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { isActive } = req.body;
+
     const staff = await staffSchema.findById(id);
     if (!staff) {
-      return res.status(404).json({ success: false, message: "Staff not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Staff not found" });
     }
-    if (staff.userId) {
-      await User.findByIdAndUpdate(staff.userId, { isActive }, { new: true });
-    }
+
+    staff.isActive = isActive;
+    await staff.save();
+
     res.json({
       success: true,
-      message: `Staff status updated to ${isActive ? "active" : "inactive"}`,
-      data: { isActive }
+      message: `Staff status updated to ${isActive ? "enabled" : "disabled"}`,
+      data: staff,
     });
   } catch (error) {
     console.error("Error updating staff status:", error);

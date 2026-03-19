@@ -1102,7 +1102,6 @@ function Purchase() {
       const uniqueData = parsedData.filter(
         (row) => !duplicateRows.includes(row),
       );
-      console.log("values of uniqueData", uniqueData);
       if (uniqueData.length === 0) {
         showToast("warning", "No unique records to import");
         return;

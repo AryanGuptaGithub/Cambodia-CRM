@@ -326,8 +326,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
       return;
     }
 
-    console.log('value of 416', uniqueData);
-
     setIsUploading(true);
     try {
       const res = await axios.post(`${backendUrl}/api/products/import`, uniqueData, {

@@ -894,18 +894,11 @@ router.get("/mr-hand", async (req, res) => {
 
 router.get("/mrs-list", async (_, res) => {
   try {
-    // 1. Get all user IDs where isActive = true
-    const activeUserIds = await User.find({ isActive: true }).distinct("_id");
-
-    // 2. Find staff whose userId is in the active user IDs array
-    const staff = await staffSchema
-      .find({ userId: { $in: activeUserIds } })
-      .populate("userId", "name email role isActive")
-      .sort({ updatedAt: -1 });
-
+    const staff = await staffSchema.find().sort({ updatedAt: -1 });
     res.json(staff);
   } catch (error) {
-    sendError(res, error, 500);
+    console.error("Error in /mrs-list:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────

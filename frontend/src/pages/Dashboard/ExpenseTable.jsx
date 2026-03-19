@@ -300,18 +300,6 @@ export const ExpenseTable = ({
               </div>
               <div className="text-sm text-gray-600">Average Expense</div>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-orange-600">
-                {expenseStats.pendingCount}
-              </div>
-              <div className="text-sm text-gray-600">Pending</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-orange-600">
-                ${formatCurrency(expenseStats.totalPendingAmount)}
-              </div>
-              <div className="text-sm text-gray-600">Pending Amount</div>
-            </div>
           </div>
         </div>
       )}

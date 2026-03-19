@@ -266,7 +266,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
         if (Array.isArray(zonesData)) {
           // If no zones returned, use the province name as the zone
           if (zonesData.length === 0) {
-            console.log(`No zones found for ${provinceName}, using province as zone`);
             setZones([{ name: provinceName, _id: provinceName }]);
           } else {
             setZones(zonesData);
@@ -277,8 +276,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
           setZones([{ name: provinceName, _id: provinceName }]);
         }
       } else {
-        // If fetch failed, use province name as zone
-        console.log(`Failed to fetch zones for ${provinceName}, using province as zone`);
         setZones([{ name: provinceName, _id: provinceName }]);
       }
     } catch (error) {
@@ -389,7 +386,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     try {
       const response = await fetch(`${backendUrl}/api/customers?limit=1`);
       const data = await response.json();
-      console.log('values of response', data);
       if (data.ok && data.nextCustomerCode) {
         setForm(prev => ({
           ...prev,
