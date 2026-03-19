@@ -550,7 +550,6 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     try {
       setMrListLoading(true);
       const result = await fetchMRList();
-      console.log('values of result', result);
       if (result.success) {
         setMrList(result.data || []);
       } else {

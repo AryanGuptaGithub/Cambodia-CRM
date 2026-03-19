@@ -192,8 +192,6 @@ export const DashboardCards = ({
   };
 
   const getCurrentSalesAmount = () => {
-    console.log("valuseo f salesData", salesData);
-    console.log("valueso f activeSalesSubTab", activeSalesSubTab);
     if (!salesData) return 0;
     if (
       isCustomDateActive["Total Sales"] &&

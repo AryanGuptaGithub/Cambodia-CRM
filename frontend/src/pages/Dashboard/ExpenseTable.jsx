@@ -228,7 +228,7 @@ export const ExpenseTable = ({
     {
       header: "Description",
       render: (item, rowIndex) => {
-        const description = item.description || '';
+        const description = item.remarks || '';
         const isExpanded = expandedDescriptions[rowIndex];
         const wordCount = countWords(description);
         const shouldTruncate = description.length > 100 || wordCount > 15;

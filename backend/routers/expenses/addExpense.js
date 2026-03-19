@@ -224,7 +224,7 @@ router.get("/categories", async (req, res) => {
   }
 });
 
-// GET /api/expenses
+// GET /api/expenses (updated to handle "All" period)
 router.get("/", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
@@ -236,6 +236,9 @@ router.get("/", async (req, res) => {
         $gte: new Date(startDate),
         $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
       };
+    } else if (period === "All") {
+      // No date filter – fetch all records
+      query = {};
     } else if (period) {
       query = getDateRangeForPeriod(period);
     }

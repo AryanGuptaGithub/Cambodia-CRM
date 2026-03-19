@@ -4429,14 +4429,11 @@ router.get("/credit-sale-not-received", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
 
-    // --------------------------------------------------------
     // Build date filter based on period or custom date range
-    // --------------------------------------------------------
     let dateFilter = {};
     const now = new Date();
 
     if (period === "custom" && startDate && endDate) {
-      // Custom date range from the frontend calendar picker
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
@@ -4457,13 +4454,13 @@ router.get("/credit-sale-not-received", async (req, res) => {
       const end = new Date(now);
       end.setHours(23, 59, 59, 999);
       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    } else if (period === "All") {
+      // No date filter – fetch all records
+      dateFilter = {};
     }
     // If no period provided, dateFilter stays {} → returns all records
-    // (keeps original behaviour when called without params)
 
-    // --------------------------------------------------------
     // Query: credit sales with outstanding amount + date filter
-    // --------------------------------------------------------
     const creditSales = await SaleSummary.find({
       ...dateFilter,
       $and: [
@@ -4525,6 +4522,107 @@ router.get("/credit-sale-not-received", async (req, res) => {
     });
   }
 });
+
+// router.get("/credit-sale-not-received", async (req, res) => {
+//   try {
+//     const { period, startDate, endDate } = req.query;
+
+//     // --------------------------------------------------------
+//     // Build date filter based on period or custom date range
+//     // --------------------------------------------------------
+//     let dateFilter = {};
+//     const now = new Date();
+
+//     if (period === "custom" && startDate && endDate) {
+//       // Custom date range from the frontend calendar picker
+//       const start = new Date(startDate);
+//       const end = new Date(endDate);
+//       end.setHours(23, 59, 59, 999);
+//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+//     } else if (period === "today") {
+//       const start = new Date(now);
+//       start.setHours(0, 0, 0, 0);
+//       const end = new Date(now);
+//       end.setHours(23, 59, 59, 999);
+//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+//     } else if (period === "month") {
+//       const start = new Date(now.getFullYear(), now.getMonth(), 1);
+//       const end = new Date(now);
+//       end.setHours(23, 59, 59, 999);
+//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+//     } else if (period === "year") {
+//       const start = new Date(now.getFullYear(), 0, 1);
+//       const end = new Date(now);
+//       end.setHours(23, 59, 59, 999);
+//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+//     }
+//     // If no period provided, dateFilter stays {} → returns all records
+//     // (keeps original behaviour when called without params)
+
+//     // --------------------------------------------------------
+//     // Query: credit sales with outstanding amount + date filter
+//     // --------------------------------------------------------
+//     const creditSales = await SaleSummary.find({
+//       ...dateFilter,
+//       $and: [
+//         {
+//           $or: [
+//             { saleReturn: { $exists: false } },
+//             { saleReturn: false },
+//             { saleReturn: null },
+//           ],
+//         },
+//         { paymentStatus: { $not: { $regex: /^(cash|paid)$/i } } },
+//         {
+//           $or: [
+//             { dueAmount: { $gt: 0 } },
+//             {
+//               $expr: {
+//                 $gt: [{ $subtract: ["$totalAmount", "$paidAmount"] }, 0],
+//               },
+//             },
+//           ],
+//         },
+//       ],
+//     })
+//       .sort({ invoiceDate: -1 })
+//       .lean();
+
+//     const totalAmount = creditSales.reduce((total, invoice) => {
+//       const outstandingAmount =
+//         invoice.dueAmount > 0
+//           ? invoice.dueAmount
+//           : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0));
+//       return total + outstandingAmount;
+//     }, 0);
+
+//     const formattedSales = creditSales.map((invoice) => ({
+//       ...invoice,
+//       outstandingAmount:
+//         invoice.dueAmount > 0
+//           ? invoice.dueAmount
+//           : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
+//     }));
+
+//     res.json({
+//       success: true,
+//       data: formattedSales,
+//       totalAmount: totalAmount.toFixed(2),
+//       count: formattedSales.length,
+//       period: period || "all",
+//       message: `Found ${formattedSales.length} credit sales`,
+//     });
+//   } catch (error) {
+//     res.status(500).json({
+//       success: false,
+//       message: "Server error while fetching credit sales",
+//       error: error.message,
+//       data: [],
+//       totalAmount: 0,
+//       count: 0,
+//     });
+//   }
+// });
 
 // ==================== UPDATED ROUTE ====================
 router.get("/table-data", async (req, res) => {

@@ -74,7 +74,6 @@ export const SubTabs = ({
 
   if (!TABS_WITH_SUBTABS.includes(activeTab)) return null;
 
-  // Smart date formatter for custom ranges
   const formatDateRangeSmart = (start, end) => {
     const startDate = new Date(start);
     const endDate = new Date(end);
@@ -112,7 +111,6 @@ export const SubTabs = ({
   const renderTabs = () => {
     const cardTitle = getCardTitle(activeTab);
     const isCustomActive = isCustomDateActive[cardTitle];
-    console.log("values of a ctive", activeTab);
     switch (activeTab) {
       case "Sales": {
         const tabs = forceSalesMonthOnly
@@ -132,7 +130,7 @@ export const SubTabs = ({
                 key: "Year",
                 label: dateRanges?.year?.rangeLabel || "This Year",
               },
-              { key: "All", label: "All" }, // All records tab
+              { key: "All", label: "All" },
               {
                 key: "Custom",
                 label: getFormattedDateRange(cardTitle) || "Custom",
@@ -165,6 +163,7 @@ export const SubTabs = ({
         const tabs = [
           { key: "Month", label: dateRanges?.month?.label || "This Month" },
           { key: "Year", label: dateRanges?.year?.rangeLabel || "This Year" },
+          { key: "All", label: "All" },
           {
             key: "Custom",
             label: getFormattedDateRange(cardTitle) || "Custom",
@@ -202,6 +201,7 @@ export const SubTabs = ({
             key: "YTD",
             label: prevMonthRanges?.ytd?.rangeLabel || "YTD",
           },
+          { key: "All", label: "All" },
           {
             key: "Custom",
             label: getFormattedDateRange(cardTitle) || "Custom",
@@ -243,9 +243,10 @@ export const SubTabs = ({
 
       case "Credit Sale Cash Not Receive": {
         const tabs = [
-          { key: "Today", label: "Today" },
           { key: "Month", label: dateRanges?.month?.label || "This Month" },
           { key: "Year", label: dateRanges?.year?.rangeLabel || "This Year" },
+          { key: "All", label: "All" },
+          { key: "Today", label: "Today" },
           {
             key: "Custom",
             label: getFormattedDateRange(cardTitle) || "Custom",

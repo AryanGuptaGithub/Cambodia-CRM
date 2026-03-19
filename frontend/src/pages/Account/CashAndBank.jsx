@@ -1935,8 +1935,6 @@ const CashAndBank = () => {
     try {
       setLoading(true);
       const response = await axios.get(`${backendUrl}/api/transactions`);
-      console.log("Raw response:", response.data);
-
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
 
@@ -1991,8 +1989,6 @@ const CashAndBank = () => {
             return destinationName === activeTabLower;
           }
         });
-
-        console.log("Filtered data:", filteredData);
 
         const matchingDestination = destinations.find(
           (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),

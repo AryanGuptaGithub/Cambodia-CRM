@@ -5,7 +5,6 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 export const fetchMRList = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/stock-transfer-to-mr/mrs-list`);
-    console.log('valueso f res', response);
     const mrList = response.data || [];
 
     return {

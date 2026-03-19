@@ -54,12 +54,13 @@ const Dashboard = () => {
   const [previousActiveTab, setPreviousActiveTab] = useState("Sales");
 
   // SUB-TABS
+  // 🔁 Total Sales defaults to Today, Pending Collection defaults to Month
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
   const [activeStockSubTab, setActiveStockSubTab] = useState("all");
   const [activePendingCollectionSubTab, setActivePendingCollectionSubTab] =
-    useState("Today");
+    useState("Month");
 
   const [isSalesMonthOnly, setIsSalesMonthOnly] = useState(false);
 
@@ -86,6 +87,8 @@ const Dashboard = () => {
   const [expenseSummary, setExpenseSummary] = useState({
     monthlyExpense: 0,
     yearExpense: 0,
+    allExpense: 0,
+    customExpenseTotal: 0,
   });
 
   // Company Balance
@@ -234,8 +237,8 @@ const Dashboard = () => {
         fetchPayrollTableData("Prev Month");
         break;
       case "Pending Collection":
-        setActivePendingCollectionSubTab("Today");
-        fetchCreditSaleTableData("Today");
+        setActivePendingCollectionSubTab("Month");
+        fetchCreditSaleTableData("Month");
         break;
       default:
         break;
@@ -303,7 +306,7 @@ const Dashboard = () => {
     }
   };
 
-  // =================== FETCH FUNCTIONS (with optional date parameters) ===================
+  // =================== FETCH FUNCTIONS ===================
   const fetchSalesTableData = async (period, startDateParam, endDateParam) => {
     try {
       setLoadingSalesData(true);
@@ -311,7 +314,7 @@ const Dashboard = () => {
         Today: "Today",
         Month: "Month",
         Year: "Year",
-        All: "All", // ✅ Added mapping for "All"
+        All: "All",
         Custom: "custom",
       };
       const backendPeriod = periodMap[period] || period;
@@ -362,106 +365,49 @@ const Dashboard = () => {
   ) => {
     try {
       setLoadingExpenseData(true);
-      const params = { period };
+      const periodMap = {
+        Month: "Month",
+        Year: "Year",
+        All: "All",
+        Custom: "custom",
+      };
+      const backendPeriod = periodMap[period] || period;
+      const params = { period: backendPeriod };
+
       if (period === "Custom") {
-        params.period = "custom";
         params.startDate =
           startDateParam || customDateRanges["Total Expense"]?.start;
         params.endDate = endDateParam || customDateRanges["Total Expense"]?.end;
       }
+
       const response = await axios.get(`${backendUrl}/api/expenses`, {
         params,
       });
-      if (response.data?.summary) {
-        setExpenseSummary({
-          monthlyExpense: response.data.summary.monthlyExpense || 0,
-          yearExpense: response.data.summary.yearExpense || 0,
-        });
-      }
-      let expenses = [];
-      if (response.data?.success) expenses = response.data.data || [];
-      else if (Array.isArray(response.data)) expenses = response.data;
-      else if (response.data?.expenses) expenses = response.data.expenses;
-      else if (response.data?.latestExpenses)
-        expenses = response.data.latestExpenses;
 
-      if (period !== "Custom") {
-        const currentDate = new Date();
-        let filtered = [];
+      const rawData = response.data.data || [];
+      const transformedData = rawData.map((expense) => ({
+        ...expense,
+        category: expense.category?.category || expense.category || "Unknown",
+      }));
+
+      setExpenseTableData(transformedData);
+
+      const total = rawData.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+
+      setExpenseSummary((prev) => {
         switch (period) {
           case "Month":
-            filtered = expenses.filter((e) => {
-              const d = new Date(e.date);
-              return (
-                d.getMonth() === currentDate.getMonth() &&
-                d.getFullYear() === currentDate.getFullYear()
-              );
-            });
-            break;
+            return { ...prev, monthlyExpense: total };
           case "Year":
-            filtered = expenses.filter(
-              (e) =>
-                new Date(e.date).getFullYear() === currentDate.getFullYear(),
-            );
-            break;
-          case "Overdue":
-            filtered = expenses.filter(
-              (e) =>
-                new Date(e.dueDate || e.date) < currentDate &&
-                e.status !== "Paid",
-            );
-            break;
-          case "Unreceive_Payment":
-            filtered = expenses.filter(
-              (e) => e.status === "Pending" || e.status === "Unpaid",
-            );
-            break;
-          case "Pending":
-            filtered = expenses.filter((e) => e.status === "Pending");
-            break;
-          case "Approved":
-            filtered = expenses.filter((e) => e.status === "Approved");
-            break;
-          case "Rejected":
-            filtered = expenses.filter((e) => e.status === "Rejected");
-            break;
+            return { ...prev, yearExpense: total };
+          case "All":
+            return { ...prev, allExpense: total };
+          case "Custom":
+            return { ...prev, customExpenseTotal: total };
           default:
-            filtered = expenses;
+            return prev;
         }
-        expenses = filtered;
-      }
-
-      const formattedExpenses = Array.isArray(expenses)
-        ? expenses.map((expense) => ({
-            id: expense._id || expense.id,
-            category:
-              expense.category?.category ||
-              (typeof expense.category === "string"
-                ? expense.category
-                : "Uncategorized"),
-            amount: expense.amount || 0,
-            date: expense.date
-              ? new Date(expense.date).toLocaleDateString()
-              : expense.createdAt
-                ? new Date(expense.createdAt).toLocaleDateString()
-                : new Date().toLocaleDateString(),
-            description:
-              expense.description || expense.remarks || "No description",
-            paymentMethod: expense.paymentMethod || "N/A",
-            sourceAccount: expense.sourceAccount?.name || "N/A",
-            details: [
-              `Amount: $${expense.amount || 0}`,
-              `Date: ${expense.date ? new Date(expense.date).toLocaleDateString() : "N/A"}`,
-              `Category: ${expense.category?.category || "Uncategorized"}`,
-              `Payment Method: ${expense.paymentMethod || "N/A"}`,
-              `Source: ${expense.sourceAccount?.name || "N/A"}`,
-              `Remarks: ${expense.remarks || "No remarks"}`,
-            ],
-          }))
-        : [];
-      setExpenseTableData(
-        formattedExpenses.sort((a, b) => b.amount - a.amount),
-      );
+      });
     } catch (error) {
       console.error("Error fetching expense table data:", error);
       setExpenseTableData([]);
@@ -478,11 +424,14 @@ const Dashboard = () => {
     try {
       setLoadingPayrollData(true);
       let params = {};
+
       if (period === "Custom") {
         params.period = "custom";
         params.startDate =
           startDateParam || customDateRanges["Total Payroll"]?.start;
         params.endDate = endDateParam || customDateRanges["Total Payroll"]?.end;
+      } else if (period === "All") {
+        params = {};
       } else {
         const currentDate = new Date();
         let payrollPeriod;
@@ -503,6 +452,7 @@ const Dashboard = () => {
         }
         params.period = payrollPeriod;
       }
+
       const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
         params,
       });
@@ -512,12 +462,18 @@ const Dashboard = () => {
         0,
       );
       setPayrollTableData(payrolls);
-      if (period === "Prev Month" || period === "Custom")
+
+      if (period === "Prev Month" || period === "Custom") {
         setCurrentPayrollTotal(totalNetSalary);
-      else if (period === "YTD") setCurrentYTDTotal(totalNetSalary);
-      else if (period === "Overdue") setCurrentPayrollTotal(totalNetSalary);
-      else if (period === "Unreceive_Payment")
+      } else if (period === "YTD") {
         setCurrentYTDTotal(totalNetSalary);
+      } else if (period === "Overdue") {
+        setCurrentPayrollTotal(totalNetSalary);
+      } else if (period === "Unreceive_Payment") {
+        setCurrentYTDTotal(totalNetSalary);
+      } else if (period === "All") {
+        setCurrentPayrollTotal(totalNetSalary);
+      }
     } catch (error) {
       console.error("Error in fetchPayrollTableData:", error);
       setPayrollTableData([]);
@@ -563,18 +519,22 @@ const Dashboard = () => {
   ) => {
     try {
       setLoadingCreditSaleData(true);
-      const params = {};
+      let params = {};
+
       if (period === "Custom") {
         params.period = "custom";
         params.startDate =
           startDateParam || customDateRanges["Pending Collection"]?.start;
         params.endDate =
           endDateParam || customDateRanges["Pending Collection"]?.end;
+      } else if (period === "All") {
+        params = {};
       } else {
         const periodMap = { Today: "today", Month: "month", Year: "year" };
         const backendPeriod = periodMap[period];
         if (backendPeriod) params.period = backendPeriod;
       }
+
       const response = await axios.get(
         `${backendUrl}/api/sales/credit-sale-not-received`,
         { params },
@@ -751,7 +711,7 @@ const Dashboard = () => {
       case "Sales":
         setIsSalesMonthOnly(false);
         setActiveSalesSubTab(
-          isCustomDateActive["Total Sales"] ? "Custom" : "Today",
+          isCustomDateActive["Total Sales"] ? "Custom" : "Today", // now Today
         );
         fetchSalesTableData(
           isCustomDateActive["Total Sales"] ? "Custom" : "Today",
@@ -798,9 +758,9 @@ const Dashboard = () => {
   useEffect(() => {
     const initializeData = async () => {
       await Promise.all([
-        fetchSalesTableData("Today"),
+        fetchSalesTableData("Today"), // changed from Month to Today
         fetchExpenseTableData("Month"),
-        fetchCreditSaleTableData("Today"),
+        fetchCreditSaleTableData("Month"), // remains Month
         fetchCompanyBalance(),
       ]);
       setCurrentPayrollTotal(totalPayroll);
@@ -977,6 +937,8 @@ const Dashboard = () => {
     ...(expenseData || {}),
     monthlyExpense: expenseSummary.monthlyExpense,
     yearExpense: expenseSummary.yearExpense,
+    allExpense: expenseSummary.allExpense,
+    customExpenseTotal: expenseSummary.customExpenseTotal,
   };
 
   return (

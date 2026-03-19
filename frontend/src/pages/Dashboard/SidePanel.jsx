@@ -306,7 +306,7 @@ const RecentExpenses = ({
                 ${formatCurrency(highestExpense.amount)}
               </p>
               <p className="text-xs text-yellow-600">
-                {highestExpense.date || "No date"}
+                {formatDateToReadable(highestExpense.date) || "No date"}
               </p>
             </div>
           </div>
@@ -328,7 +328,7 @@ const RecentExpenses = ({
                   {item.category || "Uncategorized"}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {item.description || "No description"}
+                  {item.remarks || "No description"}
                 </p>
               </div>
             </div>
@@ -336,7 +336,7 @@ const RecentExpenses = ({
               <p className="text-sm font-semibold text-red-700">
                 ${formatCurrency(item.amount)}
               </p>
-              <p className="text-xs text-gray-500">{item.date || "No date"}</p>
+              <p className="text-xs text-gray-500">{formatDateToReadable(item.date) || "No date"}</p>
             </div>
           </div>
         )}
@@ -547,12 +547,12 @@ const RecentJoins = ({ mrList = [] }) => {
             </p>
             <span
               className={`inline-block px-2 py-1 rounded-full text-xs ${
-                mr.enabled
+                mr.isActive
                   ? "bg-green-100 text-green-800"
                   : "bg-red-100 text-red-800"
               }`}
             >
-              {mr.enabled ? "Active" : "Inactive"}
+              {mr.isActive ? "Active" : "Inactive"}
             </span>
           </div>
         </div>
