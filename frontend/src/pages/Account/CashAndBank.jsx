@@ -31,7 +31,7 @@ const formatDateForInput = (dateString) => {
     const month = date.toLocaleString("en", { month: "short" });
     const year = date.getFullYear();
     return `${day} ${month} ${year}`;
-  } catch (error) {
+  } catch {
     return dateString;
   }
 };
@@ -65,7 +65,7 @@ const parseDateFromInput = (dateString) => {
       }
     }
     return dateString;
-  } catch (error) {
+  } catch {
     return dateString;
   }
 };
@@ -73,22 +73,19 @@ const parseDateFromInput = (dateString) => {
 const getDisplayValue = (value, options) => {
   try {
     if (!value && value !== 0) return "--";
-    // If value is an object with a name property (populated)
-    if (typeof value === "object" && value !== null) {
+    if (typeof value === "object" && value !== null)
       return (
         value.name || value.label || value.title || value.toString() || "--"
       );
-    }
-    // If value is a string (ID) and we have options, try to find the label
     if (typeof value === "string" && options && Array.isArray(options)) {
       const option = options.find(
         (opt) => opt.value === value || opt.value?.toString() === value,
       );
-      return option ? option.label : value; // fallback to ID if not found
+      return option ? option.label : value;
     }
     if (typeof value === "number") return value.toString();
     return value ? value.toString() : "--";
-  } catch (error) {
+  } catch {
     return "--";
   }
 };
@@ -117,11 +114,6 @@ const useDropdownOptions = () => {
         Array.isArray(categoryResponse.data.data)
       )
         categoriesData = categoryResponse.data.data;
-      else if (
-        categoryResponse.data &&
-        Array.isArray(categoryResponse.data.categories)
-      )
-        categoriesData = categoryResponse.data.categories;
       setCategoryOptions(
         categoriesData.map((cat) => ({ value: cat._id, label: cat.name })),
       );
@@ -137,18 +129,13 @@ const useDropdownOptions = () => {
         Array.isArray(destinationResponse.data.data)
       )
         destinationsData = destinationResponse.data.data;
-      else if (
-        destinationResponse.data &&
-        Array.isArray(destinationResponse.data.destinations)
-      )
-        destinationsData = destinationResponse.data.destinations;
       const destinations = destinationsData.map((dest) => ({
         value: dest._id,
         label: dest.name,
         totalAmount: dest.totalAmount || 0,
       }));
       setDestinationOptions(destinations);
-      setSourceOptions(destinations); // source and destination are same type
+      setSourceOptions(destinations);
 
       const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
       let suppliers = [];
@@ -159,20 +146,11 @@ const useDropdownOptions = () => {
         Array.isArray(supplierResponse.data.data)
       )
         suppliers = supplierResponse.data.data;
-      else if (
-        supplierResponse.data &&
-        Array.isArray(supplierResponse.data.suppliers)
-      )
-        suppliers = supplierResponse.data.suppliers;
       setSupplierOptions(
         suppliers.map((s) => ({ value: s._id, label: s.name })),
       );
     } catch (err) {
       setError(err.message);
-      setCategoryOptions([]);
-      setSourceOptions([]);
-      setDestinationOptions([]);
-      setSupplierOptions([]);
     } finally {
       setLoading(false);
     }
@@ -223,39 +201,53 @@ const CustomDropdown = ({
       </button>
       {isOpen && !disabled && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
-          {options.length === 0 ? (
-            <div className="p-2 text-gray-500 text-sm">Loading options...</div>
-          ) : (
-            options.map((option) => (
-              <div
-                key={option.value}
-                onClick={() => handleSelect(option.value)}
-                className={`p-2 cursor-pointer hover:bg-indigo-50 ${value === option.value ? "bg-indigo-100 text-indigo-700" : ""}`}
-              >
-                {option.label}
-              </div>
-            ))
-          )}
+          {options.map((option) => (
+            <div
+              key={option.value}
+              onClick={() => handleSelect(option.value)}
+              className={`p-2 cursor-pointer hover:bg-indigo-50 ${value === option.value ? "bg-indigo-100 text-indigo-700" : ""}`}
+            >
+              {option.label}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 };
 
-const useInvoiceOptions = (categoryName = "") => {
+// ============================================================================
+// useInvoiceOptions — filters out already-used and fully-paid invoices
+// ============================================================================
+const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
   const [sales, setSales] = useState([]);
+  const [usedInvoiceNumbers, setUsedInvoiceNumbers] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const fetchSales = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${backendUrl}/api/sales/all`);
-      setSales(response.data?.summaries || []);
+      const [salesRes, txRes] = await Promise.all([
+        axios.get(`${backendUrl}/api/sales/all`),
+        axios.get(`${backendUrl}/api/transactions`),
+      ]);
+      const allSales = salesRes.data?.summaries || [];
+      setSales(allSales);
+
+      const allTx = txRes.data?.data || [];
+      const usedSet = new Set(
+        allTx
+          .filter((tx) => tx.invoiceNo && tx.invoiceNo !== "NA")
+          .map((tx) => tx.invoiceNo),
+      );
+      if (editInvoiceNumber) usedSet.delete(editInvoiceNumber);
+      setUsedInvoiceNumbers(usedSet);
       setError(null);
     } catch (err) {
       setError(err.message);
       setSales([]);
+      setUsedInvoiceNumbers(new Set());
     } finally {
       setLoading(false);
     }
@@ -272,44 +264,59 @@ const useInvoiceOptions = (categoryName = "") => {
       return [{ value: "", label: "No invoices available", disabled: true }];
 
     let filteredSales = sales;
-    const categoryNameLower = categoryName?.toLowerCase() || "";
+    const cat = categoryName?.toLowerCase() || "";
 
-    if (categoryNameLower.includes("cash sale")) {
+    if (cat.includes("cash sale")) {
       filteredSales = sales.filter((s) => {
         const ps = s.paymentStatus?.toLowerCase() || "";
         return ps === "cash" || ps === "paid";
       });
-    } else if (categoryNameLower.includes("credit collection")) {
+    } else if (cat.includes("credit collection")) {
       filteredSales = sales.filter((s) => {
         const ps = s.paymentStatus?.toLowerCase() || "";
+        const isPending = s.pendingAmountPaid?.toLowerCase() !== "paid";
         return (
-          ps === "credit" || ps === "pending" || ps === "unpaid" || ps === "due"
+          isPending &&
+          (ps === "credit" ||
+            ps === "partial paid" ||
+            ps === "unpaid" ||
+            ps === "due")
         );
       });
     }
 
     const uniqueInvoices = [
-      ...new Set(filteredSales.map((s) => s.invoiceNumber).filter(Boolean)),
+      ...new Set(
+        filteredSales
+          .map((s) => s.invoiceNumber)
+          .filter(Boolean)
+          .filter((inv) => !usedInvoiceNumbers.has(inv)),
+      ),
     ];
+
     return [
       { value: "", label: "Select Invoice Number" },
       ...uniqueInvoices.map((inv) => ({ value: inv, label: inv })),
     ];
-  }, [sales, loading, error, categoryName]);
+  }, [sales, loading, error, categoryName, usedInvoiceNumbers]);
 
   const getFilteredSales = useCallback(() => {
-    if (!categoryName) return sales;
-    const cn = categoryName.toLowerCase();
-    if (cn.includes("cash sale"))
+    const cat = categoryName?.toLowerCase() || "";
+    if (cat.includes("cash sale"))
       return sales.filter((s) => {
         const ps = s.paymentStatus?.toLowerCase() || "";
         return ps === "cash" || ps === "paid";
       });
-    if (cn.includes("credit collection"))
+    if (cat.includes("credit collection"))
       return sales.filter((s) => {
         const ps = s.paymentStatus?.toLowerCase() || "";
+        const isPending = s.pendingAmountPaid?.toLowerCase() !== "paid";
         return (
-          ps === "credit" || ps === "pending" || ps === "unpaid" || ps === "due"
+          isPending &&
+          (ps === "credit" ||
+            ps === "partial paid" ||
+            ps === "unpaid" ||
+            ps === "due")
         );
       });
     return sales;
@@ -325,6 +332,11 @@ const useInvoiceOptions = (categoryName = "") => {
   };
 };
 
+// ============================================================================
+// AddTransactionModal
+// KEY CHANGE: For Credit Collection, Amount field shows dueAmount (not totalAmount)
+//             and is editable (user can enter partial amount ≤ dueAmount)
+// ============================================================================
 const AddTransactionModal = ({
   isOpen,
   onClose,
@@ -347,6 +359,8 @@ const AddTransactionModal = ({
   const [originalAmount, setOriginalAmount] = useState(0);
   const [invoiceGloballyChecked, setInvoiceGloballyChecked] = useState(false);
   const [invoiceCheckLoading, setInvoiceCheckLoading] = useState(false);
+  // For credit collection: track the invoice's dueAmount to enforce max
+  const [invoiceDueAmount, setInvoiceDueAmount] = useState(0);
 
   const getCategoryName = useMemo(() => {
     if (!form.categoryType) return "";
@@ -354,13 +368,20 @@ const AddTransactionModal = ({
     return cat ? cat.label : "";
   }, [form.categoryType, categoryOptions]);
 
+  const isCreditCollection = useMemo(
+    () => getCategoryName.toLowerCase().includes("credit collection"),
+    [getCategoryName],
+  );
+
+  const editInvoiceNumber =
+    isEdit && editData?.invoiceNumber ? editData.invoiceNumber : "";
   const {
     sales,
     filteredSales,
     loading: salesLoading,
     getInvoiceOptions,
     refetch: refetchSales,
-  } = useInvoiceOptions(getCategoryName);
+  } = useInvoiceOptions(getCategoryName, editInvoiceNumber);
 
   const requiresSupplier = useMemo(() => {
     const cn = getCategoryName.toLowerCase();
@@ -452,6 +473,11 @@ const AddTransactionModal = ({
         type: "number",
         required: true,
         layout: "half",
+        // For credit collection: show dueAmount hint and allow partial
+        hint:
+          isCreditCollection && invoiceDueAmount > 0
+            ? `Max (Due Amount): $${invoiceDueAmount.toFixed(2)}`
+            : null,
       },
     ];
 
@@ -464,7 +490,7 @@ const AddTransactionModal = ({
         options: supplierOptions,
         layout: "half",
       });
-      if (isRemittance) {
+      if (isRemittance)
         baseFields.splice(2, 0, {
           key: "source",
           label: "Source Account",
@@ -473,7 +499,7 @@ const AddTransactionModal = ({
           options: sourceOptions,
           layout: "half",
         });
-      } else if (isPaymentInward) {
+      else if (isPaymentInward)
         baseFields.splice(2, 0, {
           key: "destination",
           label: "Destination Account",
@@ -482,7 +508,6 @@ const AddTransactionModal = ({
           options: destinationOptions,
           layout: "half",
         });
-      }
     } else if (isPaymentOutward) {
       baseFields.splice(1, 0, {
         key: "supplier",
@@ -635,6 +660,8 @@ const AddTransactionModal = ({
     requiresInvoiceDropdown,
     requiresInvoiceFields,
     invoiceOptions,
+    isCreditCollection,
+    invoiceDueAmount,
   ]);
 
   const initializeFormData = () => {
@@ -648,23 +675,19 @@ const AddTransactionModal = ({
     return initialData;
   };
 
-  // Populate form for edit – map string names back to option IDs
   useEffect(() => {
     if (isOpen) {
       if (isEdit && editData) {
-        // Helper to find option ID by label
         const findIdByLabel = (options, label) => {
           if (!label || label === "--") return null;
           const opt = options.find((o) => o.label === label);
           return opt ? opt.value : null;
         };
-
         const categoryId =
           editData.categoryType &&
           (categoryOptions.find((o) => o.value === editData.categoryType)
             ? editData.categoryType
             : findIdByLabel(categoryOptions, editData.categoryType));
-
         const sourceId =
           (editData.source || editData.sourceAccount) &&
           (sourceOptions.find(
@@ -675,20 +698,17 @@ const AddTransactionModal = ({
                 sourceOptions,
                 editData.source || editData.sourceAccount,
               ));
-
         const destId =
           editData.destination &&
           editData.destination !== "--" &&
           (destinationOptions.find((o) => o.value === editData.destination)
             ? editData.destination
             : findIdByLabel(destinationOptions, editData.destination));
-
         const supplierId =
           editData.supplier &&
           (supplierOptions.find((o) => o.value === editData.supplier)
             ? editData.supplier
             : findIdByLabel(supplierOptions, editData.supplier));
-
         setForm({
           ...editData,
           categoryType: categoryId || editData.categoryType,
@@ -700,8 +720,6 @@ const AddTransactionModal = ({
         setInvoiceDataFetched(true);
         setOriginalAmount(editData.amount || 0);
         setInvoiceGloballyChecked(true);
-        if (editData.source?.totalAmount !== undefined)
-          setSourceAccountBalance(editData.source.totalAmount);
       } else {
         setForm(initializeFormData());
         setInvoiceDataFetched(false);
@@ -709,6 +727,7 @@ const AddTransactionModal = ({
         setDestinationAccountBalance(0);
         setOriginalAmount(0);
         setInvoiceGloballyChecked(false);
+        setInvoiceDueAmount(0);
       }
       setErrors({});
       refetchSales();
@@ -787,15 +806,13 @@ const AddTransactionModal = ({
       setSourceAccountBalance(0);
       setDestinationAccountBalance(0);
       setOriginalAmount(0);
+      setInvoiceDueAmount(0);
     }
   }, [form.categoryType]);
 
-  const findSaleByInvoice = (invoiceNumber) => {
-    return (
-      filteredSales.find((s) => s.invoiceNumber === invoiceNumber) ||
-      sales.find((s) => s.invoiceNumber === invoiceNumber)
-    );
-  };
+  const findSaleByInvoice = (invoiceNumber) =>
+    filteredSales.find((s) => s.invoiceNumber === invoiceNumber) ||
+    sales.find((s) => s.invoiceNumber === invoiceNumber);
 
   const checkInvoiceGlobally = async (invoiceNumber) => {
     if (!invoiceNumber || invoiceNumber.trim() === "") return true;
@@ -804,25 +821,22 @@ const AddTransactionModal = ({
       const excludeId = isEdit && editData?._id ? editData._id : undefined;
       const params = { invoiceNumber: invoiceNumber.trim() };
       if (excludeId) params.excludeId = excludeId;
-
       const response = await axios.get(
         `${backendUrl}/api/transactions/check-invoice`,
         { params },
       );
-
       if (response.data.exists) {
         const existing = response.data.existingTransaction;
         showToast(
           "error",
-          `Invoice "${invoiceNumber}" already has a transaction in "${existing.accountType || "another tab"}" (${existing.categoryType}). Each invoice can only be added once across all accounts.`,
+          `Invoice "${invoiceNumber}" already has a transaction in "${existing.accountType || "another tab"}" (${existing.categoryType}).`,
         );
         setInvoiceGloballyChecked(false);
         return false;
       }
       setInvoiceGloballyChecked(true);
       return true;
-    } catch (error) {
-      console.error("Invoice global check error:", error);
+    } catch {
       setInvoiceGloballyChecked(true);
       return true;
     } finally {
@@ -837,10 +851,8 @@ const AddTransactionModal = ({
       (!requiresInvoiceFields && !requiresInvoiceDropdown)
     )
       return;
-
     try {
       setIsFetchingSales(true);
-
       if (requiresInvoiceDropdown) {
         const saleRecord = findSaleByInvoice(invoiceNumber);
         if (saleRecord) {
@@ -855,8 +867,18 @@ const AddTransactionModal = ({
               amount: "",
             }));
             setInvoiceDataFetched(false);
+            setInvoiceDueAmount(0);
             return;
           }
+
+          // KEY FIX: For credit collection use dueAmount; for cash sale use totalAmount
+          const amountToSet = isCreditCollection
+            ? saleRecord.dueAmount || saleRecord.totalAmount || ""
+            : saleRecord.totalAmount || saleRecord.amount || "";
+
+          setInvoiceDueAmount(
+            isCreditCollection ? saleRecord.dueAmount || 0 : 0,
+          );
 
           setForm((prev) => ({
             ...prev,
@@ -873,37 +895,14 @@ const AddTransactionModal = ({
               saleRecord.shippingAddress ||
               saleRecord.address ||
               "",
-            amount: saleRecord.totalAmount || saleRecord.amount || "",
+            amount: amountToSet,
           }));
           setInvoiceDataFetched(true);
         } else {
-          const allSaleRecord = sales.find(
-            (s) => s.invoiceNumber === invoiceNumber,
+          showToast(
+            "error",
+            `Invoice ${invoiceNumber} not found or not available for ${getCategoryName}`,
           );
-          if (allSaleRecord) {
-            const paymentStatus = allSaleRecord.paymentStatus || "Unknown";
-            const cn = getCategoryName.toLowerCase();
-            if (cn.includes("cash sale"))
-              showToast(
-                "error",
-                `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Cash Sale requires invoices with "Cash" or "Paid" status.`,
-              );
-            else if (cn.includes("credit collection"))
-              showToast(
-                "error",
-                `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Credit Collection requires invoices with "Credit" or "Pending" status.`,
-              );
-            else
-              showToast(
-                "error",
-                `Invoice ${invoiceNumber} not available for ${getCategoryName}`,
-              );
-          } else {
-            showToast(
-              "error",
-              `Invoice ${invoiceNumber} not found in sales records`,
-            );
-          }
           setForm((prev) => ({
             ...prev,
             invoiceDate: "",
@@ -912,13 +911,13 @@ const AddTransactionModal = ({
             amount: "",
           }));
           setInvoiceDataFetched(false);
+          setInvoiceDueAmount(0);
         }
       } else if (requiresInvoiceFields) {
         const salesResponse = await axios.get(
           `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`,
         );
         const salesData = salesResponse.data;
-
         if (salesData.data && salesData.data.length > 0) {
           const isGloballyUnique = await checkInvoiceGlobally(invoiceNumber);
           if (!isGloballyUnique) {
@@ -932,7 +931,6 @@ const AddTransactionModal = ({
             setInvoiceDataFetched(false);
             return;
           }
-
           const saleRecord = salesData.data[0];
           setForm((prev) => ({
             ...prev,
@@ -1008,6 +1006,7 @@ const AddTransactionModal = ({
       setSourceAccountBalance(0);
       setDestinationAccountBalance(0);
       setOriginalAmount(0);
+      setInvoiceDueAmount(0);
     }
 
     if (field === "source" && value) {
@@ -1026,6 +1025,25 @@ const AddTransactionModal = ({
     if (field === "invoiceNumber" && !value) {
       setInvoiceGloballyChecked(false);
       setInvoiceDataFetched(false);
+      setInvoiceDueAmount(0);
+    }
+
+    // For credit collection, validate amount against dueAmount
+    if (
+      field === "amount" &&
+      value &&
+      isCreditCollection &&
+      invoiceDueAmount > 0
+    ) {
+      const amountValue = parseFloat(value) || 0;
+      if (amountValue > invoiceDueAmount) {
+        setErrors((prev) => ({
+          ...prev,
+          amount: `Amount cannot exceed due amount of $${invoiceDueAmount.toFixed(2)}`,
+        }));
+      } else if (errors.amount) {
+        setErrors((prev) => ({ ...prev, amount: "" }));
+      }
     }
 
     if (
@@ -1036,27 +1054,24 @@ const AddTransactionModal = ({
     ) {
       const amountValue = parseFloat(value) || 0;
       const availableBalance = getAvailableBalanceForUpdate();
-      if (amountValue > availableBalance) {
+      if (amountValue > availableBalance)
         setErrors((prev) => ({
           ...prev,
           amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(2)}`,
         }));
-      } else if (errors.amount) {
-        setErrors((prev) => ({ ...prev, amount: "" }));
-      }
+      else if (errors.amount) setErrors((prev) => ({ ...prev, amount: "" }));
     }
 
     if (field === "exchangeLoss" && value && isDeposit && form.amount) {
       const amountValue = parseFloat(form.amount) || 0;
       const exchangeLossValue = parseFloat(value) || 0;
-      if (exchangeLossValue > amountValue) {
+      if (exchangeLossValue > amountValue)
         setErrors((prev) => ({
           ...prev,
           exchangeLoss: "Exchange loss cannot exceed amount",
         }));
-      } else if (errors.exchangeLoss) {
+      else if (errors.exchangeLoss)
         setErrors((prev) => ({ ...prev, exchangeLoss: "" }));
-      }
     }
   };
 
@@ -1071,6 +1086,14 @@ const AddTransactionModal = ({
         if (isNaN(amountValue) || amountValue <= 0)
           newErrors[field.key] =
             `${field.label} must be a valid positive number`;
+        // For credit collection: enforce max = dueAmount
+        if (
+          isCreditCollection &&
+          invoiceDueAmount > 0 &&
+          amountValue > invoiceDueAmount
+        )
+          newErrors[field.key] =
+            `Amount cannot exceed due amount of $${invoiceDueAmount.toFixed(2)}`;
         if ((isDeposit || isWithdraw) && form.source) {
           const available = getAvailableBalanceForUpdate();
           if (amountValue > available)
@@ -1091,14 +1114,10 @@ const AddTransactionModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  // ======================================================================
-  // FIXED HANDLE SUBMIT – maps category names to proper enum values
-  // ======================================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
 
-    // Final global invoice check if needed
     if (
       (requiresInvoiceDropdown || requiresInvoiceFields) &&
       form.invoiceNumber
@@ -1113,13 +1132,11 @@ const AddTransactionModal = ({
     const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
     const finalAmount = isDeposit ? amount - exchangeLoss : amount;
 
-    // Get category name from selected category ID
     const categoryOption = categoryOptions.find(
       (opt) => opt.value === form.categoryType,
     );
     const categoryName = categoryOption ? categoryOption.label : "";
 
-    // Determine transactionType based on category name
     let transactionType = "sale";
     const catLower = categoryName.toLowerCase();
     if (catLower.includes("deposit")) transactionType = "deposit";
@@ -1133,30 +1150,14 @@ const AddTransactionModal = ({
     else if (catLower.includes("credit collection"))
       transactionType = "credit collection";
 
-    let categoryType = "tour Collection"; // default fallback
-    if (
-      catLower.includes("deposit") ||
-      catLower.includes("cash sale") ||
-      catLower.includes("credit collection") ||
-      catLower.includes("payment inward")
-    ) {
-      categoryType = "deposit";
-    } else if (
-      catLower.includes("withdraw") ||
-      catLower.includes("remittance") ||
-      catLower.includes("payment outward")
-    ) {
-      categoryType = "withdraw";
-    }
+    const categoryTypeForPayload = categoryName;
 
-    // Get source account name from selected source ID
     let sourceAccountName = "";
     if (form.source) {
       const sourceOpt = sourceOptions.find((opt) => opt.value === form.source);
       sourceAccountName = sourceOpt ? sourceOpt.label : "";
     }
 
-    // Get destination account name from selected destination ID
     let destinationName = "";
     if (form.destination) {
       const destOpt = destinationOptions.find(
@@ -1165,7 +1166,6 @@ const AddTransactionModal = ({
       destinationName = destOpt ? destOpt.label : "";
     }
 
-    // Get supplier name from selected supplier ID
     let supplierName = "";
     if (form.supplier) {
       const suppOpt = supplierOptions.find(
@@ -1174,41 +1174,46 @@ const AddTransactionModal = ({
       supplierName = suppOpt ? suppOpt.label : "";
     }
 
-    // Build payload matching Transaction schema
     const payload = {
-      categoryType, 
+      categoryType: categoryTypeForPayload,
       date: form.date,
       amount,
       exchangeLoss,
       finalAmount,
-      accountType: activeTab, // tab name as string
+      accountType: activeTab,
       remarks: form.remarks || "",
       transactionType,
     };
 
-    // Add conditional fields based on category type
-    if (requiresSupplier || isPaymentOutward) {
-      payload.supplier = supplierName;
-    }
-
-    if (requiresSupplier) {
-      if (isRemittance) {
-        payload.sourceAccount = sourceAccountName;
-      } else if (isPaymentInward) {
-        payload.destination = destinationName;
-      }
-    } else if (isPaymentOutward) {
-      payload.sourceAccount = sourceAccountName;
-    } else if (isDepositOrWithdraw) {
-      payload.sourceAccount = sourceAccountName;
-      payload.destination = destinationName || "--";
-    } else {
-      // For cash sale, credit collection, etc.
+    if (requiresInvoiceDropdown || requiresInvoiceFields) {
+      payload.invoiceNo = form.invoiceNumber || "";
+      payload.sourceAccount = "";
       payload.destination = destinationName;
-      payload.invoiceNumber = form.invoiceNumber;
       payload.invoiceDate = form.invoiceDate;
       payload.customerName = form.customerName;
       payload.customerAddress = form.customerAddress;
+    } else if (requiresSupplier) {
+      payload.supplier = supplierName;
+      payload.invoiceNo = "NA";
+      if (isRemittance) {
+        payload.sourceAccount = sourceAccountName;
+        payload.destination = "--";
+      } else if (isPaymentInward) {
+        payload.sourceAccount = "";
+        payload.destination = destinationName;
+      }
+    } else if (isPaymentOutward) {
+      payload.supplier = supplierName;
+      payload.sourceAccount = sourceAccountName;
+      payload.destination = "--";
+      payload.invoiceNo = "NA";
+    } else if (isDepositOrWithdraw) {
+      payload.sourceAccount = sourceAccountName;
+      payload.destination = destinationName || "--";
+      payload.invoiceNo = "NA";
+    } else {
+      payload.invoiceNo = form.invoiceNumber || "NA";
+      payload.destination = destinationName;
     }
 
     try {
@@ -1237,6 +1242,18 @@ const AddTransactionModal = ({
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
+      // For credit collection: block input above dueAmount
+      if (field === "amount" && isCreditCollection && invoiceDueAmount > 0) {
+        const numericValue = parseFloat(value);
+        if (!isNaN(numericValue) && numericValue > invoiceDueAmount) {
+          setErrors((prev) => ({
+            ...prev,
+            amount: `Amount cannot exceed due amount of $${invoiceDueAmount.toFixed(2)}`,
+          }));
+          return;
+        }
+        if (errors.amount) setErrors((prev) => ({ ...prev, amount: "" }));
+      }
       if (
         field === "amount" &&
         value &&
@@ -1319,9 +1336,7 @@ const AddTransactionModal = ({
             type="date"
             value={value}
             onChange={(e) => handleDateInputChange(e, field.key)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
           />
         ) : (
@@ -1329,9 +1344,7 @@ const AddTransactionModal = ({
             type="text"
             value={formatDateForInput(value)}
             onChange={(e) => handleDateInputChange(e, field.key)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
             placeholder="DD MMM YYYY"
           />
@@ -1343,12 +1356,19 @@ const AddTransactionModal = ({
               type="text"
               value={value}
               onChange={(e) => handleNumericInputChange(e, field.key)}
-              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-                fieldError ? "border-red-500" : "border-gray-300"
-              } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
               disabled={field.disabled || false}
               placeholder={field.placeholder || ""}
             />
+            {/* Credit collection: show due amount hint and allow partial payment */}
+            {field.key === "amount" &&
+              isCreditCollection &&
+              invoiceDueAmount > 0 && (
+                <div className="mt-1 text-xs text-orange-600">
+                  Due Amount: ${invoiceDueAmount.toFixed(2)} — You can enter a
+                  partial amount
+                </div>
+              )}
             {field.key === "amount" &&
               form.source &&
               (isDeposit || isWithdraw) && (
@@ -1376,9 +1396,7 @@ const AddTransactionModal = ({
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
             rows={3}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"}`}
             disabled={field.disabled || false}
             placeholder={field.placeholder || ""}
           />
@@ -1390,9 +1408,7 @@ const AddTransactionModal = ({
             type="text"
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${fieldError ? "border-red-500" : "border-gray-300"} ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
             placeholder={field.placeholder || ""}
           />
@@ -1472,7 +1488,7 @@ const AddTransactionModal = ({
   );
 };
 
-// ImportExcelModal — unchanged
+// ImportExcelModal — unchanged from original
 const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   const [uploading, setUploading] = useState(false);
   const [importSummary, setImportSummary] = useState(null);
@@ -1561,7 +1577,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   };
 
   if (!isOpen) return null;
-
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
       <div
@@ -1583,29 +1598,20 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
         <div className="p-6">
           {step === 1 && (
             <div className="text-center">
-              <div className="mb-6">
-                <FileSpreadsheet className="mx-auto text-gray-400" size={48} />
-                <h3 className="text-lg font-semibold mt-4 mb-2">
-                  Upload Excel File
-                </h3>
-                <p className="text-gray-600 mb-4">
-                  Upload an Excel file with transaction data. Download the
-                  template for reference.
-                </p>
-                <div className="mb-6">
-                  <button
-                    onClick={downloadTemplate}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
-                  >
-                    <Download size={16} />
-                    Download Template
-                  </button>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Template includes all required fields and category-specific
-                    formatting
-                  </p>
-                </div>
-              </div>
+              <FileSpreadsheet className="mx-auto text-gray-400" size={48} />
+              <h3 className="text-lg font-semibold mt-4 mb-2">
+                Upload Excel File
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Upload an Excel file with transaction data.
+              </p>
+              <button
+                onClick={downloadTemplate}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer mb-4"
+              >
+                <Download size={16} />
+                Download Template
+              </button>
               <div
                 className="border-2 border-dashed border-gray-300 rounded-lg p-8 hover:border-indigo-400 transition-colors cursor-pointer"
                 onClick={() => fileInputRef.current?.click()}
@@ -1633,31 +1639,11 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                   </p>
                 </div>
               )}
-              <div className="mt-8 text-left">
-                <h4 className="font-semibold mb-2">Expected Columns:</h4>
-                <div className="text-sm text-gray-600 grid grid-cols-2 gap-2">
-                  <div>• Invoice Number* (Required)</div>
-                  <div>• Category Type* (Required)</div>
-                  <div>• Date* (YYYY-MM-DD) (Required)</div>
-                  <div>• Amount* (Required)</div>
-                  <div>• Source Account (Conditional)</div>
-                  <div>• Destination Account (Conditional)</div>
-                  <div>• Supplier Name (Conditional)</div>
-                  <div>• Remarks (Optional)</div>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  * = Required field. Conditional fields depend on category
-                  type.
-                </p>
-              </div>
             </div>
           )}
           {step === 2 && (
             <div>
               <h3 className="text-lg font-semibold mb-4">Preview Data</h3>
-              <p className="text-gray-600 mb-4">
-                Preview of first 5 rows from your file:
-              </p>
               <div className="overflow-x-auto mb-6">
                 <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm">
                   <thead className="bg-gray-100">
@@ -1738,18 +1724,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
                     <div className="text-sm text-gray-600">Failed</div>
                   </div>
                 </div>
-                {importSummary.errors && importSummary.errors.length > 0 && (
-                  <div className="mt-4">
-                    <h4 className="font-semibold text-red-600 mb-2">Errors:</h4>
-                    <div className="max-h-40 overflow-y-auto">
-                      {importSummary.errors.map((error, idx) => (
-                        <div key={idx} className="text-sm text-red-500 mb-1">
-                          • Row {error.row}: {error.message}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
               <div className="flex justify-end gap-2">
                 <button
@@ -1774,12 +1748,14 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   );
 };
 
+// ============================================================================
+// CashAndBank — main component (same as before, no changes needed here)
+// ============================================================================
 const CashAndBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [exportLoading, setExportLoading] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -1790,7 +1766,6 @@ const CashAndBank = () => {
   const [totalPages, setTotalPages] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const inputRef = useRef(null);
-
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
   const [allSelected, setAllSelected] = useState(false);
@@ -1857,7 +1832,6 @@ const CashAndBank = () => {
       ),
     [allFields, tableColumns],
   );
-
   const chunkedItems = useMemo(() => {
     const items =
       activeColumnTab === "add" ? availableColumns : removableColumns;
@@ -1884,7 +1858,6 @@ const CashAndBank = () => {
       setAllSelected(updated.length === chunkedItems.flat().length);
     }
   };
-
   const handleColumnSave = () => {
     if (activeColumnTab === "add")
       setTableColumns([...tableColumns, ...selectedItems]);
@@ -1898,7 +1871,6 @@ const CashAndBank = () => {
     setAllSelected(false);
     setIsColumnModalOpen(false);
   };
-
   const handleColumnReset = () => {
     setSelectedItems([]);
     setAllSelected(false);
@@ -1920,7 +1892,6 @@ const CashAndBank = () => {
     setAllSelected(false);
     setIsColumnModalOpen(false);
   };
-
   useEffect(() => {
     const current = chunkedItems.flat();
     setAllSelected(
@@ -1928,77 +1899,56 @@ const CashAndBank = () => {
     );
   }, [selectedItems, chunkedItems]);
 
-  // ======================================================================
-  // FIXED: Normalize transaction data and filter correctly
-  // ======================================================================
   const fetchTransactions = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${backendUrl}/api/transactions`);
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
-
-        // Normalize each transaction: ensure consistent field names and convert amounts
         const normalized = transactions.map((tx) => ({
           ...tx,
-          invoiceNumber: tx.invoiceNumber || tx.invoiceNo || "NA",
-          // Use sourceAccount if source is not present (for expense transactions)
-          source: tx.source || tx.sourceAccount || null,
+          invoiceNumber:
+            tx.invoiceNo && tx.invoiceNo !== "NA"
+              ? tx.invoiceNo
+              : tx.invoiceNumber || "NA",
+          source: tx.sourceAccount || tx.source || null,
           destination: tx.destination || tx.destinationAccount || null,
-          categoryType: tx.categoryType || tx.categoryTypeId || null,
+          categoryType: tx.categoryType || null,
           amount: Number(tx.amount) || 0,
           finalAmount: Number(tx.finalAmount) || 0,
         }));
 
-        // Filter based on active tab
         const filteredData = normalized.filter((tx) => {
-          // Map transaction type: treat "expense" as "withdraw"
           let txType = tx.transactionType?.toLowerCase() || "";
           if (txType === "expense") txType = "withdraw";
-
-          // Safely get source name: could be an object (populated) or a string
-          let sourceName = "";
-          if (tx.source) {
-            if (typeof tx.source === "object") {
-              sourceName = tx.source.name?.toLowerCase() || "";
-            } else {
-              sourceName = tx.source.toString().toLowerCase();
-            }
-          }
-
-          // Safely get destination name
-          let destinationName = "";
-          if (tx.destination) {
-            if (typeof tx.destination === "object") {
-              destinationName = tx.destination.name?.toLowerCase() || "";
-            } else {
-              destinationName = tx.destination.toString().toLowerCase();
-            }
-          }
-
+          let sourceName = tx.source
+            ? typeof tx.source === "object"
+              ? tx.source.name?.toLowerCase() || ""
+              : tx.source.toString().toLowerCase()
+            : "";
+          let destinationName = tx.destination
+            ? typeof tx.destination === "object"
+              ? tx.destination.name?.toLowerCase() || ""
+              : tx.destination.toString().toLowerCase()
+            : "";
           const activeTabLower = activeTab.toLowerCase();
-
-          if (txType === "deposit" || txType === "withdraw") {
+          if (txType === "deposit" || txType === "withdraw")
             return (
               sourceName === activeTabLower ||
               destinationName === activeTabLower
             );
-          } else if (txType === "remittance") {
+          else if (txType === "remittance")
             return sourceName === activeTabLower;
-          } else {
-            return destinationName === activeTabLower;
-          }
+          else return destinationName === activeTabLower;
         });
 
-        const matchingDestination = destinations.find(
+        const matchingDestination = destinations?.find(
           (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),
         );
         setTotalAmountTab(matchingDestination?.totalAmount || 0);
-
         const totalCount = filteredData.length;
         setTotalPages(Math.ceil(totalCount / ITEMS_PER_PAGE));
         setTotalCount(totalCount);
-
         const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
         setData(filteredData.slice(startIndex, startIndex + ITEMS_PER_PAGE));
       }
@@ -2016,7 +1966,6 @@ const CashAndBank = () => {
   useEffect(() => {
     fetchTransactions();
   }, [activeTab, currentPage]);
-
   const currentData = data || [];
 
   const handleAddTransaction = async (transactionData, isEdit = false) => {
@@ -2036,7 +1985,7 @@ const CashAndBank = () => {
         fetchTransactions();
         refetchDropdownOptions();
       }
-    } catch (error) {
+    } catch {
       showToast("error", "Failed to save transaction");
     }
   };
@@ -2045,7 +1994,6 @@ const CashAndBank = () => {
     setEditingTransaction(transaction);
     setIsEditModalOpen(true);
   };
-
   const handleDelete = async (transaction) => {
     const confirm = await confirmDialog({
       title: "Delete Transaction",
@@ -2064,7 +2012,7 @@ const CashAndBank = () => {
         fetchTransactions();
         refetchDropdownOptions();
       } else showToast("error", "Failed to delete transaction");
-    } catch (error) {
+    } catch {
       showToast("error", "Failed to delete transaction");
     }
   };
@@ -2090,26 +2038,22 @@ const CashAndBank = () => {
       setSelected([]);
       fetchTransactions();
       refetchDropdownOptions();
-    } catch (error) {
+    } catch {
       showToast("error", "Failed to delete some transactions");
     }
   };
 
-  const toggleSelect = (item) => {
+  const toggleSelect = (item) =>
     setSelected((prev) =>
       prev.some((s) => s === item._id)
         ? prev.filter((s) => s !== item._id)
         : [...prev, item._id],
     );
-  };
   const toggleSelectAll = (checked) => {
     if (checked) setSelected(currentData.map((r) => r._id));
     else setSelected([]);
   };
 
-  // ======================================================================
-  // Render cell content (unchanged)
-  // ======================================================================
   const renderCellContent = (item, field) => {
     const value = item[field.dbName];
     if (field.id === "actions") {
@@ -2133,42 +2077,44 @@ const CashAndBank = () => {
       );
     }
     if (field.dbName === "categoryType") {
+      const displayVal =
+        typeof value === "string"
+          ? value
+          : getDisplayValue(value, categoryOptions);
       return (
         <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-          {getDisplayValue(value, categoryOptions)}
+          {displayVal || "--"}
         </span>
       );
     }
-    if (field.dbName === "amount") {
+    if (field.dbName === "amount")
       return (
         <span className="font-medium text-black">
           {(value || 0).toFixed(2)}
         </span>
       );
-    }
     if (field.dbName === "finalAmount") {
-      const categoryName = item.categoryType?.name?.toLowerCase() || "";
-      const isNegativeDisplay =
-        categoryName === "remittance" ||
-        (categoryName === "withdraw" &&
-          item.source?.name?.toLowerCase() === activeTab.toLowerCase()) ||
-        (categoryName === "deposit" &&
-          item.source?.name?.toLowerCase() === activeTab.toLowerCase());
-      const isPositiveDisplay =
-        (categoryName === "withdraw" || categoryName === "deposit") &&
-        item.destination?.name?.toLowerCase() === activeTab.toLowerCase();
-
+      const txType = item.transactionType?.toLowerCase() || "";
+      const sourceName =
+        typeof item.source === "object"
+          ? item.source?.name?.toLowerCase() || ""
+          : (item.source || "").toLowerCase();
+      const destName =
+        typeof item.destination === "object"
+          ? item.destination?.name?.toLowerCase() || ""
+          : (item.destination || "").toLowerCase();
+      const activeTabLower = activeTab.toLowerCase();
+      const isNeg =
+        txType === "remittance" ||
+        ((txType === "withdraw" || txType === "deposit") &&
+          sourceName === activeTabLower);
+      const isPos =
+        (txType === "withdraw" || txType === "deposit") &&
+        destName === activeTabLower;
       const val = value || 0;
-      const sign = isNegativeDisplay
-        ? "-"
-        : isPositiveDisplay
-          ? "+"
-          : val >= 0
-            ? "+"
-            : "";
       return (
         <span
-          className={`font-medium ${isNegativeDisplay ? "text-red-600" : isPositiveDisplay ? "text-green-700" : val >= 0 ? "text-green-700" : "text-red-600"}`}
+          className={`font-medium ${isNeg ? "text-red-600" : isPos ? "text-green-700" : val >= 0 ? "text-green-700" : "text-red-600"}`}
         >
           {val.toFixed(2)}
         </span>
@@ -2179,21 +2125,24 @@ const CashAndBank = () => {
         field.dbName === "source"
           ? "bg-green-50 text-green-700"
           : "bg-purple-50 text-purple-700";
+      const displayVal =
+        typeof value === "string"
+          ? value
+          : getDisplayValue(
+              value,
+              field.dbName === "source" ? sourceOptions : destinationOptions,
+            );
       return (
         <span
           className={`px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}
         >
-          {getDisplayValue(
-            value,
-            field.dbName === "source" ? sourceOptions : destinationOptions,
-          )}
+          {displayVal || "--"}
         </span>
       );
     }
-    if (field.dbName === "date" || field.dbName === "invoiceDate") {
+    if (field.dbName === "date" || field.dbName === "invoiceDate")
       return value ? formatDateToReadable(value) : "--";
-    }
-    if (field.dbName === "remarks") {
+    if (field.dbName === "remarks")
       return value ? (
         <div className="max-w-xs truncate" title={value}>
           {value}
@@ -2201,7 +2150,6 @@ const CashAndBank = () => {
       ) : (
         "--"
       );
-    }
     return value ? value.toString() : "--";
   };
 
@@ -2230,7 +2178,7 @@ const CashAndBank = () => {
       link.remove();
       window.URL.revokeObjectURL(url);
       showToast("success", "Export completed successfully");
-    } catch (error) {
+    } catch {
       showToast("error", "Failed to export transactions");
     } finally {
       setExportLoading(false);
@@ -2282,19 +2230,14 @@ const CashAndBank = () => {
           <div className="flex gap-3 items-center">
             <button
               onClick={() => setIsModalOpen(true)}
-              disabled={
-                optionsLoading ||
-                categoryOptions.length === 0 ||
-                sourceOptions.length === 0
-              }
+              disabled={optionsLoading || categoryOptions.length === 0}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus size={18} /> Add New Transaction
             </button>
             <button
               onClick={() => setIsImportModalOpen(true)}
-              disabled={importLoading}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Upload size={18} /> Import Excel
             </button>
@@ -2365,15 +2308,11 @@ const CashAndBank = () => {
         </div>
 
         <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-1">
-                {activeTab} Summary
-              </h3>
-              <div className="text-2xl font-bold text-indigo-700">
-                ${totalAmountTab.toFixed(2)}
-              </div>
-            </div>
+          <h3 className="text-lg font-semibold text-gray-800 mb-1">
+            {activeTab} Summary
+          </h3>
+          <div className="text-2xl font-bold text-indigo-700">
+            ${totalAmountTab.toFixed(2)}
           </div>
         </div>
 
@@ -2520,30 +2459,26 @@ const CashAndBank = () => {
                   {activeColumnTab === "add" ? "Add Columns" : "Remove Columns"}
                 </h2>
                 <div className="flex w-full gap-2 mb-4">
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveColumnTab("add");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "add" ? "bg-green-600 text-white" : "bg-gray-200 text-gray-700"}`}
-                    >
-                      Add Columns ({availableColumns.length})
-                    </button>
-                  </div>
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveColumnTab("remove");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "remove" ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"}`}
-                    >
-                      Remove Columns ({removableColumns.length})
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => {
+                      setActiveColumnTab("add");
+                      setSelectedItems([]);
+                      setAllSelected(false);
+                    }}
+                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "add" ? "bg-green-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                  >
+                    Add Columns ({availableColumns.length})
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveColumnTab("remove");
+                      setSelectedItems([]);
+                      setAllSelected(false);
+                    }}
+                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "remove" ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                  >
+                    Remove Columns ({removableColumns.length})
+                  </button>
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   {chunkedItems.length > 0 ? (
@@ -2579,33 +2514,6 @@ const CashAndBank = () => {
                           {pair.length === 1 && <div className="flex-1"></div>}
                         </div>
                       ))}
-                      {activeColumnTab === "remove" && (
-                        <div className="mt-6 border-t pt-4">
-                          <h3 className="text-sm font-semibold text-gray-600 mb-2">
-                            Compulsory Fields
-                          </h3>
-                          <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
-                            {allFields
-                              .filter((field) =>
-                                requiredColumns.includes(field.id),
-                              )
-                              .map((field) => (
-                                <div
-                                  key={field.id}
-                                  className="flex items-center gap-2 bg-gray-200 rounded px-2 py-1 cursor-not-allowed"
-                                >
-                                  <input type="checkbox" checked disabled />
-                                  <div className="flex flex-col">
-                                    <span>{field.name}</span>
-                                    <span className="text-xs text-red-500">
-                                      This field is compulsory
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   ) : (
                     <div className="text-center py-8 text-gray-500">

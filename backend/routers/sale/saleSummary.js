@@ -4425,6 +4425,136 @@ router.get("/analytics/custom-range", async (req, res) => {
   }
 });
 
+// ==================== UPDATED ROUTE ====================
+router.get("/table-data", async (req, res) => {
+  try {
+    const { period, startDate, endDate } = req.query;
+    let dateFilter = {};
+    if (period === "custom" && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      dateFilter = { invoiceDate: { $gte: start, $lte: end } };
+    } else if (period === "All") {
+      // No date filter – fetch all records
+      dateFilter = {};
+    } else {
+      const dateRange = getTableDateRanges(period);
+      if (dateRange)
+        dateFilter = {
+          invoiceDate: { $gte: dateRange.start, $lte: dateRange.end },
+        };
+    }
+
+    const salesData = await SaleSummary.aggregate([
+      { $match: dateFilter },
+      { $unwind: "$products" },
+      {
+        $project: {
+          date: { $dateToString: { format: "%Y-%m-%d", date: "$invoiceDate" } },
+          productName: "$products.productName",
+          salesPerson: "$mrName",
+          quantity: "$products.salesQty",
+          amount: "$products.netSellingAmount",
+          customer: "$customerName",
+          invoiceNumber: 1,
+          bonusQty: "$products.bonusQty",
+          totalQty: "$products.totalQty",
+          sellingPrice: "$products.sellingPrice",
+          discount: "$products.discount",
+          paymentStatus: 1,
+          remark: 1,
+          customerId: 1,
+          recordingDate: 1,
+          dueDate: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
+          costAmount: 1,
+        },
+      },
+      { $sort: { date: -1 } },
+    ]);
+
+    res.json({
+      success: true,
+      data: salesData.map((sale) => ({
+        date: sale.date,
+        productName: sale.productName,
+        salesPerson: sale.salesPerson,
+        quantity: sale.quantity,
+        amount: sale.amount,
+        customer: sale.customer || "N/A",
+        invoiceNumber: sale.invoiceNumber,
+        bonusQty: sale.bonusQty,
+        totalQty: sale.totalQty,
+        sellingPrice: sale.sellingPrice,
+        discount: sale.discount,
+        paymentStatus: sale.paymentStatus,
+        remark: sale.remark,
+        customerId: sale.customerId,
+        recordingDate: sale.recordingDate,
+        dueDate: sale.dueDate,
+        paidAmount: sale.paidAmount,
+        dueAmount: sale.dueAmount,
+        totalAmount: sale.totalAmount,
+        costAmount: sale.costAmount,
+      })),
+      count: salesData.length,
+      period,
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: error.message, data: [], count: 0 });
+  }
+});
+
+// ✅ FIXED: UTC‑based date ranges for periods
+const getTableDateRanges = (period) => {
+  const now = new Date();
+  switch (period) {
+    case "Today": {
+      // Start of today in UTC
+      const start = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+      );
+      // End of today in UTC (optional: if you want full day, set to end of day UTC)
+      const end = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+      return { start, end };
+    }
+    case "Month":
+      return {
+        start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+        end: now, // current moment (or end of month if preferred)
+      };
+    case "Year":
+      return {
+        start: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)),
+        end: now,
+      };
+    default:
+      // fallback (should not happen)
+      const start = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+      );
+      return { start, end: now };
+  }
+};
+
+// ==========================================
+// Credit Sale Not Received (unchanged)
+// ==========================================
 router.get("/credit-sale-not-received", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
@@ -4521,225 +4651,6 @@ router.get("/credit-sale-not-received", async (req, res) => {
       count: 0,
     });
   }
-});
-
-// router.get("/credit-sale-not-received", async (req, res) => {
-//   try {
-//     const { period, startDate, endDate } = req.query;
-
-//     // --------------------------------------------------------
-//     // Build date filter based on period or custom date range
-//     // --------------------------------------------------------
-//     let dateFilter = {};
-//     const now = new Date();
-
-//     if (period === "custom" && startDate && endDate) {
-//       // Custom date range from the frontend calendar picker
-//       const start = new Date(startDate);
-//       const end = new Date(endDate);
-//       end.setHours(23, 59, 59, 999);
-//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
-//     } else if (period === "today") {
-//       const start = new Date(now);
-//       start.setHours(0, 0, 0, 0);
-//       const end = new Date(now);
-//       end.setHours(23, 59, 59, 999);
-//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
-//     } else if (period === "month") {
-//       const start = new Date(now.getFullYear(), now.getMonth(), 1);
-//       const end = new Date(now);
-//       end.setHours(23, 59, 59, 999);
-//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
-//     } else if (period === "year") {
-//       const start = new Date(now.getFullYear(), 0, 1);
-//       const end = new Date(now);
-//       end.setHours(23, 59, 59, 999);
-//       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
-//     }
-//     // If no period provided, dateFilter stays {} → returns all records
-//     // (keeps original behaviour when called without params)
-
-//     // --------------------------------------------------------
-//     // Query: credit sales with outstanding amount + date filter
-//     // --------------------------------------------------------
-//     const creditSales = await SaleSummary.find({
-//       ...dateFilter,
-//       $and: [
-//         {
-//           $or: [
-//             { saleReturn: { $exists: false } },
-//             { saleReturn: false },
-//             { saleReturn: null },
-//           ],
-//         },
-//         { paymentStatus: { $not: { $regex: /^(cash|paid)$/i } } },
-//         {
-//           $or: [
-//             { dueAmount: { $gt: 0 } },
-//             {
-//               $expr: {
-//                 $gt: [{ $subtract: ["$totalAmount", "$paidAmount"] }, 0],
-//               },
-//             },
-//           ],
-//         },
-//       ],
-//     })
-//       .sort({ invoiceDate: -1 })
-//       .lean();
-
-//     const totalAmount = creditSales.reduce((total, invoice) => {
-//       const outstandingAmount =
-//         invoice.dueAmount > 0
-//           ? invoice.dueAmount
-//           : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0));
-//       return total + outstandingAmount;
-//     }, 0);
-
-//     const formattedSales = creditSales.map((invoice) => ({
-//       ...invoice,
-//       outstandingAmount:
-//         invoice.dueAmount > 0
-//           ? invoice.dueAmount
-//           : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
-//     }));
-
-//     res.json({
-//       success: true,
-//       data: formattedSales,
-//       totalAmount: totalAmount.toFixed(2),
-//       count: formattedSales.length,
-//       period: period || "all",
-//       message: `Found ${formattedSales.length} credit sales`,
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: "Server error while fetching credit sales",
-//       error: error.message,
-//       data: [],
-//       totalAmount: 0,
-//       count: 0,
-//     });
-//   }
-// });
-
-// ==================== UPDATED ROUTE ====================
-router.get("/table-data", async (req, res) => {
-  try {
-    const { period, startDate, endDate } = req.query;
-    let dateFilter = {};
-    if (period === "custom" && startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      dateFilter = { invoiceDate: { $gte: start, $lte: end } };
-    } else if (period === "All") {
-      // No date filter – fetch all records
-      dateFilter = {};
-    } else {
-      const dateRange = getTableDateRanges(period);
-      if (dateRange)
-        dateFilter = {
-          invoiceDate: { $gte: dateRange.start, $lte: dateRange.end },
-        };
-    }
-
-    const salesData = await SaleSummary.aggregate([
-      { $match: dateFilter },
-      { $unwind: "$products" },
-      {
-        $project: {
-          date: { $dateToString: { format: "%Y-%m-%d", date: "$invoiceDate" } },
-          productName: "$products.productName",
-          salesPerson: "$mrName",
-          quantity: "$products.salesQty",
-          amount: "$products.netSellingAmount",
-          customer: "$customerName",
-          invoiceNumber: 1,
-          bonusQty: "$products.bonusQty",
-          totalQty: "$products.totalQty",
-          sellingPrice: "$products.sellingPrice",
-          discount: "$products.discount",
-          paymentStatus: 1,
-          remark: 1,
-          customerId: 1,
-          recordingDate: 1,
-          dueDate: 1,
-          paidAmount: 1,
-          dueAmount: 1,
-          totalAmount: 1,
-          costAmount: 1,
-        },
-      },
-      { $sort: { date: -1 } },
-    ]);
-
-    res.json({
-      success: true,
-      data: salesData.map((sale) => ({
-        date: sale.date,
-        productName: sale.productName,
-        salesPerson: sale.salesPerson,
-        quantity: sale.quantity,
-        amount: sale.amount,
-        customer: sale.customer || "N/A",
-        invoiceNumber: sale.invoiceNumber,
-        bonusQty: sale.bonusQty,
-        totalQty: sale.totalQty,
-        sellingPrice: sale.sellingPrice,
-        discount: sale.discount,
-        paymentStatus: sale.paymentStatus,
-        remark: sale.remark,
-        customerId: sale.customerId,
-        recordingDate: sale.recordingDate,
-        dueDate: sale.dueDate,
-        paidAmount: sale.paidAmount,
-        dueAmount: sale.dueAmount,
-        totalAmount: sale.totalAmount,
-        costAmount: sale.costAmount,
-      })),
-      count: salesData.length,
-      period,
-    });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ success: false, message: error.message, data: [], count: 0 });
-  }
-});
-
-const getTableDateRanges = (period) => {
-  const now = new Date();
-  switch (period) {
-    case "Today": {
-      const s = new Date(now);
-      s.setHours(0, 0, 0, 0);
-      return { start: s, end: now };
-    }
-    case "Month":
-      return {
-        start: new Date(now.getFullYear(), now.getMonth(), 1),
-        end: now,
-      };
-    case "Year":
-      return { start: new Date(now.getFullYear(), 0, 1), end: now };
-    case "custom":
-      return null;
-    default: {
-      const s = new Date(now);
-      s.setHours(0, 0, 0, 0);
-      return { start: s, end: now };
-    }
-  }
-};
-
-router.get("/check-stock/health", async (req, res) => {
-  res.json({
-    success: true,
-    message: "Stock check endpoint is working",
-    timestamp: new Date().toISOString(),
-  });
 });
 
 router.post("/download-excel", async (req, res) => {

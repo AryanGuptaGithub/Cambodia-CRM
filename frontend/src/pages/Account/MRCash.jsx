@@ -8,6 +8,9 @@ import {
   DollarSign,
   TrendingUp,
   History,
+  Edit,
+  Trash2,
+  HandCoins,
 } from "lucide-react";
 import axios from "axios";
 import { format } from "date-fns";
@@ -38,8 +41,10 @@ function MRCash() {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [isEditTransferModalOpen, setIsEditTransferModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [selectedMRCash, setSelectedMRCash] = useState(null);
+  const [editingTransfer, setEditingTransfer] = useState(null);
 
   const [transferHistory, setTransferHistory] = useState([]);
   const [transferHistoryLoading, setTransferHistoryLoading] = useState(false);
@@ -48,23 +53,34 @@ function MRCash() {
     mrCashId: "",
     transferAmount: "",
     notes: "",
-    destinationAccount: "", // NEW: destination account ID
+    destinationAccount: "",
   });
-
   const [transferForm, setTransferForm] = useState({
     amount: "",
     notes: "",
-    destinationAccount: "", // NEW: destination account ID
+    destinationAccount: "",
+  });
+  const [editTransferForm, setEditTransferForm] = useState({
+    amount: "",
+    notes: "",
   });
 
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(false);
-  const [destinationOptions, setDestinationOptions] = useState([]); // NEW: destination accounts
+  const [destinationOptions, setDestinationOptions] = useState([]);
   const [destinationsLoading, setDestinationsLoading] = useState(false);
+
+  // ── Credit Collection Invoices modal state ──
+  const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
+  const [creditInvoices, setCreditInvoices] = useState([]);
+  const [creditInvoicesLoading, setCreditInvoicesLoading] = useState(false);
+  const [selectedMrForCredit, setSelectedMrForCredit] = useState(null);
+  // per-invoice collecting state
+  const [collectingInvoiceId, setCollectingInvoiceId] = useState(null);
 
   const inputRef = useRef(null);
 
-  // Format currency
+  // ─── helpers ───────────────────────────────────────────────────────────────
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return "$0.00";
     return new Intl.NumberFormat("en-US", {
@@ -79,12 +95,21 @@ function MRCash() {
     if (!dateString) return "N/A";
     try {
       return format(new Date(dateString), "dd MMM yyyy, hh:mm a");
-    } catch (error) {
+    } catch {
       return "Invalid Date";
     }
   };
 
-  // Fetch destinations
+  const formatDateShort = (dateString) => {
+    if (!dateString) return "N/A";
+    try {
+      return format(new Date(dateString), "dd MMM yyyy");
+    } catch {
+      return "Invalid Date";
+    }
+  };
+
+  // ─── data fetching ─────────────────────────────────────────────────────────
   const fetchDestinations = useCallback(async () => {
     try {
       setDestinationsLoading(true);
@@ -92,16 +117,15 @@ function MRCash() {
         `${backendUrl}/api/accounts/destinations`,
       );
       let destinations = [];
-      if (response.data && Array.isArray(response.data)) {
+      if (response.data && Array.isArray(response.data))
         destinations = response.data;
-      } else if (response.data?.data && Array.isArray(response.data.data)) {
+      else if (response.data?.data && Array.isArray(response.data.data))
         destinations = response.data.data;
-      } else if (
+      else if (
         response.data?.destinations &&
         Array.isArray(response.data.destinations)
-      ) {
+      )
         destinations = response.data.destinations;
-      }
       setDestinationOptions(
         destinations.map((dest) => ({
           value: dest._id,
@@ -118,16 +142,13 @@ function MRCash() {
     }
   }, []);
 
-  // Fetch MR list with cash
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
       const response = await axios.get(
         `${backendUrl}/api/mr-cash/mr-list-with-cash`,
       );
-      if (response.data.success) {
-        setMrList(response.data.data || []);
-      }
+      if (response.data.success) setMrList(response.data.data || []);
     } catch (error) {
       console.error("Error fetching MR list:", error);
       showToast("error", "Failed to load MR list");
@@ -136,7 +157,6 @@ function MRCash() {
     }
   }, []);
 
-  // Fetch transfer history
   const fetchTransferHistory = useCallback(async (mrCashId) => {
     try {
       setTransferHistoryLoading(true);
@@ -144,9 +164,7 @@ function MRCash() {
         `${backendUrl}/api/mr-cash/${mrCashId}/transfers`,
         { params: { limit: 30, page: 1 } },
       );
-      if (response.data.success) {
-        setTransferHistory(response.data.data || []);
-      }
+      if (response.data.success) setTransferHistory(response.data.data || []);
     } catch (error) {
       console.error("Error fetching transfer history:", error);
       showToast("error", "Failed to load transfer history");
@@ -156,16 +174,13 @@ function MRCash() {
     }
   }, []);
 
-  // Fetch all MR Cash records
   const fetchAllMRCashes = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-
       const response = await axios.get(`${backendUrl}/api/mr-cash`, {
         params: { limit: 1000, page: 1 },
       });
-
       if (response.data.success) {
         const allData = response.data.data || [];
         setAllMRCashes(allData);
@@ -193,32 +208,23 @@ function MRCash() {
   }, []);
 
   const filterAndPaginateData = (data, page, tab, search = "") => {
-    let filteredData = data;
+    let filtered = data;
     if (search) {
-      filteredData = data.filter(
-        (record) =>
-          record.mrName?.toLowerCase().includes(search.toLowerCase()) ||
-          record.notes?.toLowerCase().includes(search.toLowerCase()),
+      filtered = data.filter(
+        (r) =>
+          r.mrName?.toLowerCase().includes(search.toLowerCase()) ||
+          r.notes?.toLowerCase().includes(search.toLowerCase()),
       );
     }
+    if (tab === "carry") filtered = filtered.filter((r) => r.currentCash > 0);
+    else filtered = filtered.filter((r) => r.cashTransferredToAdmin > 0);
 
-    if (tab === "carry") {
-      filteredData = filteredData.filter((record) => record.currentCash > 0);
-    } else {
-      filteredData = filteredData.filter(
-        (record) => record.cashTransferredToAdmin > 0,
-      );
-    }
-
-    const total = filteredData.length;
-    const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
-    const startIndex = (page - 1) * ITEMS_PER_PAGE;
-    const endIndex = startIndex + ITEMS_PER_PAGE;
-    const paginatedData = filteredData.slice(startIndex, endIndex);
-
-    setMrCashes(paginatedData);
+    const total = filtered.length;
+    const pages = Math.ceil(total / ITEMS_PER_PAGE);
+    const start = (page - 1) * ITEMS_PER_PAGE;
+    setMrCashes(filtered.slice(start, start + ITEMS_PER_PAGE));
     setTotalCount(total);
-    setTotalPages(totalPages);
+    setTotalPages(pages);
   };
 
   const handleTabChange = (tab) => {
@@ -235,16 +241,15 @@ function MRCash() {
   useEffect(() => {
     fetchAllMRCashes();
     fetchMRList();
-    fetchDestinations(); // NEW
+    fetchDestinations();
   }, [fetchAllMRCashes, fetchMRList, fetchDestinations]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      handleSearch();
-    }, 500);
+    const timer = setTimeout(() => handleSearch(), 500);
     return () => clearTimeout(timer);
   }, [searchTerm, handleSearch]);
 
+  // ─── action handlers ───────────────────────────────────────────────────────
   const handleAdd = () => {
     setFormData({
       mrCashId: "",
@@ -271,10 +276,9 @@ function MRCash() {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirm.isConfirmed) {
       try {
-        await axios.delete(`${backendUrl}/api/mrcash/${record._id}`);
+        await axios.delete(`${backendUrl}/api/mr-cash/${record._id}`);
         showToast("success", "MR Cash record deleted successfully");
         fetchAllMRCashes();
         fetchMRList();
@@ -287,33 +291,22 @@ function MRCash() {
     }
   };
 
-  // NEW: Numeric input validation (allows only digits and one decimal)
   const validateNumericInput = (value) => {
-    const regex = /^\d*\.?\d*$/;
-    if (value === "" || regex.test(value)) {
-      return value;
-    }
+    if (value === "" || /^\d*\.?\d*$/.test(value)) return value;
     return null;
   };
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
-
     if (name === "transferAmount") {
       const validated = validateNumericInput(value);
       if (validated === null) return;
       setFormData((prev) => ({ ...prev, transferAmount: validated }));
-
-      if (selectedMRCash) {
-        const inputAmount = parseFloat(validated) || 0;
-        const maxAmount = selectedMRCash.currentCash || 0;
-        if (inputAmount > maxAmount) {
-          showToast(
-            "error",
-            `Cannot transfer more than available cash (${formatCurrency(maxAmount)})`,
-          );
-        }
-      }
+      if (selectedMRCash && parseFloat(validated) > selectedMRCash.currentCash)
+        showToast(
+          "error",
+          `Cannot transfer more than available cash (${formatCurrency(selectedMRCash.currentCash)})`,
+        );
     } else {
       setFormData((prev) => ({ ...prev, [name]: value }));
     }
@@ -321,24 +314,28 @@ function MRCash() {
 
   const handleTransferFormChange = (e) => {
     const { name, value } = e.target;
-
     if (name === "amount") {
       const validated = validateNumericInput(value);
       if (validated === null) return;
       setTransferForm((prev) => ({ ...prev, amount: validated }));
-
-      if (selectedRecord) {
-        const inputAmount = parseFloat(validated) || 0;
-        const maxAmount = selectedRecord.currentCash || 0;
-        if (inputAmount > maxAmount) {
-          showToast(
-            "error",
-            `Cannot transfer more than available cash (${formatCurrency(maxAmount)})`,
-          );
-        }
-      }
+      if (selectedRecord && parseFloat(validated) > selectedRecord.currentCash)
+        showToast(
+          "error",
+          `Cannot transfer more than available cash (${formatCurrency(selectedRecord.currentCash)})`,
+        );
     } else {
       setTransferForm((prev) => ({ ...prev, [name]: value }));
+    }
+  };
+
+  const handleEditTransferFormChange = (e) => {
+    const { name, value } = e.target;
+    if (name === "amount") {
+      const validated = validateNumericInput(value);
+      if (validated === null) return;
+      setEditTransferForm((prev) => ({ ...prev, amount: validated }));
+    } else {
+      setEditTransferForm((prev) => ({ ...prev, [name]: value }));
     }
   };
 
@@ -360,7 +357,6 @@ function MRCash() {
 
   const handleSubmitTransferToAdmin = async (e) => {
     e.preventDefault();
-
     if (
       !formData.mrCashId ||
       !formData.transferAmount ||
@@ -372,7 +368,6 @@ function MRCash() {
       );
       return;
     }
-
     if (!formData.destinationAccount) {
       showToast("error", "Please select a destination account");
       return;
@@ -380,11 +375,10 @@ function MRCash() {
 
     const selectedMR = mrList.find((mr) => mr.value === formData.mrCashId);
     const transferAmount = parseFloat(formData.transferAmount);
-
     if (selectedMR && transferAmount > selectedMR.currentCash) {
       showToast(
         "error",
-        `Insufficient cash available. Available: ${formatCurrency(selectedMR.currentCash)}, Requested: ${formatCurrency(transferAmount)}`,
+        `Insufficient cash. Available: ${formatCurrency(selectedMR.currentCash)}, Requested: ${formatCurrency(transferAmount)}`,
       );
       return;
     }
@@ -395,10 +389,9 @@ function MRCash() {
         {
           amount: transferAmount,
           notes: formData.notes,
-          destinationAccount: formData.destinationAccount, // send the selected destination ID
+          destinationAccount: formData.destinationAccount,
         },
       );
-
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsAddModalOpen(false);
@@ -411,10 +404,9 @@ function MRCash() {
         setSelectedMRCash(null);
         fetchAllMRCashes();
         fetchMRList();
-        fetchDestinations(); // refresh destination balances
+        fetchDestinations();
       }
     } catch (error) {
-      console.error("Transfer error:", error);
       showToast(
         "error",
         error.response?.data?.message ||
@@ -426,17 +418,14 @@ function MRCash() {
 
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
-
     const transferAmount = parseFloat(transferForm.amount);
-
     if (transferAmount > selectedRecord.currentCash) {
       showToast(
         "error",
-        `Insufficient cash available. Available: ${formatCurrency(selectedRecord.currentCash)}, Requested: ${formatCurrency(transferAmount)}`,
+        `Insufficient cash. Available: ${formatCurrency(selectedRecord.currentCash)}`,
       );
       return;
     }
-
     if (!transferForm.destinationAccount) {
       showToast("error", "Please select a destination account");
       return;
@@ -451,7 +440,6 @@ function MRCash() {
           destinationAccount: transferForm.destinationAccount,
         },
       );
-
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsTransferModalOpen(false);
@@ -461,13 +449,79 @@ function MRCash() {
         fetchDestinations();
       }
     } catch (error) {
-      console.error("Transfer error:", error);
       showToast(
         "error",
         error.response?.data?.message ||
           error.message ||
           "Failed to transfer cash",
       );
+    }
+  };
+
+  const handleEditTransfer = (transfer) => {
+    setEditingTransfer(transfer);
+    setEditTransferForm({
+      amount: transfer.amount.toString(),
+      notes: transfer.notes || "",
+    });
+    setIsEditTransferModalOpen(true);
+  };
+
+  const handleSubmitEditTransfer = async (e) => {
+    e.preventDefault();
+    const newAmount = parseFloat(editTransferForm.amount);
+    if (newAmount <= 0) {
+      showToast("error", "Amount must be positive");
+      return;
+    }
+    try {
+      const response = await axios.put(
+        `${backendUrl}/api/mr-cash/transfers/${editingTransfer._id}`,
+        { amount: newAmount, notes: editTransferForm.notes },
+      );
+      if (response.data.success) {
+        showToast("success", "Transfer updated successfully");
+        setIsEditTransferModalOpen(false);
+        setEditingTransfer(null);
+        fetchAllMRCashes();
+        fetchMRList();
+        fetchDestinations();
+        if (selectedRecord) fetchTransferHistory(selectedRecord._id);
+      }
+    } catch (error) {
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to update transfer",
+      );
+    }
+  };
+
+  const handleDeleteTransfer = async (transfer) => {
+    const confirm = await confirmDialog({
+      title: "Delete Transfer",
+      text: `Are you sure you want to delete this transfer of ${formatCurrency(transfer.amount)}? The amount will be returned to the MR's cash.`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+    if (confirm.isConfirmed) {
+      try {
+        const response = await axios.delete(
+          `${backendUrl}/api/mr-cash/${transfer.fromAccount}/transfers/${transfer._id}`,
+        );
+        if (response.data.success) {
+          showToast("success", "Transfer deleted successfully");
+          fetchAllMRCashes();
+          fetchMRList();
+          fetchDestinations();
+          if (selectedRecord) fetchTransferHistory(selectedRecord._id);
+        }
+      } catch (error) {
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to delete transfer",
+        );
+      }
     }
   };
 
@@ -484,6 +538,42 @@ function MRCash() {
   const handlePageChange = (newPage) => {
     setCurrentPage(newPage);
     filterAndPaginateData(allMRCashes, newPage, activeTab, searchTerm);
+  };
+
+  // ─── Credit Collection Invoices modal ─────────────────────────────────────
+  const fetchCreditCollectionInvoices = async (mrName) => {
+    try {
+      setCreditInvoicesLoading(true);
+      const response = await axios.get(
+        `${backendUrl}/api/mr-cash/credit-collection-invoices/${encodeURIComponent(mrName)}`,
+      );
+      if (response.data.success) {
+        setCreditInvoices(response.data.data || []);
+      } else {
+        showToast("error", "Failed to load credit collection invoices");
+      }
+    } catch (error) {
+      console.error("Error fetching credit collection invoices:", error);
+      showToast(
+        "error",
+        error.response?.data?.message || "Error loading invoices",
+      );
+    } finally {
+      setCreditInvoicesLoading(false);
+    }
+  };
+
+  const openCreditModal = (record) => {
+    setSelectedMrForCredit(record);
+    fetchCreditCollectionInvoices(record.mrName);
+    setIsCreditModalOpen(true);
+  };
+
+  const closeCreditModal = () => {
+    setIsCreditModalOpen(false);
+    setCreditInvoices([]);
+    setSelectedMrForCredit(null);
+    setCollectingInvoiceId(null);
   };
 
   if (loading && mrCashes.length === 0) {
@@ -512,7 +602,6 @@ function MRCash() {
             <TrendingUp size={18} /> Transfer Cash to Admin
           </button>
         </div>
-
         <div className="flex gap-3">
           <div className="relative w-full lg:w-80">
             <Search
@@ -532,7 +621,7 @@ function MRCash() {
         </div>
       </div>
 
-      {/* Error Message */}
+      {/* Error */}
       {error && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
           <div className="flex items-center gap-2 text-red-700">
@@ -542,7 +631,7 @@ function MRCash() {
         </div>
       )}
 
-      {/* Totals Summary */}
+      {/* Totals */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
           <div className="flex items-center gap-3">
@@ -560,7 +649,6 @@ function MRCash() {
             </div>
           </div>
         </div>
-
         <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-green-100 rounded-lg">
@@ -586,23 +674,16 @@ function MRCash() {
         <div className="flex space-x-4">
           <button
             onClick={() => handleTabChange("carry")}
-            className={`py-2 px-4 font-medium text-sm transition-colors ${
-              activeTab === "carry"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
+            className={`py-2 px-4 font-medium text-sm transition-colors ${activeTab === "carry" ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-500 hover:text-gray-700"}`}
           >
             MR Carry Cash
             <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
               {
                 allMRCashes.filter(
-                  (record) =>
-                    record.currentCash > 0 &&
+                  (r) =>
+                    r.currentCash > 0 &&
                     (searchTerm === "" ||
-                      record.mrName
-                        ?.toLowerCase()
-                        .includes(searchTerm.toLowerCase()) ||
-                      record.notes
+                      r.mrName
                         ?.toLowerCase()
                         .includes(searchTerm.toLowerCase())),
                 ).length
@@ -611,23 +692,16 @@ function MRCash() {
           </button>
           <button
             onClick={() => handleTabChange("transferred")}
-            className={`py-2 px-4 font-medium text-sm transition-colors ${
-              activeTab === "transferred"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
+            className={`py-2 px-4 font-medium text-sm transition-colors ${activeTab === "transferred" ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-500 hover:text-gray-700"}`}
           >
             MR Transfer Cash To Admin
             <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
               {
                 allMRCashes.filter(
-                  (record) =>
-                    record.cashTransferredToAdmin > 0 &&
+                  (r) =>
+                    r.cashTransferredToAdmin > 0 &&
                     (searchTerm === "" ||
-                      record.mrName
-                        ?.toLowerCase()
-                        .includes(searchTerm.toLowerCase()) ||
-                      record.notes
+                      r.mrName
                         ?.toLowerCase()
                         .includes(searchTerm.toLowerCase())),
                 ).length
@@ -644,35 +718,25 @@ function MRCash() {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="py-3 px-4 text-center">
-                  <div className="flex items-center justify-center gap-2">
-                    <span>MR Name</span>
-                  </div>
+                  <span>MR Name</span>
                 </th>
                 {activeTab === "carry" ? (
                   <>
                     <th className="py-3 px-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <span>Current Cash</span>
-                      </div>
+                      <span>Current Cash</span>
                     </th>
                     <th className="py-3 px-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <span>Last Transfer</span>
-                      </div>
+                      <span>Last Transfer</span>
                     </th>
                     <th className="py-3 px-4 text-center">Actions</th>
                   </>
                 ) : (
                   <>
                     <th className="py-3 px-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <span>Transferred to Admin</span>
-                      </div>
+                      <span>Transferred to Admin</span>
                     </th>
                     <th className="py-3 px-4 text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <span>Last Transfer</span>
-                      </div>
+                      <span>Last Transfer</span>
                     </th>
                     <th className="py-3 px-4 text-center">Actions</th>
                   </>
@@ -701,7 +765,6 @@ function MRCash() {
                         {record.mrName}
                       </div>
                     </td>
-
                     {activeTab === "carry" ? (
                       <>
                         <td className="py-3 px-4 text-center">
@@ -732,6 +795,14 @@ function MRCash() {
                               disabled={record.currentCash <= 0}
                             >
                               <TrendingUp size={18} />
+                            </button>
+                            {/* Credit Collection Invoices button */}
+                            <button
+                              onClick={() => openCreditModal(record)}
+                              className="text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                              title="View Credit Collection Invoices"
+                            >
+                              <HandCoins size={18} />
                             </button>
                           </div>
                         </td>
@@ -773,57 +844,44 @@ function MRCash() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4 mt-6">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => handlePageChange(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
-            >
-              <span>Previous</span>
-            </button>
-
-            <div className="flex items-center gap-2">
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                let pageNum;
-                if (totalPages <= 5) {
-                  pageNum = i + 1;
-                } else if (currentPage <= 3) {
-                  pageNum = i + 1;
-                } else if (currentPage >= totalPages - 2) {
-                  pageNum = totalPages - 4 + i;
-                } else {
-                  pageNum = currentPage - 2 + i;
-                }
-
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => handlePageChange(pageNum)}
-                    className={`px-3 py-1 rounded-lg min-w-[40px] cursor-pointer ${
-                      currentPage === pageNum
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              onClick={() => handlePageChange(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
-            >
-              <span>Next</span>
-            </button>
+        <div className="flex items-center gap-4 mt-6">
+          <button
+            onClick={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            Previous
+          </button>
+          <div className="flex items-center gap-2">
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNum;
+              if (totalPages <= 5) pageNum = i + 1;
+              else if (currentPage <= 3) pageNum = i + 1;
+              else if (currentPage >= totalPages - 2)
+                pageNum = totalPages - 4 + i;
+              else pageNum = currentPage - 2 + i;
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => handlePageChange(pageNum)}
+                  className={`px-3 py-1 rounded-lg min-w-[40px] cursor-pointer ${currentPage === pageNum ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
           </div>
+          <button
+            onClick={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            Next
+          </button>
         </div>
       )}
 
-      {/* View Modal */}
+      {/* ── View Modal ─────────────────────────────────────────────────────── */}
       {isViewModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -915,7 +973,6 @@ function MRCash() {
                       </p>
                     </div>
                   </div>
-
                   <div className="mb-6">
                     <h3 className="text-lg font-medium text-gray-700 mb-3">
                       Last 30 Transfer Records
@@ -952,6 +1009,9 @@ function MRCash() {
                               <th className="py-3 px-4 font-medium text-gray-700">
                                 Transferred By
                               </th>
+                              <th className="py-3 px-4 font-medium text-gray-700">
+                                Actions
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -974,6 +1034,28 @@ function MRCash() {
                                 </td>
                                 <td className="py-3 px-4 text-gray-600">
                                   {transfer.transferredBy?.name || "System"}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      onClick={() =>
+                                        handleEditTransfer(transfer)
+                                      }
+                                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                                      title="Edit Transfer"
+                                    >
+                                      <Edit size={16} />
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        handleDeleteTransfer(transfer)
+                                      }
+                                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                                      title="Delete Transfer"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -1001,7 +1083,7 @@ function MRCash() {
           document.body,
         )}
 
-      {/* Add / Transfer to Admin Modal */}
+      {/* ── Add / Transfer to Admin Modal ──────────────────────────────────── */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1026,7 +1108,6 @@ function MRCash() {
                   <X size={24} />
                 </button>
               </div>
-
               <form
                 onSubmit={handleSubmitTransferToAdmin}
                 className="p-6 space-y-4"
@@ -1051,7 +1132,6 @@ function MRCash() {
                     </p>
                   )}
                 </div>
-
                 {selectedMRCash && (
                   <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <div className="flex justify-between items-center">
@@ -1064,7 +1144,6 @@ function MRCash() {
                     </div>
                   </div>
                 )}
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Destination Account <span className="text-red-500">*</span>
@@ -1085,7 +1164,6 @@ function MRCash() {
                     ))}
                   </select>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Transfer Amount ($) <span className="text-red-500">*</span>
@@ -1107,7 +1185,6 @@ function MRCash() {
                     </p>
                   )}
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Transfer Notes
@@ -1121,7 +1198,6 @@ function MRCash() {
                     placeholder="Reason for transfer..."
                   />
                 </div>
-
                 <div className="flex justify-end gap-3 pt-4 border-t">
                   <button
                     type="button"
@@ -1141,7 +1217,6 @@ function MRCash() {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer"
                     disabled={
                       !formData.mrCashId ||
                       !formData.transferAmount ||
@@ -1151,6 +1226,7 @@ function MRCash() {
                           selectedMRCash.currentCash) ||
                       !formData.destinationAccount
                     }
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Transfer to Admin
                   </button>
@@ -1161,7 +1237,7 @@ function MRCash() {
           document.body,
         )}
 
-      {/* Transfer Modal (from table row) */}
+      {/* ── Transfer Modal (from table row) ────────────────────────────────── */}
       {isTransferModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -1178,7 +1254,6 @@ function MRCash() {
                   <X size={24} />
                 </button>
               </div>
-
               <form onSubmit={handleSubmitTransfer} className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1188,7 +1263,6 @@ function MRCash() {
                     {selectedRecord.mrName}
                   </div>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Available Cash
@@ -1197,7 +1271,6 @@ function MRCash() {
                     {formatCurrency(selectedRecord.currentCash)}
                   </div>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Destination Account <span className="text-red-500">*</span>
@@ -1218,7 +1291,6 @@ function MRCash() {
                     ))}
                   </select>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Transfer Amount ($) <span className="text-red-500">*</span>
@@ -1236,7 +1308,6 @@ function MRCash() {
                     Maximum: {formatCurrency(selectedRecord.currentCash)}
                   </p>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Transfer Notes
@@ -1250,7 +1321,6 @@ function MRCash() {
                     placeholder="Reason for transfer..."
                   />
                 </div>
-
                 <div className="flex justify-end gap-3 pt-4 border-t">
                   <button
                     type="button"
@@ -1261,7 +1331,6 @@ function MRCash() {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer"
                     disabled={
                       !transferForm.amount ||
                       parseFloat(transferForm.amount) <= 0 ||
@@ -1269,11 +1338,238 @@ function MRCash() {
                         selectedRecord.currentCash ||
                       !transferForm.destinationAccount
                     }
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Transfer
                   </button>
                 </div>
               </form>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* ── Edit Transfer Modal ─────────────────────────────────────────────── */}
+      {isEditTransferModalOpen &&
+        editingTransfer &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+              <div className="flex justify-between items-center p-6 border-b">
+                <h2 className="text-xl font-bold text-gray-800">
+                  Edit Transfer
+                </h2>
+                <button
+                  onClick={() => {
+                    setIsEditTransferModalOpen(false);
+                    setEditingTransfer(null);
+                  }}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              <form
+                onSubmit={handleSubmitEditTransfer}
+                className="p-6 space-y-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    MR Name
+                  </label>
+                  <div className="p-3 bg-gray-50 rounded-lg font-medium">
+                    {editingTransfer.fromAccountName}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Destination Account
+                  </label>
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    {editingTransfer.toAccountName}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transfer Amount ($) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="amount"
+                    value={editTransferForm.amount}
+                    onChange={handleEditTransferFormChange}
+                    className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="Enter amount"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transfer Notes
+                  </label>
+                  <textarea
+                    name="notes"
+                    value={editTransferForm.notes}
+                    onChange={handleEditTransferFormChange}
+                    rows="3"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="Reason for transfer..."
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditTransferModalOpen(false);
+                      setEditingTransfer(null);
+                    }}
+                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+                  >
+                    Update Transfer
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* ── Credit Collection Invoices Modal ───────────────────────────────── */}
+      {isCreditModalOpen &&
+        selectedMrForCredit &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center p-6 border-b">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    Credit Collection Invoices
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    MR:{" "}
+                    <span className="font-semibold text-indigo-700">
+                      {selectedMrForCredit.mrName}
+                    </span>
+                  </p>
+                </div>
+                <button
+                  onClick={closeCreditModal}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6">
+                {creditInvoicesLoading ? (
+                  <div className="text-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-3"></div>
+                    <p className="text-gray-500">Loading invoices...</p>
+                  </div>
+                ) : creditInvoices.length === 0 ? (
+                  <div className="text-center py-12">
+                    <HandCoins
+                      className="mx-auto text-gray-300 mb-3"
+                      size={48}
+                    />
+                    <p className="text-gray-500 font-medium">
+                      No credit collection invoices found
+                    </p>
+                    <p className="text-gray-400 text-sm mt-1">
+                      No Credit Collection transactions have been recorded for
+                      this MR yet.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Summary strip */}
+                    <div className="mb-4 p-3 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-between">
+                      <span className="text-sm text-indigo-700 font-medium">
+                        {creditInvoices.length} invoice
+                        {creditInvoices.length !== 1 ? "s" : ""} collected
+                      </span>
+                      <span className="text-sm text-indigo-700 font-bold">
+                        Total:{" "}
+                        {formatCurrency(
+                          creditInvoices.reduce(
+                            (s, i) => s + (i.finalAmount || i.amount || 0),
+                            0,
+                          ),
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="py-3 px-4 text-left font-medium text-gray-700">
+                              Invoice #
+                            </th>
+                            <th className="py-3 px-4 text-left font-medium text-gray-700">
+                              Customer
+                            </th>
+                            <th className="py-3 px-4 text-left font-medium text-gray-700">
+                              Date
+                            </th>
+                            <th className="py-3 px-4 text-right font-medium text-gray-700">
+                              Amount
+                            </th>
+                            <th className="py-3 px-4 text-left font-medium text-gray-700">
+                              Account
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {creditInvoices.map((inv, index) => (
+                            <tr
+                              key={inv._id || index}
+                              className="border-t hover:bg-gray-50"
+                            >
+                              <td className="py-3 px-4">
+                                <span className="font-medium text-indigo-700">
+                                  {inv.invoiceNumber || "—"}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-gray-600">
+                                {inv.customerName || "—"}
+                              </td>
+                              <td className="py-3 px-4 text-gray-600">
+                                {formatDateShort(inv.date)}
+                              </td>
+                              <td className="py-3 px-4 text-right font-semibold text-green-700">
+                                {formatCurrency(
+                                  inv.finalAmount || inv.amount || 0,
+                                )}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+                                  {inv.destination || inv.accountType || "—"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="flex justify-end p-6 border-t">
+                <button
+                  onClick={closeCreditModal}
+                  className="px-5 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>,
           document.body,

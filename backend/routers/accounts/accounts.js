@@ -8,16 +8,17 @@ import Transaction from "../../models/accounts/Transaction.js";
 
 const router = express.Router();
 
-function formatTx(tx, direction) {
+// Helper to format a transaction for frontend consumption
+function formatTx(tx, direction = null) {
   return {
     _id: tx._id,
-    direction, // "credit" | "debit"
+    direction, // "credit", "debit", or null
 
     // ── Core display fields ──
     transactionType: tx.transactionType || "transaction",
-    categoryTypeName: tx.categoryType?.name || null, // populated: "MR Transfer"
-    destinationName: tx.destination?.name || tx.accountType || null, // "Cash Balance"
-    sourceName: tx.source?.name || null, // source account name
+    categoryTypeName: tx.categoryType || null,
+    destinationName: tx.destination || null,
+    sourceName: tx.sourceAccount || null,
 
     // ── Amount ──
     amount: tx.finalAmount || tx.amount || 0,
@@ -28,7 +29,7 @@ function formatTx(tx, direction) {
     invoiceDate: tx.invoiceDate || null,
 
     // ── Invoice / customer info ──
-    invoiceNumber: tx.invoiceNumber || null,
+    invoiceNumber: tx.invoiceNo || null,
     customerName: tx.customerName || null,
     customerAddress: tx.customerAddress || null,
 
@@ -42,7 +43,9 @@ function formatTx(tx, direction) {
   };
 }
 
+// ============================================================================
 // Category Types
+// ============================================================================
 router.get("/category-type", async (req, res) => {
   try {
     const categories = await CategoryType.find({ isActive: true })
@@ -141,8 +144,7 @@ router.put("/category-type/:id", async (req, res) => {
     }
 
     if (name !== undefined) categoryType.name = name.trim();
-    if (description !== undefined)
-      categoryType.description = description.trim();
+    if (description !== undefined) categoryType.description = description.trim();
     if (code !== undefined) categoryType.code = code.trim();
     if (isActive !== undefined) categoryType.isActive = isActive;
 
@@ -200,7 +202,9 @@ router.delete("/category-type/:id", async (req, res) => {
   }
 });
 
+// ============================================================================
 // Destinations
+// ============================================================================
 router.get("/destinations", async (req, res) => {
   try {
     const destinations = await Destination.find({ isActive: true })
@@ -365,43 +369,91 @@ router.delete("/destinations/:id", async (req, res) => {
     });
   }
 });
+// ============================================================================
+// ROUTE: Get transactions (optionally filtered by accountId)
+// ============================================================================
+router.get("/transactions", async (req, res) => {
+  try {
+    const { accountId } = req.query;
 
+    let transactions;
+    let formatted;
+
+    if (accountId && mongoose.Types.ObjectId.isValid(accountId)) {
+      // 1. Find the account to get its name
+      const account = await Destination.findById(accountId).lean();
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          message: "Account not found",
+        });
+      }
+      const accountName = account.name;
+
+      // 2. Find transactions where source or destination matches the account name
+      transactions = await Transaction.find({
+        $or: [{ sourceAccount: accountName }, { destination: accountName }],
+      })
+        .sort({ date: -1, createdAt: -1 })
+        .lean();
+
+      // 3. Add direction based on whether the account is destination (credit) or source (debit)
+      formatted = transactions.map((tx) => {
+        const isCredit = tx.destination === accountName;
+        return formatTx(tx, isCredit ? "credit" : "debit");
+      });
+    } else {
+      // No accountId – return all transactions without direction
+      transactions = await Transaction.find({})
+        .sort({ date: -1, createdAt: -1 })
+        .lean();
+
+      formatted = transactions.map((tx) => formatTx(tx, null));
+    }
+
+    res.json({
+      success: true,
+      data: formatted,
+    });
+  } catch (error) {
+    console.error("Error fetching transactions:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch transactions",
+      error: error.message,
+    });
+  }
+});
+
+// ============================================================================
+// ROUTE: Get company balance with per‑account transaction lists
+// ============================================================================
 router.get("/balance", async (req, res) => {
   try {
-    // 1. All active accounts
     const destinations = await Destination.find({ isActive: true })
       .sort({ name: 1 })
       .lean();
 
-    // 2. Total balance = sum of all Destination.totalAmount
     const totalBalance = destinations.reduce(
       (sum, dest) => sum + (dest.totalAmount || 0),
       0,
     );
 
-    // 3. Per-account: fetch ALL transactions linked by destination OR source
-    //    Populate categoryType → name, destination → name, source → name
+    // For each account, fetch transactions by name (not ID)
     const accountsWithTransactions = await Promise.all(
       destinations.map(async (dest) => {
-        const destId = dest._id;
+        const accountName = dest.name;
 
-        // ── Money IN: destination === this account ──
-        const incomingRaw = await Transaction.find({ destination: destId })
-          .populate("categoryType", "name") // e.g. "MR Transfer"
-          .populate("destination", "name") // e.g. "Cash Balance"
-          .populate("source", "name") // e.g. source account name if any
+        // Transactions where this account is the destination (money in)
+        const incomingRaw = await Transaction.find({ destination: accountName })
           .sort({ date: -1, createdAt: -1 })
           .lean();
 
-        // ── Money OUT: source === this account ──
-        const outgoingRaw = await Transaction.find({ source: destId })
-          .populate("categoryType", "name")
-          .populate("destination", "name")
-          .populate("source", "name")
+        // Transactions where this account is the source (money out)
+        const outgoingRaw = await Transaction.find({ sourceAccount: accountName })
           .sort({ date: -1, createdAt: -1 })
           .lean();
 
-        // Format both arrays with full details
         const formattedIncoming = incomingRaw.map((tx) =>
           formatTx(tx, "credit"),
         );
@@ -409,14 +461,13 @@ router.get("/balance", async (req, res) => {
           formatTx(tx, "debit"),
         );
 
-        // Merge and sort newest first
         const allTransactions = [
           ...formattedIncoming,
           ...formattedOutgoing,
         ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
         return {
-          _id: destId,
+          _id: dest._id,
           name: dest.name,
           code: dest.code,
           totalAmount: dest.totalAmount || 0,
@@ -443,7 +494,124 @@ router.get("/balance", async (req, res) => {
     });
   }
 });
+// ============================================================================
+// ROUTE: Get transactions (optionally filtered by accountId)
+// ============================================================================
+// router.get("/transactions", async (req, res) => {
+//   try {
+//     const { accountId } = req.query;
 
+//     let transactions;
+//     let formatted;
+
+//     if (accountId && mongoose.Types.ObjectId.isValid(accountId)) {
+//       // Filter by account – compare with the string representation of the account ID.
+//       // (This is a temporary workaround; ideally you would store the account name.)
+//       transactions = await Transaction.find({
+//         $or: [{ sourceAccount: accountId }, { destination: accountId }],
+//       })
+//         .sort({ date: -1, createdAt: -1 })
+//         .lean();
+
+//       formatted = transactions.map((tx) => {
+//         const isCredit = tx.destination === accountId;
+//         return formatTx(tx, isCredit ? "credit" : "debit");
+//       });
+//     } else {
+//       // No accountId – return all transactions without direction
+//       transactions = await Transaction.find({})
+//         .sort({ date: -1, createdAt: -1 })
+//         .lean();
+
+//       formatted = transactions.map((tx) => formatTx(tx, null));
+//     }
+
+//     res.json({
+//       success: true,
+//       data: formatted,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching transactions:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch transactions",
+//       error: error.message,
+//     });
+//   }
+// });
+
+// // ============================================================================
+// // ROUTE: Get company balance with per‑account transaction lists
+// // ============================================================================
+// router.get("/balance", async (req, res) => {
+//   try {
+//     const destinations = await Destination.find({ isActive: true })
+//       .sort({ name: 1 })
+//       .lean();
+
+//     const totalBalance = destinations.reduce(
+//       (sum, dest) => sum + (dest.totalAmount || 0),
+//       0,
+//     );
+
+//     const accountsWithTransactions = await Promise.all(
+//       destinations.map(async (dest) => {
+//         const accountId = dest._id.toString(); // convert to string for comparison
+
+//         // Transactions where this account is the destination (money in)
+//         const incomingRaw = await Transaction.find({ destination: accountId })
+//           .sort({ date: -1, createdAt: -1 })
+//           .lean();
+
+//         // Transactions where this account is the source (money out)
+//         const outgoingRaw = await Transaction.find({ sourceAccount: accountId })
+//           .sort({ date: -1, createdAt: -1 })
+//           .lean();
+
+//         const formattedIncoming = incomingRaw.map((tx) =>
+//           formatTx(tx, "credit"),
+//         );
+//         const formattedOutgoing = outgoingRaw.map((tx) =>
+//           formatTx(tx, "debit"),
+//         );
+
+//         const allTransactions = [
+//           ...formattedIncoming,
+//           ...formattedOutgoing,
+//         ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+//         return {
+//           _id: dest._id,
+//           name: dest.name,
+//           code: dest.code,
+//           totalAmount: dest.totalAmount || 0,
+//           transactions: allTransactions,
+//           transactionCount: allTransactions.length,
+//         };
+//       }),
+//     );
+
+//     res.json({
+//       success: true,
+//       totalBalance,
+//       accounts: accountsWithTransactions,
+//       accountCount: destinations.length,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching company balance:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch company balance",
+//       error: error.message,
+//       totalBalance: 0,
+//       accounts: [],
+//     });
+//   }
+// });
+
+// ============================================================================
+// GET / – list sales (account summaries)
+// ============================================================================
 router.get("/", async (req, res) => {
   try {
     const {
@@ -533,6 +701,9 @@ router.get("/", async (req, res) => {
   }
 });
 
+// ============================================================================
+// GET /alternative – alternative route with aggregation
+// ============================================================================
 router.get("/alternative", async (req, res) => {
   try {
     const {
@@ -641,6 +812,9 @@ router.get("/alternative", async (req, res) => {
   }
 });
 
+// ============================================================================
+// GET /statistics – sales statistics
+// ============================================================================
 router.get("/statistics", async (req, res) => {
   try {
     const { startDate, endDate, customerCode } = req.query;
@@ -718,7 +892,9 @@ router.get("/statistics", async (req, res) => {
   }
 });
 
-// Parameterized route must come last
+// ============================================================================
+// Parameterized route must come last: GET /:id – single sale
+// ============================================================================
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;

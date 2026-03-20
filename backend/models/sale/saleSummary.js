@@ -107,7 +107,7 @@
       isReturn: { type: Boolean, default: false },
 
       importBatchId: { type: Number },
-      importStatus: { type: String, default: "pending" },
+      pendingAmountPaid: { type: String, default: "pending" },
 
       totalProfitLoss: { type: Number, default: 0, set: roundToFour },
     },

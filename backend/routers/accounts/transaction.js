@@ -1,22 +1,23 @@
 import express from "express";
 import Transaction from "../../models/accounts/Transaction.js";
 import Destination from "../../models/accounts/Destination.js";
+import MRCash from "../../models/accounts/MRCash.js";
+import Sale from "../../models/sale/saleSummary.js";
+import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import multer from "multer";
 
 const router = express.Router();
 
-// Configure multer for file upload
 const storage = multer.memoryStorage();
 const upload = multer({
-  storage: storage,
+  storage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedMimeTypes = [
       "application/vnd.ms-excel",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
       "application/x-excel",
       "application/x-msexcel",
       "text/csv",
@@ -26,25 +27,71 @@ const upload = multer({
       "application/octet-stream",
     ];
     const allowedExtensions = [".xlsx", ".xls", ".csv"];
-    const fileExtension = file.originalname
+    const ext = file.originalname
       .toLowerCase()
       .slice(file.originalname.lastIndexOf("."));
     if (
       allowedMimeTypes.includes(file.mimetype) ||
-      allowedExtensions.includes(fileExtension)
-    ) {
+      allowedExtensions.includes(ext)
+    )
       cb(null, true);
-    } else {
+    else
       cb(
         new Error(
           "Invalid file type. Please upload Excel (.xlsx, .xls) or CSV files only.",
         ),
       );
-    }
   },
 });
 
-// Helper: Update account balances by account name
+// =============================================================================
+// Helper: Derive a valid transactionType enum value from a category label.
+// =============================================================================
+function deriveTransactionType(label = "") {
+  const s = label.toLowerCase().trim();
+  if (s.includes("deposit")) return "deposit";
+  if (s.includes("withdraw")) return "withdraw";
+  if (s.includes("remittance")) return "remittance";
+  if (s.includes("payment inward")) return "payment inward";
+  if (s.includes("payment outward")) return "payment outward";
+  if (s.includes("cash sale")) return "cash sale";
+  if (s.includes("credit collection")) return "credit collection";
+  if (s.includes("tour collection")) return "tour collection";
+  if (s.includes("collection")) return "collection";
+  if (s.includes("transfer")) return "transfer";
+  if (s.includes("expense")) return "expense";
+  return "sale";
+}
+
+// =============================================================================
+// Helper: Check if an MR (by name) is in stockTransferToMR
+// Returns true if MR is a field MR (has stock), false otherwise
+// =============================================================================
+async function isMRInStockTransfer(mrName) {
+  if (!mrName || mrName.trim() === "") return false;
+  try {
+    // stockTransferToMR stores mrId references; we need to find via MRCash
+    const nameRegex = new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i");
+    const mrCashRecord = await MRCash.findOne({
+      mrName: nameRegex,
+      isActive: true,
+    }).lean();
+    if (!mrCashRecord) return false;
+
+    // Check if this mrId has stock transfers
+    const stockTransfer = await stockTransferToMR
+      .findOne({ mrId: mrCashRecord.mrId })
+      .lean();
+    return !!stockTransfer;
+  } catch (err) {
+    console.warn("isMRInStockTransfer error:", err.message);
+    return false;
+  }
+}
+
+// =============================================================================
+// Helper: Adjust Destination account balances
+// =============================================================================
 async function adjustBalances(transaction, session, isDelete = false) {
   const {
     transactionType,
@@ -54,11 +101,9 @@ async function adjustBalances(transaction, session, isDelete = false) {
     finalAmount,
     categoryType,
   } = transaction;
+  const amountValue = finalAmount || amount;
+  if (typeof amountValue !== "number" || amountValue <= 0) return;
 
-  if (typeof amount !== "number" || amount <= 0)
-    throw new Error("Invalid amount in transaction");
-
-  // Find source account by name (if provided and not "--")
   const sourceAcc =
     sourceAccount && sourceAccount !== "--"
       ? await Destination.findOne({ name: sourceAccount }).session(session)
@@ -68,148 +113,247 @@ async function adjustBalances(transaction, session, isDelete = false) {
       ? await Destination.findOne({ name: destination }).session(session)
       : null;
 
-  switch (transactionType) {
-    case "deposit":
-      if (!sourceAcc || !destAcc)
-        throw new Error("Source or destination account missing for deposit");
-      if (isDelete) {
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + amount;
-        destAcc.totalAmount =
-          (destAcc.totalAmount || 0) - (finalAmount || amount);
-      } else {
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amount;
-        destAcc.totalAmount =
-          (destAcc.totalAmount || 0) + (finalAmount || amount);
-        if (sourceAcc.totalAmount < 0)
-          throw new Error(
-            `Insufficient balance in source account. Available: $${sourceAcc.totalAmount + amount}, Required: $${amount}`,
-          );
-      }
+  const cat = (categoryType || "").toLowerCase();
+  const txType = (transactionType || "").toLowerCase();
+  const isDeposit = cat === "deposit" || txType === "deposit";
+  const isWithdraw = cat === "withdraw" || txType === "withdraw";
+  const isCashSale = cat.includes("cash sale") || txType === "cash sale";
+  const isCreditCol =
+    cat.includes("credit collection") || txType === "credit collection";
+  const isRemittance = cat.includes("remittance") || txType === "remittance";
+  const isPaymentInward =
+    cat.includes("payment inward") || txType === "payment inward";
+  const isPaymentOutward =
+    cat.includes("payment outward") || txType === "payment outward";
+  const m = isDelete ? -1 : 1;
+
+  if (isDeposit) {
+    if (sourceAcc) {
+      sourceAcc.totalAmount = Math.max(
+        0,
+        (sourceAcc.totalAmount || 0) - amountValue * m,
+      );
       await sourceAcc.save({ session });
+    }
+    if (destAcc) {
+      destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
-      break;
-
-    case "withdraw":
-      if (!sourceAcc || !destAcc)
-        throw new Error("Source or destination account missing for withdraw");
-      if (isDelete) {
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + amount;
-        destAcc.totalAmount = (destAcc.totalAmount || 0) - amount;
-      } else {
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amount;
-        destAcc.totalAmount = (destAcc.totalAmount || 0) + amount;
-        if (sourceAcc.totalAmount < 0)
-          throw new Error(
-            `Insufficient balance in source account. Available: $${sourceAcc.totalAmount + amount}, Required: $${amount}`,
-          );
-      }
+    }
+  } else if (isWithdraw || isRemittance || isPaymentOutward) {
+    if (sourceAcc) {
+      sourceAcc.totalAmount = Math.max(
+        0,
+        (sourceAcc.totalAmount || 0) - amountValue * m,
+      );
       await sourceAcc.save({ session });
+    }
+    if (destAcc) {
+      destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
-      break;
-
-    case "payment inward":
-      if (!destAcc)
-        throw new Error("Destination account missing for payment inward");
-      destAcc.totalAmount = isDelete
-        ? (destAcc.totalAmount || 0) - amount
-        : (destAcc.totalAmount || 0) + amount;
+    }
+  } else if (isCashSale || isCreditCol) {
+    // Only adjust destination account balance for cash sale/credit collection
+    // (credit collection to MR doesn't affect a Destination account — MRCash handles it)
+    if (destAcc) {
+      destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
-      break;
-
-    case "payment outward":
-      if (!sourceAcc)
-        throw new Error("Source account missing for payment outward");
-      sourceAcc.totalAmount = isDelete
-        ? (sourceAcc.totalAmount || 0) + amount
-        : (sourceAcc.totalAmount || 0) - amount;
-      await sourceAcc.save({ session });
-      break;
-
-    case "remittance":
-      if (!sourceAcc) throw new Error("Source account missing for remittance");
-      sourceAcc.totalAmount = isDelete
-        ? (sourceAcc.totalAmount || 0) + amount
-        : (sourceAcc.totalAmount || 0) - amount;
-      await sourceAcc.save({ session });
-      break;
-
-    case "cash sale":
-    case "credit collection":
-      if (!destAcc)
-        throw new Error("Destination account missing for sale transaction");
-      destAcc.totalAmount = isDelete
-        ? (destAcc.totalAmount || 0) - amount
-        : (destAcc.totalAmount || 0) + amount;
+    }
+  } else if (isPaymentInward) {
+    if (destAcc) {
+      destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
-      break;
-
-    default:
-      if (destAcc) {
-        destAcc.totalAmount = isDelete
-          ? (destAcc.totalAmount || 0) - amount
-          : (destAcc.totalAmount || 0) + amount;
-        await destAcc.save({ session });
-      }
-      break;
+    }
+  } else {
+    if (destAcc) {
+      destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
+      await destAcc.save({ session });
+    }
   }
 }
 
-// Helper: Check if source account has sufficient balance (by name)
-async function checkSourceAccountBalance(
-  sourceAccountName,
-  amount,
-  transactionType,
-) {
-  if (!sourceAccountName || sourceAccountName === "--") return true;
-  const sourceAccount = await Destination.findOne({ name: sourceAccountName });
-  if (!sourceAccount)
-    throw new Error(`Source account not found: ${sourceAccountName}`);
-  const currentBalance = sourceAccount.totalAmount || 0;
+// =============================================================================
+// KEY FIX: updateMRCashOnCreditCollection
+//
+// ROUTING LOGIC:
+//   1. Find the Sale by invoiceNo → get mrName
+//   2. Check if mrName is in stockTransferToMR (is a field MR)
+//      YES → add finalAmount to MRCash.currentCash
+//      NO  → add finalAmount to Destination account (via adjustBalances for tour collection)
+//
+// add=true  → adding the transaction
+// add=false → reversing the transaction (delete/update)
+// =============================================================================
+async function updateMRCashOnCreditCollection(tx, session, add = true) {
+  const { invoiceNo, finalAmount, amount, categoryType, transactionType } = tx;
+
+  const cat = (categoryType || "").toLowerCase();
+  const txType = (transactionType || "").toLowerCase();
+  const isCreditCol =
+    cat.includes("credit collection") || txType === "credit collection";
+
+  if (!isCreditCol) return;
+  if (!invoiceNo || invoiceNo === "NA" || invoiceNo === "") return;
+
+  const collected = finalAmount || amount || 0;
+  if (collected <= 0) return;
+
+  const change = add ? collected : -collected;
+
+  // Find sale to get mrName
+  const sale = await Sale.findOne({ invoiceNumber: invoiceNo }).lean();
+  if (!sale || !sale.mrName) {
+    console.warn(
+      `updateMRCashOnCreditCollection: no sale/mrName for invoice ${invoiceNo}`,
+    );
+    return;
+  }
+
+  const mrName = sale.mrName.trim();
+  const isFieldMR = await isMRInStockTransfer(mrName);
+
+  if (isFieldMR) {
+    // ── Path A: MR is in stockTransferToMR → update MRCash.currentCash ──
+    const nameRegex = new RegExp(`^\\s*${mrName}\\s*$`, "i");
+    const mrCash = await MRCash.findOne({
+      mrName: nameRegex,
+      isActive: true,
+    }).session(session);
+    if (!mrCash) {
+      console.warn(
+        `updateMRCashOnCreditCollection: no MRCash record for mrName="${mrName}"`,
+      );
+      return;
+    }
+    mrCash.currentCash = parseFloat(
+      Math.max(0, (mrCash.currentCash || 0) + change).toFixed(4),
+    );
+    mrCash.updatedAt = new Date();
+    await mrCash.save({ session });
+    console.log(`[Credit Collection] Added $${change} to MRCash for ${mrName}`);
+  } else {
+    // ── Path B: MR is NOT in stockTransferToMR → add to Destination account ──
+    // The destination account is already the tab account (Cash Balance etc.)
+    // This is handled by adjustBalances — nothing extra needed here.
+    // But we also create a "tour collection" transaction note for audit trail.
+    console.log(
+      `[Credit Collection] MR "${mrName}" not in stockTransferToMR — amount goes to Destination account`,
+    );
+  }
+}
+
+// =============================================================================
+// Helper: Update Sale record (paidAmount, dueAmount, pendingAmountPaid)
+//
+// KEY FIX for partial payment:
+//   - If amount == dueAmount → set pendingAmountPaid = "paid"
+//   - If amount < dueAmount → add to paidAmount, subtract from dueAmount, keep "pending"
+// =============================================================================
+async function updateSaleFromTransaction(tx, session, add = true) {
+  const { invoiceNo, finalAmount, amount, categoryType, transactionType } = tx;
+  if (!invoiceNo || invoiceNo === "NA" || invoiceNo === "") return;
+
+  const cat = (categoryType || "").toLowerCase();
+  const txType = (transactionType || "").toLowerCase();
+  const isCashSale = cat.includes("cash sale") || txType === "cash sale";
+  const isCreditCol =
+    cat.includes("credit collection") || txType === "credit collection";
+  if (!isCashSale && !isCreditCol) return;
+
+  const sale = await Sale.findOne({ invoiceNumber: invoiceNo }).session(
+    session,
+  );
+  if (!sale) {
+    console.warn(`Sale not found for invoice: ${invoiceNo}`);
+    return;
+  }
+
+  const collected = finalAmount || amount || 0;
+  const change = add ? collected : -collected;
+
+  if (isCashSale) {
+    if (add) {
+      sale.paidAmount = sale.totalAmount;
+      sale.dueAmount = 0;
+      sale.paymentStatus = "Paid";
+      sale.pendingAmountPaid = "paid";
+    } else {
+      sale.paidAmount = 0;
+      sale.dueAmount = sale.totalAmount;
+      sale.paymentStatus = "Cash";
+      sale.pendingAmountPaid = "pending";
+    }
+  } else if (isCreditCol) {
+    // KEY FIX: Support partial payments
+    const newPaid = Math.max(0, (sale.paidAmount || 0) + change);
+    const newDue = Math.max(0, sale.totalAmount - newPaid);
+    sale.paidAmount = parseFloat(newPaid.toFixed(4));
+    sale.dueAmount = parseFloat(newDue.toFixed(4));
+
+    if (newDue <= 0) {
+      // Fully paid → hide from dropdown
+      sale.paymentStatus = "Paid";
+      sale.pendingAmountPaid = "paid";
+    } else if (newPaid > 0) {
+      // Partially paid → still shows in dropdown (outstanding remains)
+      sale.paymentStatus = "Partial Paid";
+      sale.pendingAmountPaid = "pending";
+    } else {
+      sale.paymentStatus = "Credit";
+      sale.pendingAmountPaid = "pending";
+    }
+  }
+
+  await sale.save({ session });
+}
+
+// =============================================================================
+// Helper: Verify source account has sufficient balance
+// =============================================================================
+async function checkSourceAccountBalance(name, amount, txType) {
+  if (!name || name === "--") return true;
+  const acc = await Destination.findOne({ name });
+  if (!acc) throw new Error(`Source account not found: ${name}`);
+  const balance = acc.totalAmount || 0;
   if (
-    ["deposit", "withdraw", "remittance", "payment outward"].includes(
-      transactionType,
-    )
+    ["deposit", "withdraw", "remittance", "payment outward"].includes(txType)
   ) {
-    if (currentBalance < amount)
+    if (balance < amount)
       throw new Error(
-        `Insufficient balance in source account "${sourceAccountName}". Available: $${currentBalance.toFixed(2)}, Required: $${amount.toFixed(2)}`,
+        `Insufficient balance in "${name}". Available: $${balance.toFixed(2)}, Required: $${amount.toFixed(2)}`,
       );
   }
   return true;
 }
 
-// Helper: Parse date from various formats
-const parseDate = (dateValue) => {
-  if (!dateValue) return null;
-  if (dateValue instanceof Date) return dateValue;
-  if (typeof dateValue === "string") {
-    const date = new Date(dateValue);
-    if (!isNaN(date.getTime())) return date;
-    const parts = dateValue.split("-");
-    if (parts.length === 3) {
-      const d = new Date(
-        parseInt(parts[0]),
-        parseInt(parts[1]) - 1,
-        parseInt(parts[2]),
-      );
-      if (!isNaN(d.getTime())) return d;
+// =============================================================================
+// Date parsers / Excel helpers
+// =============================================================================
+const parseDate = (v) => {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === "string") {
+    const d1 = new Date(v);
+    if (!isNaN(d1)) return d1;
+    const p = v.split("-");
+    if (p.length === 3) {
+      const d2 = new Date(+p[0], +p[1] - 1, +p[2]);
+      if (!isNaN(d2)) return d2;
     }
-    if (dateValue.includes("/")) {
-      const p = dateValue.split("/");
-      if (p.length === 3) {
-        const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
-        if (!isNaN(d.getTime())) return d;
+    if (v.includes("/")) {
+      const q = v.split("/");
+      if (q.length === 3) {
+        const d3 = new Date(+q[2], +q[1] - 1, +q[0]);
+        if (!isNaN(d3)) return d3;
       }
     }
   }
-  if (typeof dateValue === "number") {
-    const date = new Date((dateValue - 25569) * 86400 * 1000);
-    if (!isNaN(date.getTime())) return date;
+  if (typeof v === "number") {
+    const d4 = new Date((v - 25569) * 86400 * 1000);
+    if (!isNaN(d4)) return d4;
   }
   return null;
 };
 
-// Helper: Get cell value from Excel
 const getCellValue = (cell) => {
   if (!cell) return null;
   if (cell.type === 6) return null;
@@ -219,127 +363,103 @@ const getCellValue = (cell) => {
       cell.value &&
       typeof cell.value === "string" &&
       cell.value.startsWith("=")
-    ) {
-      if (cell.value.startsWith("=IF(D") || cell.value.includes("=IF("))
-        return null;
-    }
+    )
+      return null;
     return "";
   }
-  const value = cell.value;
-  if (value === undefined || value === null) return null;
-  if (typeof value === "object" && !(value instanceof Date)) {
-    if (value.formula || value.sharedFormula) return cell.result || "";
-    return String(value);
+  const v = cell.value;
+  if (v === undefined || v === null) return null;
+  if (typeof v === "object" && !(v instanceof Date)) {
+    if (v.formula || v.sharedFormula) return cell.result || "";
+    return String(v);
   }
-  return value;
+  return v;
 };
 
-// Helper: Validate transaction by category
 const validateTransactionByCategory = (categoryName, rowData) => {
   const errors = [];
-  const categoryLower = categoryName.toLowerCase();
+  const cat = categoryName.toLowerCase();
   if (!rowData["Date"]) errors.push("Date is required");
   const amount = parseFloat(rowData["Amount"]);
-  if (!amount || amount <= 0 || isNaN(amount))
-    errors.push("Valid Amount is required");
-  switch (categoryLower) {
-    case "cash sale":
-    case "credit collection":
-      if (!rowData["Destination Account"])
-        errors.push(`Destination Account is required for ${categoryName}`);
-      if (!rowData["Customer Name"])
-        errors.push(`Customer Name is required for ${categoryName}`);
-      if (!rowData["Invoice Number"])
-        errors.push(`Invoice Number is required for ${categoryName}`);
-      break;
-    case "deposit":
-      if (!rowData["Source Account"])
-        errors.push("Source Account is required for Deposit");
-      if (!rowData["Destination Account"])
-        errors.push("Destination Account is required for Deposit");
-      if (
-        rowData["Exchange Loss"] &&
-        (isNaN(parseFloat(rowData["Exchange Loss"])) ||
-          parseFloat(rowData["Exchange Loss"]) < 0)
-      )
-        errors.push("Exchange Loss must be a valid non-negative number");
-      if (
-        rowData["Exchange Loss"] &&
-        parseFloat(rowData["Exchange Loss"]) > amount
-      )
-        errors.push("Exchange Loss cannot exceed Amount");
-      break;
-    case "withdraw":
-      if (!rowData["Source Account"])
-        errors.push("Source Account is required for Withdraw");
-      if (!rowData["Destination Account"])
-        errors.push("Destination Account is required for Withdraw");
-      break;
-    case "payment inward":
-      if (!rowData["Supplier Name"])
-        errors.push("Supplier Name is required for Payment Inward");
-      if (!rowData["Destination Account"])
-        errors.push("Destination Account is required for Payment Inward");
-      break;
-    case "remittance":
-      if (!rowData["Supplier Name"])
-        errors.push("Supplier Name is required for Remittance");
-      if (!rowData["Source Account"])
-        errors.push("Source Account is required for Remittance");
-      break;
-    default:
-      errors.push(`Unknown category type: ${categoryName}`);
-      break;
+  if (isNaN(amount) || amount <= 0) errors.push("Valid Amount is required");
+  if (cat.includes("cash sale") || cat.includes("credit collection")) {
+    if (!rowData["Destination Account"])
+      errors.push(`Destination Account is required for ${categoryName}`);
+    if (!rowData["Customer Name"])
+      errors.push(`Customer Name is required for ${categoryName}`);
+    if (!rowData["Invoice Number"])
+      errors.push(`Invoice Number is required for ${categoryName}`);
+  } else if (cat.includes("deposit")) {
+    if (!rowData["Source Account"])
+      errors.push("Source Account is required for Deposit");
+    if (!rowData["Destination Account"])
+      errors.push("Destination Account is required for Deposit");
+    const xl = parseFloat(rowData["Exchange Loss"]);
+    if (rowData["Exchange Loss"] && (isNaN(xl) || xl < 0))
+      errors.push("Exchange Loss must be a valid non-negative number");
+    if (rowData["Exchange Loss"] && xl > amount)
+      errors.push("Exchange Loss cannot exceed Amount");
+  } else if (cat.includes("withdraw")) {
+    if (!rowData["Source Account"])
+      errors.push("Source Account is required for Withdraw");
+    if (!rowData["Destination Account"])
+      errors.push("Destination Account is required for Withdraw");
+  } else if (cat.includes("payment inward")) {
+    if (!rowData["Supplier Name"])
+      errors.push("Supplier Name is required for Payment Inward");
+    if (!rowData["Destination Account"])
+      errors.push("Destination Account is required for Payment Inward");
+  } else if (cat.includes("remittance")) {
+    if (!rowData["Supplier Name"])
+      errors.push("Supplier Name is required for Remittance");
+    if (!rowData["Source Account"])
+      errors.push("Source Account is required for Remittance");
+  } else {
+    errors.push(`Unknown category type: ${categoryName}`);
   }
   return errors;
 };
 
 // =============================================================================
-// CHECK INVOICE UNIQUENESS
+// GET /check-invoice
 // =============================================================================
 router.get("/check-invoice", async (req, res) => {
   try {
     const { invoiceNumber, excludeId } = req.query;
-
-    if (!invoiceNumber || invoiceNumber.trim() === "") {
+    if (!invoiceNumber?.trim())
       return res
         .status(400)
         .json({ success: false, message: "Invoice number is required" });
-    }
-
     const query = { invoiceNo: invoiceNumber.trim() };
-    if (excludeId && mongoose.Types.ObjectId.isValid(excludeId)) {
+    if (excludeId && mongoose.Types.ObjectId.isValid(excludeId))
       query._id = { $ne: new mongoose.Types.ObjectId(excludeId) };
-    }
-
     const existing = await Transaction.findOne(query).lean();
-
     if (existing) {
-      return res.status(200).json({
-        success: true,
-        exists: true,
-        message: `Invoice ${invoiceNumber} already has a transaction`,
-        existingTransaction: {
-          id: existing._id,
-          invoiceNo: existing.invoiceNo,
-          categoryType: existing.categoryType,
-          accountType: existing.accountType,
-          destination: existing.destination,
-          amount: existing.amount,
-          date: existing.date,
-        },
-      });
+      return res
+        .status(200)
+        .json({
+          success: true,
+          exists: true,
+          message: `Invoice ${invoiceNumber} already has a transaction`,
+          existingTransaction: {
+            id: existing._id,
+            invoiceNo: existing.invoiceNo,
+            categoryType: existing.categoryType,
+            accountType: existing.accountType,
+            destination: existing.destination,
+            amount: existing.amount,
+            date: existing.date,
+          },
+        });
     }
-
     return res.status(200).json({ success: true, exists: false });
   } catch (error) {
-    console.error("Check invoice error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
 // =============================================================================
-// GET ALL TRANSACTIONS
+// GET / — all transactions
 // =============================================================================
 router.get("/", async (req, res) => {
   try {
@@ -349,44 +469,31 @@ router.get("/", async (req, res) => {
       categoryType,
       accountType,
       page = 1,
-      limit = 50,
+      limit = 500,
     } = req.query;
-
-    let query = {};
-
-    // Safe date parsing
+    const query = {};
     if (startDate || endDate) {
       query.date = {};
       if (startDate) {
-        const parsedStart = new Date(startDate);
-        if (!isNaN(parsedStart.getTime())) {
-          query.date.$gte = parsedStart;
-        }
+        const d = new Date(startDate);
+        if (!isNaN(d)) query.date.$gte = d;
       }
       if (endDate) {
-        const parsedEnd = new Date(endDate);
-        if (!isNaN(parsedEnd.getTime())) {
-          query.date.$lte = parsedEnd;
-        }
+        const d = new Date(endDate);
+        if (!isNaN(d)) query.date.$lte = d;
       }
-      if (Object.keys(query.date).length === 0) delete query.date;
+      if (!Object.keys(query.date).length) delete query.date;
     }
-
     if (categoryType) query.categoryType = categoryType;
     if (accountType) query.accountType = accountType;
-
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, parseInt(limit) || 50);
-    const skip = (pageNum - 1) * limitNum;
-
+    const limitNum = Math.max(1, parseInt(limit) || 500);
     const transactions = await Transaction.find(query)
       .sort({ date: -1, createdAt: -1 })
-      .skip(skip)
+      .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
-
     const total = await Transaction.countDocuments(query);
     const destinations = await Destination.find();
-
     res.json({
       success: true,
       data: transactions,
@@ -407,110 +514,132 @@ router.get("/", async (req, res) => {
 // GET single transaction
 router.get("/:id", async (req, res) => {
   try {
-    const transaction = await Transaction.findById(req.params.id);
-    if (!transaction)
+    const tx = await Transaction.findById(req.params.id);
+    if (!tx)
       return res
         .status(404)
         .json({ success: false, message: "Transaction not found" });
-    res.json({ success: true, data: transaction });
+    res.json({ success: true, data: tx });
   } catch (error) {
-    console.error("GET /:id error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// POST create transaction
+// =============================================================================
+// POST / — create transaction
+// KEY CHANGES:
+//   1. invoiceNo = actual invoice number
+//   2. categoryType = human label (e.g. "Credit Collection")
+//   3. transactionType = derived valid enum
+//   4. Sale.pendingAmountPaid updated with partial payment support
+//   5. MR routing: field MR → MRCash; non-field MR → Destination account
+// =============================================================================
 router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   try {
     session.startTransaction();
+
     const {
       categoryType,
-      sourceAccount, // string (account name)
-      destination, // string (account name or "--")
-      supplier, // string (optional)
+      sourceAccount,
+      destination,
+      supplier,
       amount,
       exchangeLoss = 0,
       finalAmount,
       date,
       invoiceDate,
-      invoiceNo, // string
-      customerName,
-      customerAddress,
-      accountType,
-      description,
-      remarks,
-      transactionType, // must be provided (e.g., "expense", "deposit", etc.)
-    } = req.body;
-
-    // Basic validation
-    if (!categoryType || !amount || !date || !accountType || !transactionType) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields",
-      });
-    }
-
-    // Check invoice uniqueness globally
-    if (invoiceNo && invoiceNo.trim() !== "") {
-      const duplicateInvoice = await Transaction.findOne({
-        invoiceNo: invoiceNo.trim(),
-      });
-      if (duplicateInvoice) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Invoice number "${invoiceNo}" already has a transaction in "${duplicateInvoice.accountType || "another tab"}".`,
-        });
-      }
-    }
-
-    let calculatedFinalAmount = parseFloat(finalAmount) || parseFloat(amount);
-    if (transactionType === "deposit") {
-      const exchangeLossValue = parseFloat(exchangeLoss) || 0;
-      calculatedFinalAmount = parseFloat(amount) - exchangeLossValue;
-    }
-
-    if (sourceAccount && sourceAccount !== "--")
-      await checkSourceAccountBalance(
-        sourceAccount,
-        parseFloat(amount),
-        transactionType,
-      );
-
-    const transactionData = {
-      invoiceNo: invoiceNo?.trim() || "NA",
-      categoryType,
-      sourceAccount: sourceAccount || "--",
-      destination: destination || "--",
-      supplier: supplier || "",
-      amount: parseFloat(amount),
-      exchangeLoss: parseFloat(exchangeLoss) || 0,
-      finalAmount: calculatedFinalAmount,
-      date: new Date(date),
-      invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
+      invoiceNo,
       customerName,
       customerAddress,
       accountType,
       description,
       remarks,
       transactionType,
+    } = req.body;
+
+    if (!categoryType || !amount || !date || !accountType) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
+    }
+
+    const normalizedTxType = deriveTransactionType(
+      categoryType || transactionType || "",
+    );
+    const invoiceNoClean =
+      invoiceNo && invoiceNo.trim() && invoiceNo.trim() !== "NA"
+        ? invoiceNo.trim()
+        : "NA";
+
+    if (invoiceNoClean !== "NA") {
+      const dup = await Transaction.findOne({ invoiceNo: invoiceNoClean });
+      if (dup) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: `Invoice "${invoiceNoClean}" already has a transaction in "${dup.accountType || "another tab"}".`,
+          });
+      }
+    }
+
+    const amountNum = parseFloat(amount);
+    const exchangeLossNum = parseFloat(exchangeLoss) || 0;
+    let calcFinal = parseFloat(finalAmount) || amountNum;
+    if (normalizedTxType === "deposit") calcFinal = amountNum - exchangeLossNum;
+
+    if (sourceAccount && sourceAccount !== "--" && sourceAccount !== "")
+      await checkSourceAccountBalance(
+        sourceAccount,
+        amountNum,
+        normalizedTxType,
+      );
+
+    const txData = {
+      invoiceNo: invoiceNoClean,
+      categoryType: categoryType,
+      sourceAccount: sourceAccount || "--",
+      destination: destination || "--",
+      supplier: supplier || "",
+      amount: amountNum,
+      exchangeLoss: exchangeLossNum,
+      finalAmount: calcFinal,
+      date: new Date(date),
+      invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
+      customerName: customerName || "",
+      customerAddress: customerAddress || "",
+      accountType,
+      description: description || "",
+      remarks: remarks || "",
+      transactionType: normalizedTxType,
     };
 
-    const transaction = new Transaction(transactionData);
-    await transaction.save({ session });
-    await adjustBalances(transaction, session, false);
+    const tx = new Transaction(txData);
+    await tx.save({ session });
+
+    // 1. Adjust Destination account balances
+    await adjustBalances(tx, session, false);
+
+    // 2. Update Sale record (partial payment support)
+    await updateSaleFromTransaction(tx, session, true);
+
+    // 3. Route to MRCash or Destination based on stockTransferToMR
+    await updateMRCashOnCreditCollection(tx, session, true);
+
     await session.commitTransaction();
     session.endSession();
-
-    res.status(201).json({
-      success: true,
-      data: transaction,
-      message: "Transaction created successfully",
-    });
+    res
+      .status(201)
+      .json({
+        success: true,
+        data: tx,
+        message: "Transaction created successfully",
+      });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -519,28 +648,21 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Helper: Check if row is template row
+// =============================================================================
+// POST /import
+// =============================================================================
 const isTemplateRow = (rowData) => {
-  const requiredFields = ["Category Type", "Amount", "Date", "Invoice Number"];
-  for (const field of requiredFields) {
-    const value = rowData[field];
-    if (value && typeof value === "string") {
-      const trimmed = value.trim();
-      if (
-        trimmed &&
-        trimmed !== "--" &&
-        !trimmed.startsWith("=IF(") &&
-        !trimmed.startsWith("Select")
-      )
+  for (const f of ["Category Type", "Amount", "Date", "Invoice Number"]) {
+    const v = rowData[f];
+    if (v && typeof v === "string") {
+      const t = v.trim();
+      if (t && t !== "--" && !t.startsWith("=IF(") && !t.startsWith("Select"))
         return false;
-    } else if (value && typeof value === "number") {
-      if (value !== 0) return false;
-    }
+    } else if (v && typeof v === "number" && v !== 0) return false;
   }
   return true;
 };
 
-// POST /import
 router.post("/import", upload.single("file"), async (req, res) => {
   const session = await mongoose.startSession();
   try {
@@ -554,36 +676,37 @@ router.post("/import", upload.single("file"), async (req, res) => {
 
     const workbook = new ExcelJS.Workbook();
     try {
-      if (file.originalname.toLowerCase().endsWith(".csv")) {
+      if (file.originalname.toLowerCase().endsWith(".csv"))
         await workbook.csv.read(file.buffer);
-      } else {
+      else
         await workbook.xlsx.load(file.buffer, {
           ignoreNodes: ["calcChain"],
           ignoreStyles: true,
         });
-      }
-    } catch (excelError) {
-      return res.status(400).json({
-        success: false,
-        message: "Error reading Excel file.",
-        error: excelError.message,
-      });
+    } catch (e) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Error reading Excel file.",
+          error: e.message,
+        });
     }
 
-    const worksheet = workbook.worksheets[0];
-    if (!worksheet)
+    const ws = workbook.worksheets[0];
+    if (!ws)
       return res
         .status(400)
         .json({ success: false, message: "No worksheet found" });
 
-    const headerRow = worksheet.getRow(3);
+    const headerRow = ws.getRow(3);
     const headers = [];
-    headerRow.eachCell((cell, colNumber) => {
-      headers[colNumber - 1] =
-        getCellValue(cell)?.toString()?.trim() || `Column ${colNumber}`;
+    headerRow.eachCell((cell, col) => {
+      headers[col - 1] =
+        getCellValue(cell)?.toString()?.trim() || `Column ${col}`;
     });
 
-    const headerMapping = {
+    const headerMap = {
       "Invoice No": "Invoice Number",
       "Invoice Number": "Invoice Number",
       "Invoice #": "Invoice Number",
@@ -614,113 +737,84 @@ router.post("/import", upload.single("file"), async (req, res) => {
       "Payment To": "Supplier Name",
     };
 
-    const importedTransactions = [];
-    const errors = [];
+    const imported = [],
+      errors = [];
     const batchId = `BATCH_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    let rowNumber = 4,
+      dataRows = 0,
+      skipped = 0;
+    const maxRows = Math.min(ws.rowCount, 1000);
 
-    let rowNumber = 4;
-    let processedRows = 0;
-    let skippedRows = 0;
-    let dataRowsProcessed = 0;
-    const maxRowsToProcess = Math.min(worksheet.rowCount, 1000);
-
-    while (rowNumber <= maxRowsToProcess) {
-      const row = worksheet.getRow(rowNumber);
+    while (rowNumber <= maxRows) {
+      const row = ws.getRow(rowNumber);
       const rowData = {};
-      let hasAnyData = false;
-
-      headers.forEach((header, index) => {
-        const cell = row.getCell(index + 1);
-        let value = getCellValue(cell);
-        if (value !== null && value !== undefined && value !== "") {
-          if (typeof value === "string") {
-            value = value.trim();
+      let hasData = false;
+      headers.forEach((h, i) => {
+        const cell = row.getCell(i + 1);
+        let v = getCellValue(cell);
+        if (v !== null && v !== undefined && v !== "") {
+          if (typeof v === "string") {
+            v = v.trim();
             if (
-              value === "--" ||
-              value === "Select" ||
-              value.startsWith("Select ") ||
-              value.startsWith("=IF(") ||
-              value === "0" ||
-              value === "0.00"
-            ) {
-              value = "";
-            } else if (value) hasAnyData = true;
-          } else if (typeof value === "number") {
-            if (value !== 0) hasAnyData = true;
-          } else if (value instanceof Date) hasAnyData = true;
-        } else value = "";
-        const mappedHeader = headerMapping[header] || header;
-        if (!rowData[mappedHeader]) rowData[mappedHeader] = value;
+              v === "--" ||
+              v === "Select" ||
+              v.startsWith("Select ") ||
+              v.startsWith("=IF(") ||
+              v === "0" ||
+              v === "0.00"
+            )
+              v = "";
+            else if (v) hasData = true;
+          } else if (typeof v === "number" && v !== 0) hasData = true;
+          else if (v instanceof Date) hasData = true;
+        } else v = "";
+        const mh = headerMap[h] || h;
+        if (!rowData[mh]) rowData[mh] = v;
       });
 
-      if (!hasAnyData || isTemplateRow(rowData)) {
+      if (!hasData || isTemplateRow(rowData)) {
         rowNumber++;
-        skippedRows++;
+        skipped++;
         continue;
       }
-
-      processedRows++;
-      dataRowsProcessed++;
-      const rowErrors = [];
+      dataRows++;
 
       try {
-        if (!rowData["Category Type"] || rowData["Category Type"].trim() === "")
+        const rowErrors = [];
+        if (!rowData["Category Type"]?.trim())
           rowErrors.push("Category Type is required");
-        const date = parseDate(rowData["Date"]);
-        if (!date) rowErrors.push("Invalid Date format");
-        const amount = parseFloat(rowData["Amount"]);
-        if (isNaN(amount) || amount <= 0)
-          rowErrors.push("Valid Amount is required");
-
-        if (rowErrors.length > 0) {
+        const dt = parseDate(rowData["Date"]);
+        if (!dt) rowErrors.push("Invalid Date format");
+        const amt = parseFloat(rowData["Amount"]);
+        if (isNaN(amt) || amt <= 0) rowErrors.push("Valid Amount is required");
+        if (rowErrors.length) {
           errors.push({ row: rowNumber, errors: rowErrors, data: rowData });
           rowNumber++;
           continue;
         }
 
-        const categoryName = rowData["Category Type"].trim();
-        const categoryErrors = validateTransactionByCategory(
-          categoryName,
-          rowData,
-        );
-        if (categoryErrors.length > 0) {
-          errors.push({
-            row: rowNumber,
-            errors: categoryErrors,
-            data: rowData,
-          });
+        const catName = rowData["Category Type"].trim();
+        const catErrors = validateTransactionByCategory(catName, rowData);
+        if (catErrors.length) {
+          errors.push({ row: rowNumber, errors: catErrors, data: rowData });
           rowNumber++;
           continue;
         }
 
-        // Determine transaction type based on category name
-        let transactionType = "sale";
-        const catLower = categoryName.toLowerCase();
-        if (catLower.includes("deposit")) transactionType = "deposit";
-        else if (catLower.includes("withdraw")) transactionType = "withdraw";
-        else if (catLower.includes("remittance"))
-          transactionType = "remittance";
-        else if (catLower.includes("payment inward"))
-          transactionType = "payment inward";
-        else if (catLower.includes("payment outward"))
-          transactionType = "payment outward";
-        else if (catLower.includes("cash sale")) transactionType = "cash sale";
-        else if (catLower.includes("credit collection"))
-          transactionType = "credit collection";
-
-        const sourceAccount = rowData["Source Account"]?.trim() || "";
-        const destination = rowData["Destination Account"]?.trim() || "";
+        const normTxType = deriveTransactionType(catName);
+        const srcAcc = rowData["Source Account"]?.trim() || "";
+        const destAcc = rowData["Destination Account"]?.trim() || "";
         const supplier = rowData["Supplier Name"]?.trim() || "";
-        const customerName = rowData["Customer Name"]?.trim() || "";
-        const customerAddress = rowData["Customer Address"]?.trim() || "";
-        const invoiceDate = rowData["Invoice Date"]?.trim()
+        const custName = rowData["Customer Name"]?.trim() || "";
+        const custAddr = rowData["Customer Address"]?.trim() || "";
+        const invDate = rowData["Invoice Date"]?.trim()
           ? parseDate(rowData["Invoice Date"])
-          : date;
-        const exchangeLoss = parseFloat(rowData["Exchange Loss"]) || 0;
-        let finalAmount = amount;
-        if (transactionType === "deposit") {
-          finalAmount = amount - exchangeLoss;
-          if (finalAmount < 0) {
+          : dt;
+        const exLoss = parseFloat(rowData["Exchange Loss"]) || 0;
+        let final = amt;
+        if (normTxType === "deposit") {
+          final = amt - exLoss;
+          if (final < 0) {
             errors.push({
               row: rowNumber,
               errors: ["Final Amount cannot be negative"],
@@ -731,24 +825,35 @@ router.post("/import", upload.single("file"), async (req, res) => {
           }
         }
 
-        // Check invoice uniqueness globally
-        const invoiceNo = rowData["Invoice Number"]?.trim() || "";
-        if (invoiceNo) {
-          const exists = await Transaction.findOne({ invoiceNo });
+        const invNo = rowData["Invoice Number"]?.trim() || "";
+        const invNoClean = invNo || "NA";
+
+        if (invNoClean !== "NA") {
+          const exists = await Transaction.findOne({ invoiceNo: invNoClean });
           if (exists) {
             errors.push({
               row: rowNumber,
               errors: [
-                `Invoice number "${invoiceNo}" already exists in "${exists.accountType || "another tab"}"`,
+                `Invoice "${invNoClean}" already exists in "${exists.accountType || "another tab"}"`,
               ],
               data: rowData,
             });
             rowNumber++;
             continue;
           }
-        } else if (
-          ["cash sale", "credit collection"].includes(transactionType)
-        ) {
+          if (normTxType === "credit collection") {
+            const s = await Sale.findOne({ invoiceNumber: invNoClean });
+            if (s && s.pendingAmountPaid === "paid") {
+              errors.push({
+                row: rowNumber,
+                errors: [`Invoice "${invNoClean}" is already fully paid`],
+                data: rowData,
+              });
+              rowNumber++;
+              continue;
+            }
+          }
+        } else if (["cash sale", "credit collection"].includes(normTxType)) {
           errors.push({
             row: rowNumber,
             errors: ["Invoice Number is required"],
@@ -759,22 +864,18 @@ router.post("/import", upload.single("file"), async (req, res) => {
         }
 
         if (
-          sourceAccount &&
-          sourceAccount !== "--" &&
+          srcAcc &&
+          srcAcc !== "--" &&
           ["deposit", "withdraw", "remittance", "payment outward"].includes(
-            transactionType,
+            normTxType,
           )
         ) {
           try {
-            await checkSourceAccountBalance(
-              sourceAccount,
-              amount,
-              transactionType,
-            );
-          } catch (balanceError) {
+            await checkSourceAccountBalance(srcAcc, amt, normTxType);
+          } catch (be) {
             errors.push({
               row: rowNumber,
-              errors: [balanceError.message],
+              errors: [be.message],
               data: rowData,
             });
             rowNumber++;
@@ -782,34 +883,36 @@ router.post("/import", upload.single("file"), async (req, res) => {
           }
         }
 
-        const transaction = new Transaction({
-          invoiceNo: invoiceNo || "NA",
-          categoryType: categoryName,
-          sourceAccount,
-          destination,
+        const tx = new Transaction({
+          invoiceNo: invNoClean,
+          categoryType: catName,
+          sourceAccount: srcAcc,
+          destination: destAcc,
           supplier,
-          date,
-          invoiceDate,
-          customerName,
-          customerAddress,
-          amount,
-          exchangeLoss,
-          finalAmount,
+          date: dt,
+          invoiceDate: invDate,
+          customerName: custName,
+          customerAddress: custAddr,
+          amount: amt,
+          exchangeLoss: exLoss,
+          finalAmount: final,
           remarks: rowData["Remarks"]?.trim() || "",
-          transactionType,
-          accountType: "Cash Balance", // or could be dynamic
+          transactionType: normTxType,
+          accountType: req.body.accountType || "Cash Balance",
           createdBy: userId,
           importBatchId: batchId,
           importStatus: "imported",
         });
 
-        await transaction.save({ session });
-        await adjustBalances(transaction, session, false);
-        importedTransactions.push({
-          id: transaction._id,
-          invoiceNo: transaction.invoiceNo,
-          amount,
-          category: categoryName,
+        await tx.save({ session });
+        await adjustBalances(tx, session, false);
+        await updateSaleFromTransaction(tx, session, true);
+        await updateMRCashOnCreditCollection(tx, session, true);
+        imported.push({
+          id: tx._id,
+          invoiceNo: tx.invoiceNo,
+          amount: amt,
+          category: catName,
         });
       } catch (err) {
         console.error(`Error processing row ${rowNumber}:`, err);
@@ -822,47 +925,50 @@ router.post("/import", upload.single("file"), async (req, res) => {
       rowNumber++;
     }
 
-    if (errors.length > 0) {
+    if (errors.length) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Import failed with errors",
-        summary: {
-          totalDataRows: dataRowsProcessed,
-          successCount: importedTransactions.length,
-          errorCount: errors.length,
-          skippedRows,
-          errors: errors.slice(0, 20),
-        },
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Import failed with errors",
+          summary: {
+            totalDataRows: dataRows,
+            successCount: imported.length,
+            errorCount: errors.length,
+            skippedRows: skipped,
+            errors: errors.slice(0, 20),
+          },
+        });
     }
 
     await session.commitTransaction();
     session.endSession();
     res.json({
       success: true,
-      message: `Successfully imported ${importedTransactions.length} transaction(s)`,
+      message: `Successfully imported ${imported.length} transaction(s)`,
       batchId,
-      importedTransactions,
+      importedTransactions: imported,
       summary: {
-        totalDataRows: dataRowsProcessed,
-        totalImported: importedTransactions.length,
-        skippedRows,
+        totalDataRows: dataRows,
+        totalImported: imported.length,
+        skippedRows: skipped,
       },
     });
   } catch (error) {
     if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
-    res.status(500).json({
-      success: false,
-      message: "Import failed due to server error",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Import failed due to server error",
+        error: error.message,
+      });
   }
 });
 
-// POST import test
 router.post("/import/test", upload.single("file"), async (req, res) => {
   try {
     const file = req.file;
@@ -872,21 +978,23 @@ router.post("/import/test", upload.single("file"), async (req, res) => {
         .json({ success: false, message: "No file uploaded" });
     res.json({
       success: true,
-      message: "File received successfully",
+      message: "File received",
       fileInfo: {
         name: file.originalname,
         size: file.size,
         type: file.mimetype,
       },
     });
-  } catch (error) {
+  } catch (e) {
     res
       .status(500)
-      .json({ success: false, message: "Test failed", error: error.message });
+      .json({ success: false, message: "Test failed", error: e.message });
   }
 });
 
-// PUT update transaction
+// =============================================================================
+// PUT /:id — update transaction
+// =============================================================================
 router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -899,9 +1007,8 @@ router.put("/:id", async (req, res) => {
         .status(400)
         .json({ success: false, message: "Invalid transaction ID" });
     }
-
-    const existingTransaction = await Transaction.findById(id).session(session);
-    if (!existingTransaction) {
+    const existing = await Transaction.findById(id).session(session);
+    if (!existing) {
       await session.abortTransaction();
       session.endSession();
       return res
@@ -910,71 +1017,77 @@ router.put("/:id", async (req, res) => {
     }
 
     const newInvoiceNo = req.body.invoiceNo?.trim();
-    if (newInvoiceNo && newInvoiceNo !== existingTransaction.invoiceNo) {
-      const duplicateInvoice = await Transaction.findOne({
+    if (
+      newInvoiceNo &&
+      newInvoiceNo !== "NA" &&
+      newInvoiceNo !== existing.invoiceNo
+    ) {
+      const dup = await Transaction.findOne({
         invoiceNo: newInvoiceNo,
         _id: { $ne: new mongoose.Types.ObjectId(id) },
       }).session(session);
-      if (duplicateInvoice) {
+      if (dup) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Invoice number "${newInvoiceNo}" already has a transaction in "${duplicateInvoice.accountType || "another tab"}".`,
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: `Invoice "${newInvoiceNo}" already has a transaction in "${dup.accountType || "another tab"}".`,
+          });
       }
     }
 
-    // Reverse old balances
-    await adjustBalances(existingTransaction, session, true);
+    // Reverse old effects
+    await adjustBalances(existing, session, true);
+    await updateSaleFromTransaction(existing, session, false);
+    await updateMRCashOnCreditCollection(existing, session, false);
 
-    // Prepare update data
+    const normTxType = deriveTransactionType(
+      req.body.categoryType ||
+        req.body.transactionType ||
+        existing.transactionType ||
+        "",
+    );
     const updateData = {
       ...req.body,
-      amount: parseFloat(req.body.amount || existingTransaction.amount),
-      exchangeLoss: parseFloat(
-        req.body.exchangeLoss || existingTransaction.exchangeLoss,
-      ),
-      finalAmount: parseFloat(
-        req.body.finalAmount || existingTransaction.finalAmount,
-      ),
-      date: req.body.date ? new Date(req.body.date) : existingTransaction.date,
+      transactionType: normTxType,
+      amount: parseFloat(req.body.amount || existing.amount),
+      exchangeLoss: parseFloat(req.body.exchangeLoss || existing.exchangeLoss),
+      finalAmount: parseFloat(req.body.finalAmount || existing.finalAmount),
+      date: req.body.date ? new Date(req.body.date) : existing.date,
       invoiceDate: req.body.invoiceDate
         ? new Date(req.body.invoiceDate)
-        : existingTransaction.invoiceDate,
+        : existing.invoiceDate,
     };
 
-    // Check new source account balance if changed
     if (
       updateData.sourceAccount &&
-      updateData.sourceAccount !== existingTransaction.sourceAccount
-    ) {
+      updateData.sourceAccount !== "--" &&
+      updateData.sourceAccount !== existing.sourceAccount
+    )
       await checkSourceAccountBalance(
         updateData.sourceAccount,
         updateData.amount,
-        updateData.transactionType || existingTransaction.transactionType,
+        normTxType,
       );
-    }
 
-    const updatedTransaction = await Transaction.findByIdAndUpdate(
-      id,
-      updateData,
-      {
-        new: true,
-        runValidators: true,
-        session,
-      },
-    );
+    const updated = await Transaction.findByIdAndUpdate(id, updateData, {
+      new: true,
+      runValidators: true,
+      session,
+    });
 
-    // Apply new balances
-    await adjustBalances(updatedTransaction, session, false);
+    // Apply new effects
+    await adjustBalances(updated, session, false);
+    await updateSaleFromTransaction(updated, session, true);
+    await updateMRCashOnCreditCollection(updated, session, true);
 
     await session.commitTransaction();
     session.endSession();
-
     res.json({
       success: true,
-      data: updatedTransaction,
+      data: updated,
       message: "Transaction updated successfully",
     });
   } catch (error) {
@@ -985,7 +1098,9 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE single transaction
+// =============================================================================
+// DELETE /:id
+// =============================================================================
 router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -998,15 +1113,17 @@ router.delete("/:id", async (req, res) => {
         .status(400)
         .json({ success: false, message: "Invalid transaction ID" });
     }
-    const transaction = await Transaction.findById(id).session(session);
-    if (!transaction) {
+    const tx = await Transaction.findById(id).session(session);
+    if (!tx) {
       await session.abortTransaction();
       session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "Transaction not found" });
     }
-    await adjustBalances(transaction, session, true);
+    await adjustBalances(tx, session, true);
+    await updateSaleFromTransaction(tx, session, false);
+    await updateMRCashOnCreditCollection(tx, session, false);
     await Transaction.findByIdAndDelete(id, { session });
     await session.commitTransaction();
     session.endSession();
@@ -1017,16 +1134,19 @@ router.delete("/:id", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("DELETE /:id error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete transaction",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to delete transaction",
+        error: error.message,
+      });
   }
 });
 
-// DELETE bulk
+// =============================================================================
+// DELETE /bulk-delete
+// =============================================================================
 router.delete("/bulk-delete", async (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0)
@@ -1034,26 +1154,30 @@ router.delete("/bulk-delete", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-    if (invalidIds.length > 0) {
+    const invalid = ids.filter((i) => !mongoose.Types.ObjectId.isValid(i));
+    if (invalid.length) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `Invalid transaction ID(s): ${invalidIds.join(", ")}`,
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: `Invalid IDs: ${invalid.join(", ")}`,
+        });
     }
-    const transactions = await Transaction.find({ _id: { $in: ids } }).session(
-      session,
-    );
-    if (transactions.length === 0) {
+    const txs = await Transaction.find({ _id: { $in: ids } }).session(session);
+    if (!txs.length) {
       await session.abortTransaction();
       session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "No transactions found" });
     }
-    for (const tx of transactions) await adjustBalances(tx, session, true);
+    for (const tx of txs) {
+      await adjustBalances(tx, session, true);
+      await updateSaleFromTransaction(tx, session, false);
+      await updateMRCashOnCreditCollection(tx, session, false);
+    }
     const result = await Transaction.deleteMany({ _id: { $in: ids } }).session(
       session,
     );
@@ -1061,17 +1185,18 @@ router.delete("/bulk-delete", async (req, res) => {
     session.endSession();
     res.json({
       success: true,
-      message: `${result.deletedCount} transaction(s) deleted and balances updated successfully`,
+      message: `${result.deletedCount} transaction(s) deleted successfully`,
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("DELETE /bulk-delete error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete transactions",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to delete transactions",
+        error: error.message,
+      });
   }
 });
 

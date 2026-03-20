@@ -54,7 +54,6 @@ const Dashboard = () => {
   const [previousActiveTab, setPreviousActiveTab] = useState("Sales");
 
   // SUB-TABS
-  // 🔁 Total Sales defaults to Today, Pending Collection defaults to Month
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
@@ -572,13 +571,19 @@ const Dashboard = () => {
     }
   };
 
+  // ✅ FIXED: ensure each account has a transactions array
   const fetchCompanyBalance = async () => {
     try {
       setLoadingCompanyBalance(true);
       const response = await axios.get(`${backendUrl}/api/accounts/balance`);
       if (response.data.success) {
         setCompanyBalance(response.data.totalBalance || 0);
-        setCompanyBalanceAccounts(response.data.accounts || []);
+        // Ensure each account has a transactions array (even if empty)
+        const accounts = (response.data.accounts || []).map((acc) => ({
+          ...acc,
+          transactions: acc.transactions || [], // fallback to empty array
+        }));
+        setCompanyBalanceAccounts(accounts);
       }
     } catch (error) {
       console.error("Error fetching company balance:", error);
@@ -597,7 +602,7 @@ const Dashboard = () => {
             code: d.code || "",
             totalAmount: d.totalAmount || 0,
             transactionCount: 0,
-            transactions: [],
+            transactions: [], // ensure transactions array exists
           })),
         );
       } catch (err) {
@@ -711,7 +716,7 @@ const Dashboard = () => {
       case "Sales":
         setIsSalesMonthOnly(false);
         setActiveSalesSubTab(
-          isCustomDateActive["Total Sales"] ? "Custom" : "Today", // now Today
+          isCustomDateActive["Total Sales"] ? "Custom" : "Today",
         );
         fetchSalesTableData(
           isCustomDateActive["Total Sales"] ? "Custom" : "Today",
@@ -758,9 +763,9 @@ const Dashboard = () => {
   useEffect(() => {
     const initializeData = async () => {
       await Promise.all([
-        fetchSalesTableData("Today"), // changed from Month to Today
+        fetchSalesTableData("Today"),
         fetchExpenseTableData("Month"),
-        fetchCreditSaleTableData("Month"), // remains Month
+        fetchCreditSaleTableData("Month"),
         fetchCompanyBalance(),
       ]);
       setCurrentPayrollTotal(totalPayroll);

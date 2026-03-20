@@ -191,6 +191,7 @@ export const DashboardCards = ({
     return `${formatDate(startOfYear)} – ${formatDate(now)}`;
   };
 
+  // ✅ FIX: Added "Today" case
   const getCurrentSalesAmount = () => {
     if (!salesData) return 0;
     if (
@@ -199,6 +200,8 @@ export const DashboardCards = ({
     )
       return getSafeNumber(salesData.customSales);
     switch (activeSalesSubTab) {
+      case "Today":
+        return getSafeNumber(salesData.todaySales);
       case "Month":
         return getSafeNumber(salesData.monthlySales);
       case "Year":
@@ -210,6 +213,7 @@ export const DashboardCards = ({
     }
   };
 
+  // ✅ FIX: Added "Today" case (if you have todayGrowth, otherwise return 0)
   const getCurrentSalesGrowth = () => {
     if (!salesData) return 0;
     if (
@@ -218,6 +222,8 @@ export const DashboardCards = ({
     )
       return getSafeNumber(salesData.customGrowth);
     switch (activeSalesSubTab) {
+      case "Today":
+        return getSafeNumber(salesData.todayGrowth); // or return 0 if not available
       case "Month":
         return getSafeNumber(salesData.monthlyGrowth);
       case "YTD":

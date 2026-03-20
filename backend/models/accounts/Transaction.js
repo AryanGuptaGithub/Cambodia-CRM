@@ -8,20 +8,25 @@ const transactionSchema = new mongoose.Schema(
     customerName: { type: String },
     customerAddress: { type: String },
 
-    // Category type (string, not ObjectId)
+    // -------------------------------------------------------------------------
+    // FIX: categoryType now stores the actual category label string from the
+    // CategoryType master (e.g. "Credit Collection", "Cash Sale", "Deposit").
+    // Removed the restrictive enum so any label saved in the master is accepted.
+    // -------------------------------------------------------------------------
     categoryType: {
       type: String,
-      enum: ["withdraw", "deposit", "tour collection"],
       required: true,
+      trim: true,
     },
 
     // Source account (stores the account name as a string)
-    sourceAccount: { type: String, required: true },
+    sourceAccount: { type: String, default: "--" },
+
     // Destination (string, default "--")
     destination: { type: String, default: "--" },
 
     // Supplier (string, optional)
-    supplier: { type: String },
+    supplier: { type: String, default: "" },
 
     // Monetary fields
     amount: { type: Number, required: true },
@@ -32,10 +37,14 @@ const transactionSchema = new mongoose.Schema(
     date: { type: Date, required: true },
 
     // Description / remarks
-    description: { type: String },
+    description: { type: String, default: "" },
     remarks: { type: String, default: "" },
 
-    // Transaction classification (expense, deposit, etc.)
+    // -------------------------------------------------------------------------
+    // FIX: transactionType enum expanded to cover all types used by the app.
+    // Values are lowercase and match what the frontend/backend derives from
+    // the category label.
+    // -------------------------------------------------------------------------
     transactionType: {
       type: String,
       enum: [
@@ -46,9 +55,11 @@ const transactionSchema = new mongoose.Schema(
         "payment inward",
         "payment outward",
         "cash sale",
-        "credit collection",
+        "credit collection", // FIX: was "credit collections" — now singular
         "tour collection",
+        "collection",
         "sale",
+        "transfer",
       ],
       required: true,
     },

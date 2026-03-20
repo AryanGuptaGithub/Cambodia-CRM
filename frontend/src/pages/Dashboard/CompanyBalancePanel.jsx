@@ -32,14 +32,12 @@ const typeBadgeClass = (type = "") => {
   return "bg-gray-100 text-gray-600";
 };
 
-// ─────────────────────────────────────────────
-// Transaction card — summary row + expandable TABLE details
-// ─────────────────────────────────────────────
 const TransactionCard = ({ tx }) => {
+  // If direction is not provided, treat as neutral (no green/red)
   const isCredit = tx.direction === "credit";
+  const isDebit = tx.direction === "debit";
   const [expanded, setExpanded] = useState(false);
 
-  // Build table rows — only show rows that have values
   const detailRows = [
     { label: "Transaction Type", value: toTitle(tx.transactionType) },
     { label: "Category Type", value: tx.categoryTypeName },
@@ -66,24 +64,41 @@ const TransactionCard = ({ tx }) => {
     (row) => row && row.value && row.value !== "N/A" && row.value !== "",
   );
 
+  // Determine icon and color based on direction
+  let iconBg = "bg-gray-100";
+  let iconColor = "text-gray-600";
+  let IconComponent = TrendingUp; // fallback
+  let amountColor = "text-gray-700";
+
+  if (isCredit) {
+    iconBg = "bg-green-100";
+    iconColor = "text-green-600";
+    IconComponent = TrendingUp;
+    amountColor = "text-green-600";
+  } else if (isDebit) {
+    iconBg = "bg-red-100";
+    iconColor = "text-red-600";
+    IconComponent = TrendingDown;
+    amountColor = "text-red-600";
+  } else {
+    // neutral
+    iconBg = "bg-gray-100";
+    iconColor = "text-gray-600";
+    IconComponent = TrendingUp;
+    amountColor = "text-gray-700";
+  }
+
   return (
     <div className="border border-gray-200 rounded-lg mb-2 overflow-hidden">
-      {/* ── Summary row ── */}
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer text-left"
       >
         <div className="flex items-center gap-3 min-w-0">
           <div
-            className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-              isCredit ? "bg-green-100" : "bg-red-100"
-            }`}
+            className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${iconBg}`}
           >
-            {isCredit ? (
-              <TrendingUp className="w-3.5 h-3.5 text-green-600" />
-            ) : (
-              <TrendingDown className="w-3.5 h-3.5 text-red-600" />
-            )}
+            <IconComponent className={`w-3.5 h-3.5 ${iconColor}`} />
           </div>
 
           <div className="min-w-0">
@@ -94,8 +109,8 @@ const TransactionCard = ({ tx }) => {
                 {toTitle(tx.transactionType)}
               </span>
               {tx.invoiceNumber && (
-                <span className="text-xs text-gray-400">
-                  #{tx.invoiceNumber}
+                <span className="text-xs text-600">
+                  {tx.categoryTypeName}
                 </span>
               )}
             </div>
@@ -106,10 +121,8 @@ const TransactionCard = ({ tx }) => {
         </div>
 
         <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-          <span
-            className={`text-sm font-bold ${isCredit ? "text-green-600" : "text-red-600"}`}
-          >
-            {isCredit ? "+" : "−"}${formatCurrency(tx.amount)}
+          <span className={`text-sm font-bold ${amountColor}`}>
+            {isCredit ? "+" : isDebit ? "−" : ""}${formatCurrency(tx.amount)}
           </span>
           <svg
             className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -127,7 +140,6 @@ const TransactionCard = ({ tx }) => {
         </div>
       </button>
 
-      {/* ── Expanded: TABLE format ── */}
       {expanded && (
         <div className="border-t border-gray-100">
           <table className="w-full text-xs">
@@ -153,15 +165,14 @@ const TransactionCard = ({ tx }) => {
   );
 };
 
-// ─────────────────────────────────────────────
-// Main CompanyBalancePanel
-// ─────────────────────────────────────────────
 export const CompanyBalancePanel = () => {
   const [loading, setLoading] = useState(true);
   const [totalBalance, setTotalBalance] = useState(0);
   const [accounts, setAccounts] = useState([]);
   const [activeAccountId, setActiveAccountId] = useState(null);
   const [error, setError] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [loadingTransactions, setLoadingTransactions] = useState(false);
 
   const fetchBalanceData = async () => {
     try {
@@ -172,14 +183,14 @@ export const CompanyBalancePanel = () => {
         setTotalBalance(response.data.totalBalance || 0);
         const accs = response.data.accounts || [];
         setAccounts(accs);
-        setActiveAccountId((prev) => {
-          const stillValid = accs.some((a) => String(a._id) === prev);
-          return stillValid
-            ? prev
-            : accs.length > 0
-              ? String(accs[0]._id)
-              : null;
-        });
+        if (accs.length > 0) {
+          const newActiveId = String(accs[0]._id);
+          setActiveAccountId(newActiveId);
+          fetchTransactions(newActiveId);
+        } else {
+          // No accounts, still fetch all transactions
+          fetchTransactions(null);
+        }
       }
     } catch (err) {
       console.error("Error fetching company balance:", err);
@@ -189,9 +200,40 @@ export const CompanyBalancePanel = () => {
     }
   };
 
+  const fetchTransactions = async (accountId) => {
+    setLoadingTransactions(true);
+    try {
+      // If accountId provided, add as query parameter; otherwise fetch all
+      const url = accountId
+        ? `${backendUrl}/api/accounts/transactions?accountId=${accountId}`
+        : `${backendUrl}/api/accounts/transactions`;
+      const response = await axios.get(url);
+      console.log('values of response', response);
+      if (response.data.success) {
+        setTransactions(response.data.data || []);
+      } else {
+        setTransactions([]);
+      }
+    } catch (err) {
+      console.error("Error fetching transactions:", err);
+      setTransactions([]);
+    } finally {
+      setLoadingTransactions(false);
+    }
+  };
+
   useEffect(() => {
     fetchBalanceData();
   }, []);
+
+  useEffect(() => {
+    if (activeAccountId) {
+      fetchTransactions(activeAccountId);
+    } else if (accounts.length === 0) {
+      // If no accounts, fetch all transactions
+      fetchTransactions(null);
+    }
+  }, [activeAccountId, accounts]);
 
   const activeAccount = accounts.find(
     (acc) => String(acc._id) === activeAccountId,
@@ -242,7 +284,6 @@ export const CompanyBalancePanel = () => {
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
-      {/* ── Header ── */}
       <div className="px-6 pt-5 pb-4 border-b border-gray-100">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -259,8 +300,6 @@ export const CompanyBalancePanel = () => {
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
-
-        {/* Total */}
         <div className="mt-3 flex items-baseline gap-1">
           <span className="text-2xl font-bold text-teal-600">
             ${formatCurrency(totalBalance)}
@@ -271,7 +310,6 @@ export const CompanyBalancePanel = () => {
         </div>
       </div>
 
-      {/* ── Account Tabs ── */}
       {accounts.length > 0 && (
         <>
           <div className="flex border-b border-gray-100 overflow-x-auto">
@@ -299,7 +337,6 @@ export const CompanyBalancePanel = () => {
             ))}
           </div>
 
-          {/* ── Transaction list ── */}
           <div className="px-4 py-4">
             {activeAccount ? (
               <>
@@ -315,7 +352,11 @@ export const CompanyBalancePanel = () => {
                   </span>
                 </div>
 
-                {activeAccount.transactions.length === 0 ? (
+                {loadingTransactions ? (
+                  <div className="py-4 text-center text-gray-400">
+                    Loading transactions...
+                  </div>
+                ) : transactions.length === 0 ? (
                   <div className="py-8 text-center">
                     <p className="text-sm text-gray-400">
                       No transactions found for this account.
@@ -323,7 +364,7 @@ export const CompanyBalancePanel = () => {
                   </div>
                 ) : (
                   <div className="max-h-96 overflow-y-auto pr-1">
-                    {activeAccount.transactions.map((tx) => (
+                    {transactions.map((tx) => (
                       <TransactionCard key={String(tx._id)} tx={tx} />
                     ))}
                   </div>
@@ -339,8 +380,27 @@ export const CompanyBalancePanel = () => {
       )}
 
       {accounts.length === 0 && (
-        <div className="px-6 py-8 text-center">
-          <p className="text-sm text-gray-400">No accounts found.</p>
+        <div className="px-4 py-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              All Transactions
+            </span>
+          </div>
+          {loadingTransactions ? (
+            <div className="py-4 text-center text-gray-400">
+              Loading transactions...
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="py-8 text-center">
+              <p className="text-sm text-gray-400">No transactions found.</p>
+            </div>
+          ) : (
+            <div className="max-h-96 overflow-y-auto pr-1">
+              {transactions.map((tx) => (
+                <TransactionCard key={String(tx._id)} tx={tx} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -4,47 +4,32 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
-// Helper function to generate a fallback MR ID (if not found in staff)
+// Helper function
 const generateFallbackMRId = (index) => {
   return `MR${String(index + 1).padStart(3, "0")}`;
 };
 
-// GET / – paginated data with working contact info
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 7, search, startDate, endDate } = req.query;
 
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const limitNum = Math.max(1, parseInt(limit, 10));
-    const skip = (pageNum - 1) * limitNum;
+    const skip = (page - 1) * limit;
 
     const matchConditions = { dueAmount: { $gt: 0 } };
-
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-        return res.status(400).json({
-          error: "Invalid date format. Please use YYYY-MM-DD format.",
-        });
-      }
-
-      matchConditions.invoiceDate = {
-        $gte: start,
-        $lte: end,
-      };
-    }
 
     if (search?.trim()) {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // Base aggregation pipeline
-    const basePipeline = [
-      { $match: matchConditions },
+    if (startDate && endDate) {
+      matchConditions.invoiceDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
 
-      // Step 1: add a normalised key field on every document
+    const pipeline = [
+      { $match: matchConditions },
       {
         $addFields: {
           _mrNameNormalized: {
@@ -52,378 +37,305 @@ router.get("/", async (req, res) => {
           },
         },
       },
-
-      // Step 2: group by the normalised key; keep first original name for display
       {
         $group: {
           _id: "$_mrNameNormalized",
-          mrNameDisplay: { $first: { $trim: { input: "$mrName" } } },
+          mrName: { $first: "$mrName" },
           totalOutstandingAmount: { $sum: "$dueAmount" },
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
       },
-
-      // Step 3: look up staff using case-insensitive match on the normalised name
       {
         $lookup: {
           from: "staffs",
-          let: { mrNameNorm: "$_id" },
+          let: { name: "$_id" },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $eq: [
                     { $toLower: { $trim: { input: "$medicalRepName" } } },
-                    "$$mrNameNorm",
+                    "$$name",
                   ],
                 },
               },
             },
-            {
-              $project: {
-                medicalRepName: 1,
-                teamName: 1,
-                contactNo: 1,
-                email: 1,
-                MRId: 1,
-              },
-            },
           ],
-          as: "staffDetails",
+          as: "staff",
         },
       },
-
       {
         $project: {
-          mrName: "$mrNameDisplay",
-          totalOutstandingAmount: { $round: ["$totalOutstandingAmount", 2] },
+          mrName: 1,
+          totalOutstandingAmount: 1,
           totalCustomers: { $size: "$uniqueCustomers" },
-          staff: {
-            $cond: {
-              if: { $gt: [{ $size: "$staffDetails" }, 0] },
-              then: { $arrayElemAt: ["$staffDetails", 0] },
-              else: {
-                medicalRepName: "$mrNameDisplay",
-                contactNo: "Not Available",
-                email: "Not Available",
-                teamName: "Not Available",
-                MRId: null,
-              },
-            },
-          },
+          staff: { $arrayElemAt: ["$staff", 0] },
         },
       },
-
       { $sort: { totalOutstandingAmount: -1 } },
     ];
 
-    const [countResult, mrData, summaryResult] = await Promise.all([
-      SaleSummary.aggregate([...basePipeline, { $count: "totalCount" }]),
-
-      SaleSummary.aggregate([
-        ...basePipeline,
-        { $skip: skip },
-        { $limit: limitNum },
-      ]),
-
-      SaleSummary.aggregate([
-        { $match: matchConditions },
-        {
-          $addFields: {
-            _mrNameNormalized: {
-              $toLower: { $trim: { input: "$mrName" } },
-            },
-          },
-        },
-        {
-          $group: {
-            _id: "$_mrNameNormalized",
-            totalOutstandingAmount: { $sum: "$dueAmount" },
-            uniqueCustomers: { $addToSet: "$customerCode" },
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalOutstandingAmount: {
-              $sum: { $round: ["$totalOutstandingAmount", 2] },
-            },
-            totalCustomers: { $sum: { $size: "$uniqueCustomers" } },
-            totalMRs: { $sum: 1 },
-          },
-        },
-      ]),
+    const data = await SaleSummary.aggregate([
+      ...pipeline,
+      { $skip: skip },
+      { $limit: parseInt(limit) },
     ]);
 
-    const totalRecords = countResult[0]?.totalCount || 0;
-    const totalPages = Math.ceil(totalRecords / limitNum);
-
-    const records = mrData.map((mr, index) => ({
-      mrId: mr.staff?.MRId
-        ? String(mr.staff.MRId).padStart(3, "0")
-        : generateFallbackMRId(skip + index),
-      mrName: mr.mrName,
-      totalOutstandingAmount: mr.totalOutstandingAmount,
-      totalCustomers: mr.totalCustomers,
-      staff: mr.staff,
-    }));
-
-    const summary = summaryResult[0] || {
-      totalOutstandingAmount: 0,
-      totalCustomers: 0,
-      totalMRs: 0,
-    };
+    const totalCount = await SaleSummary.aggregate([
+      ...pipeline,
+      { $count: "count" },
+    ]);
 
     res.json({
       data: {
-        summary,
-        records,
+        records: data.map((mr, i) => ({
+          mrId: mr.staff?.MRId
+            ? String(mr.staff.MRId).padStart(3, "0")
+            : generateFallbackMRId(i),
+          mrName: mr.mrName,
+          totalOutstandingAmount: mr.totalOutstandingAmount,
+          totalCustomers: mr.totalCustomers,
+          staff: {
+            contactNo: mr.staff?.contactNo || "Not Available",
+            email: mr.staff?.email || "Not Available",
+          },
+        })),
+        summary: {
+          totalOutstandingAmount: data.reduce(
+            (sum, d) => sum + d.totalOutstandingAmount,
+            0,
+          ),
+          totalCustomers: data.reduce((sum, d) => sum + d.totalCustomers, 0),
+          totalMRs: totalCount[0]?.count || 0,
+        },
       },
       pagination: {
-        currentPage: pageNum,
-        totalPages,
-        totalRecords,
-        hasNext: pageNum < totalPages,
-        hasPrev: pageNum > 1,
+        currentPage: parseInt(page),
+        totalPages: Math.ceil((totalCount[0]?.count || 0) / limit),
       },
     });
   } catch (err) {
-    console.error("Error in MR wise outstanding:", err);
-    res.status(500).json({
-      error: "Internal server error",
-      message: err.message,
-    });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// GET /customers/:mrName – fetch customer details for a specific MR
 router.get("/customers/:mrName", async (req, res) => {
   try {
-    const { mrName } = req.params;
-    const { startDate, endDate } = req.query;
+    const decodedMrName = decodeURIComponent(req.params.mrName).trim();
 
-    if (!mrName) {
-      return res.status(400).json({ error: "MR name is required" });
-    }
+    const matchConditions = {
+      dueAmount: { $gt: 0 },
+      mrName: { $regex: new RegExp(`^${decodedMrName}$`, "i") },
+    };
 
-    const matchConditions = { dueAmount: { $gt: 0 } };
-
-    // Decode URI component if needed
-    const decodedMrName = decodeURIComponent(mrName).trim();
-
-    // Match by mrName (case-insensitive)
-    matchConditions.mrName = { $regex: new RegExp(`^${decodedMrName}$`, 'i') };
-
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-        return res.status(400).json({ error: "Invalid date format" });
-      }
-      matchConditions.invoiceDate = { $gte: start, $lte: end };
-    }
-
-    // Aggregate to get customer details with unpaid amounts
     const customers = await SaleSummary.aggregate([
       { $match: matchConditions },
+
       {
         $group: {
           _id: "$customerCode",
           customerName: { $first: "$customerName" },
           totalDue: { $sum: "$dueAmount" },
-        }
+        },
       },
+
       {
         $lookup: {
           from: "customers",
           localField: "_id",
           foreignField: "customerCode",
-          as: "customerInfo"
-        }
+          pipeline: [
+            {
+              $project: {
+                contactNo: 1,
+                phone: 1,
+                mobile: 1,
+                address: 1,
+                province: 1,
+              },
+            },
+          ],
+          as: "customerInfo",
+        },
       },
+
+      {
+        $addFields: {
+          customer: { $arrayElemAt: ["$customerInfo", 0] },
+        },
+      },
+
       {
         $project: {
           customerCode: "$_id",
           customerName: 1,
           totalDue: { $round: ["$totalDue", 2] },
-          contact: { $ifNull: [{ $arrayElemAt: ["$customerInfo.phone", 0] }, "N/A"] },
-          address: { $ifNull: [{ $arrayElemAt: ["$customerInfo.address", 0] }, "N/A"] },
-          province: { $ifNull: [{ $arrayElemAt: ["$customerInfo.province", 0] }, "N/A"] }
-        }
+
+          // ✅ FIXED CONTACT FIELD
+          contact: {
+            $ifNull: [
+              "$customer.customerNumber",
+              {
+                $ifNull: [
+                  "$customer.phone",
+                  {
+                    $ifNull: ["$customer.mobile", "N/A"],
+                  },
+                ],
+              },
+            ],
+          },
+
+          address: { $ifNull: ["$customer.address", "N/A"] },
+          province: { $ifNull: ["$customer.province", "N/A"] },
+        },
       },
-      { $sort: { totalDue: -1 } }
+
+      { $sort: { totalDue: -1 } },
     ]);
 
     res.json({ success: true, data: customers });
   } catch (err) {
-    console.error("Error fetching MR customers:", err);
-    res.status(500).json({ error: "Server error", message: err.message });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// GET /export/excel – Excel export with working contact info
 router.get("/export/excel", async (req, res) => {
   try {
     const { search, startDate, endDate } = req.query;
-    const matchConditions = { dueAmount: { $gt: 0 } };
 
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+    const matchConditions = {};
 
-      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-        return res.status(400).json({
-          error: "Invalid date format. Please use YYYY-MM-DD format.",
-        });
-      }
+    // ✅ IMPORTANT: do NOT over-filter
+    matchConditions.dueAmount = { $gt: 0 };
 
-      matchConditions.invoiceDate = {
-        $gte: start,
-        $lte: end,
-      };
-    }
-
-    if (search?.trim()) {
+    if (search && search.trim()) {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    const mrData = await SaleSummary.aggregate([
+    if (startDate && endDate) {
+      matchConditions.invoiceDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate),
+      };
+    }
+
+    console.log("MATCH:", matchConditions);
+
+    // ✅ MAIN QUERY
+    const data = await SaleSummary.aggregate([
       { $match: matchConditions },
 
-      // Normalise mrName before grouping
+      // ✅ DEBUG: check raw data
       {
-        $addFields: {
-          _mrNameNormalized: {
-            $toLower: { $trim: { input: "$mrName" } },
-          },
+        $project: {
+          mrName: 1,
+          customerName: 1,
+          customerCode: 1,
+          dueAmount: 1,
         },
       },
 
       {
         $group: {
-          _id: "$_mrNameNormalized",
-          mrNameDisplay: { $first: { $trim: { input: "$mrName" } } },
-          totalOutstandingAmount: { $sum: "$dueAmount" },
-          uniqueCustomers: { $addToSet: "$customerCode" },
+          _id: {
+            mrName: "$mrName",
+            customerCode: "$customerCode",
+          },
+          mrName: { $first: "$mrName" },
+          customerName: { $first: "$customerName" },
+          totalDue: { $sum: "$dueAmount" },
         },
       },
 
       {
         $lookup: {
-          from: "staffs",
-          let: { mrNameNorm: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: {
-                  $eq: [
-                    { $toLower: { $trim: { input: "$medicalRepName" } } },
-                    "$$mrNameNorm",
-                  ],
-                },
-              },
-            },
-            {
-              $project: {
-                medicalRepName: 1,
-                teamName: 1,
-                contactNo: 1,
-                email: 1,
-                MRId: 1,
-              },
-            },
-          ],
-          as: "staffDetails",
+          from: "customers",
+          localField: "_id.customerCode",
+          foreignField: "customerCode",
+          as: "customerInfo",
+        },
+      },
+
+      {
+        $addFields: {
+          customer: { $arrayElemAt: ["$customerInfo", 0] },
         },
       },
 
       {
         $project: {
-          mrName: "$mrNameDisplay",
-          totalOutstandingAmount: { $round: ["$totalOutstandingAmount", 2] },
-          totalCustomers: { $size: "$uniqueCustomers" },
-          staff: {
-            $cond: {
-              if: { $gt: [{ $size: "$staffDetails" }, 0] },
-              then: { $arrayElemAt: ["$staffDetails", 0] },
-              else: {
-                medicalRepName: "$mrNameDisplay",
-                contactNo: "Not Available",
-                email: "Not Available",
-                teamName: "Not Available",
-                MRId: null,
+          mrName: { $ifNull: ["$mrName", "N/A"] },
+          customerName: { $ifNull: ["$customerName", "N/A"] },
+          totalDue: { $ifNull: ["$totalDue", 0] },
+
+          contact: {
+            $ifNull: [
+              "$customer.customerNumber",
+              {
+                $ifNull: [
+                  "$customer.phone",
+                  {
+                    $ifNull: ["$customer.mobile", "N/A"],
+                  },
+                ],
               },
-            },
+            ],
           },
+
+          address: { $ifNull: ["$customer.address", "N/A"] },
+          province: { $ifNull: ["$customer.province", "N/A"] },
         },
       },
 
-      { $sort: { totalOutstandingAmount: -1 } },
+      { $sort: { mrName: 1 } },
     ]);
 
-    // Create Excel workbook
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = "MR Wise Outstanding System";
-    workbook.created = new Date();
+    console.log("DATA LENGTH:", data.length);
+    console.log("SAMPLE DATA:", data[0]);
 
-    const worksheet = workbook.addWorksheet("MR Wise Outstanding");
-
-    worksheet.columns = [
-      { header: "Sr.No", key: "serialNo", width: 10 },
-      { header: "MR ID", key: "mrId", width: 15 },
-      { header: "MR Name", key: "mrName", width: 30 },
-      { header: "Contact", key: "contact", width: 20 },
-      { header: "Total Customers", key: "totalCustomers", width: 15 },
-      { header: "Total Outstanding ($)", key: "totalOutstanding", width: 20 },
-    ];
-
-    const headerRow = worksheet.getRow(1);
-    headerRow.font = { bold: true, size: 12 };
-    headerRow.alignment = { horizontal: "center", vertical: "middle" };
-    headerRow.height = 25;
-
-    mrData.forEach((mr, index) => {
-      const mrId = mr.staff?.MRId
-        ? String(mr.staff.MRId).padStart(3, "0")
-        : generateFallbackMRId(index);
-
-      const row = worksheet.addRow({
-        serialNo: index + 1,
-        mrId: mrId,
-        mrName: mr.mrName || "N/A",
-        contact: mr.staff?.contactNo || "Not Available",
-        totalCustomers: mr.totalCustomers || 0,
-        totalOutstanding: mr.totalOutstandingAmount || 0,
+    // ❌ If still empty → return message
+    if (!data || data.length === 0) {
+      return res.status(404).json({
+        message: "No data found for export. Check filters or database.",
       });
-
-      row.font = { size: 11 };
-      row.alignment = { vertical: "middle" };
-      row.getCell("totalOutstanding").numFmt = "$#,##0.00";
-    });
-
-    // Calculate totals
-    const totalOutstanding = mrData.reduce(
-      (sum, mr) => sum + (mr.totalOutstandingAmount || 0),
-      0,
-    );
-    const totalCustomers = mrData.reduce(
-      (sum, mr) => sum + (mr.totalCustomers || 0),
-      0,
-    );
-
-    if (mrData.length > 0) {
-      worksheet.addRow({});
-      const summaryRow = worksheet.addRow({});
-      summaryRow.getCell("mrName").value = "TOTAL SUMMARY";
-      summaryRow.getCell("totalCustomers").value = totalCustomers;
-      summaryRow.getCell("totalOutstanding").value = totalOutstanding;
-      summaryRow.font = { bold: true, size: 12 };
-      summaryRow.getCell("totalOutstanding").numFmt = "$#,##0.00";
     }
 
-    // Apply borders
-    worksheet.eachRow({ includeEmpty: true }, (row) => {
-      row.eachCell({ includeEmpty: true }, (cell) => {
+    // ✅ CREATE EXCEL
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("MR Customer Outstanding");
+
+    worksheet.columns = [
+      { header: "Sr.No", key: "sr", width: 10 },
+      { header: "MR Name", key: "mrName", width: 25 },
+      { header: "Customer Name", key: "customerName", width: 30 },
+      { header: "Contact", key: "contact", width: 20 },
+      { header: "Address", key: "address", width: 35 },
+      { header: "Province", key: "province", width: 20 },
+      { header: "Unpaid Amount ($)", key: "amount", width: 18 },
+    ];
+
+    worksheet.getRow(1).font = { bold: true };
+
+    data.forEach((item, index) => {
+      worksheet.addRow({
+        sr: index + 1,
+        mrName: item.mrName,
+        customerName: item.customerName,
+        contact: item.contact,
+        address: item.address,
+        province: item.province,
+        amount: item.totalDue,
+      });
+    });
+
+    worksheet.getColumn("amount").numFmt = "$#,##0.00";
+
+    // Borders
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
         cell.border = {
           top: { style: "thin" },
           left: { style: "thin" },
@@ -433,30 +345,22 @@ router.get("/export/excel", async (req, res) => {
       });
     });
 
-    const currentDate = new Date();
-    const formattedDate = currentDate.toISOString().split("T")[0];
-    let fileName = "mr-wise-outstanding";
-    if (startDate && endDate) {
-      fileName = `mr-wise-outstanding-${startDate.replace(/-/g, "")}-to-${endDate.replace(/-/g, "")}`;
-    } else {
-      fileName = `mr-wise-outstanding-${formattedDate.replace(/-/g, "")}`;
-    }
-    fileName += ".xlsx";
-
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=mr-customer-outstanding.xlsx",
+    );
 
     const buffer = await workbook.xlsx.writeBuffer();
     res.send(buffer);
-  } catch (err) {
-    console.error("Error in Excel export:", err);
+  } catch (error) {
+    console.error("EXPORT ERROR:", error);
     res.status(500).json({
-      error: "Failed to generate Excel export",
-      message: err.message,
-      stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
+      error: "Excel export failed",
+      message: error.message,
     });
   }
 });
