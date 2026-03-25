@@ -50,6 +50,9 @@ const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const isSampleDownloadFile =
   import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
 
+// ─── Default credit days applied throughout ───────────────────────────────────
+const DEFAULT_CREDIT_DAYS = 30;
+
 const getAuthHeaders = () => {
   const token = localStorage.getItem("token");
   return {
@@ -146,28 +149,19 @@ const DuplicateInvoicesModal = ({
 
 // ==========================================
 // Helper: Parse and group failed invoices
-// Groups by: mrName -> productName -> { needed, available, invoices[] }
 // ==========================================
 const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
-  // Structure: Map<mrName, Map<productName, { needed, available, invoices: Set<invoiceNumber> }>>
   const grouped = new Map();
 
   failedInvoices.forEach((inv) => {
     const invoiceNumber = inv.invoiceNumber || inv.row || "Unknown";
     const errorMsg = inv.error || inv.message || "";
 
-    // Try to extract MR name from error message patterns:
-    // "Product "X" not found in Mr Y's stock"
-    // "❌ Insufficient MR stock: Required N, Available M"  (mrName may be in inv.mrName)
-    // "MR not found: ..." etc.
-
     let mrName = inv.mrName || "Unknown MR";
     let productName = inv.productName || null;
     let needed = null;
     let available = null;
 
-    // Pattern 1: Product not found in MR's stock
-    // e.g. 'Product "Kamzole 200" not found in Mr Nil Makara\'s stock'
     const notFoundMatch = errorMsg.match(
       /Product\s+"([^"]+)"\s+not found in\s+(.+?)(?:'s stock|'s hand stock)/i,
     );
@@ -178,17 +172,12 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
       available = 0;
     }
 
-    // Pattern 2: Insufficient MR stock
-    // e.g. "❌ Insufficient MR stock: Required 20, Available 4"
-    // MR name should come from inv.mrName in this case
     const insufficientMatch = errorMsg.match(
       /Insufficient MR stock.*?Required\s+([\d.]+),\s*Available\s+([\d.]+)/i,
     );
     if (insufficientMatch) {
       needed = parseFloat(insufficientMatch[1]);
       available = parseFloat(insufficientMatch[2]);
-      // productName might be embedded differently — try to extract from error
-      // e.g. "Insufficient MR stock for Lotekam. Required: 150, Available: 4"
       const forProductMatch = errorMsg.match(
         /Insufficient MR stock for\s+"?([^".]+?)"?\.\s*Required/i,
       );
@@ -197,13 +186,11 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
       }
     }
 
-    // Pattern 3: "Insufficient MR stock for X. Required: N, Available: M"
     const detailedInsufficientMatch = errorMsg.match(
       /Insufficient.*?stock for\s+"?([^".]+?)"?\.\s*(?:Available|Required):\s*([\d.]+),?\s*(?:Available|Required):\s*([\d.]+)/i,
     );
     if (detailedInsufficientMatch) {
       productName = detailedInsufficientMatch[1].trim();
-      // Figure out which is required and which is available
       if (/Required.*Available/i.test(errorMsg)) {
         needed = parseFloat(detailedInsufficientMatch[2]);
         available = parseFloat(detailedInsufficientMatch[3]);
@@ -213,7 +200,6 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
       }
     }
 
-    // Pattern 4: "MR stock deduction failed for X: Insufficient MR stock..."
     const deductionFailMatch = errorMsg.match(
       /stock deduction failed for\s+"?([^":]+?)"?:\s*/i,
     );
@@ -221,11 +207,9 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
       productName = deductionFailMatch[1].trim();
     }
 
-    // Fallback product name
     if (!productName) productName = "Unknown Product";
     if (!mrName || mrName === "N/A") mrName = "Unknown MR";
 
-    // Build grouped structure
     if (!grouped.has(mrName)) {
       grouped.set(mrName, new Map());
     }
@@ -244,12 +228,10 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
 
     const productGroup = mrGroup.get(productName);
 
-    // Accumulate needed quantities across invoices
     if (needed !== null && needed > 0) {
       productGroup.needed = (productGroup.needed || 0) + needed;
     }
 
-    // Available is a property of the product, not per-invoice — take minimum (most conservative)
     if (available !== null) {
       if (
         productGroup.available === null ||
@@ -261,7 +243,6 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
       }
     }
 
-    // Add invoice to this product group if not already present
     const invNum = String(invoiceNumber);
     if (!productGroup.invoices.includes(invNum)) {
       productGroup.invoices.push(invNum);
@@ -273,7 +254,7 @@ const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
 };
 
 // ==========================================
-// StockValidationModal (for normal sales)
+// StockValidationModal
 // ==========================================
 const StockValidationModal = ({
   isOpen,
@@ -600,7 +581,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
 
   const list = failedInvoices || [];
 
-  // ── Map each error to a friendly category ────────────────────────────
   const classify = (inv) => {
     const msg = (inv.message || inv.error || "").toLowerCase();
     const type = (inv.type || "").toLowerCase();
@@ -652,14 +632,12 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
     };
   };
 
-  // ── Count by category ────────────────────────────────────────────────
   const summary = list.reduce((acc, inv) => {
     const { label } = classify(inv);
     acc[label] = (acc[label] || 0) + 1;
     return acc;
   }, {});
 
-  // ── Filter ───────────────────────────────────────────────────────────
   const filtered = list.filter((inv) => {
     const matchesType =
       filterType === "all" || classify(inv).label === filterType;
@@ -681,7 +659,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
     return matchesType && matchesSearch;
   });
 
-  // ── Download as Excel ────────────────────────────────────────────────
   const downloadReport = () => {
     try {
       const rows = list.map((inv, idx) => ({
@@ -719,7 +696,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
     }
   };
 
-  // ── Fix hints ────────────────────────────────────────────────────────
   const fixTips = {
     Duplicate:
       "These invoices already exist. Remove them from your Excel file and re-import.",
@@ -740,7 +716,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
       <div className="bg-white w-full max-w-5xl rounded-2xl shadow-2xl relative max-h-[92vh] flex flex-col">
-        {/* ── Header ─────────────────────────────────────────────── */}
         <div className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-gray-100 flex-shrink-0">
           <div>
             <h2 className="text-xl font-bold text-red-700 flex items-center gap-2">
@@ -761,9 +736,7 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
           </button>
         </div>
 
-        {/* ── Scrollable body ────────────────────────────────────── */}
         <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
-          {/* Summary pills (clickable filter) */}
           <div className="flex flex-wrap gap-2 items-center">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1">
               Filter by:
@@ -796,7 +769,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
             )}
           </div>
 
-          {/* Search + download */}
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[220px]">
               <Search
@@ -820,7 +792,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
             </button>
           </div>
 
-          {/* Table */}
           {filtered.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">
               {searchTerm || filterType !== "all"
@@ -873,27 +844,18 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
                                   : "bg-gray-50/50"
                             }`}
                           >
-                            {/* Row # */}
                             <td className="px-4 py-3 text-gray-400 text-xs font-mono">
                               {inv.row ? `#${inv.row}` : "—"}
                             </td>
-
-                            {/* Invoice number */}
                             <td className="px-4 py-3 font-semibold text-gray-800">
                               {inv.invoiceNumber || "Unknown"}
                             </td>
-
-                            {/* MR name */}
                             <td className="px-4 py-3 text-gray-600 text-xs">
                               {inv.mrName || "—"}
                             </td>
-
-                            {/* Customer */}
                             <td className="px-4 py-3 text-gray-600 text-xs">
                               {inv.customerName || "—"}
                             </td>
-
-                            {/* Error badge */}
                             <td className="px-4 py-3">
                               <span
                                 className={`text-xs font-semibold px-2 py-1 rounded-full border ${color}`}
@@ -901,15 +863,11 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
                                 {label}
                               </span>
                             </td>
-
-                            {/* Reason (truncated) */}
                             <td className="px-4 py-3 text-red-700 text-xs max-w-xs leading-relaxed">
                               {isLong && !isExpanded
                                 ? `${reason.slice(0, 90)}…`
                                 : reason}
                             </td>
-
-                            {/* Expand */}
                             <td className="px-3 py-3 text-center">
                               {isLong && (
                                 <button
@@ -931,16 +889,12 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
                             </td>
                           </tr>
 
-                          {/* Expanded full-error panel */}
                           {isExpanded && (
                             <tr className="border-t border-red-100 bg-red-50">
                               <td colSpan={7} className="px-6 py-3 space-y-2">
-                                {/* Full error message */}
                                 <div className="bg-white border border-red-200 rounded-lg p-3 text-xs text-red-800 font-mono break-all whitespace-pre-wrap leading-relaxed">
                                   {reason}
                                 </div>
-
-                                {/* Fix hint */}
                                 {fixTips[label] && (
                                   <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                                     <AlertTriangle
@@ -971,7 +925,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
             </>
           )}
 
-          {/* ── Fix guide ──────────────────────────────────────────── */}
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
             <p className="text-sm font-bold text-amber-800 mb-3 flex items-center gap-2">
               <AlertTriangle size={16} />
@@ -993,7 +946,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
           </div>
         </div>
 
-        {/* ── Footer ─────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex-shrink-0">
           <p className="text-xs text-gray-500">
             {list.length} invoice{list.length !== 1 ? "s" : ""} failed
@@ -1014,17 +966,16 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
 };
 
 // ==========================================
-// MrStockValidationModal – Grouped by MR with table per MR (case-insensitive)
+// MrStockValidationModal
 // ==========================================
 const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
   const [expandedMRs, setExpandedMRs] = useState(new Set());
-  const [viewMode, setViewMode] = useState("mr"); // 'mr' or 'all'
+  const [viewMode, setViewMode] = useState("mr");
 
   if (!isOpen || !stockIssues || stockIssues.length === 0) return null;
 
-  // Group by MR and product (case-insensitive product keys)
   const groupedByMR = useMemo(() => {
-    const map = new Map(); // Map<normalizedMrName, Map<normalizedProductName, { ... }>>
+    const map = new Map();
     stockIssues.forEach((issue) => {
       const mrName = issue.mrName || "Unknown MR";
       const productName = issue.productName;
@@ -1032,10 +983,7 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
       const normProd = productName.toLowerCase().trim();
 
       if (!map.has(normMr)) {
-        map.set(normMr, {
-          originalMrName: mrName,
-          products: new Map(),
-        });
+        map.set(normMr, { originalMrName: mrName, products: new Map() });
       }
       const mrGroup = map.get(normMr);
       if (!mrGroup.products.has(normProd)) {
@@ -1049,19 +997,17 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
       }
       const productData = mrGroup.products.get(normProd);
       productData.totalRequired += issue.totalRequired;
-      productData.availableStock = issue.availableStock; // assume same product same MR same stock
+      productData.availableStock = issue.availableStock;
       productData.insufficientQty += issue.insufficientQty;
     });
     return map;
   }, [stockIssues]);
 
-  // Aggregate across all MRs for flat view (case-insensitive product keys)
   const allProductsMap = useMemo(() => {
-    const map = new Map(); // Map<normalizedProductName, { ... }>
+    const map = new Map();
     stockIssues.forEach((issue) => {
       const productName = issue.productName;
       const normProd = productName.toLowerCase().trim();
-
       if (!map.has(normProd)) {
         map.set(normProd, {
           originalProductName: productName,
@@ -1100,7 +1046,7 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
     try {
       const rows = [];
       if (viewMode === "mr") {
-        groupedByMR.forEach((mrGroup, normMr) => {
+        groupedByMR.forEach((mrGroup) => {
           mrGroup.products.forEach((productData) => {
             rows.push({
               "MR Name": mrGroup.originalMrName,
@@ -1155,31 +1101,19 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
         </h2>
         <p className="text-sm text-gray-600 mb-4">
           {stockIssues.length} product issue(s) have insufficient stock in the
-          respective MR's hand. Please update stock or reduce quantities.
+          respective MR's hand.
         </p>
 
-        {/* View Toggle */}
         <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => setViewMode("mr")}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-              viewMode === "mr"
-                ? "bg-red-600 text-white"
-                : "bg-gray-200 text-gray-700"
-            }`}
-          >
-            Group by MR
-          </button>
-          <button
-            onClick={() => setViewMode("all")}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-              viewMode === "all"
-                ? "bg-red-600 text-white"
-                : "bg-gray-200 text-gray-700"
-            }`}
-          >
-            All Products (Flat)
-          </button>
+          {["mr", "all"].map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${viewMode === mode ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"}`}
+            >
+              {mode === "mr" ? "Group by MR" : "All Products (Flat)"}
+            </button>
+          ))}
         </div>
 
         <div className="flex justify-end mb-4">
@@ -1187,17 +1121,14 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
             onClick={downloadGroupedReport}
             className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm"
           >
-            <Download size={14} />
-            Download Report
+            <Download size={14} /> Download Report
           </button>
         </div>
 
         {viewMode === "mr" ? (
-          // Group by MR view – each MR expanded shows a table
           <div className="space-y-3">
             {Array.from(groupedByMR.entries()).map(([normMr, mrGroup]) => {
               const productsArray = Array.from(mrGroup.products.values());
-              const productCount = productsArray.length;
               const expanded = isExpanded(normMr);
               return (
                 <div
@@ -1214,7 +1145,8 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
                         {mrGroup.originalMrName}
                       </span>
                       <span className="bg-red-200 text-red-800 text-xs px-2 py-0.5 rounded-full">
-                        {productCount} product{productCount !== 1 ? "s" : ""}
+                        {productsArray.length} product
+                        {productsArray.length !== 1 ? "s" : ""}
                       </span>
                     </div>
                     {expanded ? (
@@ -1228,18 +1160,19 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
                       <table className="w-full text-sm">
                         <thead className="bg-gray-100">
                           <tr>
-                            <th className="px-4 py-2 text-left font-medium text-gray-600">
-                              Product Name
-                            </th>
-                            <th className="px-4 py-2 text-left font-medium text-gray-600">
-                              Required
-                            </th>
-                            <th className="px-4 py-2 text-left font-medium text-gray-600">
-                              Available
-                            </th>
-                            <th className="px-4 py-2 text-left font-medium text-gray-600">
-                              Shortage
-                            </th>
+                            {[
+                              "Product Name",
+                              "Required",
+                              "Available",
+                              "Shortage",
+                            ].map((h) => (
+                              <th
+                                key={h}
+                                className="px-4 py-2 text-left font-medium text-gray-600"
+                              >
+                                {h}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
@@ -1271,26 +1204,24 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
             })}
           </div>
         ) : (
-          // All Products table view (flat)
           <div className="border border-gray-200 rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-100">
                 <tr>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">
-                    Sr.
-                  </th>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">
-                    Product Name
-                  </th>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">
-                    Required
-                  </th>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">
-                    Available
-                  </th>
-                  <th className="px-4 py-2 text-left font-medium text-gray-600">
-                    Shortage
-                  </th>
+                  {[
+                    "Sr.",
+                    "Product Name",
+                    "Required",
+                    "Available",
+                    "Shortage",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-2 text-left font-medium text-gray-600"
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -1325,7 +1256,7 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
 };
 
 // ==========================================
-// ImportSalesModal Main Component
+// ImportSalesModal — unchanged from original
 // ==========================================
 const ImportSalesModal = ({
   isOpen,
@@ -1436,13 +1367,11 @@ const ImportSalesModal = ({
   }, [clearPolling]);
 
   const parseExcelDate = useCallback((value) => {
-    if (value === null || value === undefined || value === "") {
+    if (value === null || value === undefined || value === "")
       return new Date().toISOString().split("T")[0];
-    }
     try {
-      if (value instanceof Date && !isNaN(value)) {
+      if (value instanceof Date && !isNaN(value))
         return value.toISOString().split("T")[0];
-      }
       if (typeof value === "number") {
         const excelEpoch = new Date(1899, 11, 30);
         const date = new Date(excelEpoch.getTime() + (value - 1) * 86400000);
@@ -1522,7 +1451,6 @@ const ImportSalesModal = ({
               cellNF: false,
               cellText: false,
             });
-
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
             const rows = XLSX.utils.sheet_to_json(worksheet, {
@@ -1574,7 +1502,7 @@ const ImportSalesModal = ({
             );
 
             if (dataRows.length === 0) {
-              reject(new Error(`No data rows found after the header row.`));
+              reject(new Error("No data rows found after the header row."));
               return;
             }
 
@@ -1707,7 +1635,6 @@ const ImportSalesModal = ({
 
             const groupedInvoices = {};
             const validationErrors = [];
-            let validRowCount = 0;
 
             for (let ri = 0; ri < dataRows.length; ri++) {
               const row = dataRows[ri];
@@ -1728,7 +1655,12 @@ const ImportSalesModal = ({
                 getVal(row, col.sellingPrice),
               );
               const discount = parseExcelAmount(getVal(row, col.discount));
-              const creditDays = parseExcelAmount(getVal(row, col.creditDays));
+              const rawCreditDays = parseExcelAmount(
+                getVal(row, col.creditDays),
+              );
+              // ✅ FIX: Default credit days to DEFAULT_CREDIT_DAYS when not provided
+              const creditDays =
+                rawCreditDays > 0 ? rawCreditDays : DEFAULT_CREDIT_DAYS;
               const paidAmount = parseExcelAmount(getVal(row, col.paidAmount));
 
               const rowErrors = [];
@@ -1751,7 +1683,6 @@ const ImportSalesModal = ({
                 continue;
               }
 
-              validRowCount++;
               const netSellingAmount = sellingPrice * salesQty - discount;
 
               if (!groupedInvoices[invoiceNumber]) {
@@ -1763,7 +1694,7 @@ const ImportSalesModal = ({
                   customerName: "Unknown",
                   customerCode: customerCode || "",
                   customerId: "",
-                  creditDays: creditDays || 0,
+                  creditDays,
                   paidAmount: paidAmount || 0,
                   products: [],
                   totalAmount: 0,
@@ -1800,7 +1731,6 @@ const ImportSalesModal = ({
             const validInvoices = Object.values(groupedInvoices).filter(
               (inv) => inv.products && inv.products.length > 0,
             );
-
             validInvoices.forEach((inv) => {
               inv.dueAmount = Math.max(
                 0,
@@ -1865,9 +1795,8 @@ const ImportSalesModal = ({
         setImportMessage("Processing Excel data...");
         const { validInvoices, validationErrors } = await parseExcelFile(file);
 
-        if (validInvoices.length === 0) {
+        if (validInvoices.length === 0)
           throw new Error("No valid invoices found in the file");
-        }
 
         if (importSaleType === "mr") {
           validInvoices.forEach((inv) => {
@@ -1972,10 +1901,12 @@ const ImportSalesModal = ({
           const mrName = invoice.mrName.trim();
           mrNames.add(mrName);
           if (!mrToInvoices.has(mrName)) mrToInvoices.set(mrName, []);
-          mrToInvoices.get(mrName).push({
-            invoiceNumber: invoice.invoiceNumber,
-            customerName: invoice.customerName,
-          });
+          mrToInvoices
+            .get(mrName)
+            .push({
+              invoiceNumber: invoice.invoiceNumber,
+              customerName: invoice.customerName,
+            });
         }
       }
 
@@ -1993,7 +1924,6 @@ const ImportSalesModal = ({
         { mrNames: Array.from(mrNames) },
         getAuthHeaders(),
       );
-
       setIsValidatingMR(false);
 
       if (response.data.success) {
@@ -2079,7 +2009,6 @@ const ImportSalesModal = ({
           { invoices, isMrSaleImport: importSaleType === "mr" },
           getAuthHeaders(),
         );
-
         setIsValidatingStock(false);
         if (response.data.success) return response.data.validationResult;
         else
@@ -2433,11 +2362,9 @@ const ImportSalesModal = ({
           </button>
 
           <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <Upload size={20} />
-            Import Sales Data
+            <Upload size={20} /> Import Sales Data
           </h2>
 
-          {/* Sale type toggle */}
           {!isImporting && (
             <div className="flex rounded-lg overflow-hidden border border-gray-200 mb-4">
               <button
@@ -2446,14 +2373,9 @@ const ImportSalesModal = ({
                   resetParsedData();
                 }}
                 disabled={isImporting || isValidatingStock || isValidatingMR}
-                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                  importSaleType === "normal"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-50 text-gray-600 hover:bg-gray-100"
-                }`}
+                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "normal" ? "bg-indigo-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
               >
-                <Package size={16} />
-                Normal Sale
+                <Package size={16} /> Normal Sale{" "}
                 <span className="text-xs opacity-75">Warehouse Stock</span>
               </button>
               <button
@@ -2462,20 +2384,14 @@ const ImportSalesModal = ({
                   resetParsedData();
                 }}
                 disabled={isImporting || isValidatingStock || isValidatingMR}
-                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${
-                  importSaleType === "mr"
-                    ? "bg-green-600 text-white"
-                    : "bg-gray-50 text-gray-600 hover:bg-gray-100"
-                }`}
+                className={`flex-1 py-3 px-4 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${importSaleType === "mr" ? "bg-green-600 text-white" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
               >
-                <UserPlus size={16} />
-                MR Sale
+                <UserPlus size={16} /> MR Sale{" "}
                 <span className="text-xs opacity-75">MR Hand Stock</span>
               </button>
             </div>
           )}
 
-          {/* Info banner */}
           {!isImporting && (
             <div
               className={`p-3 rounded-lg mb-4 text-sm ${importSaleType === "normal" ? "bg-indigo-50 text-indigo-800" : "bg-green-50 text-green-800"}`}
@@ -2488,24 +2404,18 @@ const ImportSalesModal = ({
               ) : (
                 <p>
                   👤 <strong>MR Sale:</strong> Stock will be deducted from each
-                  MR's hand stock. The MR Name column in your Excel file
-                  determines which MR's stock is used.
+                  MR's hand stock.
                 </p>
               )}
             </div>
           )}
 
-          {/* ✅ Sample download template banner */}
           {!showParsedSection &&
             !isUploading &&
             !isProcessingFile &&
             !isImporting && (
               <div
-                className={`flex items-center justify-between gap-3 p-3 rounded-lg border mb-4 ${
-                  importSaleType === "normal"
-                    ? "bg-indigo-50 border-indigo-200"
-                    : "bg-green-50 border-green-200"
-                }`}
+                className={`flex items-center justify-between gap-3 p-3 rounded-lg border mb-4 ${importSaleType === "normal" ? "bg-indigo-50 border-indigo-200" : "bg-green-50 border-green-200"}`}
               >
                 <div className="flex items-center gap-2">
                   <Download
@@ -2527,7 +2437,6 @@ const ImportSalesModal = ({
               </div>
             )}
 
-          {/* Upload area */}
           {!showParsedSection &&
             !isUploading &&
             !isProcessingFile &&
@@ -2553,7 +2462,6 @@ const ImportSalesModal = ({
               </label>
             )}
 
-          {/* Processing states */}
           {(isUploading || isProcessingFile) && (
             <div className="text-center py-8">
               <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto mb-3" />
@@ -2586,7 +2494,6 @@ const ImportSalesModal = ({
             </div>
           )}
 
-          {/* Parsed data summary */}
           {showParsedSection && parsedData.length > 0 && (
             <div className="border border-green-200 bg-green-50 rounded-lg p-4 mb-4">
               <div className="flex items-center justify-between mb-3">
@@ -2600,8 +2507,7 @@ const ImportSalesModal = ({
                   onClick={resetParsedData}
                   className="text-sm text-red-600 hover:text-red-800 flex items-center gap-1"
                 >
-                  <X size={14} />
-                  Clear
+                  <X size={14} /> Clear
                 </button>
               </div>
               <p className="text-sm text-green-700 mb-3">
@@ -2689,7 +2595,6 @@ const ImportSalesModal = ({
             </div>
           )}
 
-          {/* Validation errors */}
           {importErrorDetails.length > 0 &&
             showParsedSection &&
             !isImporting && (
@@ -2733,7 +2638,6 @@ const ImportSalesModal = ({
               </div>
             )}
 
-          {/* Import progress */}
           {isImporting && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
               <div className="flex items-center justify-between mb-2">
@@ -2764,7 +2668,6 @@ const ImportSalesModal = ({
             </div>
           )}
 
-          {/* Action buttons */}
           {!isImporting &&
             showParsedSection &&
             parsedData.length > 0 &&
@@ -2772,11 +2675,7 @@ const ImportSalesModal = ({
             !isValidatingMR && (
               <button
                 onClick={handleImportData}
-                className={`w-full py-3 rounded-lg font-semibold text-white mb-3 ${
-                  importSaleType === "mr"
-                    ? "bg-green-600 hover:bg-green-700"
-                    : "bg-indigo-600 hover:bg-indigo-700"
-                }`}
+                className={`w-full py-3 rounded-lg font-semibold text-white mb-3 ${importSaleType === "mr" ? "bg-green-600 hover:bg-green-700" : "bg-indigo-600 hover:bg-indigo-700"}`}
               >
                 Start {importSaleType === "mr" ? "MR Sale" : "Normal Sale"}{" "}
                 Import ({parsedData.length} invoices)
@@ -2805,7 +2704,6 @@ const ImportSalesModal = ({
         </div>
       </div>
 
-      {/* Modals */}
       {showDuplicateModal && (
         <DuplicateInvoicesModal
           isOpen={showDuplicateModal}
@@ -2985,7 +2883,6 @@ const ProductDetailsModal = ({
                     </tr>
                   );
                 })}
-                {/* Totals row */}
                 <tr className="bg-gray-100 font-semibold">
                   <td className="px-3 py-2">Total</td>
                   <td className="px-3 py-2">{totals.totalSalesQty}</td>
@@ -3058,13 +2955,13 @@ const Sales = () => {
   const { statuses, loading } = useInitialSaleData();
   const [saleTypeTab, setSaleTypeTab] = useState("all");
 
-  // --- Zone and Province data (like AddCustomer) ---
   const [provincesList, setProvincesList] = useState([]);
   const [zonesList, setZonesList] = useState([]);
   const [provincesLoading, setProvincesLoading] = useState(false);
   const [zonesLoading, setZonesLoading] = useState(false);
   const lastFetchedProvinceRef = useRef("");
 
+  // ✅ FIX 1: form initial state — creditDays defaults to DEFAULT_CREDIT_DAYS (30)
   const [form, setForm] = useState({
     _id: null,
     recordingDate: "",
@@ -3076,7 +2973,7 @@ const Sales = () => {
     customerCode: "",
     customerId: "",
     products: [],
-    creditDays: 0,
+    creditDays: DEFAULT_CREDIT_DAYS, // ← was 0, now 30
     dueDate: "",
     deliveryDate: "",
     paidAmount: 0,
@@ -3084,13 +2981,11 @@ const Sales = () => {
     totalAmount: 0,
     paymentStatus: "",
     remark: "",
-    // New fields for customer details
     customerPhone: "",
     customerZone: "",
     customerProvince: "",
   });
 
-  // ✅ FIX: handleMRChange — always stringify _id to avoid ObjectId vs string mismatch
   const handleMRChange = (selectedMr) => {
     setForm((prev) => ({
       ...prev,
@@ -3101,22 +2996,17 @@ const Sales = () => {
 
   const SALES_PER_PAGE = 9;
 
-  // ----- Fetch functions -----
   const fetchProductsList = useCallback(async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/products`, {
         timeout: 5000,
       });
-      if (response.data && Array.isArray(response.data)) {
+      if (response.data && Array.isArray(response.data))
         setProductsList(response.data);
-      } else if (
-        response.data.products &&
-        Array.isArray(response.data.products)
-      ) {
+      else if (response.data.products && Array.isArray(response.data.products))
         setProductsList(response.data.products);
-      } else if (response.data.data && Array.isArray(response.data.data)) {
+      else if (response.data.data && Array.isArray(response.data.data))
         setProductsList(response.data.data);
-      }
     } catch (error) {
       console.error("Error fetching products list:", error);
     }
@@ -3139,15 +3029,10 @@ const Sales = () => {
   const fetchSaleSummaries = useCallback(async () => {
     try {
       setLoadingData(true);
-
       const res = await fetch(`${backendUrl}/api/sales/all`, {
         headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
       });
-
-      if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       processSalesData(data.summaries);
     } catch (error) {
@@ -3176,24 +3061,19 @@ const Sales = () => {
     setShouldCheckPurchase(true);
   }, []);
 
-  // ----- Fetch provinces -----
   const fetchProvinces = useCallback(async () => {
     setProvincesLoading(true);
     try {
       const response = await axios.get(`${backendUrl}/api/customers/provinces`);
-      if (response.data.success) {
-        setProvincesList(response.data.data || []);
-      } else {
-        // Fallback static data for demo
+      if (response.data.success) setProvincesList(response.data.data || []);
+      else
         setProvincesList([
           { name: "Province A" },
           { name: "Province B" },
           { name: "Province C" },
         ]);
-      }
     } catch (error) {
       console.error("Error fetching provinces:", error);
-      showToast("error", "Failed to load provinces");
       setProvincesList([
         { name: "Province A" },
         { name: "Province B" },
@@ -3204,7 +3084,6 @@ const Sales = () => {
     }
   }, []);
 
-  // ----- Fetch zones for a selected province -----
   const fetchZonesByProvince = useCallback(async (provinceName) => {
     if (!provinceName) {
       setZonesList([]);
@@ -3212,36 +3091,26 @@ const Sales = () => {
     }
     setZonesLoading(true);
     try {
-      // Adjust endpoint as needed; here we use a query param
       const response = await axios.get(
         `${backendUrl}/api/zones?province=${encodeURIComponent(provinceName)}`,
       );
-      if (response.data.success) {
-        setZonesList(response.data.data || []);
-      } else {
-        // Fallback: use province name as a single zone
-        setZonesList([{ name: provinceName }]);
-      }
+      if (response.data.success) setZonesList(response.data.data || []);
+      else setZonesList([{ name: provinceName }]);
     } catch (error) {
-      console.error("Error fetching zones:", error);
-      // Fallback: use province name as zone
       setZonesList([{ name: provinceName }]);
     } finally {
       setZonesLoading(false);
     }
   }, []);
 
-  // ----- Effects -----
   useEffect(() => {
     fetchSaleSummaries();
   }, [fetchSaleSummaries]);
-
   useEffect(() => {
     checkPurchaseInventories();
     fetchProductsList();
     fetchProvinces();
   }, [checkPurchaseInventories, fetchProductsList, fetchProvinces]);
-
   useEffect(() => {
     if (shouldCheckPurchase) {
       checkPurchaseInventories();
@@ -3249,7 +3118,6 @@ const Sales = () => {
     }
   }, [shouldCheckPurchase, checkPurchaseInventories]);
 
-  // Fetch zones when province changes (like AddCustomer)
   useEffect(() => {
     if (
       form.customerProvince &&
@@ -3286,7 +3154,6 @@ const Sales = () => {
       );
   }, [recheckPurchaseInventories]);
 
-  // ✅ FIX: Fetch dropdown data — stringify all _id values for safe comparison
   useEffect(() => {
     const fetchDropdownData = async () => {
       setCustomerListLoading(true);
@@ -3306,7 +3173,6 @@ const Sales = () => {
               full.push({ _id: null, mrName: trimmed });
             } else if (mr && typeof mr === "object") {
               const name = mr.medicalRepName || mr.name || mr.fullName;
-              // ✅ Always stringify _id so comparisons never fail due to ObjectId vs string
               const id = mr._id ? String(mr._id) : null;
               if (name) {
                 const trimmedName = name.trim();
@@ -3323,12 +3189,9 @@ const Sales = () => {
         }
 
         if (customers && customers.success && Array.isArray(customers.data)) {
-          // ✅ Stringify customer _id as well
-          const customerData = customers.data.map((c) => ({
-            ...c,
-            _id: String(c._id),
-          }));
-          setCustomerList(customerData);
+          setCustomerList(
+            customers.data.map((c) => ({ ...c, _id: String(c._id) })),
+          );
         } else {
           setCustomerList([]);
         }
@@ -3347,7 +3210,6 @@ const Sales = () => {
     setCurrentPage(1);
   }, [searchTerm, selectedTab, saleTypeTab]);
 
-  // ----- Handlers for delete, view, edit, etc. -----
   const handleDeleteSelected = useCallback(async () => {
     if (selected.length === 0) return;
     const confirm = await confirmDialog({
@@ -3377,11 +3239,12 @@ const Sales = () => {
           setSelected([]);
         }
       } catch (error) {
-        const errorMessage =
+        showToast(
+          "error",
           error.response?.data?.error ||
-          error.response?.data?.message ||
-          "Failed to delete selected sales";
-        showToast("error", errorMessage);
+            error.response?.data?.message ||
+            "Failed to delete selected sales",
+        );
       }
     }
   }, [selected, fetchSaleSummaries]);
@@ -3433,9 +3296,8 @@ const Sales = () => {
         !baseTabs.includes(status) &&
         status !== "Cash" &&
         status !== "Credit"
-      ) {
+      )
         baseTabs.push(status);
-      }
     });
     return baseTabs;
   }, [sales]);
@@ -3451,7 +3313,6 @@ const Sales = () => {
 
   const filteredSales = useMemo(() => {
     if (!Array.isArray(sales)) return [];
-
     const lowerSearch = searchTerm.trim().toLowerCase();
     const tabStatus = selectedTab.toLowerCase();
     const tabSaleType = saleTypeTab;
@@ -3461,13 +3322,11 @@ const Sales = () => {
         const ps = (sale.paymentStatus || "").toLowerCase();
         if (ps !== tabStatus) return false;
       }
-
       if (tabSaleType === "mr") {
         if (!isMRSaleDoc(sale)) return false;
       } else if (tabSaleType === "normal") {
         if (isMRSaleDoc(sale)) return false;
       }
-
       if (!lowerSearch) return true;
       return [sale.invoiceNumber, sale.customerName, sale.mrName].some((f) =>
         (f ?? "").toString().toLowerCase().includes(lowerSearch),
@@ -3475,9 +3334,7 @@ const Sales = () => {
     });
   }, [sales, searchTerm, selectedTab, saleTypeTab]);
 
-  // Debug log
-  useEffect(() => {
-  }, [filteredSales]);
+  useEffect(() => {}, [filteredSales]);
 
   const downloadData = useMemo(() => {
     if (isSampleDownloadFile) {
@@ -3498,7 +3355,6 @@ const Sales = () => {
     () => Math.ceil(filteredSales.length / SALES_PER_PAGE),
     [filteredSales.length],
   );
-
   const visiblePages = useMemo(
     () => getVisiblePages(currentPage, totalPages),
     [currentPage, totalPages],
@@ -3535,20 +3391,15 @@ const Sales = () => {
   }, []);
 
   const handleView = useCallback((sale) => {
-    // Customer fields are already on the sale object from the backend
-    setForm({
-      ...sale,
-      products: sale.products || [],
-    });
+    setForm({ ...sale, products: sale.products || [] });
     setIsViewModalOpen(true);
   }, []);
 
-  // ✅ FIX: editSale — match mrName against mrFullList to get correct _id
+  // ✅ FIX 2: editSale — default creditDays to DEFAULT_CREDIT_DAYS (30) when 0/missing
   const editSale = useCallback(
     (sale) => {
       setSelectedSale(sale);
 
-      // Match the sale's mrName against mrFullList to find the correct _id
       const matchedMr = mrFullList.find(
         (mr) =>
           mr.mrName?.toLowerCase().trim() ===
@@ -3556,18 +3407,21 @@ const Sales = () => {
       );
 
       setForm({
-        ...sale, // customerPhone, customerZone, customerProvince are already here
+        ...sale,
         products: sale.products || [],
-        // ✅ Use matched MR's _id (already stringified) or fall back to sale.mrId stringified
         mrId: matchedMr
           ? String(matchedMr._id)
           : sale.mrId
             ? String(sale.mrId)
             : "",
         mrName: matchedMr ? matchedMr.mrName : sale.mrName || "",
-        // Ensure zone and province are set from the sale's customer fields
         customerZone: sale.customerZone || "",
         customerProvince: sale.customerProvince || "",
+        // ✅ Default to DEFAULT_CREDIT_DAYS (30) when the sale has 0 or no credit days
+        creditDays:
+          sale.creditDays && sale.creditDays > 0
+            ? sale.creditDays
+            : DEFAULT_CREDIT_DAYS,
       });
       setIsEditModalOpen(true);
     },
@@ -3589,9 +3443,7 @@ const Sales = () => {
           const token = localStorage.getItem("token");
           const res = await axios.delete(
             `${backendUrl}/api/sales/${sale._id}`,
-            {
-              headers: { Authorization: `Bearer ${token}` },
-            },
+            { headers: { Authorization: `Bearer ${token}` } },
           );
           if (res.status === 200) {
             showToast(
@@ -3601,11 +3453,12 @@ const Sales = () => {
             fetchSaleSummaries();
           }
         } catch (error) {
-          const errorMessage =
+          showToast(
+            "error",
             error.response?.data?.error ||
-            error.response?.data?.message ||
-            "Failed to delete sale";
-          showToast("error", errorMessage);
+              error.response?.data?.message ||
+              "Failed to delete sale",
+          );
         }
       }
     },
@@ -3637,7 +3490,6 @@ const Sales = () => {
     [form.products, calculateProductTotals],
   );
 
-  // ----- Numeric input handlers with filtering -----
   const handlePaidChange = (e) => {
     const rawValue = e.target.value;
     const filtered = filterNumericInput(rawValue, true);
@@ -3688,12 +3540,13 @@ const Sales = () => {
     });
   };
 
+  // ✅ FIX 3: handleCreditDaysChange — if user clears field, default back to DEFAULT_CREDIT_DAYS
   const handleCreditDaysChange = (e) => {
     const rawValue = e.target.value;
     const filtered = filterNumericInput(rawValue, false);
     e.target.value = filtered;
 
-    const days = filtered ? parseInt(filtered, 10) : 0;
+    const days = filtered ? parseInt(filtered, 10) : DEFAULT_CREDIT_DAYS;
     let newDueDate = "";
 
     if (days > 0) {
@@ -3702,11 +3555,7 @@ const Sales = () => {
       newDueDate = today.toISOString().split("T")[0];
     }
 
-    setForm((prev) => ({
-      ...prev,
-      creditDays: days,
-      dueDate: newDueDate,
-    }));
+    setForm((prev) => ({ ...prev, creditDays: days, dueDate: newDueDate }));
   };
 
   const handleFormChange = (e) => {
@@ -3745,9 +3594,8 @@ const Sales = () => {
   );
 
   const customerOptions = useMemo(() => {
-    if (customerList.length === 0 && !customerListLoading) {
+    if (customerList.length === 0 && !customerListLoading)
       return [{ value: "", label: "No Customers Available", disabled: true }];
-    }
     return [
       { value: "", label: "Select Customer" },
       ...customerList.map((customer) => ({
@@ -3757,31 +3605,22 @@ const Sales = () => {
     ];
   }, [customerList, customerListLoading]);
 
-  // --- MR dropdown options (includes current selection) ---
   const mrOptions = useMemo(() => {
     const options = [{ value: "", label: "Select MR" }];
-
-    // Add all known MRs from mrFullList
     mrFullList.forEach((mr) => {
       options.push({ value: String(mr._id), label: mr.mrName });
     });
-
-    // If the current selected MR (from form) is not in the list, add it as a fallback
     if (form.mrId && form.mrName) {
       const exists = options.some((opt) => opt.value === String(form.mrId));
-      if (!exists) {
+      if (!exists)
         options.push({ value: String(form.mrId), label: form.mrName });
-      }
     }
-
     return options;
   }, [mrFullList, form.mrId, form.mrName]);
 
-  // --- Province dropdown options (includes current selection) ---
   const provinceOptions = useMemo(() => {
-    if (provincesLoading) {
+    if (provincesLoading)
       return [{ value: "", label: "Loading provinces...", disabled: true }];
-    }
     const options = [
       { value: "", label: "Select Province" },
       ...provincesList.map((prov) => {
@@ -3792,13 +3631,9 @@ const Sales = () => {
           prov.label ||
           prov.province ||
           "";
-        return {
-          value: provName.trim(),
-          label: provName.trim(),
-        };
+        return { value: provName.trim(), label: provName.trim() };
       }),
     ];
-    // Ensure the current province is always in the list
     if (
       form.customerProvince &&
       !options.some((opt) => opt.value === form.customerProvince.trim())
@@ -3811,19 +3646,15 @@ const Sales = () => {
     return options;
   }, [provincesList, provincesLoading, form.customerProvince]);
 
-  // --- Zone dropdown options (includes current selection) ---
   const zoneOptions = useMemo(() => {
-    if (zonesLoading) {
+    if (zonesLoading)
       return [{ value: "", label: "Loading zones...", disabled: true }];
-    }
     if (!zonesList || zonesList.length === 0) {
-      if (form.customerZone) {
-        // If a zone is already selected but no zones fetched, show it as an option
+      if (form.customerZone)
         return [
           { value: "", label: "Select a province first", disabled: true },
           { value: form.customerZone.trim(), label: form.customerZone.trim() },
         ];
-      }
       return form.customerProvince
         ? [{ value: "", label: "No zones for this province", disabled: true }]
         : [{ value: "", label: "Select a province first", disabled: true }];
@@ -3838,13 +3669,9 @@ const Sales = () => {
           zone.label ||
           zone.zone ||
           "";
-        return {
-          value: zoneName.trim(),
-          label: zoneName.trim(),
-        };
+        return { value: zoneName.trim(), label: zoneName.trim() };
       }),
     ];
-    // Ensure the current zone is always in the list
     if (
       form.customerZone &&
       !options.some((opt) => opt.value === form.customerZone.trim())
@@ -3857,15 +3684,12 @@ const Sales = () => {
     return options;
   }, [zonesList, zonesLoading, form.customerProvince, form.customerZone]);
 
-  // Handlers for province/zone changes
   const handleProvinceChange = (value) => {
-    const trimmed = value.trim();
     setForm((prev) => ({
       ...prev,
-      customerProvince: trimmed,
+      customerProvince: value.trim(),
       customerZone: "",
     }));
-    // Fetch zones will be triggered by the useEffect watching customerProvince
   };
 
   const handleZoneChange = (value) => {
@@ -3885,6 +3709,11 @@ const Sales = () => {
             form.paidAmount,
             totals.netAmount,
           ),
+          // ✅ Ensure creditDays is never saved as 0 — use DEFAULT_CREDIT_DAYS as minimum
+          creditDays:
+            form.creditDays && Number(form.creditDays) > 0
+              ? Number(form.creditDays)
+              : DEFAULT_CREDIT_DAYS,
         };
         const token = localStorage.getItem("token");
         const res = await axios.put(
@@ -3900,11 +3729,12 @@ const Sales = () => {
           fetchSaleSummaries();
         }
       } catch (err) {
-        const errorMessage =
+        showToast(
+          "error",
           err.response?.data?.error ||
-          err.response?.data?.message ||
-          "Failed to update sale";
-        showToast("error", errorMessage);
+            err.response?.data?.message ||
+            "Failed to update sale",
+        );
       }
     },
     [form, calculateProductTotals, fetchSaleSummaries, selectedSale],
@@ -4009,22 +3839,15 @@ const Sales = () => {
   const handleSampleDownload = useCallback(() => {
     const normalSales = sales.filter((s) => !isMRSaleDoc(s));
     const mrSales = sales.filter((s) => isMRSaleDoc(s));
-
     if (normalSales.length === 0 && mrSales.length === 0) {
       showToast("error", "No sales data available");
       return;
     }
-    if (normalSales.length > 0) {
-      downloadExcel(normalSales, "Normal_Sales");
-    } else {
-      showToast("info", "No normal sales to download");
-    }
+    if (normalSales.length > 0) downloadExcel(normalSales, "Normal_Sales");
+    else showToast("info", "No normal sales to download");
     setTimeout(() => {
-      if (mrSales.length > 0) {
-        downloadExcel(mrSales, "MR_Sales");
-      } else {
-        showToast("info", "No MR sales to download");
-      }
+      if (mrSales.length > 0) downloadExcel(mrSales, "MR_Sales");
+      else showToast("info", "No MR sales to download");
     }, 500);
   }, [sales, downloadExcel]);
 
@@ -4059,8 +3882,7 @@ const Sales = () => {
                 <X size={20} />
               </button>
               <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-                <Edit size={20} />
-                Edit Sales Record
+                <Edit size={20} /> Edit Sales Record
               </h2>
               <form onSubmit={handleUpdateSale} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4118,7 +3940,6 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* MR Name select - using mrOptions with fallback */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       MR Name
@@ -4130,13 +3951,11 @@ const Sales = () => {
                         const selectedOption = mrOptions.find(
                           (opt) => opt.value === selectedVal,
                         );
-                        if (selectedOption) {
-                          const selectedMr = {
+                        if (selectedOption)
+                          handleMRChange({
                             _id: selectedVal,
                             mrName: selectedOption.label,
-                          };
-                          handleMRChange(selectedMr);
-                        }
+                          });
                       }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     >
@@ -4148,7 +3967,6 @@ const Sales = () => {
                     </select>
                   </div>
 
-                  {/* Customer dropdown */}
                   <div className="col-span-1 md:col-span-2">
                     <SearchableDropdown
                       value={form.customerId}
@@ -4163,7 +3981,6 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* Customer extra fields – now editable with proper zone/province dropdowns */}
                   {form.customerId && (
                     <div className="col-span-1 md:col-span-2">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -4209,7 +4026,6 @@ const Sales = () => {
                   )}
                 </div>
 
-                {/* Products section */}
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-medium text-gray-700">
@@ -4248,7 +4064,6 @@ const Sales = () => {
                   )}
                 </div>
 
-                {/* Totals (read‑only) */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[
                     ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
@@ -4266,18 +4081,13 @@ const Sales = () => {
                   <div className="bg-gray-50 p-3 rounded-lg">
                     <div className="text-xs text-gray-500">Profit/Loss</div>
                     <div
-                      className={`font-semibold ${
-                        formTotals.totalProfitLoss >= 0
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
+                      className={`font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
                     >
                       ${formTotals.totalProfitLoss.toFixed(2)}
                     </div>
                   </div>
                 </div>
 
-                {/* Payment related fields */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -4308,6 +4118,9 @@ const Sales = () => {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Credit Days
+                        <span className="ml-1 text-xs text-gray-400">
+                          (default: {DEFAULT_CREDIT_DAYS})
+                        </span>
                       </label>
                       <input
                         type="text"
@@ -4315,6 +4128,7 @@ const Sales = () => {
                         name="creditDays"
                         value={form.creditDays || ""}
                         onChange={handleCreditDaysChange}
+                        placeholder={String(DEFAULT_CREDIT_DAYS)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2"
                       />
                     </div>
@@ -4410,8 +4224,7 @@ const Sales = () => {
                     type="submit"
                     className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer flex items-center gap-2"
                   >
-                    <Save size={18} />
-                    Update Sale
+                    <Save size={18} /> Update Sale
                   </button>
                 </div>
               </form>
@@ -4432,8 +4245,7 @@ const Sales = () => {
                 <X size={20} />
               </button>
               <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-                <Eye size={20} />
-                View Sales Record
+                <Eye size={20} /> View Sales Record
               </h2>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -4456,7 +4268,6 @@ const Sales = () => {
                 ))}
               </div>
 
-              {/* New row for customer contact details (read‑only in View modal) */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 {[
                   ["Customer Phone", form.customerPhone || "-"],
@@ -4540,11 +4351,7 @@ const Sales = () => {
                     Profit/Loss
                   </label>
                   <div
-                    className={`text-lg font-semibold ${
-                      formTotals.totalProfitLoss >= 0
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
+                    className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
                   >
                     ${formTotals.totalProfitLoss.toFixed(2)}
                   </div>
@@ -4553,7 +4360,11 @@ const Sales = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 {[
-                  ["Credit Days", `${form.creditDays || 0} days`],
+                  // ✅ FIX 4: View modal shows DEFAULT_CREDIT_DAYS when stored value is 0
+                  [
+                    "Credit Days",
+                    `${form.creditDays && form.creditDays > 0 ? form.creditDays : DEFAULT_CREDIT_DAYS} days`,
+                  ],
                   ["Due Date", formatDateToReadable(form.dueDate)],
                   ["Paid Amount", `$${(form.paidAmount || 0).toFixed(2)}`],
                   ["Due Amount", `$${(form.dueAmount || 0).toFixed(2)}`],
@@ -4613,7 +4424,6 @@ const Sales = () => {
 
       {/* ── Main Content ── */}
       <div className="container">
-        {/* Top action bar */}
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
             <button
@@ -4622,8 +4432,7 @@ const Sales = () => {
               disabled={shouldDisableButtons}
               title={getButtonTitle()}
             >
-              <UserPlus size={18} />
-              Add New Sales
+              <UserPlus size={18} /> Add New Sales
             </button>
             <button
               onClick={() => setShowImportModal(true)}
@@ -4631,29 +4440,25 @@ const Sales = () => {
               disabled={shouldDisableButtons}
               title={getButtonTitle()}
             >
-              <Upload size={18} />
-              Import Sales
+              <Upload size={18} /> Import Sales
             </button>
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
                 className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
               >
-                <Trash2 size={18} />
-                Delete Selected
+                <Trash2 size={18} /> Delete Selected
               </button>
             )}
           </div>
 
-          {/* Download button */}
           {isSampleDownloadFile ? (
             <button
               onClick={handleSampleDownload}
               className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
               disabled={sales.length === 0}
             >
-              <Download size={18} />
-              Download Sample (Normal + MR)
+              <Download size={18} /> Download Sample (Normal + MR)
             </button>
           ) : (
             <SaleExcelDownload
@@ -4664,7 +4469,6 @@ const Sales = () => {
           )}
         </div>
 
-        {/* Warnings */}
         {!checkingPurchaseInventories && !hasPurchaseInventories && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start gap-3">
@@ -4716,11 +4520,9 @@ const Sales = () => {
             </div>
           )}
 
-        {/* Filter tabs + search */}
         {sales.length > 0 && (
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div className="flex gap-2 flex-wrap items-center">
-              {/* Payment status */}
               <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
                 <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
                   Payment
@@ -4733,11 +4535,7 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`px-4 py-1.5 rounded-lg cursor-pointer transition-colors text-sm font-medium ${
-                      selectedTab === tab
-                        ? "bg-indigo-600 text-white shadow"
-                        : "text-gray-600 hover:bg-gray-200"
-                    }`}
+                    className={`px-4 py-1.5 rounded-lg cursor-pointer transition-colors text-sm font-medium ${selectedTab === tab ? "bg-indigo-600 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
                   >
                     {tab}
                   </button>
@@ -4746,7 +4544,6 @@ const Sales = () => {
 
               <div className="w-px h-8 bg-gray-300 mx-1" />
 
-              {/* Sale type */}
               <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
                 <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
                   Sale Type
@@ -4827,7 +4624,6 @@ const Sales = () => {
               </div>
             </div>
 
-            {/* Right — count + search */}
             <div className="flex items-center justify-end gap-4 flex-wrap">
               <p className="text-lg font-semibold text-gray-700">
                 Total Count:{" "}
@@ -4856,7 +4652,6 @@ const Sales = () => {
           </div>
         )}
 
-        {/* Table */}
         <div className="overflow-x-auto shadow-lg rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -4921,13 +4716,10 @@ const Sales = () => {
               ) : (
                 currentSales.map((sale, index) => {
                   const isMRSale = isMRSaleDoc(sale);
-
                   return (
                     <tr
                       key={`sale-${sale._id || index}`}
-                      className={`hover:bg-gray-50 transition-colors ${
-                        index < currentSales.length - 1 ? "border-b" : ""
-                      }`}
+                      className={`hover:bg-gray-50 transition-colors ${index < currentSales.length - 1 ? "border-b" : ""}`}
                     >
                       {allFields
                         .filter((item) => tableColumns.includes(item.id))
@@ -5016,7 +4808,6 @@ const Sales = () => {
             </tbody>
           </table>
 
-          {/* Pagination */}
           {filteredSales.length > SALES_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
               <div className="flex items-center gap-2 flex-wrap">
@@ -5048,11 +4839,7 @@ const Sales = () => {
                         setCurrentPage(page);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                        currentPage === page
-                          ? "bg-indigo-600 text-white"
-                          : "bg-gray-200 hover:bg-gray-300"
-                      }`}
+                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
                     >
                       {page}
                     </button>

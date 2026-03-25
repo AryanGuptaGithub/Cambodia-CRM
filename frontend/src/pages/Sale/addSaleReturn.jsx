@@ -739,7 +739,7 @@ const AddReturnSale = () => {
   const fetchSaleSummaries = async () => {
     setLoadingSales(true);
     try {
-      const res = await fetch(`${backendUrl}/api/sales`);
+      const res = await fetch(`${backendUrl}/api/sales/all`);
       if (!res.ok) throw new Error("Failed to fetch sales");
       const data = await res.json();
       setSales(Array.isArray(data.summaries) ? data.summaries : []);

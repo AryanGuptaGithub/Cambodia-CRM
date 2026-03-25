@@ -3,13 +3,6 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
-/**
- * GET /table-data
- * Returns outstanding sales based on period filter.
- * Query params:
- *   period: "today" | "all" | "currentMonth" | "janToPreviousMonth" | "custom"
- *   startDate, endDate – required when period = "custom"
- */
 router.get("/table-data", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;

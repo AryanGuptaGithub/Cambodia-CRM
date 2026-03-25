@@ -19,7 +19,6 @@ async function connectDB(uri) {
     });
 
     isConnected = true;
-    // Call seed function ONCE after successful connection
     await seedSaleTypes();
     await seedPaymentStatuses();
 

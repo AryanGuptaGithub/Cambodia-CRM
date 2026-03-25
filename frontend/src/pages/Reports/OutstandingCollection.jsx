@@ -10,6 +10,7 @@ import {
   Upload,
   Search,
   Plus,
+  Wallet,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -25,7 +26,18 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CustomerDropdown — unchanged from original
+// Module-level cache — survives re-renders, cleared on page reload only
+// ─────────────────────────────────────────────────────────────────────────────
+const _cache = {
+  customers: null,
+  destinations: null,
+  categoryLabel: null,
+  ts: 0,
+};
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CustomerDropdown
 // ─────────────────────────────────────────────────────────────────────────────
 const CustomerDropdown = ({
   value,
@@ -114,7 +126,7 @@ const CustomerDropdown = ({
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InvoiceDropdown — searchable, used inside AddCreditCollectionModal
+// InvoiceDropdown
 // ─────────────────────────────────────────────────────────────────────────────
 const InvoiceDropdown = ({ value, onChange, options, disabled, loading }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -194,32 +206,75 @@ const InvoiceDropdown = ({ value, onChange, options, disabled, loading }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// pickAddress helper
+// ─────────────────────────────────────────────────────────────────────────────
+const pickAddress = (obj) => {
+  if (!obj) return "";
+  const candidates = [
+    obj.address,
+    obj.customerAddress,
+    obj.billingAddress,
+    obj.shippingAddress,
+    obj.deliveryAddress,
+    obj.custAddress,
+    obj.customer_address,
+    obj.billing_address,
+    obj.permanentAddress,
+    obj.contactAddress,
+  ];
+  for (const c of candidates) {
+    if (c && String(c).trim() !== "") return String(c).trim();
+  }
+  return "";
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Build customer lookup maps from raw customer array
+// ─────────────────────────────────────────────────────────────────────────────
+const buildCustomerMaps = (custRaw) => {
+  const byId = {},
+    byCode = {},
+    byName = {};
+  if (!Array.isArray(custRaw)) return { byId, byCode, byName };
+  custRaw.forEach((c) => {
+    const addr = pickAddress(c);
+    if (c._id)
+      byId[String(c._id)] = { addr, name: c.name, phone: c.customerNumber };
+    if (c.customerCode) {
+      byCode[String(c.customerCode)] = addr;
+      byCode[String(c.customerCode).replace(/^0+/, "") || "0"] = addr;
+    }
+    if (c.name) byName[c.name.toLowerCase().trim()] = addr;
+  });
+  return { byId, byCode, byName };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AddCreditCollectionModal
-// Opened by the "Add New Transaction" header button.
-// - Category Type: locked to "Credit Collection"
-// - Customer Name: searchable dropdown of all customers with outstanding invoices
-// - Invoice dropdown: filters to selected customer's outstanding invoices
-// - Amount: pre-fills with dueAmount, editable for partial payment
-// - Invoice Date / Customer Address: auto-filled, read-only
-// On submit → POST /api/transactions
 // ─────────────────────────────────────────────────────────────────────────────
 const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
   const [destinationOptions, setDestinationOptions] = useState([]);
   const [categoryLabel, setCategoryLabel] = useState("Credit Collection");
   const [allSales, setAllSales] = useState([]);
   const [usedInvoices, setUsedInvoices] = useState(new Set());
-  const [invoiceOptions, setInvoiceOptions] = useState([]);
-  const [customerOptions, setCustomerOptions] = useState([]);
-  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [allInvoiceOptions, setAllInvoiceOptions] = useState([]);
+
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [staticLoading, setStaticLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Customer search state
-  const [customerSearch, setCustomerSearch] = useState("");
-  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
-  const customerDropdownRef = useRef(null);
+  const [customerById, setCustomerById] = useState({});
+  const [customerByCode, setCustomerByCode] = useState({});
+  const [customerByName, setCustomerByName] = useState({});
+
+  const [mrCashInfo, setMrCashInfo] = useState(null);
+  const [isMrInStockTransfer, setIsMrInStockTransfer] = useState(false);
+  const [mrCashLoading, setMrCashLoading] = useState(false);
+
+  // Track the selected sale for dueAmount updates
+  const [selectedSale, setSelectedSale] = useState(null);
 
   const [form, setForm] = useState({
-    selectedCustomer: null, // { code, name, address }
     invoiceNumber: "",
     destinationAccount: "",
     date: new Date().toISOString().split("T")[0],
@@ -232,28 +287,14 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
   const [errors, setErrors] = useState({});
   const [invoiceDueAmount, setInvoiceDueAmount] = useState(0);
 
-  // Close customer dropdown on outside click
-  useEffect(() => {
-    const handler = (e) => {
-      if (
-        customerDropdownRef.current &&
-        !customerDropdownRef.current.contains(e.target)
-      )
-        setCustomerDropdownOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
   useEffect(() => {
     if (!isOpen) return;
     resetForm();
-    loadOptions();
+    loadData();
   }, [isOpen]);
 
   const resetForm = () => {
     setForm({
-      selectedCustomer: null,
       invoiceNumber: "",
       destinationAccount: "",
       date: new Date().toISOString().split("T")[0],
@@ -265,187 +306,173 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
     });
     setErrors({});
     setInvoiceDueAmount(0);
-    setInvoiceOptions([]);
-    setCustomerSearch("");
+    setAllInvoiceOptions([]);
+    setMrCashInfo(null);
+    setIsMrInStockTransfer(false);
+    setSelectedSale(null);
   };
 
-  const loadOptions = async () => {
-    setLoadingOptions(true);
+  const loadData = async () => {
+    setInvoicesLoading(true);
     try {
-      const [destRes, catRes, salesRes, txRes] = await Promise.all([
-        axios.get(`${backendUrl}/api/accounts/destinations`),
-        axios.get(`${backendUrl}/api/accounts/category-type`),
+      const [salesRes, txRes] = await Promise.all([
         axios.get(`${backendUrl}/api/sales/all`),
         axios.get(`${backendUrl}/api/transactions`),
       ]);
 
-      // Destination accounts
+      const allTx = txRes.data?.data || [];
+
+      // ── FIX: Build a map of invoiceNo → total collected so far ──────────
+      const collectedMap = {};
+      allTx
+        .filter((tx) => tx.invoiceNo && tx.invoiceNo !== "NA")
+        .forEach((tx) => {
+          const inv = tx.invoiceNo;
+          collectedMap[inv] = (collectedMap[inv] || 0) + (tx.amount || 0);
+        });
+
+      const allSalesData = salesRes.data?.summaries || [];
+      setAllSales(allSalesData);
+
+      // ── FIX: Show invoice if effective dueAmount > 0 (after subtracting
+      //    already-collected amounts from transactions) ────────────────────
+      const invoiceOpts = allSalesData
+        .filter((s) => {
+          const ps = (s.paymentStatus || "").toLowerCase();
+          const isCredit =
+            ps === "credit" ||
+            ps === "partial paid" ||
+            ps === "unpaid" ||
+            ps === "due";
+          const notPaid = (s.pendingAmountPaid || "").toLowerCase() !== "paid";
+          const collected = collectedMap[s.invoiceNumber] || 0;
+          const effectiveDue = Math.max(0, (s.dueAmount || 0) - collected);
+          return isCredit && notPaid && effectiveDue > 0 && s.invoiceNumber;
+        })
+        .map((s) => {
+          const collected = collectedMap[s.invoiceNumber] || 0;
+          const effectiveDue = Math.max(0, (s.dueAmount || 0) - collected);
+          return {
+            value: s.invoiceNumber,
+            label: `${s.invoiceNumber} — Due: $${effectiveDue.toFixed(2)}`,
+            effectiveDue,
+          };
+        });
+
+      setUsedInvoices(collectedMap);
+      setAllInvoiceOptions([
+        { value: "", label: "Select Invoice Number" },
+        ...invoiceOpts,
+      ]);
+    } catch (err) {
+      console.error("Phase 1 load error:", err);
+      showToast("error", "Failed to load invoices");
+    } finally {
+      setInvoicesLoading(false);
+    }
+
+    const now = Date.now();
+    const cacheValid = _cache.ts && now - _cache.ts < CACHE_TTL;
+
+    if (cacheValid && _cache.customers && _cache.destinations) {
+      const { byId, byCode, byName } = _cache.customers;
+      setCustomerById(byId);
+      setCustomerByCode(byCode);
+      setCustomerByName(byName);
+      setDestinationOptions(_cache.destinations);
+      if (_cache.categoryLabel) setCategoryLabel(_cache.categoryLabel);
+      return;
+    }
+
+    setStaticLoading(true);
+    try {
+      const [destRes, catRes, custRes] = await Promise.all([
+        axios.get(`${backendUrl}/api/accounts/destinations`),
+        axios.get(`${backendUrl}/api/accounts/category-type`),
+        axios.get(`${backendUrl}/api/customers`),
+      ]);
+
       let destinations = [];
       if (destRes.data && Array.isArray(destRes.data))
         destinations = destRes.data;
       else if (destRes.data?.data) destinations = destRes.data.data;
-      setDestinationOptions(
-        destinations.map((d) => ({
-          value: d._id,
-          label: d.name,
-          totalAmount: d.totalAmount || 0,
-        })),
-      );
+      const destOpts = destinations.map((d) => ({
+        value: d._id,
+        label: d.name,
+        totalAmount: d.totalAmount || 0,
+      }));
+      setDestinationOptions(destOpts);
+      _cache.destinations = destOpts;
 
-      // Credit Collection category label from master
       let categories = [];
       if (catRes.data && Array.isArray(catRes.data)) categories = catRes.data;
       else if (catRes.data?.data) categories = catRes.data.data;
       const creditCat = categories.find((c) =>
         c.name?.toLowerCase().includes("credit collection"),
       );
-      if (creditCat) setCategoryLabel(creditCat.name);
+      const label = creditCat?.name || "Credit Collection";
+      setCategoryLabel(label);
+      _cache.categoryLabel = label;
 
-      // Used invoice numbers
-      const allTx = txRes.data?.data || [];
-      const usedSet = new Set(
-        allTx
-          .filter((tx) => tx.invoiceNo && tx.invoiceNo !== "NA")
-          .map((tx) => tx.invoiceNo),
-      );
-      setUsedInvoices(usedSet);
-
-      // All sales
-      const allSalesData = salesRes.data?.summaries || [];
-      setAllSales(allSalesData);
-
-      // Build unique customer list from sales that have outstanding invoices
-      const customerMap = new Map();
-      allSalesData.forEach((s) => {
-        const ps = (s.paymentStatus || "").toLowerCase();
-        const isCredit =
-          ps === "credit" ||
-          ps === "partial paid" ||
-          ps === "unpaid" ||
-          ps === "due";
-        const notPaid = (s.pendingAmountPaid || "").toLowerCase() !== "paid";
-        const notUsed = !usedSet.has(s.invoiceNumber);
-        const hasDue = (s.dueAmount || 0) > 0;
-
-        if (isCredit && notPaid && notUsed && hasDue && s.customerName) {
-          const key = String(s.customerCode || s.customerName);
-          if (!customerMap.has(key)) {
-            customerMap.set(key, {
-              code: s.customerCode || "",
-              name: s.customerName,
-              address: s.customerAddress || s.billingAddress || "",
-            });
-          }
-        }
-      });
-      setCustomerOptions(Array.from(customerMap.values()));
+      const custRaw =
+        custRes.data?.customers ||
+        custRes.data?.data ||
+        (Array.isArray(custRes.data) ? custRes.data : []);
+      const maps = buildCustomerMaps(custRaw);
+      setCustomerById(maps.byId);
+      setCustomerByCode(maps.byCode);
+      setCustomerByName(maps.byName);
+      _cache.customers = maps;
+      _cache.ts = Date.now();
     } catch (err) {
-      console.error("AddCreditCollectionModal loadOptions error:", err);
-      showToast("error", "Failed to load options");
+      console.error("Phase 2 load error:", err);
     } finally {
-      setLoadingOptions(false);
+      setStaticLoading(false);
     }
   };
 
-  // When customer is selected, filter invoices for that customer
-  const handleCustomerSelect = (customer) => {
-    setCustomerSearch(customer.name);
-    setCustomerDropdownOpen(false);
-    setForm((prev) => ({
-      ...prev,
-      selectedCustomer: customer,
-      customerName: customer.name,
-      customerAddress: customer.address || "",
-      invoiceNumber: "",
-      invoiceDate: "",
-      amount: "",
-    }));
-    setInvoiceDueAmount(0);
-    setErrors((prev) => ({ ...prev, selectedCustomer: "", invoiceNumber: "" }));
+  const resolveAddress = (sale, byId, byCode, byName) => {
+    const fromSale = pickAddress(sale);
+    if (fromSale) return fromSale;
 
-    // Build invoice options for this customer
-    const custCode = customer.code;
-    const custName = customer.name;
-    const filtered = allSales.filter((s) => {
-      const codeMatch = custCode
-        ? String(s.customerCode).replace(/^0+/, "") ===
-          String(custCode).replace(/^0+/, "")
-        : false;
-      const nameMatch = custName
-        ? (s.customerName || "").toLowerCase() === custName.toLowerCase()
-        : false;
-      const matchesCustomer = codeMatch || nameMatch;
-      const ps = (s.paymentStatus || "").toLowerCase();
-      const isCredit =
-        ps === "credit" ||
-        ps === "partial paid" ||
-        ps === "unpaid" ||
-        ps === "due";
-      const notPaid = (s.pendingAmountPaid || "").toLowerCase() !== "paid";
-      const notUsed = !usedInvoices.has(s.invoiceNumber);
-      const hasDue = (s.dueAmount || 0) > 0;
-      return matchesCustomer && isCredit && notPaid && notUsed && hasDue;
-    });
+    if (sale.customerId) {
+      const rec = byId[String(sale.customerId)];
+      if (rec?.addr) return rec.addr;
+      if (typeof rec === "string" && rec) return rec;
+    }
 
-    setInvoiceOptions([
-      { value: "", label: "Select Invoice Number" },
-      ...filtered.map((s) => ({
-        value: s.invoiceNumber,
-        label: `${s.invoiceNumber} — Due: $${(s.dueAmount || 0).toFixed(2)}`,
-      })),
-    ]);
+    if (sale.customerCode) {
+      const raw = String(sale.customerCode);
+      const stripped = raw.replace(/^0+/, "") || "0";
+      if (byCode[raw]) return byCode[raw];
+      if (byCode[stripped]) return byCode[stripped];
+    }
+
+    if (sale.customerName) {
+      const byNameAddr = byName[sale.customerName.toLowerCase().trim()];
+      if (byNameAddr) return byNameAddr;
+    }
+
+    return "";
   };
 
-  const handleInvoiceSelect = (invoiceNumber) => {
-    if (!invoiceNumber) {
-      setForm((prev) => ({
-        ...prev,
-        invoiceNumber: "",
-        invoiceDate: "",
-        amount: "",
-      }));
-      setInvoiceDueAmount(0);
-      return;
-    }
-    if (usedInvoices.has(invoiceNumber)) {
-      showToast(
-        "error",
-        `Invoice "${invoiceNumber}" already has a transaction.`,
-      );
-      return;
-    }
-    const sale = allSales.find((s) => s.invoiceNumber === invoiceNumber);
-    if (sale) {
-      const due = sale.dueAmount || 0;
-      setInvoiceDueAmount(due);
-      setForm((prev) => ({
-        ...prev,
-        invoiceNumber,
-        invoiceDate: sale.invoiceDate ? sale.invoiceDate.split("T")[0] : "",
-        customerName: sale.customerName || prev.customerName || "",
-        customerAddress:
-          sale.customerAddress ||
-          sale.billingAddress ||
-          prev.customerAddress ||
-          "",
-        amount: due.toFixed(2),
-      }));
-      setErrors((prev) => ({ ...prev, invoiceNumber: "" }));
-    }
-  };
+  const handleAmountChange = (e) => {
+    const raw = e.target.value;
+    const cleaned = raw.replace(/[^0-9.]/g, "");
+    const parts = cleaned.split(".");
+    const sanitized =
+      parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleaned;
 
-  const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: "" }));
+    setForm((prev) => ({ ...prev, amount: sanitized }));
 
-    if (field === "amount" && invoiceDueAmount > 0) {
-      const amt = parseFloat(value) || 0;
-      if (amt > invoiceDueAmount) {
+    if (invoiceDueAmount > 0) {
+      const amt = parseFloat(sanitized) || 0;
+      if (sanitized !== "" && amt > invoiceDueAmount) {
         setErrors((prev) => ({
           ...prev,
           amount: `Cannot exceed due amount of $${invoiceDueAmount.toFixed(2)}`,
         }));
-      } else if (amt <= 0) {
+      } else if (sanitized !== "" && amt <= 0) {
         setErrors((prev) => ({
           ...prev,
           amount: "Amount must be greater than 0",
@@ -453,24 +480,147 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
       } else {
         setErrors((prev) => ({ ...prev, amount: "" }));
       }
+    } else {
+      if (errors.amount) setErrors((prev) => ({ ...prev, amount: "" }));
     }
+  };
+
+  const handleInvoiceSelect = async (invoiceNumber) => {
+    if (!invoiceNumber) {
+      setForm((prev) => ({
+        ...prev,
+        invoiceNumber: "",
+        invoiceDate: "",
+        amount: "",
+        customerName: "",
+        customerAddress: "",
+        destinationAccount: "",
+      }));
+      setInvoiceDueAmount(0);
+      setMrCashInfo(null);
+      setIsMrInStockTransfer(false);
+      setSelectedSale(null);
+      return;
+    }
+
+    const sale = allSales.find((s) => s.invoiceNumber === invoiceNumber);
+    if (!sale) return;
+
+    // ── FIX: Calculate effective due (subtract already-collected amounts) ──
+    const alreadyCollected =
+      typeof usedInvoices === "object" && !(usedInvoices instanceof Set)
+        ? usedInvoices[invoiceNumber] || 0
+        : 0;
+    const effectiveDue = Math.max(0, (sale.dueAmount || 0) - alreadyCollected);
+
+    if (effectiveDue <= 0) {
+      showToast(
+        "error",
+        `Invoice "${invoiceNumber}" has no outstanding due amount.`,
+      );
+      return;
+    }
+
+    setInvoiceDueAmount(effectiveDue);
+    setSelectedSale(sale);
+
+    const resolvedAddress = resolveAddress(
+      sale,
+      customerById,
+      customerByCode,
+      customerByName,
+    );
+
+    setForm((prev) => ({
+      ...prev,
+      invoiceNumber,
+      invoiceDate: sale.invoiceDate ? sale.invoiceDate.split("T")[0] : "",
+      customerName: sale.customerName || "",
+      customerAddress: resolvedAddress,
+      amount: effectiveDue.toFixed(2),
+      destinationAccount: "",
+    }));
+    setErrors((prev) => ({
+      ...prev,
+      invoiceNumber: "",
+      customerName: "",
+      destinationAccount: "",
+      amount: "",
+    }));
+
+    if (!resolvedAddress && sale.customerId && !staticLoading) {
+      try {
+        const res = await axios.get(
+          `${backendUrl}/api/customers/${sale.customerId}`,
+        );
+        const cust = res.data?.customer || res.data?.data || res.data;
+        if (cust) {
+          const addr = pickAddress(cust);
+          if (addr) {
+            setForm((prev) => ({ ...prev, customerAddress: addr }));
+            setCustomerById((prev) => ({
+              ...prev,
+              [String(sale.customerId)]: { addr },
+            }));
+          }
+        }
+      } catch (fetchErr) {
+        console.warn("Address fetch by ID failed:", fetchErr.message);
+      }
+    }
+
+    const mrName = sale.mrName;
+    if (mrName && mrName.trim() !== "" && mrName.toLowerCase() !== "unknown") {
+      setMrCashLoading(true);
+      try {
+        const mrCashRes = await axios.get(`${backendUrl}/api/mr-cash`);
+        const allMrCaches = mrCashRes.data?.data || [];
+        const mrCashRecord = allMrCaches.find(
+          (m) => m.mrName?.toLowerCase().trim() === mrName.toLowerCase().trim(),
+        );
+        if (mrCashRecord) {
+          setIsMrInStockTransfer(true);
+          setMrCashInfo({
+            _id: mrCashRecord._id,
+            mrName: mrCashRecord.mrName,
+            currentCash: mrCashRecord.currentCash || 0,
+          });
+        } else {
+          setIsMrInStockTransfer(false);
+          setMrCashInfo(null);
+        }
+      } catch (err) {
+        console.error("MR cash fetch error:", err);
+        setIsMrInStockTransfer(false);
+        setMrCashInfo(null);
+      } finally {
+        setMrCashLoading(false);
+      }
+    } else {
+      setIsMrInStockTransfer(false);
+      setMrCashInfo(null);
+    }
+  };
+
+  const handleChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: "" }));
   };
 
   const validate = () => {
     const newErrors = {};
-    if (!form.selectedCustomer)
-      newErrors.selectedCustomer = "Customer is required";
     if (!form.invoiceNumber)
       newErrors.invoiceNumber = "Invoice Number is required";
-    if (!form.destinationAccount)
-      newErrors.destinationAccount = "Destination Account is required";
-    if (!form.date) newErrors.date = "Date is required";
-    if (!form.amount || parseFloat(form.amount) <= 0)
-      newErrors.amount = "Valid amount is required";
-    if (invoiceDueAmount > 0 && parseFloat(form.amount) > invoiceDueAmount)
-      newErrors.amount = `Cannot exceed due amount of $${invoiceDueAmount.toFixed(2)}`;
     if (!form.customerName)
       newErrors.customerName = "Customer Name is required";
+    if (!isMrInStockTransfer && !form.destinationAccount)
+      newErrors.destinationAccount = "Destination Account is required";
+    if (!form.date) newErrors.date = "Date is required";
+    const amtNum = parseFloat(form.amount);
+    if (!form.amount || isNaN(amtNum) || amtNum <= 0)
+      newErrors.amount = "Valid amount is required";
+    else if (invoiceDueAmount > 0 && amtNum > invoiceDueAmount)
+      newErrors.amount = `Cannot exceed due amount of $${invoiceDueAmount.toFixed(2)}`;
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -479,11 +629,17 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
     e.preventDefault();
     if (!validate()) return;
 
-    const destOpt = destinationOptions.find(
-      (d) => d.value === form.destinationAccount,
-    );
-    const destinationName = destOpt?.label || "";
     const amount = parseFloat(form.amount);
+    let destinationName = "";
+
+    if (isMrInStockTransfer && mrCashInfo) {
+      destinationName = mrCashInfo.mrName;
+    } else {
+      const destOpt = destinationOptions.find(
+        (d) => d.value === form.destinationAccount,
+      );
+      destinationName = destOpt?.label || "";
+    }
 
     const payload = {
       categoryType: categoryLabel,
@@ -498,30 +654,73 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
       invoiceDate: form.invoiceDate || undefined,
       customerName: form.customerName,
       customerAddress: form.customerAddress || "",
-      accountType: destinationName || "Cash Balance",
+      accountType: isMrInStockTransfer
+        ? "MR Cash"
+        : destinationName || "Cash Balance",
       remarks:
         form.remarks || `Credit collection from invoice ${form.invoiceNumber}`,
     };
 
     setSubmitting(true);
     try {
+      // ── Step 1: Post the transaction ─────────────────────────────────────
       const response = await axios.post(
         `${backendUrl}/api/transactions`,
         payload,
       );
-      if (response.data.success) {
-        showToast(
-          "success",
-          `Transaction added — $${amount.toFixed(2)} collected from invoice ${form.invoiceNumber}`,
-        );
-        onSuccess?.();
-        onClose();
+
+      if (!response.data.success) {
+        throw new Error(response.data.message || "Transaction failed");
       }
+
+      // ── Step 2: Update the sale's paidAmount / dueAmount ─────────────────
+      // Calculate new paid and due amounts for this sale
+      if (selectedSale) {
+        const currentPaid = parseFloat(selectedSale.paidAmount) || 0;
+        const currentTotal = parseFloat(selectedSale.totalAmount) || 0;
+        const newPaidAmount = Math.min(currentPaid + amount, currentTotal);
+        const newDueAmount = Math.max(0, currentTotal - newPaidAmount);
+
+        try {
+          await axios.post(
+            `${backendUrl}/api/reports/outstanding-collections/bulk-update`,
+            {
+              updates: [
+                {
+                  invoiceNumber: form.invoiceNumber,
+                  totalAmount: currentTotal,
+                  paidAmount: newPaidAmount,
+                  creditDays: selectedSale.creditDays || 30,
+                  remarks: `Payment collected: $${amount.toFixed(2)} on ${form.date}`,
+                },
+              ],
+            },
+          );
+        } catch (updateErr) {
+          // Don't fail the whole operation — transaction was saved successfully.
+          // Log it and warn the user to refresh.
+          console.error("Sale due amount update failed:", updateErr);
+          showToast(
+            "warning",
+            "Transaction saved but sale amount update failed. Please refresh.",
+          );
+        }
+      }
+
+      _cache.ts = 0;
+      showToast(
+        "success",
+        `Transaction added — $${amount.toFixed(2)} collected from invoice ${form.invoiceNumber}`,
+      );
+      onSuccess?.();
+      onClose();
     } catch (err) {
       console.error("Transaction submission error:", err);
       showToast(
         "error",
-        err.response?.data?.message || "Failed to add transaction",
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to add transaction",
       );
     } finally {
       setSubmitting(false);
@@ -541,20 +740,12 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
     }
   };
 
-  // Filtered customer list for search
-  const filteredCustomers = customerOptions.filter(
-    (c) =>
-      c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-      String(c.code).toLowerCase().includes(customerSearch.toLowerCase()),
-  );
-
   if (!isOpen) return null;
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="absolute inset-0" onClick={onClose} />
       <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative z-10 shadow-2xl">
-        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b">
           <h2 className="text-xl font-semibold text-gray-800">
             Add New Transaction - Cash Balance
@@ -569,7 +760,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
 
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Category Type — locked */}
+            {/* ① Category Type */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Category Type <span className="text-red-500">*</span>
@@ -579,80 +770,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               </div>
             </div>
 
-            {/* Customer Name — searchable dropdown */}
-            <div className="space-y-1" ref={customerDropdownRef}>
-              <label className="block text-sm font-medium text-gray-700">
-                Customer Name <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={customerSearch}
-                  onChange={(e) => {
-                    setCustomerSearch(e.target.value);
-                    setCustomerDropdownOpen(true);
-                    if (!e.target.value) {
-                      setForm((prev) => ({
-                        ...prev,
-                        selectedCustomer: null,
-                        invoiceNumber: "",
-                        invoiceDate: "",
-                        amount: "",
-                        customerName: "",
-                        customerAddress: "",
-                      }));
-                      setInvoiceOptions([]);
-                      setInvoiceDueAmount(0);
-                    }
-                  }}
-                  onFocus={() => setCustomerDropdownOpen(true)}
-                  placeholder={
-                    loadingOptions
-                      ? "Loading customers..."
-                      : "Search customer..."
-                  }
-                  disabled={loadingOptions}
-                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 ${
-                    errors.selectedCustomer
-                      ? "border-red-500"
-                      : "border-gray-300"
-                  } ${loadingOptions ? "bg-gray-50 cursor-not-allowed" : ""}`}
-                />
-                {customerDropdownOpen && filteredCustomers.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {filteredCustomers.map((c) => (
-                      <div
-                        key={c.code || c.name}
-                        onClick={() => handleCustomerSelect(c)}
-                        className="px-3 py-2 text-sm cursor-pointer hover:bg-indigo-50"
-                      >
-                        <span className="font-medium">{c.name}</span>
-                        {c.code && (
-                          <span className="ml-2 text-gray-400 text-xs">
-                            ({c.code})
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {customerDropdownOpen &&
-                  customerSearch &&
-                  filteredCustomers.length === 0 &&
-                  !loadingOptions && (
-                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-3 text-sm text-gray-500 text-center">
-                      No customers with outstanding invoices found
-                    </div>
-                  )}
-              </div>
-              {errors.selectedCustomer && (
-                <p className="text-red-500 text-xs">
-                  {errors.selectedCustomer}
-                </p>
-              )}
-            </div>
-
-            {/* Invoice Number */}
+            {/* ② Invoice Number */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Invoice Number <span className="text-red-500">*</span>
@@ -660,57 +778,123 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               <InvoiceDropdown
                 value={form.invoiceNumber}
                 onChange={handleInvoiceSelect}
-                options={invoiceOptions}
-                disabled={!form.selectedCustomer || loadingOptions}
-                loading={loadingOptions}
+                options={allInvoiceOptions}
+                disabled={invoicesLoading}
+                loading={invoicesLoading}
               />
               {errors.invoiceNumber && (
                 <p className="text-red-500 text-xs">{errors.invoiceNumber}</p>
               )}
-              {form.selectedCustomer &&
-                invoiceOptions.length <= 1 &&
-                !loadingOptions && (
-                  <p className="text-xs text-orange-500">
-                    No outstanding invoices for this customer.
-                  </p>
-                )}
-              {!form.selectedCustomer && (
-                <p className="text-xs text-gray-400">Select a customer first</p>
-              )}
-            </div>
-
-            {/* Destination Account */}
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Destination Account <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={form.destinationAccount}
-                onChange={(e) =>
-                  handleChange("destinationAccount", e.target.value)
-                }
-                className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 ${
-                  errors.destinationAccount
-                    ? "border-red-500"
-                    : "border-gray-300"
-                }`}
-                disabled={loadingOptions}
-              >
-                <option value="">Select Destination Account</option>
-                {destinationOptions.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label} (Balance: ${d.totalAmount.toFixed(2)})
-                  </option>
-                ))}
-              </select>
-              {errors.destinationAccount && (
-                <p className="text-red-500 text-xs">
-                  {errors.destinationAccount}
+              {allInvoiceOptions.length <= 1 && !invoicesLoading && (
+                <p className="text-xs text-orange-500">
+                  No outstanding invoices found.
                 </p>
               )}
             </div>
 
-            {/* Date */}
+            {/* ③ Customer Name */}
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">
+                Customer Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={form.customerName}
+                readOnly
+                placeholder="Auto-filled on invoice selection"
+                className={`w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 cursor-not-allowed ${
+                  errors.customerName ? "border-red-500" : "border-gray-200"
+                } text-gray-700`}
+              />
+              {errors.customerName && (
+                <p className="text-red-500 text-xs">{errors.customerName}</p>
+              )}
+              {!form.invoiceNumber && (
+                <p className="text-xs text-gray-400">Select an invoice first</p>
+              )}
+            </div>
+
+            {/* ④ Destination Account OR MR Cash balance */}
+            <div className="space-y-1">
+              {mrCashLoading ? (
+                <>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Destination
+                  </label>
+                  <div className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-400 text-sm animate-pulse">
+                    Checking MR cash...
+                  </div>
+                </>
+              ) : isMrInStockTransfer && mrCashInfo ? (
+                <>
+                  <label className="block text-sm font-medium text-gray-700 flex items-center gap-1">
+                    <Wallet size={14} className="text-indigo-500" />
+                    MR Cash Balance
+                  </label>
+                  <div className="w-full px-3 py-3 border border-indigo-200 rounded-lg bg-indigo-50 text-sm">
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-indigo-800">
+                        {mrCashInfo.mrName}
+                      </p>
+                      <div className="text-right">
+                        <p className="text-xs text-indigo-500">Current Cash</p>
+                        <p className="text-lg font-bold text-indigo-700">
+                          $
+                          {mrCashInfo.currentCash.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-indigo-500">
+                    Collection will be added to this MR's current cash
+                  </p>
+                </>
+              ) : (
+                <>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Destination Account <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={form.destinationAccount}
+                    onChange={(e) =>
+                      handleChange("destinationAccount", e.target.value)
+                    }
+                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 ${
+                      errors.destinationAccount
+                        ? "border-red-500"
+                        : "border-gray-300"
+                    }`}
+                    disabled={staticLoading || !form.invoiceNumber}
+                  >
+                    <option value="">
+                      {staticLoading
+                        ? "Loading accounts..."
+                        : "Select Destination Account"}
+                    </option>
+                    {destinationOptions.map((d) => (
+                      <option key={d.value} value={d.value}>
+                        {d.label} (Balance: ${d.totalAmount.toFixed(2)})
+                      </option>
+                    ))}
+                  </select>
+                  {!form.invoiceNumber && !staticLoading && (
+                    <p className="text-xs text-gray-400">
+                      Select an invoice first
+                    </p>
+                  )}
+                  {errors.destinationAccount && (
+                    <p className="text-red-500 text-xs">
+                      {errors.destinationAccount}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* ⑤ Date */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Date <span className="text-red-500">*</span>
@@ -728,23 +912,21 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               )}
             </div>
 
-            {/* Amount */}
+            {/* ⑥ Amount */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Amount ($) <span className="text-red-500">*</span>
               </label>
               <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                max={invoiceDueAmount > 0 ? invoiceDueAmount : undefined}
+                type="text"
+                inputMode="decimal"
                 value={form.amount}
-                onChange={(e) => handleChange("amount", e.target.value)}
+                onChange={handleAmountChange}
                 placeholder="Enter amount"
                 disabled={!form.invoiceNumber}
                 className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 ${
                   errors.amount ? "border-red-500" : "border-gray-300"
-                } ${!form.invoiceNumber ? "bg-gray-50" : ""}`}
+                } ${!form.invoiceNumber ? "bg-gray-50 cursor-not-allowed" : ""}`}
               />
               {invoiceDueAmount > 0 && (
                 <p className="text-xs text-orange-500">
@@ -757,7 +939,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               )}
             </div>
 
-            {/* Invoice Date — read-only */}
+            {/* ⑦ Invoice Date */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Invoice Date
@@ -771,7 +953,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               />
             </div>
 
-            {/* Customer Address — read-only */}
+            {/* ⑧ Customer Address */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Customer Address
@@ -780,11 +962,16 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
                 type="text"
                 value={form.customerAddress}
                 readOnly
+                placeholder={
+                  form.invoiceNumber
+                    ? "No address on record"
+                    : "Auto-filled on invoice selection"
+                }
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 text-sm cursor-not-allowed"
               />
             </div>
 
-            {/* Remarks — full width */}
+            {/* ⑨ Remarks */}
             <div className="space-y-1 md:col-span-2">
               <label className="block text-sm font-medium text-gray-700">
                 Remarks
@@ -799,7 +986,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
             </div>
           </div>
 
-          {/* Footer */}
           <div className="flex justify-end gap-3 pt-5 mt-2 border-t">
             <button
               type="button"
@@ -810,7 +996,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
             </button>
             <button
               type="submit"
-              disabled={submitting || loadingOptions}
+              disabled={submitting || invoicesLoading || mrCashLoading}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               <Plus size={15} />
@@ -859,22 +1045,16 @@ const OutstandingCollection = () => {
   const [parsedData, setParsedData] = useState([]);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
-
   const [customerOptions, setCustomerOptions] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
-
-  // ── Add Transaction modal ──────────────────────────────────────────────────
   const [showAddTxModal, setShowAddTxModal] = useState(false);
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
-
-  const getSerialNumber = (index) => {
-    const itemsPerPage = 7;
-    return (pagination.currentPage - 1) * itemsPerPage + index + 1;
-  };
+  const getSerialNumber = (index) =>
+    (pagination.currentPage - 1) * 7 + index + 1;
 
   const fetchCustomerOptions = async () => {
     setLoadingCustomers(true);
@@ -966,7 +1146,6 @@ const OutstandingCollection = () => {
     try {
       const dateRange = getDateRange();
       let params = { page, limit: 7 };
-
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -981,19 +1160,15 @@ const OutstandingCollection = () => {
           endDate: dateRange.endDate,
         };
       }
-
       if (search && search.trim() !== "") params.search = search.trim();
-
       if (selectedTab === "custom") {
         if (filter.customerName) params.customerCode = filter.customerName;
         if (filter.status !== "all") params.status = filter.status;
       }
-
       const response = await axios.get(
         `${backendUrl}/api/reports/outstanding-collections`,
         { params },
       );
-
       setData(response.data.data || { summary: {}, records: [] });
       setPagination(
         response.data.pagination || {
@@ -1030,11 +1205,17 @@ const OutstandingCollection = () => {
       fetchOutstandingCollections(1);
   }, [customDateRange.startDate, customDateRange.endDate]);
 
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      fetchOutstandingCollections(1, searchTerm);
+    }, 500);
+    return () => clearTimeout(delayDebounce);
+  }, [searchTerm]);
+
   const handlePageChange = (page) => {
     if (page >= 1 && page <= pagination.totalPages)
       fetchOutstandingCollections(page);
   };
-
   const handleSearchChange = (e) => setSearchTerm(e.target.value);
   const handleClearSearch = () => {
     setSearchTerm("");
@@ -1044,14 +1225,6 @@ const OutstandingCollection = () => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   const handleCustomerNameChange = (value) =>
     setFilter((prev) => ({ ...prev, customerName: value }));
-
-  useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      fetchOutstandingCollections(1, searchTerm);
-    }, 500);
-    return () => clearTimeout(delayDebounce);
-  }, [searchTerm]);
-
   const handleSearch = (e) => {
     if (e.key === "Enter") fetchOutstandingCollections(1);
   };
@@ -1119,7 +1292,6 @@ const OutstandingCollection = () => {
       if (searchTerm) params.append("search", searchTerm);
       if (selectedTab === "custom" && filter.customerName)
         params.append("customerCode", filter.customerName);
-
       const downloadUrl = `${backendUrl}/api/reports/outstanding-collections/export/excel?${params.toString()}`;
       const response = await axios.get(downloadUrl, { responseType: "blob" });
       const blob = new Blob([response.data], {
@@ -1128,17 +1300,10 @@ const OutstandingCollection = () => {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      let fileName = "outstanding-collections-report";
-      if (dateRange.startDate && dateRange.endDate)
-        fileName = `outstanding-collections-${dateRange.startDate.replace(
-          /-/g,
-          "",
-        )}-to-${dateRange.endDate.replace(/-/g, "")}`;
-      else
-        fileName = `outstanding-collections-${new Date()
-          .toISOString()
-          .split("T")[0]
-          .replace(/-/g, "")}`;
+      let fileName =
+        dateRange.startDate && dateRange.endDate
+          ? `outstanding-collections-${dateRange.startDate.replace(/-/g, "")}-to-${dateRange.endDate.replace(/-/g, "")}`
+          : `outstanding-collections-${new Date().toISOString().split("T")[0].replace(/-/g, "")}`;
       fileName += ".xlsx";
       link.download = fileName;
       document.body.appendChild(link);
@@ -1222,7 +1387,7 @@ const OutstandingCollection = () => {
             creditDays: parseInt(item["Credit Days"] || 0) || 0,
             remarks: item["Remarks"]?.toString().trim() || "",
           }))
-          .filter((item) => item.invoiceNumber && item.totalAmount > 0);
+          .filter((item) => item.invoiceNumber);
         if (validData.length === 0) {
           showToast("warning", "No valid records found in the Excel file");
           return;
@@ -1281,9 +1446,7 @@ const OutstandingCollection = () => {
         return getJanToPreviousMonthRange().label;
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
-          let display = `${formatDateForDisplay(
-            customDateRange.startDate,
-          )} to ${formatDateForDisplay(customDateRange.endDate)}`;
+          let display = `${formatDateForDisplay(customDateRange.startDate)} to ${formatDateForDisplay(customDateRange.endDate)}`;
           if (filter.customerName) {
             const sc = customerOptions.find(
               (opt) => opt.value === filter.customerName,
@@ -1300,12 +1463,15 @@ const OutstandingCollection = () => {
   };
 
   const renderPagination = () => {
-    if (!pagination.totalRecords || pagination.totalRecords === 0) return null;
-    if (pagination.totalPages <= 1) return null;
-    const itemsPerPage = 7;
-    const startItem = (pagination.currentPage - 1) * itemsPerPage + 1;
+    if (
+      !pagination.totalRecords ||
+      pagination.totalRecords === 0 ||
+      pagination.totalPages <= 1
+    )
+      return null;
+    const startItem = (pagination.currentPage - 1) * 7 + 1;
     const endItem = Math.min(
-      pagination.currentPage * itemsPerPage,
+      pagination.currentPage * 7,
       pagination.totalRecords,
     );
     return (
@@ -1314,11 +1480,7 @@ const OutstandingCollection = () => {
           <button
             onClick={() => handlePageChange(pagination.currentPage - 1)}
             disabled={!pagination.hasPrev}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${
-              pagination.hasPrev
-                ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed"
-            }`}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
           >
             ← Prev
           </button>
@@ -1329,13 +1491,7 @@ const OutstandingCollection = () => {
                 onClick={() =>
                   typeof page === "number" ? handlePageChange(page) : null
                 }
-                className={`min-w-[40px] px-3 py-2 rounded-lg ${
-                  page === pagination.currentPage
-                    ? "bg-indigo-600 text-white cursor-default"
-                    : typeof page === "number"
-                      ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
-                      : "bg-transparent text-gray-500 cursor-default"
-                }`}
+                className={`min-w-[40px] px-3 py-2 rounded-lg ${page === pagination.currentPage ? "bg-indigo-600 text-white cursor-default" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-transparent text-gray-500 cursor-default"}`}
                 disabled={typeof page !== "number"}
               >
                 {page}
@@ -1345,11 +1501,7 @@ const OutstandingCollection = () => {
           <button
             onClick={() => handlePageChange(pagination.currentPage + 1)}
             disabled={!pagination.hasNext}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${
-              pagination.hasNext
-                ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed"
-            }`}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
           >
             Next →
           </button>
@@ -1366,24 +1518,18 @@ const OutstandingCollection = () => {
 
   return (
     <div className="p-4">
-      {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Receipt className="text-orange-500" size={28} />
           <h1 className="text-2xl font-bold">Outstanding Collection</h1>
         </div>
-
         <div className="flex items-center gap-3">
-          {/* ── Add New Transaction button ── */}
           <button
             onClick={() => setShowAddTxModal(true)}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
           >
-            <Plus size={16} />
-            Add New Transaction
+            <Plus size={16} /> Add New Transaction
           </button>
-
-          {/* Search */}
           <div className="relative flex items-center">
             <Search
               size={16}
@@ -1396,8 +1542,8 @@ const OutstandingCollection = () => {
               value={searchTerm}
               onChange={handleSearchChange}
               onKeyDown={handleSearch}
-              placeholder="Search by customer name"
-              className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-52"
+              placeholder="Search by invoice or customer"
+              className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-60"
             />
             {searchTerm && (
               <button
@@ -1408,30 +1554,18 @@ const OutstandingCollection = () => {
               </button>
             )}
           </div>
-
-          {/* Upload Excel */}
           <button
             onClick={handleImportClick}
             disabled={isUploading}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white ${
-              isUploading
-                ? "bg-purple-400 cursor-not-allowed"
-                : "bg-purple-600 hover:bg-purple-700 cursor-pointer"
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white ${isUploading ? "bg-purple-400 cursor-not-allowed" : "bg-purple-600 hover:bg-purple-700 cursor-pointer"}`}
           >
             <Upload size={16} />
             {isUploading ? "Uploading..." : "Upload Excel"}
           </button>
-
-          {/* Export Excel */}
           <button
             onClick={exportToExcel}
             disabled={isExportDisabled}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-              isExportDisabled
-                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                : "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${isExportDisabled ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"}`}
           >
             <Download size={16} />
             {exportLoading ? "Exporting..." : "Export Excel"}
@@ -1439,35 +1573,24 @@ const OutstandingCollection = () => {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <button
-          onClick={() => handleTabChange("all")}
-          className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "all" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-        >
-          All Records
-        </button>
-        <button
-          onClick={() => handleTabChange("currentMonth")}
-          className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "currentMonth" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-        >
-          Current Month ({getCurrentMonthName()} {getCurrentYear()})
-        </button>
-        <button
-          onClick={() => handleTabChange("janToPreviousMonth")}
-          className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "janToPreviousMonth" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-        >
-          {getJanToPreviousMonthRange().label}
-        </button>
-        <button
-          onClick={() => handleTabChange("custom")}
-          className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "custom" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-        >
-          Custom Filter
-        </button>
+        {["all", "currentMonth", "janToPreviousMonth", "custom"].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => handleTabChange(tab)}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+          >
+            {tab === "all"
+              ? "All Records"
+              : tab === "currentMonth"
+                ? `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`
+                : tab === "janToPreviousMonth"
+                  ? getJanToPreviousMonthRange().label
+                  : "Custom Filter"}
+          </button>
+        ))}
       </div>
 
-      {/* Active Filter */}
       <div className="flex items-center gap-2 mb-4 text-sm text-gray-600">
         <Filter size={14} />
         <span>
@@ -1476,7 +1599,6 @@ const OutstandingCollection = () => {
         </span>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="border border-orange-300 rounded-xl p-4 flex items-center justify-between">
           <div>
@@ -1498,25 +1620,22 @@ const OutstandingCollection = () => {
         </div>
         <div className="border border-gray-300 rounded-xl p-4 flex items-center justify-between">
           <div>
-            <p className="text-sm text-gray-500">Total Customers</p>
+            <p className="text-sm text-gray-500">Total Invoices</p>
             <p className="text-2xl font-bold">
-              {data.summary.totalCustomers || 0}
+              {data.summary.totalInvoices || 0}
             </p>
           </div>
           <User className="text-blue-400" size={36} />
         </div>
         <div className="border border-green-300 rounded-xl p-4 flex items-center justify-between">
           <div>
-            <p className="text-sm text-gray-500">Total Invoices</p>
-            <p className="text-2xl font-bold">
-              {data.summary.totalInvoices || 0}
-            </p>
+            <p className="text-sm text-gray-500">Total Records</p>
+            <p className="text-2xl font-bold">{pagination.totalRecords || 0}</p>
           </div>
           <Receipt className="text-green-400" size={36} />
         </div>
       </div>
 
-      {/* Data Table — original columns, NO Action column */}
       <div className="bg-white rounded-xl shadow overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -1525,7 +1644,10 @@ const OutstandingCollection = () => {
                 Sr.No
               </th>
               <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Customer Code
+                Invoice Number
+              </th>
+              <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                Invoice Date
               </th>
               <th className="px-4 py-3 text-left font-semibold text-gray-600">
                 Customer Name
@@ -1542,9 +1664,6 @@ const OutstandingCollection = () => {
               <th className="px-4 py-3 text-center font-semibold text-gray-600">
                 Overdue Days
               </th>
-              <th className="px-4 py-3 text-center font-semibold text-gray-600">
-                Last Transaction
-              </th>
             </tr>
           </thead>
           <tbody>
@@ -1555,55 +1674,54 @@ const OutstandingCollection = () => {
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
-              data.records.map((customer, index) => (
+              data.records.map((record, index) => (
                 <tr
-                  key={customer.customerCode}
+                  key={record.invoiceNumber || index}
                   className="border-b hover:bg-gray-50"
                 >
                   <td className="px-4 py-3 text-gray-600">
                     {getSerialNumber(index)}
                   </td>
-                  <td className="px-4 py-3 font-mono text-sm">
-                    {customer.customerCode || "N/A"}
+                  <td className="px-4 py-3 font-mono text-sm font-semibold text-indigo-700">
+                    {record.invoiceNumber || "N/A"}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 text-sm">
+                    {record.invoiceDate
+                      ? formatDateToReadable(record.invoiceDate)
+                      : "N/A"}
                   </td>
                   <td className="px-4 py-3 font-medium">
-                    {customer.customerName}
+                    <div>{record.customerName}</div>
+                    <div className="text-xs text-gray-400 font-mono">
+                      {record.customerCode || ""}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 text-gray-600">
                       <Phone size={12} />
-                      {customer.phone || "N/A"}
+                      {record.phone || "N/A"}
                     </div>
-                    {customer.email && (
+                    {record.email && record.email !== "N/A" && (
                       <div className="flex items-center gap-1 text-gray-500 text-xs mt-1">
                         <Mail size={12} />
-                        {customer.email}
+                        {record.email}
                       </div>
                     )}
                   </td>
                   <td className="px-4 py-3 text-right font-medium">
-                    ${(customer.totalOutstandingAmount || 0).toLocaleString()}
+                    ${(record.totalOutstandingAmount || 0).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-red-600">
-                    ${(customer.overdueAmount || 0).toLocaleString()}
+                    ${(record.overdueAmount || 0).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span
-                      className={`font-medium ${
-                        customer.overdueDays > 0
-                          ? "text-red-600"
-                          : "text-green-600"
-                      }`}
+                      className={`font-medium ${record.overdueDays > 0 ? "text-red-600" : "text-green-600"}`}
                     >
-                      {customer.overdueDays > 0
-                        ? `${customer.overdueDays} days`
+                      {record.overdueDays > 0
+                        ? `${record.overdueDays} days`
                         : "On Time"}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-center text-gray-600">
-                    {customer.lastTransactionDate
-                      ? formatDateToReadable(customer.lastTransactionDate)
-                      : "N/A"}
                   </td>
                 </tr>
               ))
@@ -1623,14 +1741,12 @@ const OutstandingCollection = () => {
 
       {renderPagination()}
 
-      {/* ── Add Transaction Modal ──────────────────────────────────────────── */}
       <AddCreditCollectionModal
         isOpen={showAddTxModal}
         onClose={() => setShowAddTxModal(false)}
         onSuccess={handleTxSuccess}
       />
 
-      {/* Import Modal */}
       {showImportModal &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1686,22 +1802,14 @@ const OutstandingCollection = () => {
                     if (fileInputRef.current) fileInputRef.current.value = "";
                   }}
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                  }`}
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleImportSubmit}
                   disabled={isUploading || parsedData.length === 0}
-                  className={`px-5 py-2 rounded-lg text-white ${
-                    isUploading || parsedData.length === 0
-                      ? "bg-indigo-400 cursor-not-allowed"
-                      : "bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
-                  }`}
+                  className={`px-5 py-2 rounded-lg text-white ${isUploading || parsedData.length === 0 ? "bg-indigo-400 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-700 cursor-pointer"}`}
                 >
                   {isUploading ? "Uploading…" : `Upload (${parsedData.length})`}
                 </button>
@@ -1711,7 +1819,6 @@ const OutstandingCollection = () => {
           document.body,
         )}
 
-      {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

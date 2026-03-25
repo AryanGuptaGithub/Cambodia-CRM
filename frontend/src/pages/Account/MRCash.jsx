@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import ReactDOM from "react-dom";
 import {
-  Plus,
   Search,
   Eye,
   X,
@@ -70,13 +69,22 @@ function MRCash() {
   const [destinationOptions, setDestinationOptions] = useState([]);
   const [destinationsLoading, setDestinationsLoading] = useState(false);
 
-  // ── Credit Collection Invoices modal state ──
+  // ── Credit Collection modal state ────────────────────────────────────────
   const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
   const [creditInvoices, setCreditInvoices] = useState([]);
   const [creditInvoicesLoading, setCreditInvoicesLoading] = useState(false);
   const [selectedMrForCredit, setSelectedMrForCredit] = useState(null);
-  // per-invoice collecting state
   const [collectingInvoiceId, setCollectingInvoiceId] = useState(null);
+
+  // ── Edit Credit Invoice modal state ──────────────────────────────────────
+  const [isEditCreditModalOpen, setIsEditCreditModalOpen] = useState(false);
+  const [editingCreditInvoice, setEditingCreditInvoice] = useState(null);
+  const [editCreditForm, setEditCreditForm] = useState({
+    amount: "",
+    customerName: "",
+    remarks: "",
+  });
+  const [editCreditLoading, setEditCreditLoading] = useState(false);
 
   const inputRef = useRef(null);
 
@@ -107,6 +115,19 @@ function MRCash() {
     } catch {
       return "Invalid Date";
     }
+  };
+
+  const getSafeAmount = (inv) => {
+    if (typeof inv.finalAmount === "number" && !isNaN(inv.finalAmount))
+      return inv.finalAmount;
+    if (typeof inv.amount === "number" && !isNaN(inv.amount)) return inv.amount;
+    const parsed = parseFloat(inv.finalAmount ?? inv.amount);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  const validateNumericInput = (value) => {
+    if (value === "" || /^\d*\.?\d*$/.test(value)) return value;
+    return null;
   };
 
   // ─── data fetching ─────────────────────────────────────────────────────────
@@ -218,7 +239,6 @@ function MRCash() {
     }
     if (tab === "carry") filtered = filtered.filter((r) => r.currentCash > 0);
     else filtered = filtered.filter((r) => r.cashTransferredToAdmin > 0);
-
     const total = filtered.length;
     const pages = Math.ceil(total / ITEMS_PER_PAGE);
     const start = (page - 1) * ITEMS_PER_PAGE;
@@ -289,11 +309,6 @@ function MRCash() {
         );
       }
     }
-  };
-
-  const validateNumericInput = (value) => {
-    if (value === "" || /^\d*\.?\d*$/.test(value)) return value;
-    return null;
   };
 
   const handleFormChange = (e) => {
@@ -372,17 +387,15 @@ function MRCash() {
       showToast("error", "Please select a destination account");
       return;
     }
-
     const selectedMR = mrList.find((mr) => mr.value === formData.mrCashId);
     const transferAmount = parseFloat(formData.transferAmount);
     if (selectedMR && transferAmount > selectedMR.currentCash) {
       showToast(
         "error",
-        `Insufficient cash. Available: ${formatCurrency(selectedMR.currentCash)}, Requested: ${formatCurrency(transferAmount)}`,
+        `Insufficient cash. Available: ${formatCurrency(selectedMR.currentCash)}`,
       );
       return;
     }
-
     try {
       const response = await axios.post(
         `${backendUrl}/api/mr-cash/${formData.mrCashId}/transfer`,
@@ -430,7 +443,6 @@ function MRCash() {
       showToast("error", "Please select a destination account");
       return;
     }
-
     try {
       const response = await axios.post(
         `${backendUrl}/api/mr-cash/${selectedRecord._id}/transfer`,
@@ -540,7 +552,7 @@ function MRCash() {
     filterAndPaginateData(allMRCashes, newPage, activeTab, searchTerm);
   };
 
-  // ─── Credit Collection Invoices modal ─────────────────────────────────────
+  // ─── Credit Collection helpers ─────────────────────────────────────────────
   const fetchCreditCollectionInvoices = async (mrName) => {
     try {
       setCreditInvoicesLoading(true);
@@ -574,6 +586,120 @@ function MRCash() {
     setCreditInvoices([]);
     setSelectedMrForCredit(null);
     setCollectingInvoiceId(null);
+  };
+
+  // ─── Credit Invoice Edit ───────────────────────────────────────────────────
+  const handleEditCreditInvoice = (inv) => {
+    setEditingCreditInvoice(inv);
+    setEditCreditForm({
+      amount: getSafeAmount(inv).toString(),
+      customerName: inv.customerName || inv.customer_name || inv.customer || "",
+      remarks: inv.remarks || "",
+    });
+    setIsEditCreditModalOpen(true);
+  };
+
+  const handleEditCreditFormChange = (e) => {
+    const { name, value } = e.target;
+    if (name === "amount") {
+      const validated = validateNumericInput(value);
+      if (validated === null) return;
+      setEditCreditForm((prev) => ({ ...prev, amount: validated }));
+    } else {
+      setEditCreditForm((prev) => ({ ...prev, [name]: value }));
+    }
+  };
+
+  /**
+   * PUT /api/mr-cash/credit-collection-invoices/:id
+   * Backend:
+   *   difference = newAmount - oldAmount
+   *   mrCash.currentCash += difference
+   *   sale.paidAmount += difference → recalculates dueAmount, paymentStatus, pendingAmountPaid
+   */
+  const handleSubmitEditCreditInvoice = async (e) => {
+    e.preventDefault();
+    const newAmount = parseFloat(editCreditForm.amount);
+    if (!newAmount || newAmount <= 0) {
+      showToast("error", "Amount must be a positive number");
+      return;
+    }
+    try {
+      setEditCreditLoading(true);
+      const response = await axios.put(
+        `${backendUrl}/api/mr-cash/credit-collection-invoices/${editingCreditInvoice._id}`,
+        {
+          amount: newAmount,
+          finalAmount: newAmount,
+          customerName: editCreditForm.customerName,
+          remarks: editCreditForm.remarks,
+        },
+      );
+      if (response.data.success) {
+        // Show sale update info in toast if available
+        const saleInfo = response.data.data?.sale;
+        const msg = saleInfo
+          ? `Invoice updated. MR cash adjusted. Sale: paid ${formatCurrency(saleInfo.paidAmount)}, due ${formatCurrency(saleInfo.dueAmount)} (${saleInfo.paymentStatus})`
+          : "Credit invoice updated. MR cash adjusted accordingly.";
+        showToast("success", msg);
+        setIsEditCreditModalOpen(false);
+        setEditingCreditInvoice(null);
+        if (selectedMrForCredit)
+          fetchCreditCollectionInvoices(selectedMrForCredit.mrName);
+        fetchAllMRCashes();
+        fetchMRList();
+      }
+    } catch (error) {
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to update credit invoice",
+      );
+    } finally {
+      setEditCreditLoading(false);
+    }
+  };
+
+  /**
+   * DELETE /api/mr-cash/credit-collection-invoices/:id
+   * Backend:
+   *   mrCash.currentCash -= collectedAmount
+   *   sale.paidAmount -= collectedAmount → recalculates dueAmount, paymentStatus, pendingAmountPaid
+   *   pendingAmountPaid = "pending" → sale reappears in outstanding report
+   */
+  const handleDeleteCreditInvoice = async (inv) => {
+    const invoiceNo = inv.invoiceNumber || inv.invoiceNo || "this invoice";
+    const amount = getSafeAmount(inv);
+    const confirm = await confirmDialog({
+      title: "Delete Credit Invoice",
+      text: `Are you sure you want to delete invoice <b>${invoiceNo}</b>?<br/>
+             <span style="color:#dc2626">${formatCurrency(amount)} will be subtracted from the MR's current cash and the sale will be restored to outstanding.</span>`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+    if (confirm.isConfirmed) {
+      try {
+        const response = await axios.delete(
+          `${backendUrl}/api/mr-cash/credit-collection-invoices/${inv._id}`,
+        );
+        if (response.data.success) {
+          const saleInfo = response.data.data?.sale;
+          const msg = saleInfo
+            ? `Deleted. ${formatCurrency(amount)} reversed. Sale restored: due ${formatCurrency(saleInfo.dueAmount)} (${saleInfo.paymentStatus})`
+            : response.data.message || "Credit invoice deleted. Cash reversed.";
+          showToast("success", msg);
+          if (selectedMrForCredit)
+            fetchCreditCollectionInvoices(selectedMrForCredit.mrName);
+          fetchAllMRCashes();
+          fetchMRList();
+        }
+      } catch (error) {
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to delete credit invoice",
+        );
+      }
+    }
   };
 
   if (loading && mrCashes.length === 0) {
@@ -796,7 +922,6 @@ function MRCash() {
                             >
                               <TrendingUp size={18} />
                             </button>
-                            {/* Credit Collection Invoices button */}
                             <button
                               onClick={() => openCreditModal(record)}
                               className="text-indigo-600 hover:text-indigo-800 cursor-pointer"
@@ -903,7 +1028,6 @@ function MRCash() {
               >
                 <X size={20} />
               </button>
-
               {activeTab === "carry" ? (
                 <>
                   <h2 className="text-xl font-semibold text-gray-800 mb-4">
@@ -1066,7 +1190,6 @@ function MRCash() {
                   </div>
                 </>
               )}
-
               <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
                 <button
                   onClick={() => {
@@ -1445,7 +1568,7 @@ function MRCash() {
         selectedMrForCredit &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center p-6 border-b">
                 <div>
                   <h2 className="text-xl font-bold text-gray-800">
@@ -1488,7 +1611,6 @@ function MRCash() {
                   </div>
                 ) : (
                   <>
-                    {/* Summary strip */}
                     <div className="mb-4 p-3 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-between">
                       <span className="text-sm text-indigo-700 font-medium">
                         {creditInvoices.length} invoice
@@ -1498,7 +1620,7 @@ function MRCash() {
                         Total:{" "}
                         {formatCurrency(
                           creditInvoices.reduce(
-                            (s, i) => s + (i.finalAmount || i.amount || 0),
+                            (sum, inv) => sum + getSafeAmount(inv),
                             0,
                           ),
                         )}
@@ -1524,37 +1646,92 @@ function MRCash() {
                             <th className="py-3 px-4 text-left font-medium text-gray-700">
                               Account
                             </th>
+                            <th className="py-3 px-4 text-center font-medium text-gray-700">
+                              Actions
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {creditInvoices.map((inv, index) => (
-                            <tr
-                              key={inv._id || index}
-                              className="border-t hover:bg-gray-50"
-                            >
-                              <td className="py-3 px-4">
-                                <span className="font-medium text-indigo-700">
-                                  {inv.invoiceNumber || "—"}
-                                </span>
-                              </td>
-                              <td className="py-3 px-4 text-gray-600">
-                                {inv.customerName || "—"}
-                              </td>
-                              <td className="py-3 px-4 text-gray-600">
-                                {formatDateShort(inv.date)}
-                              </td>
-                              <td className="py-3 px-4 text-right font-semibold text-green-700">
-                                {formatCurrency(
-                                  inv.finalAmount || inv.amount || 0,
-                                )}
-                              </td>
-                              <td className="py-3 px-4">
-                                <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
-                                  {inv.destination || inv.accountType || "—"}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
+                          {creditInvoices.map((inv, index) => {
+                            const invoiceNo =
+                              inv.invoiceNumber ||
+                              inv.invoiceNo ||
+                              inv.invoice_number ||
+                              "—";
+                            const customer =
+                              inv.customerName ||
+                              inv.customer_name ||
+                              inv.customer ||
+                              "—";
+                            const rawDate =
+                              inv.date ||
+                              inv.invoiceDate ||
+                              inv.createdAt ||
+                              null;
+                            const amount = getSafeAmount(inv);
+                            const account = (() => {
+                              const dest =
+                                inv.destination || inv.destinationAccount || "";
+                              const type = inv.accountType || "";
+                              if (
+                                dest &&
+                                dest.toLowerCase() !== type.toLowerCase()
+                              )
+                                return dest;
+                              if (type) return type;
+                              if (dest) return dest;
+                              return "—";
+                            })();
+
+                            return (
+                              <tr
+                                key={inv._id || index}
+                                className="border-t hover:bg-gray-50"
+                              >
+                                <td className="py-3 px-4">
+                                  <span className="font-medium text-indigo-700">
+                                    {invoiceNo}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-gray-600">
+                                  {customer}
+                                </td>
+                                <td className="py-3 px-4 text-gray-600">
+                                  {rawDate ? formatDateShort(rawDate) : "—"}
+                                </td>
+                                <td className="py-3 px-4 text-right font-semibold text-green-700">
+                                  {formatCurrency(amount)}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+                                    {account}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      onClick={() =>
+                                        handleEditCreditInvoice(inv)
+                                      }
+                                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                                      title="Edit — adjusts MR cash &amp; sale by the difference"
+                                    >
+                                      <Edit size={16} />
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        handleDeleteCreditInvoice(inv)
+                                      }
+                                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                                      title="Delete — reverses cash &amp; restores sale to outstanding"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1570,6 +1747,137 @@ function MRCash() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* ── Edit Credit Invoice Modal ──────────────────────────────────────── */}
+      {isEditCreditModalOpen &&
+        editingCreditInvoice &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+              <div className="flex justify-between items-center p-6 border-b">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    Edit Credit Invoice
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    Invoice:{" "}
+                    <span className="font-semibold text-indigo-700">
+                      {editingCreditInvoice.invoiceNumber ||
+                        editingCreditInvoice.invoiceNo ||
+                        "—"}
+                    </span>
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setIsEditCreditModalOpen(false);
+                    setEditingCreditInvoice(null);
+                  }}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Cash & Sale impact note */}
+              <div className="mx-6 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                ⚠️ Changing the amount adjusts this MR's current cash <b>and</b>{" "}
+                updates the sale's paid/due amounts in the outstanding report.
+              </div>
+
+              <form
+                onSubmit={handleSubmitEditCreditInvoice}
+                className="p-6 space-y-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Invoice #
+                  </label>
+                  <div className="p-3 bg-gray-50 rounded-lg text-gray-700 font-medium">
+                    {editingCreditInvoice.invoiceNumber ||
+                      editingCreditInvoice.invoiceNo ||
+                      "—"}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Current Amount
+                  </label>
+                  <div className="p-3 bg-gray-50 rounded-lg text-green-700 font-bold">
+                    {formatCurrency(getSafeAmount(editingCreditInvoice))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    New Amount ($) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="amount"
+                    value={editCreditForm.amount}
+                    onChange={handleEditCreditFormChange}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+                    placeholder="Enter new amount"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Customer Name
+                  </label>
+                  <input
+                    type="text"
+                    name="customerName"
+                    value={editCreditForm.customerName}
+                    onChange={handleEditCreditFormChange}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+                    placeholder="Customer name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Remarks
+                  </label>
+                  <textarea
+                    name="remarks"
+                    value={editCreditForm.remarks}
+                    onChange={handleEditCreditFormChange}
+                    rows="3"
+                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+                    placeholder="Add remarks..."
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditCreditModalOpen(false);
+                      setEditingCreditInvoice(null);
+                    }}
+                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      editCreditLoading ||
+                      !editCreditForm.amount ||
+                      parseFloat(editCreditForm.amount) <= 0
+                    }
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {editCreditLoading && (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                    )}
+                    Update Invoice
+                  </button>
+                </div>
+              </form>
             </div>
           </div>,
           document.body,

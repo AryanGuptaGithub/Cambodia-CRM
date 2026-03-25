@@ -22,6 +22,33 @@ const formatCurrency = (value) => {
   }).format(value);
 };
 
+// ─── helper: recalculate and save sale payment fields ─────────────────────────
+// Call this after changing paidAmount on a sale object (inside a session).
+// It recomputes dueAmount, paymentStatus, pendingAmountPaid and saves.
+async function recalculateSalePayment(sale, session) {
+  const total = parseFloat(sale.totalAmount) || 0;
+  const paid = parseFloat(Math.max(0, sale.paidAmount).toFixed(4));
+  const due = parseFloat(Math.max(0, total - paid).toFixed(4));
+
+  sale.paidAmount = paid;
+  sale.dueAmount = due;
+
+  if (due <= 0) {
+    sale.paymentStatus = "Paid";
+    sale.pendingAmountPaid = "paid"; // hides from outstanding report
+  } else if (paid > 0) {
+    sale.paymentStatus = "Partial Paid";
+    sale.pendingAmountPaid = "pending"; // shows in outstanding report
+  } else {
+    sale.paymentStatus = "Unpaid";
+    sale.pendingAmountPaid = "pending"; // shows in outstanding report
+  }
+
+  sale.updatedAt = new Date();
+  await sale.save({ session });
+  return sale;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /  — all active MR Cash records
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,10 +65,7 @@ router.get("/", async (req, res) => {
     const stockTransfers = await stockTransferToMR.find({}, { mrId: 1 }).lean();
     const mrIds = stockTransfers.map((item) => item.mrId);
 
-    const query = {
-      isActive: true,
-      mrId: { $in: mrIds },
-    };
+    const query = { isActive: true, mrId: { $in: mrIds } };
 
     if (search) {
       query.$or = [
@@ -1044,7 +1068,7 @@ router.delete("/:mrCashId/transfers/:transferId", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELETE /:id
+// DELETE /:id  — deactivate MR Cash record
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   try {
@@ -1188,12 +1212,11 @@ router.post("/stock-transfer-to-mr", async (req, res) => {
       remainingToDeduct -= deduct;
     }
 
-    if (remainingToDeduct > 0) {
+    if (remainingToDeduct > 0)
       warehouseStock.addStockAdjustment = Math.max(
         0,
         (warehouseStock.addStockAdjustment || 0) - remainingToDeduct,
       );
-    }
 
     let newTotalBoxes = 0,
       newTotalAmount = 0;
@@ -1263,36 +1286,20 @@ router.post("/stock-transfer-to-mr", async (req, res) => {
   }
 });
 
-// =============================================================================
-// FIX: GET /credit-collection-invoices/:mrName
-// Returns all Credit Collection transactions for the given MR name.
-// These are transactions where:
-//   - transactionType = "credit collection"
-//   - destination matches the MR's destination account name (Cash Balance tab etc.)
-//     OR we look up by the source MR name stored on the transaction.
-// We show: invoiceNo, amount, finalAmount, date, destination, customerName
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /credit-collection-invoices/:mrName
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/credit-collection-invoices/:mrName", async (req, res) => {
   try {
     const { mrName } = req.params;
 
-    // Find the MRCash record to get this MR's name exactly
     const mrCashRecord = await MRCash.findOne({
       mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
       isActive: true,
     }).lean();
 
-    if (!mrCashRecord) {
-      return res.status(200).json({ success: true, data: [] });
-    }
+    if (!mrCashRecord) return res.status(200).json({ success: true, data: [] });
 
-    // Look for Credit Collection transactions where:
-    // 1. destination matches one of the account tabs (Cash Balance, Personal Account, Company Account)
-    // 2. AND the invoiceNo is not "NA" (meaning it has a real invoice)
-    // We identify the MR's transactions by checking the Sale's mrName field
-    // or by looking for transactions whose invoiceNo belongs to sales by this MR
-
-    // Get all invoices from sales that belong to this MR
     const mrSales = await Sale.find({
       mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
     })
@@ -1303,7 +1310,6 @@ router.get("/credit-collection-invoices/:mrName", async (req, res) => {
       .map((s) => s.invoiceNumber)
       .filter(Boolean);
 
-    // Now find Credit Collection transactions for those invoice numbers
     const creditCollectionTxns = await Transaction.find({
       transactionType: "credit collection",
       invoiceNo: { $in: mrInvoiceNumbers, $ne: "NA" },
@@ -1311,7 +1317,6 @@ router.get("/credit-collection-invoices/:mrName", async (req, res) => {
       .sort({ date: -1, createdAt: -1 })
       .lean();
 
-    // Format the response
     const formatted = creditCollectionTxns.map((tx) => ({
       _id: tx._id,
       invoiceNumber: tx.invoiceNo,
@@ -1334,14 +1339,278 @@ router.get("/credit-collection-invoices/:mrName", async (req, res) => {
 });
 
 // =============================================================================
-// FIX: POST /collect-payment
-// When Credit Collection is added via Cash & Bank → this endpoint is called
-// from the due invoices modal "Collect Full" button.
-// It:
-//   1. Updates the Sale (paidAmount, dueAmount, paymentStatus, pendingAmountPaid)
-//   2. Adds the collectedAmount to MRCash.currentCash  ← KEY FIX
-//   3. Creates a Transaction record with transactionType = "credit collection"
+// PUT /credit-collection-invoices/:transactionId
+// Edit a credit collection Transaction.
+//
+// Cash & Sale update logic:
+//   difference = newAmount - oldAmount
+//   mrCash.currentCash  += difference  (positive = more cash, negative = less)
+//   sale.paidAmount     += difference
+//   sale.dueAmount       = totalAmount - paidAmount  (recalculated)
+//   sale.paymentStatus   recalculated → "Paid" / "Partial Paid" / "Unpaid"
+//   sale.pendingAmountPaid → "paid" (hides from outstanding) or "pending" (shows)
 // =============================================================================
+router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { transactionId } = req.params;
+    const { amount, finalAmount, customerName, remarks } = req.body;
+
+    const newAmount = parseFloat(amount ?? finalAmount);
+    if (isNaN(newAmount) || newAmount <= 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "Valid positive amount is required" });
+    }
+
+    // ── 1. Find the Transaction ──────────────────────────────────────────────
+    const txn = await Transaction.findById(transactionId).session(session);
+    if (!txn) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(404)
+        .json({ success: false, message: "Transaction not found" });
+    }
+    if (txn.transactionType !== "credit collection") {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Only credit collection transactions can be edited here",
+        });
+    }
+
+    const oldAmount = parseFloat(txn.amount) || 0;
+    const difference = parseFloat((newAmount - oldAmount).toFixed(4));
+
+    // ── 2. Find MRCash (destination field holds the MR name) ─────────────────
+    const mrName = txn.destination;
+    const mrCash = await MRCash.findOne({
+      mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
+      isActive: true,
+    }).session(session);
+
+    if (!mrCash) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(404)
+        .json({ success: false, message: "MR Cash record not found" });
+    }
+
+    // ── 3. Validate cash won't go negative when reducing ─────────────────────
+    const newCurrentCash = parseFloat(
+      (mrCash.currentCash + difference).toFixed(4),
+    );
+    if (newCurrentCash < 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Cannot reduce amount: MR cash would go negative. Current cash: ${formatCurrency(mrCash.currentCash)}, Reduction: ${formatCurrency(Math.abs(difference))}`,
+      });
+    }
+
+    // ── 4. Adjust MRCash.currentCash ─────────────────────────────────────────
+    mrCash.currentCash = newCurrentCash;
+    mrCash.updatedAt = new Date();
+
+    // ── 5. Find the Sale by invoiceNumber and update paidAmount/dueAmount ────
+    //       invoiceNumber in Sale == invoiceNo in Transaction
+    const sale = await Sale.findOne({
+      invoiceNumber: String(txn.invoiceNo),
+    }).session(session);
+
+    if (sale) {
+      // Add the difference to paidAmount, then recalculate everything
+      sale.paidAmount = parseFloat(
+        ((sale.paidAmount || 0) + difference).toFixed(4),
+      );
+      await recalculateSalePayment(sale, session);
+    }
+
+    // ── 6. Update the Transaction record ────────────────────────────────────
+    txn.amount = newAmount;
+    txn.finalAmount = newAmount;
+    if (customerName !== undefined) txn.customerName = customerName;
+    if (remarks !== undefined) txn.remarks = remarks;
+    txn.updatedAt = new Date();
+
+    await mrCash.save({ session });
+    await txn.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      success: true,
+      message: `Credit invoice updated. MR cash adjusted by ${formatCurrency(difference)}. Sale updated.`,
+      data: {
+        transaction: txn,
+        mrCash,
+        sale: sale
+          ? {
+              _id: sale._id,
+              invoiceNumber: sale.invoiceNumber,
+              paidAmount: sale.paidAmount,
+              dueAmount: sale.dueAmount,
+              totalAmount: sale.totalAmount,
+              paymentStatus: sale.paymentStatus,
+              pendingAmountPaid: sale.pendingAmountPaid,
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error updating credit collection invoice:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
+  }
+});
+
+// =============================================================================
+// DELETE /credit-collection-invoices/:transactionId
+// Delete a credit collection Transaction.
+//
+// Cash & Sale reversal logic:
+//   mrCash.currentCash  -= collectedAmount   (reversal)
+//   sale.paidAmount     -= collectedAmount
+//   sale.dueAmount       = totalAmount - paidAmount  (recalculated)
+//   sale.paymentStatus   recalculated → "Partial Paid" / "Unpaid"
+//   sale.pendingAmountPaid → "pending"  (always shows back in outstanding report)
+// =============================================================================
+router.delete(
+  "/credit-collection-invoices/:transactionId",
+  async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const { transactionId } = req.params;
+
+      // ── 1. Find the Transaction ──────────────────────────────────────────────
+      const txn = await Transaction.findById(transactionId).session(session);
+      if (!txn) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(404)
+          .json({ success: false, message: "Transaction not found" });
+      }
+      if (txn.transactionType !== "credit collection") {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "Only credit collection transactions can be deleted here",
+          });
+      }
+
+      const collectedAmount = parseFloat(txn.amount) || 0;
+
+      // ── 2. Find MRCash (destination = MR name) ────────────────────────────────
+      const mrName = txn.destination;
+      const mrCash = await MRCash.findOne({
+        mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
+        isActive: true,
+      }).session(session);
+
+      if (!mrCash) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(404)
+          .json({ success: false, message: "MR Cash record not found" });
+      }
+
+      // ── 3. Subtract amount from MRCash.currentCash (reversal) ────────────────
+      mrCash.currentCash = parseFloat(
+        Math.max(0, mrCash.currentCash - collectedAmount).toFixed(4),
+      );
+      mrCash.updatedAt = new Date();
+
+      // ── 4. Find the Sale and reverse paidAmount / dueAmount / paymentStatus ──
+      //       Sale.invoiceNumber is a string → match exactly
+      const sale = await Sale.findOne({
+        invoiceNumber: String(txn.invoiceNo),
+      }).session(session);
+
+      if (sale) {
+        // Subtract the collected amount back from paidAmount
+        sale.paidAmount = parseFloat(
+          Math.max(0, (sale.paidAmount || 0) - collectedAmount).toFixed(4),
+        );
+        await recalculateSalePayment(sale, session);
+      }
+
+      // ── 5. Reverse linked Destination account if any ─────────────────────────
+      const dest = await Account.findOne({ name: mrCash.mrName }).session(
+        session,
+      );
+      if (dest) {
+        dest.totalAmount = parseFloat(
+          Math.max(0, dest.totalAmount - collectedAmount).toFixed(4),
+        );
+        await dest.save({ session });
+      }
+
+      // ── 6. Delete the transaction ─────────────────────────────────────────────
+      await Transaction.findByIdAndDelete(transactionId).session(session);
+      await mrCash.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      res.status(200).json({
+        success: true,
+        message: `Credit invoice deleted. ${formatCurrency(collectedAmount)} reversed from ${mrCash.mrName}'s cash. Sale restored.`,
+        data: {
+          deletedTransactionId: transactionId,
+          reversedAmount: collectedAmount,
+          newCurrentCash: mrCash.currentCash,
+          sale: sale
+            ? {
+                _id: sale._id,
+                invoiceNumber: sale.invoiceNumber,
+                paidAmount: sale.paidAmount,
+                dueAmount: sale.dueAmount,
+                totalAmount: sale.totalAmount,
+                paymentStatus: sale.paymentStatus,
+                pendingAmountPaid: sale.pendingAmountPaid,
+              }
+            : null,
+        },
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      console.error("Error deleting credit collection invoice:", error);
+      res
+        .status(500)
+        .json({
+          success: false,
+          message: "Server error",
+          error: error.message,
+        });
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /collect-payment
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/collect-payment", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1363,7 +1632,6 @@ router.post("/collect-payment", async (req, res) => {
 
     const nameRegex = new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i");
 
-    // Find the sale — allow any non-fully-paid status
     const sale = await Sale.findOne({
       mrName: nameRegex,
       invoiceNumber,
@@ -1390,26 +1658,12 @@ router.post("/collect-payment", async (req, res) => {
       });
     }
 
-    // --- Update Sale ---
-    const newPaid = parseFloat(
+    // Update sale payment fields
+    sale.paidAmount = parseFloat(
       ((sale.paidAmount || 0) + collectedAmount).toFixed(4),
     );
-    const newDue = parseFloat(
-      Math.max(0, sale.totalAmount - newPaid).toFixed(4),
-    );
-    sale.paidAmount = newPaid;
-    sale.dueAmount = newDue;
+    await recalculateSalePayment(sale, session);
 
-    if (newDue <= 0) {
-      sale.paymentStatus = "Paid";
-      sale.pendingAmountPaid = "paid"; // hides from Credit Collection dropdown
-    } else {
-      sale.paymentStatus = "Partial Paid";
-      sale.pendingAmountPaid = "pending";
-    }
-    sale.updatedAt = new Date();
-
-    // --- Find or create MRCash record ---
     let mrCash = await MRCash.findOne({
       mrName: nameRegex,
       isActive: true,
@@ -1434,18 +1688,16 @@ router.post("/collect-payment", async (req, res) => {
       });
     }
 
-    // FIX: Add collected amount to MR's current cash
     mrCash.currentCash = parseFloat(
       (mrCash.currentCash + collectedAmount).toFixed(4),
     );
     mrCash.updatedAt = new Date();
 
-    // --- Create Transaction record ---
     const transaction = new Transaction({
-      categoryType: "Credit Collection", // human-readable label
-      transactionType: "credit collection", // valid enum value
+      categoryType: "Credit Collection",
+      transactionType: "credit collection",
       sourceAccount: sale.customerName || "Customer",
-      destination: mrCash.mrName, // goes to MR's cash (not a bank account)
+      destination: mrCash.mrName,
       amount: collectedAmount,
       exchangeLoss: 0,
       finalAmount: collectedAmount,
@@ -1458,7 +1710,6 @@ router.post("/collect-payment", async (req, res) => {
       remarks: notes || `Credit collection from invoice ${invoiceNumber}`,
     });
 
-    // --- Optionally update Destination account if MR has a linked Destination doc ---
     const dest = await Account.findOne({ name: mrCash.mrName }).session(
       session,
     );
@@ -1469,7 +1720,6 @@ router.post("/collect-payment", async (req, res) => {
       await dest.save({ session });
     }
 
-    await sale.save({ session });
     await mrCash.save({ session });
     await transaction.save({ session });
 
@@ -1479,7 +1729,19 @@ router.post("/collect-payment", async (req, res) => {
     res.status(200).json({
       success: true,
       message: `Successfully collected ${formatCurrency(collectedAmount)} from invoice ${invoiceNumber}. Added to ${mrName}'s current cash.`,
-      data: { sale, mrCash, transaction },
+      data: {
+        sale: {
+          _id: sale._id,
+          invoiceNumber: sale.invoiceNumber,
+          paidAmount: sale.paidAmount,
+          dueAmount: sale.dueAmount,
+          totalAmount: sale.totalAmount,
+          paymentStatus: sale.paymentStatus,
+          pendingAmountPaid: sale.pendingAmountPaid,
+        },
+        mrCash,
+        transaction,
+      },
     });
   } catch (error) {
     await session.abortTransaction();

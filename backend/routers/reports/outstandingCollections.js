@@ -4,7 +4,7 @@ import Sale from "../../models/sale/saleSummary.js";
 import Customer from "../../models/master/customer.js";
 import MRCash from "../../models/accounts/MRCash.js";
 import Staff from "../../models/staffMember/staff.js";
-import ExcelJS from 'exceljs';
+import ExcelJS from "exceljs";
 
 const router = express.Router();
 
@@ -17,116 +17,153 @@ const fixPrecision = (num) => {
 // Helper function to format customer code to 5 digits with leading zeros
 const formatCustomerCode = (code) => {
   if (!code) return code;
-  // Convert to string, remove any non-digit characters, then pad with leading zeros to 5 digits
-  const numericCode = code.toString().replace(/\D/g, '');
-  return numericCode.padStart(5, '0');
+  const numericCode = code.toString().replace(/\D/g, "");
+  return numericCode.padStart(5, "0");
 };
 
 // Helper function to normalize customer code for comparison (remove leading zeros)
 const normalizeCustomerCode = (code) => {
   if (!code) return code;
-  // Remove leading zeros for comparison
-  return code.toString().replace(/^0+/, '');
+  return code.toString().replace(/^0+/, "");
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared match stage builder — includes Credit AND Partial Paid
+// FIX: use invoiceDate instead of deliveryDate (deliveryDate is null on many records)
+// ─────────────────────────────────────────────────────────────────────────────
+const buildMatchStage = ({ startDate, endDate, customerCode } = {}) => {
+  const matchStage = {
+    // Match credit OR partial paid (case-insensitive)
+    paymentStatus: {
+      $in: [/^credit$/i, /^partial paid$/i, /^unpaid$/i, /^due$/i],
+    },
+    dueAmount: { $gt: 0 },
+    // Exclude records that have been fully collected
+    pendingAmountPaid: { $ne: "paid" },
+    // Only show non-returned, non-exchanged sales
+    $or: [
+      { isReturn: { $exists: false } },
+      { isReturn: false },
+      { isReturn: null },
+    ],
+  };
+
+  // FIX: filter by invoiceDate — deliveryDate is null on many records and breaks date queries
+  if (startDate || endDate) {
+    matchStage.invoiceDate = {};
+    if (startDate) {
+      const start = new Date(startDate);
+      if (!isNaN(start.getTime())) matchStage.invoiceDate.$gte = start;
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      if (!isNaN(end.getTime())) {
+        end.setHours(23, 59, 59, 999);
+        matchStage.invoiceDate.$lte = end;
+      }
+    }
+  }
+
+  if (customerCode) {
+    matchStage.customerCode = formatCustomerCode(customerCode);
+  }
+
+  return matchStage;
 };
 
 // Helper function to update MR Cash
-const updateMRCash = async (mrName, amount, invoiceNumber, date, session, isRefund = false) => {
+const updateMRCash = async (
+  mrName,
+  amount,
+  invoiceNumber,
+  date,
+  session,
+  isRefund = false,
+) => {
   try {
     const cleanAmount = fixPrecision(Number(amount) || 0);
     if (cleanAmount === 0) {
       return { success: true, skipped: true, reason: "Amount is zero" };
     }
-    
+
     if (!mrName || mrName.trim() === "") {
       throw new Error("MR name is required to update MR Cash");
     }
-    
-    const escapeForRegex = (text = "") => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    
-    // Find MR in Staff collection
+
+    const escapeForRegex = (text = "") =>
+      text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
     const mr = await Staff.findOne({
-      medicalRepName: { 
-        $regex: `^${escapeForRegex(mrName.trim())}$`, 
-        $options: "i" 
+      medicalRepName: {
+        $regex: `^${escapeForRegex(mrName.trim())}$`,
+        $options: "i",
       },
     }).session(session);
-    
+
     if (!mr) {
       console.warn(`⚠️ MR not found with name "${mrName}"`);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: `MR not found with name "${mrName}"`,
-        skipped: true 
+        skipped: true,
       };
     }
-    
-    // Find or create MR Cash record
+
     let mrCash = await MRCash.findOne({ mrId: mr._id }).session(session);
-    
+
     if (!mrCash) {
-      // Create new MR Cash record
       let initialCash = 0;
-      if (!isRefund) {
-        initialCash = cleanAmount;
-      }
-      
+      if (!isRefund) initialCash = cleanAmount;
+
       mrCash = new MRCash({
         mrId: mr._id,
         mrName: mr.medicalRepName,
         currentCash: initialCash,
         cashTransferredToAdmin: 0,
         lastTransferDate: null,
-        notes: `Initial creation with invoice: ${invoiceNumber} (${isRefund ? 'Due Increased' : 'Due Decreased'}: ${cleanAmount})`,
+        notes: `Initial creation with invoice: ${invoiceNumber} (${isRefund ? "Due Increased" : "Due Decreased"}: ${cleanAmount})`,
         isActive: true,
       });
-      
+
       await mrCash.save({ session });
-      return { 
-        success: true, 
-        mrCash, 
+      return {
+        success: true,
+        mrCash,
         action: "created_new",
         previousAmount: 0,
-        newAmount: initialCash
+        newAmount: initialCash,
       };
     }
-    
-    // Update existing MR Cash record
+
     const previousAmount = fixPrecision(mrCash.currentCash || 0);
-    let newCashAmount = previousAmount;
-    
-    if (isRefund) {
-      // Due amount increased = subtract from MR cash
-      newCashAmount = fixPrecision(previousAmount - cleanAmount);
-    } else {
-      // Due amount decreased = add to MR cash
-      newCashAmount = fixPrecision(previousAmount + cleanAmount);
-    }
-    
+    let newCashAmount = isRefund
+      ? fixPrecision(previousAmount - cleanAmount)
+      : fixPrecision(previousAmount + cleanAmount);
+
     mrCash.currentCash = newCashAmount;
-    
+
     if (mrCash.currentCash < 0) {
       console.warn(
-        `⚠️ Warning: MR ${mr.medicalRepName} cash balance went negative: ${mrCash.currentCash}`
+        `⚠️ Warning: MR ${mr.medicalRepName} cash balance went negative: ${mrCash.currentCash}`,
       );
     }
-    
+
     const transactionNote = isRefund
       ? `Due amount increased for invoice ${invoiceNumber}: -${cleanAmount}`
       : `Due amount decreased for invoice ${invoiceNumber}: +${cleanAmount}`;
-      
+
     mrCash.notes = mrCash.notes
       ? `${mrCash.notes}\n${transactionNote}`
       : transactionNote;
-      
     mrCash.updatedAt = new Date();
-    
+
     await mrCash.save({ session });
-      
+
     return {
       success: true,
       mrCash,
       action: "updated_existing",
-      previousAmount: previousAmount,
+      previousAmount,
       newAmount: newCashAmount,
       changeAmount: cleanAmount,
     };
@@ -136,17 +173,17 @@ const updateMRCash = async (mrName, amount, invoiceNumber, date, session, isRefu
   }
 };
 
-// Bulk Update Route with MR Cash Integration
-// ✅ CHANGED: removed "/reports/outstanding-collections" prefix
+// ─────────────────────────────────────────────────────────────────────────────
+// Bulk Update Route
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/bulk-update", async (req, res) => {
   try {
     const { updates } = req.body;
 
     if (!updates || !Array.isArray(updates) || updates.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No update data provided",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "No update data provided" });
     }
 
     const results = {
@@ -154,40 +191,37 @@ router.post("/bulk-update", async (req, res) => {
       failedCount: 0,
       errors: [],
       updated: [],
-      mrCashUpdates: []
+      mrCashUpdates: [],
     };
 
     for (const update of updates) {
-      const { invoiceNumber, totalAmount, paidAmount, creditDays, remarks } = update;
-      
+      const { invoiceNumber, totalAmount, paidAmount, creditDays, remarks } =
+        update;
       const session = await mongoose.startSession();
       session.startTransaction();
 
       try {
-        // Find the sale by invoice number
-        const sale = await Sale.findOne({ invoiceNumber: invoiceNumber }).session(session);
+        const sale = await Sale.findOne({ invoiceNumber }).session(session);
 
         if (!sale) {
           await session.abortTransaction();
           session.endSession();
-          
           results.failedCount++;
-          results.errors.push({
-            invoiceNumber,
-            error: "Invoice not found"
-          });
+          results.errors.push({ invoiceNumber, error: "Invoice not found" });
           continue;
         }
 
-        // Validate amounts
-        if (totalAmount <= 0) {
+        // FIX: fall back to existing totalAmount when upload value is 0/blank
+        const resolvedTotalAmount =
+          totalAmount > 0 ? totalAmount : sale.totalAmount || 0;
+
+        if (resolvedTotalAmount <= 0) {
           await session.abortTransaction();
           session.endSession();
-          
           results.failedCount++;
           results.errors.push({
             invoiceNumber,
-            error: "Total amount must be greater than 0"
+            error: "Total amount must be greater than 0",
           });
           continue;
         }
@@ -195,80 +229,74 @@ router.post("/bulk-update", async (req, res) => {
         if (paidAmount < 0) {
           await session.abortTransaction();
           session.endSession();
-          
           results.failedCount++;
           results.errors.push({
             invoiceNumber,
-            error: "Paid amount cannot be negative"
+            error: "Paid amount cannot be negative",
           });
           continue;
         }
 
-        if (paidAmount > totalAmount) {
+        if (paidAmount > resolvedTotalAmount) {
           await session.abortTransaction();
           session.endSession();
-          
           results.failedCount++;
           results.errors.push({
             invoiceNumber,
-            error: "Paid amount cannot exceed total amount"
+            error: "Paid amount cannot exceed total amount",
           });
           continue;
         }
 
-        // Calculate old and new due amounts
         const oldDueAmount = fixPrecision(sale.dueAmount || 0);
         const oldPaidAmount = fixPrecision(sale.paidAmount || 0);
-        const newDueAmount = fixPrecision(totalAmount - paidAmount);
+        const newDueAmount = fixPrecision(resolvedTotalAmount - paidAmount);
         const newPaidAmount = fixPrecision(paidAmount);
-        
-        // Calculate the change in due amount
         const dueAmountChange = fixPrecision(newDueAmount - oldDueAmount);
         const paidAmountChange = fixPrecision(newPaidAmount - oldPaidAmount);
 
-        // Prepare update data
+        // FIX: default creditDays to 30 when 0/blank
+        const resolvedCreditDays = creditDays > 0 ? creditDays : 30;
+
         const updateData = {
-          totalAmount: fixPrecision(totalAmount),
+          totalAmount: fixPrecision(resolvedTotalAmount),
           paidAmount: newPaidAmount,
           dueAmount: newDueAmount,
-          paymentStatus: newDueAmount > 0 ? "Credit" : "Cash",
-          creditDays: creditDays || 0,
+          paymentStatus:
+            newDueAmount > 0
+              ? newPaidAmount > 0
+                ? "Partial Paid"
+                : "Credit"
+              : "Cash",
+          creditDays: resolvedCreditDays,
         };
 
-        // Update remark if provided
-        if (remarks) {
-          updateData.remark = remarks;
-        }
+        if (remarks) updateData.remark = remarks;
 
-        // Calculate due date based on invoice date + credit days
-        if (newDueAmount > 0 && creditDays > 0) {
+        // Always calculate dueDate from invoiceDate + creditDays
+        if (newDueAmount > 0 && resolvedCreditDays > 0) {
           const invoiceDate = new Date(sale.invoiceDate);
           const dueDate = new Date(invoiceDate);
-          dueDate.setDate(dueDate.getDate() + creditDays);
+          dueDate.setDate(dueDate.getDate() + resolvedCreditDays);
           updateData.dueDate = dueDate;
-        } else if (newDueAmount > 0) {
-          // If no credit days, due date is same as invoice date
-          updateData.dueDate = sale.invoiceDate;
         }
 
-        // Update MR cash if MR is involved in the sale
         let mrUpdated = false;
         let mrDetails = null;
 
-        if (sale.mrName && sale.mrName.trim() !== "" && sale.mrName.toLowerCase() !== "unknown") {
-          // When due amount changes, we need to adjust MR cash
-          // If due amount INCREASES (customer owes more), SUBTRACT from MR cash
-          // If due amount DECREASES (customer paid more), ADD to MR cash
-          
+        if (
+          sale.mrName &&
+          sale.mrName.trim() !== "" &&
+          sale.mrName.toLowerCase() !== "unknown"
+        ) {
           if (Math.abs(dueAmountChange) > 0.01) {
-            // There's a change in due amount
             const mrCashUpdate = await updateMRCash(
               sale.mrName.trim(),
               Math.abs(dueAmountChange),
               invoiceNumber,
               sale.invoiceDate || new Date(),
               session,
-              dueAmountChange > 0 // isRefund = true if due amount increased (subtract from MR cash)
+              dueAmountChange > 0,
             );
 
             if (mrCashUpdate.success) {
@@ -276,66 +304,60 @@ router.post("/bulk-update", async (req, res) => {
               mrDetails = {
                 mrName: sale.mrName,
                 previousCash: mrCashUpdate.previousAmount,
-                adjustment: -dueAmountChange, // Negative means subtract from MR, positive means add
+                adjustment: -dueAmountChange,
                 newCash: mrCashUpdate.newAmount,
-                oldDueAmount: oldDueAmount,
-                newDueAmount: newDueAmount,
-                dueAmountChange: dueAmountChange,
-                oldPaidAmount: oldPaidAmount,
-                newPaidAmount: newPaidAmount,
-                paidAmountChange: paidAmountChange
+                oldDueAmount,
+                newDueAmount,
+                dueAmountChange,
+                oldPaidAmount,
+                newPaidAmount,
+                paidAmountChange,
               };
             } else if (!mrCashUpdate.skipped) {
-              // MR Cash update failed
-              console.error(`⚠️ Failed to update MR Cash for ${sale.mrName}: ${mrCashUpdate.error}`);
+              console.error(
+                `⚠️ Failed to update MR Cash for ${sale.mrName}: ${mrCashUpdate.error}`,
+              );
             }
           }
         }
 
-        // Update the sale
-        await Sale.findByIdAndUpdate(sale._id, updateData, { new: true, session });
-
+        await Sale.findByIdAndUpdate(sale._id, updateData, {
+          new: true,
+          session,
+        });
         await session.commitTransaction();
         session.endSession();
 
         results.successCount++;
         results.updated.push({
           invoiceNumber,
-          totalAmount: fixPrecision(totalAmount),
+          totalAmount: fixPrecision(resolvedTotalAmount),
           paidAmount: newPaidAmount,
           dueAmount: newDueAmount,
           oldDueAmount,
           dueAmountChange,
           paymentStatus: updateData.paymentStatus,
-          mrUpdated
+          mrUpdated,
         });
 
-        if (mrDetails) {
-          results.mrCashUpdates.push({
-            invoiceNumber,
-            ...mrDetails
-          });
-        }
-
+        if (mrDetails)
+          results.mrCashUpdates.push({ invoiceNumber, ...mrDetails });
       } catch (error) {
         console.error(`Error updating invoice ${invoiceNumber}:`, error);
-        
         try {
           await session.abortTransaction();
-        } catch (abortError) {
-          console.error("Error aborting transaction:", abortError);
+        } catch (e) {
+          console.error("Abort error:", e);
         }
-        
         try {
           session.endSession();
-        } catch (endError) {
-          console.error("Error ending session:", endError);
+        } catch (e) {
+          console.error("End session error:", e);
         }
-        
         results.failedCount++;
         results.errors.push({
           invoiceNumber,
-          error: error.message || "Unknown error"
+          error: error.message || "Unknown error",
         });
       }
     }
@@ -347,9 +369,8 @@ router.post("/bulk-update", async (req, res) => {
       failedCount: results.failedCount,
       updated: results.updated,
       mrCashUpdates: results.mrCashUpdates,
-      errors: results.errors
+      errors: results.errors,
     });
-
   } catch (error) {
     console.error("Error in bulk update:", error);
     return res.status(500).json({
@@ -360,8 +381,10 @@ router.post("/bulk-update", async (req, res) => {
   }
 });
 
-// Outstanding Collections Report
-// ✅ CHANGED: removed "/reports/outstanding-collections" prefix
+// ─────────────────────────────────────────────────────────────────────────────
+// Outstanding Collections Report — GET /
+// FIX: group by invoiceNumber (one row per invoice, not per customer)
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const {
@@ -374,71 +397,64 @@ router.get("/", async (req, res) => {
       status,
     } = req.query;
 
-    // ---------- 1. BUILD MATCH STAGE ----------
-    const matchStage = {
-      paymentStatus: { $regex: /^credit$/i },
-      isReturn: false,
-      isExchange: false,
-      dueAmount: { $gt: 0 },
-    };
-  
-    // Date filtering
-    if (startDate || endDate) {
-      matchStage.deliveryDate = {};
-      if (startDate) {
-        const start = new Date(startDate);
-        if (isNaN(start.getTime())) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid startDate format",
-          });
-        }
-        matchStage.deliveryDate.$gte = start;
-      }
-      if (endDate) {
-        const end = new Date(endDate);
-        if (isNaN(end.getTime())) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid endDate format",
-          });
-        }
-        end.setHours(23, 59, 59, 999);
-        matchStage.deliveryDate.$lte = end;
-      }
+    // Validate date params early
+    if (startDate && isNaN(new Date(startDate).getTime())) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid startDate format" });
+    }
+    if (endDate && isNaN(new Date(endDate).getTime())) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid endDate format" });
     }
 
-    // Customer code filter (5‑digit format)
-    if (customerCode) {
-      matchStage.customerCode = formatCustomerCode(customerCode);
-    }
+    const matchStage = buildMatchStage({ startDate, endDate, customerCode });
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
     const now = new Date();
+
     const sales = await Sale.find(matchStage).lean();
-    // Log total dueAmount from raw sales (should be close to expected total if filters are correct)
-    const rawTotalDue = sales.reduce((sum, s) => sum + (s.dueAmount || 0), 0);
+
     if (sales.length === 0) {
       return res.json({
         success: true,
-        data: { summary: { /* ... zeros */ }, records: [] },
-        pagination: { /* ... zeros */ },
+        data: {
+          summary: {
+            totalOutstandingAmount: 0,
+            totalDueAmount: 0,
+            totalOverdueAmount: 0,
+            totalCustomers: 0,
+            totalInvoices: 0,
+            totalOverdueInvoices: 0,
+            totalRecords: 0,
+          },
+          records: [],
+        },
+        pagination: {
+          currentPage: pageNum,
+          totalPages: 0,
+          totalRecords: 0,
+          hasNext: false,
+          hasPrev: false,
+        },
         count: 0,
       });
     }
 
-    // ---------- 3. FORMAT CUSTOMER CODES ----------
+    // Format customer codes and look up customer master
     const formattedSales = sales.map((sale) => ({
       ...sale,
       formattedCustomerCode: formatCustomerCode(sale.customerCode),
     }));
+
     const uniqueFormattedCodes = [
       ...new Set(formattedSales.map((s) => s.formattedCustomerCode)),
     ];
+
     const customerPromises = uniqueFormattedCodes.map(async (code) => {
-      // exact match
       let customer = await Customer.findOne({ customerCode: code }).lean();
       if (!customer) {
         const normalizedCode = normalizeCustomerCode(code);
@@ -449,7 +465,7 @@ router.get("/", async (req, res) => {
             { customerCode: { $regex: new RegExp(`${normalizedCode}$`) } },
           ],
         }).lean();
-      } 
+      }
       return { saleCode: code, customer };
     });
 
@@ -459,96 +475,90 @@ router.get("/", async (req, res) => {
       customerMap[saleCode] = customer;
     });
 
-    const customerGroups = {};
+    // ── FIX: Group by invoiceNumber — one row per invoice ──────────────────
+    const invoiceGroups = {};
 
     formattedSales.forEach((sale) => {
       const custCode = sale.formattedCustomerCode;
       const customer = customerMap[custCode];
+      const invoiceKey = sale.invoiceNumber;
 
-      if (!customerGroups[custCode]) {
-        customerGroups[custCode] = {
-          customerCode: custCode,
-          customerName: customer?.name || null,
-          customerPhone: customer?.customerNumber || null,
-          customerEmail: customer?.email || null,
-          customerAddress: customer?.address || null,
-          totalNetSellingAmount: 0,
-          totalDueAmount: 0,
-          totalPaidAmount: 0,
-          overdueAmount: 0,
-          latestDeliveryDate: null,
-          invoiceCount: 0,
-          overdueInvoices: 0,
-          invoices: [],
-        };
+      // Determine overdue date:
+      // 1. Use stored dueDate if available
+      // 2. Fall back to invoiceDate + creditDays (never use deliveryDate — it can be null)
+      let overdueDate = sale.dueDate ? new Date(sale.dueDate) : null;
+      if (!overdueDate && sale.creditDays && sale.invoiceDate) {
+        const baseDate = new Date(sale.invoiceDate);
+        if (!isNaN(baseDate.getTime())) {
+          overdueDate = new Date(baseDate);
+          overdueDate.setDate(overdueDate.getDate() + (sale.creditDays || 0));
+        }
       }
+      const isOverdue =
+        overdueDate &&
+        !isNaN(overdueDate.getTime()) &&
+        overdueDate < now &&
+        (sale.dueAmount || 0) > 0;
 
-      // overdue calculation
-      let overdueDate = sale.dueDate;
-      if (!overdueDate && sale.creditDays) {
-        overdueDate = new Date(sale.deliveryDate);
-        overdueDate.setDate(overdueDate.getDate() + sale.creditDays);
-      }
-      const isOverdue = overdueDate && new Date(overdueDate) < now && sale.dueAmount > 0;
-
-      const group = customerGroups[custCode];
-      group.totalNetSellingAmount += sale.netSellingAmount || 0;
-      group.totalDueAmount += sale.dueAmount || 0;
-      group.totalPaidAmount += sale.paidAmount || 0;
-      if (isOverdue) {
-        group.overdueAmount += sale.dueAmount || 0;
-        group.overdueInvoices += 1;
-      }
-      if (
-        !group.latestDeliveryDate ||
-        new Date(sale.deliveryDate) > new Date(group.latestDeliveryDate)
-      ) {
-        group.latestDeliveryDate = sale.deliveryDate;
-      }
-      group.invoiceCount += 1;
-      group.invoices.push(sale);
+      invoiceGroups[invoiceKey] = {
+        invoiceNumber: sale.invoiceNumber,
+        invoiceDate: sale.invoiceDate,
+        customerCode: custCode,
+        customerName: customer?.name || sale.customerName || "N/A",
+        customerPhone: customer?.customerNumber || null,
+        customerEmail: customer?.email || null,
+        customerAddress: customer?.address || null,
+        totalDueAmount: sale.dueAmount || 0,
+        totalPaidAmount: sale.paidAmount || 0,
+        overdueAmount: isOverdue ? sale.dueAmount || 0 : 0,
+        overdueInvoices: isOverdue ? 1 : 0,
+        // Use invoiceDate as the reference date (deliveryDate may be null)
+        latestDeliveryDate: sale.invoiceDate || sale.deliveryDate,
+        invoiceCount: 1,
+      };
     });
 
-    let customerList = Object.values(customerGroups).map((group) => ({
-      ...group,
-      outstandingAmount: group.totalDueAmount,
+    let invoiceList = Object.values(invoiceGroups).map((inv) => ({
+      ...inv,
+      outstandingAmount: inv.totalDueAmount,
       overdueDays:
-        group.overdueAmount > 0
-          ? Math.floor((now - new Date(group.latestDeliveryDate)) / (1000 * 60 * 60 * 24))
+        inv.overdueAmount > 0 && inv.latestDeliveryDate
+          ? Math.max(
+              0,
+              Math.floor(
+                (now - new Date(inv.latestDeliveryDate)) /
+                  (1000 * 60 * 60 * 24),
+              ),
+            )
           : 0,
     }));
 
-    // ---------- 7. SEARCH FILTER ----------
+    // Search filter — now also searches invoiceNumber
     if (search && search.trim() !== "") {
       const searchTerm = search.trim().toLowerCase();
-      const beforeCount = customerList.length;
-      customerList = customerList.filter((cust) => {
-        const name = (cust.customerName || "").toLowerCase();
-        const code = (cust.customerCode || "").toLowerCase();
-        const phone = (cust.customerPhone || "").toLowerCase();
-        const email = (cust.customerEmail || "").toLowerCase();
-        const addr = (cust.customerAddress || "").toLowerCase();
+      invoiceList = invoiceList.filter((inv) => {
         return (
-          name.includes(searchTerm) ||
-          code.includes(searchTerm) ||
-          phone.includes(searchTerm) ||
-          email.includes(searchTerm) ||
-          addr.includes(searchTerm)
+          (inv.invoiceNumber || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerName || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerCode || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerPhone || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerEmail || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerAddress || "").toLowerCase().includes(searchTerm)
         );
       });
     }
 
-    // ---------- 8. SORT BY OVERDUE AMOUNT ----------
-    customerList.sort((a, b) => b.overdueAmount - a.overdueAmount);
+    // Sort by overdue amount descending
+    invoiceList.sort((a, b) => b.overdueAmount - a.overdueAmount);
 
-    // ---------- 9. AGGREGATE TOTALS ----------
-    const totals = customerList.reduce(
+    // Aggregate totals
+    const totals = invoiceList.reduce(
       (acc, curr) => {
         acc.totalOutstandingAmount += curr.outstandingAmount || 0;
         acc.totalDueAmount += curr.totalDueAmount || 0;
         acc.totalOverdueAmount += curr.overdueAmount || 0;
-        acc.totalCustomers += 1;
-        acc.totalInvoices += curr.invoiceCount || 0;
+        acc.totalCustomers += 1; // one row per invoice
+        acc.totalInvoices += 1;
         acc.totalOverdueInvoices += curr.overdueInvoices || 0;
         return acc;
       },
@@ -559,37 +569,36 @@ router.get("/", async (req, res) => {
         totalCustomers: 0,
         totalInvoices: 0,
         totalOverdueInvoices: 0,
-      }
+      },
     );
-    totals.totalRecords = customerList.length;
-    // ---------- 10. PAGINATION ----------
-    const totalCount = customerList.length;
+    totals.totalRecords = invoiceList.length;
+
+    // Pagination
+    const totalCount = invoiceList.length;
     const totalPages = Math.ceil(totalCount / limitNum);
-    const paginatedCustomers = customerList.slice(skip, skip + limitNum);
-  
-    // ---------- 11. FORMAT RESPONSE RECORDS ----------
-    const records = paginatedCustomers.map((cust) => ({
-      customerCode: cust.customerCode,
-      customerName: cust.customerName || "N/A",
-      phone: cust.customerPhone || "N/A",
-      email: cust.customerEmail || "N/A",
-      address: cust.customerAddress || "N/A",
-      totalOutstandingAmount: cust.outstandingAmount || 0,
-      dueAmount: cust.totalDueAmount || 0,
-      overdueAmount: cust.overdueAmount || 0,
-      lastTransactionDate: cust.latestDeliveryDate,
-      invoiceCount: cust.invoiceCount || 0,
-      overdueInvoices: cust.overdueInvoices || 0,
-      overdueDays: cust.overdueDays || 0,
+    const paginatedInvoices = invoiceList.slice(skip, skip + limitNum);
+
+    // ── FIX: return invoiceNumber instead of customerCode as primary identifier ──
+    const records = paginatedInvoices.map((inv) => ({
+      invoiceNumber: inv.invoiceNumber,
+      invoiceDate: inv.invoiceDate,
+      customerCode: inv.customerCode,
+      customerName: inv.customerName || "N/A",
+      phone: inv.customerPhone || "N/A",
+      email: inv.customerEmail || "N/A",
+      address: inv.customerAddress || "N/A",
+      totalOutstandingAmount: inv.outstandingAmount || 0,
+      dueAmount: inv.totalDueAmount || 0,
+      overdueAmount: inv.overdueAmount || 0,
+      lastTransactionDate: inv.latestDeliveryDate,
+      invoiceCount: 1,
+      overdueInvoices: inv.overdueInvoices || 0,
+      overdueDays: inv.overdueDays || 0,
     }));
 
-    // ---------- 12. SEND RESPONSE ----------
     return res.json({
       success: true,
-      data: {
-        summary: totals,
-        records,
-      },
+      data: { summary: totals, records },
       pagination: {
         currentPage: pageNum,
         totalPages,
@@ -609,359 +618,332 @@ router.get("/", async (req, res) => {
   }
 });
 
-// Excel Export for Outstanding Collections
-// ✅ CHANGED: removed "/reports/outstanding-collections" prefix
+// ─────────────────────────────────────────────────────────────────────────────
+// Excel Export — GET /export/excel
+// FIX: same invoiceDate + invoice-level grouping fixes applied here too
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, customerCode } = req.query;
-    const matchStage = {
-      paymentStatus: { $regex: /^credit$/i },
-      isReturn: false,
-      isExchange: false,
-      dueAmount: { $gt: 0 }
-    };
 
-    if (startDate || endDate) {
-      matchStage.deliveryDate = {};
-
-      if (startDate) {
-        const start = new Date(startDate);
-        if (isNaN(start.getTime())) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid startDate format",
-          });
-        }
-        matchStage.deliveryDate.$gte = start;
-      }
-
-      if (endDate) {
-        const end = new Date(endDate);
-        if (isNaN(end.getTime())) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid endDate format",
-          });
-        }
-        end.setHours(23, 59, 59, 999);
-        matchStage.deliveryDate.$lte = end;
-      }
+    if (startDate && isNaN(new Date(startDate).getTime())) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid startDate format" });
+    }
+    if (endDate && isNaN(new Date(endDate).getTime())) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid endDate format" });
     }
 
-    // Handle customer code filter - format to 5 digits
-    if (customerCode) {
-      matchStage.customerCode = formatCustomerCode(customerCode);
-    }
-
+    const matchStage = buildMatchStage({ startDate, endDate, customerCode });
     const now = new Date();
 
-    // Get all sales that match the criteria
     const sales = await Sale.find(matchStage).lean();
-    
+
     if (sales.length === 0) {
       return generateEmptyExcel(res);
     }
 
-    // Format all sale customer codes to 5 digits
-    const formattedSales = sales.map(sale => ({
+    const formattedSales = sales.map((sale) => ({
       ...sale,
-      formattedCustomerCode: formatCustomerCode(sale.customerCode)
+      formattedCustomerCode: formatCustomerCode(sale.customerCode),
     }));
 
-    // Get unique formatted customer codes from sales
-    const customerCodes = [...new Set(formattedSales.map(sale => sale.formattedCustomerCode))];
-    
-    // Find customers with flexible matching
+    const customerCodes = [
+      ...new Set(formattedSales.map((sale) => sale.formattedCustomerCode)),
+    ];
+
     const customerPromises = customerCodes.map(async (code) => {
-      // Try exact match first with formatted code
       let customer = await Customer.findOne({ customerCode: code }).lean();
-      
-      // If not found, try without leading zeros
       if (!customer) {
         const normalizedCode = normalizeCustomerCode(code);
-        customer = await Customer.findOne({ 
+        customer = await Customer.findOne({
           $or: [
             { customerCode: normalizedCode },
             { customerCode: formatCustomerCode(normalizedCode) },
-            { customerCode: { $regex: new RegExp(`${normalizedCode}$`) } }
-          ]
+            { customerCode: { $regex: new RegExp(`${normalizedCode}$`) } },
+          ],
         }).lean();
       }
-      
       return { saleCode: code, customer };
     });
 
     const customerResults = await Promise.all(customerPromises);
-    
-    // Create a map of sale customer code to customer data
     const customerMap = {};
     customerResults.forEach(({ saleCode, customer }) => {
       customerMap[saleCode] = customer;
     });
 
-    // Group sales by formatted customer code
-    const customerGroups = {};
-    
-    formattedSales.forEach(sale => {
-      const customerCode = sale.formattedCustomerCode;
-      const customer = customerMap[customerCode];
-      
-      if (!customerGroups[customerCode]) {
-        customerGroups[customerCode] = {
-          customerCode: customerCode, // Always return 5-digit format
-          customerName: customer?.name || null,
-          customerPhone: customer?.customerNumber || null,
-          customerEmail: customer?.email || null,
-          customerAddress: customer?.address || null,
-          totalDueAmount: 0,
-          overdueAmount: 0,
-          latestDeliveryDate: null,
-          invoiceCount: 0
-        };
+    // ── FIX: invoice-level grouping (same logic as GET /) ──
+    const invoiceGroups = {};
+
+    formattedSales.forEach((sale) => {
+      const code = sale.formattedCustomerCode;
+      const customer = customerMap[code];
+      const invoiceKey = sale.invoiceNumber;
+
+      let overdueDate = sale.dueDate ? new Date(sale.dueDate) : null;
+      if (!overdueDate && sale.creditDays && sale.invoiceDate) {
+        const baseDate = new Date(sale.invoiceDate);
+        if (!isNaN(baseDate.getTime())) {
+          overdueDate = new Date(baseDate);
+          overdueDate.setDate(overdueDate.getDate() + (sale.creditDays || 0));
+        }
       }
-      
-      // Calculate overdue date
-      let overdueDate = sale.dueDate;
-      if (!overdueDate && sale.creditDays) {
-        overdueDate = new Date(sale.deliveryDate);
-        overdueDate.setDate(overdueDate.getDate() + sale.creditDays);
-      }
-      
-      const isOverdue = overdueDate && new Date(overdueDate) < now && sale.dueAmount > 0;
-      
-      customerGroups[customerCode].totalDueAmount += sale.dueAmount || 0;
-      
-      if (isOverdue) {
-        customerGroups[customerCode].overdueAmount += sale.dueAmount || 0;
-      }
-      
-      if (!customerGroups[customerCode].latestDeliveryDate || 
-          new Date(sale.deliveryDate) > new Date(customerGroups[customerCode].latestDeliveryDate)) {
-        customerGroups[customerCode].latestDeliveryDate = sale.deliveryDate;
-      }
-      
-      customerGroups[customerCode].invoiceCount += 1;
+      const isOverdue =
+        overdueDate &&
+        !isNaN(overdueDate.getTime()) &&
+        overdueDate < now &&
+        (sale.dueAmount || 0) > 0;
+
+      invoiceGroups[invoiceKey] = {
+        invoiceNumber: sale.invoiceNumber,
+        invoiceDate: sale.invoiceDate,
+        customerCode: code,
+        customerName: customer?.name || sale.customerName || "N/A",
+        customerPhone: customer?.customerNumber || null,
+        customerEmail: customer?.email || null,
+        customerAddress: customer?.address || null,
+        totalDueAmount: sale.dueAmount || 0,
+        overdueAmount: isOverdue ? sale.dueAmount || 0 : 0,
+        latestDeliveryDate: sale.invoiceDate || sale.deliveryDate,
+        invoiceCount: 1,
+      };
     });
 
-    // Convert to array and add calculated fields
-    let customerList = Object.values(customerGroups).map(group => ({
-      ...group,
-      outstandingAmount: group.totalDueAmount,
-      overdueDays: group.overdueAmount > 0 ? 
-        Math.floor((now - new Date(group.latestDeliveryDate)) / (1000 * 60 * 60 * 24)) : 0
+    let invoiceList = Object.values(invoiceGroups).map((inv) => ({
+      ...inv,
+      outstandingAmount: inv.totalDueAmount,
+      overdueDays:
+        inv.overdueAmount > 0 && inv.latestDeliveryDate
+          ? Math.max(
+              0,
+              Math.floor(
+                (now - new Date(inv.latestDeliveryDate)) /
+                  (1000 * 60 * 60 * 24),
+              ),
+            )
+          : 0,
     }));
 
-    // Apply search filter
     if (search && search.trim() !== "") {
       const searchTerm = search.trim().toLowerCase();
-      customerList = customerList.filter(customer => {
-        const customerName = (customer.customerName || '').toLowerCase();
-        const customerCode = (customer.customerCode || '').toLowerCase();
-        const customerPhone = (customer.customerPhone || '').toLowerCase();
-        const customerEmail = (customer.customerEmail || '').toLowerCase();
-        const customerAddress = (customer.customerAddress || '').toLowerCase();
-        
-        return customerName.includes(searchTerm) ||
-               customerCode.includes(searchTerm) ||
-               customerPhone.includes(searchTerm) ||
-               customerEmail.includes(searchTerm) ||
-               customerAddress.includes(searchTerm);
-      });
+      invoiceList = invoiceList.filter(
+        (inv) =>
+          (inv.invoiceNumber || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerName || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerCode || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerPhone || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerEmail || "").toLowerCase().includes(searchTerm) ||
+          (inv.customerAddress || "").toLowerCase().includes(searchTerm),
+      );
     }
 
-    // Sort by overdue amount
-    customerList.sort((a, b) => b.overdueAmount - a.overdueAmount);
+    invoiceList.sort((a, b) => b.overdueAmount - a.overdueAmount);
 
     const summary = {
-      totalOutstandingAmount: customerList.reduce((sum, record) => sum + (record.outstandingAmount || 0), 0),
-      totalOverdueAmount: customerList.reduce((sum, record) => sum + (record.overdueAmount || 0), 0),
-      totalCustomers: customerList.length,
-      totalInvoices: customerList.reduce((sum, record) => sum + (record.invoiceCount || 0), 0)
+      totalOutstandingAmount: invoiceList.reduce(
+        (sum, r) => sum + (r.outstandingAmount || 0),
+        0,
+      ),
+      totalOverdueAmount: invoiceList.reduce(
+        (sum, r) => sum + (r.overdueAmount || 0),
+        0,
+      ),
+      totalCustomers: invoiceList.length,
+      totalInvoices: invoiceList.length,
     };
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Outstanding Collections System';
+    workbook.creator = "Outstanding Collections System";
     workbook.created = new Date();
 
-    const worksheet = workbook.addWorksheet('Outstanding Collections Report');
-    
+    const worksheet = workbook.addWorksheet("Outstanding Collections Report");
+
     worksheet.columns = [
-      { header: 'Sr.No', key: 'serialNo', width: 8 },
-      { header: 'Customer Code', key: 'customerCode', width: 15 },
-      { header: 'Customer Name', key: 'customerName', width: 25 },
-      { header: 'Phone', key: 'phone', width: 15 },
-      { header: 'Email', key: 'email', width: 30 },
-      { header: 'Address', key: 'address', width: 30 },
-      { header: 'Total Outstanding ($)', key: 'totalOutstandingAmount', width: 20 },
-      { header: 'Overdue Amount ($)', key: 'overdueAmount', width: 18 },
-      { header: 'Overdue Days', key: 'overdueDays', width: 12 },
-      { header: 'Last Transaction Date', key: 'lastTransactionDate', width: 18 },
-      { header: 'Total Invoices', key: 'invoiceCount', width: 12 },
+      { header: "Sr.No", key: "serialNo", width: 8 },
+      { header: "Invoice Number", key: "invoiceNumber", width: 18 },
+      { header: "Invoice Date", key: "invoiceDate", width: 15 },
+      { header: "Customer Code", key: "customerCode", width: 15 },
+      { header: "Customer Name", key: "customerName", width: 25 },
+      { header: "Phone", key: "phone", width: 15 },
+      { header: "Email", key: "email", width: 30 },
+      { header: "Address", key: "address", width: 30 },
+      {
+        header: "Total Outstanding ($)",
+        key: "totalOutstandingAmount",
+        width: 20,
+      },
+      { header: "Overdue Amount ($)", key: "overdueAmount", width: 18 },
+      { header: "Overdue Days", key: "overdueDays", width: 12 },
+      {
+        header: "Last Transaction Date",
+        key: "lastTransactionDate",
+        width: 18,
+      },
     ];
 
     const headerRow = worksheet.getRow(1);
     headerRow.font = { bold: true, size: 12 };
-    headerRow.alignment = { 
-      horizontal: 'center', 
-      vertical: 'middle'
-    };
+    headerRow.alignment = { horizontal: "center", vertical: "middle" };
     headerRow.height = 25;
     headerRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFE0E0E0' }
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE0E0E0" },
     };
 
-    customerList.forEach((record, index) => {
+    invoiceList.forEach((record, index) => {
       const row = worksheet.addRow({
         serialNo: index + 1,
-        customerCode: record.customerCode || 'N/A',
-        customerName: record.customerName || 'N/A',
-        phone: record.customerPhone || 'N/A',
-        email: record.customerEmail || 'N/A',
-        address: record.customerAddress || 'N/A',
+        invoiceNumber: record.invoiceNumber || "N/A",
+        invoiceDate: record.invoiceDate ? new Date(record.invoiceDate) : "",
+        customerCode: record.customerCode || "N/A",
+        customerName: record.customerName || "N/A",
+        phone: record.customerPhone || "N/A",
+        email: record.customerEmail || "N/A",
+        address: record.customerAddress || "N/A",
         totalOutstandingAmount: record.outstandingAmount || 0,
         overdueAmount: record.overdueAmount || 0,
         overdueDays: record.overdueDays || 0,
         lastTransactionDate: record.latestDeliveryDate,
-        invoiceCount: record.invoiceCount || 0
       });
 
       row.font = { size: 11 };
-      row.alignment = { 
-        vertical: 'middle',
-        horizontal: 'center'
-      };
+      row.alignment = { vertical: "middle", horizontal: "center" };
 
-      const dateCell = row.getCell('lastTransactionDate');
-      dateCell.value = record.latestDeliveryDate ? new Date(record.latestDeliveryDate) : '';
-      dateCell.numFmt = 'dd-mm-yyyy';
-      
-      const outstandingCell = row.getCell('totalOutstandingAmount');
-      outstandingCell.numFmt = '$#,##0.00';
-      
-      const overdueCell = row.getCell('overdueAmount');
-      overdueCell.numFmt = '$#,##0.00';
+      const invDateCell = row.getCell("invoiceDate");
+      invDateCell.value = record.invoiceDate
+        ? new Date(record.invoiceDate)
+        : "";
+      invDateCell.numFmt = "dd-mm-yyyy";
+
+      const dateCell = row.getCell("lastTransactionDate");
+      dateCell.value = record.latestDeliveryDate
+        ? new Date(record.latestDeliveryDate)
+        : "";
+      dateCell.numFmt = "dd-mm-yyyy";
+
+      row.getCell("totalOutstandingAmount").numFmt = "$#,##0.00";
+      row.getCell("overdueAmount").numFmt = "$#,##0.00";
     });
 
-    if (customerList.length > 0) {
+    if (invoiceList.length > 0) {
       worksheet.addRow({});
-
-      const summaryHeader = worksheet.addRow(['SUMMARY']);
+      const summaryHeader = worksheet.addRow(["SUMMARY"]);
       summaryHeader.font = { bold: true, size: 12 };
-      summaryHeader.alignment = { horizontal: 'center' };
+      summaryHeader.alignment = { horizontal: "center" };
       summaryHeader.getCell(1).fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFD0D0D0' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFD0D0D0" },
       };
-      worksheet.mergeCells(`A${summaryHeader.number}:K${summaryHeader.number}`);
+      worksheet.mergeCells(`A${summaryHeader.number}:L${summaryHeader.number}`);
 
-      const summaryData = [
-        ['Total Customers:', summary.totalCustomers],
-        ['Total Invoices:', summary.totalInvoices],
-        ['Total Outstanding Amount:', `$${summary.totalOutstandingAmount.toFixed(2)}`],
-        ['Total Overdue Amount:', `$${summary.totalOverdueAmount.toFixed(2)}`]
-      ];
-
-      summaryData.forEach(([label, value]) => {
+      [
+        ["Total Invoices:", summary.totalInvoices],
+        [
+          "Total Outstanding Amount:",
+          `$${summary.totalOutstandingAmount.toFixed(2)}`,
+        ],
+        ["Total Overdue Amount:", `$${summary.totalOverdueAmount.toFixed(2)}`],
+      ].forEach(([label, value]) => {
         const row = worksheet.addRow([label, value]);
         row.font = { bold: true };
-        row.getCell(1).alignment = { horizontal: 'right' };
-        row.getCell(2).alignment = { horizontal: 'left' };
+        row.getCell(1).alignment = { horizontal: "right" };
+        row.getCell(2).alignment = { horizontal: "left" };
       });
     }
 
-    // Apply borders to all cells
-    worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    worksheet.eachRow({ includeEmpty: true }, (row) => {
+      row.eachCell({ includeEmpty: true }, (cell) => {
         cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
         };
       });
     });
 
     worksheet.autoFilter = {
       from: { row: 1, column: 1 },
-      to: { row: 1, column: worksheet.columnCount }
+      to: { row: 1, column: worksheet.columnCount },
     };
 
-    const currentDate = new Date();
-    const formattedDate = currentDate.toISOString().split('T')[0];
-    
-    let fileName = 'outstanding-collections-report';
+    let fileName = "outstanding-collections-report";
     if (startDate && endDate) {
-      fileName = `outstanding-collections-${startDate.replace(/-/g, '')}-to-${endDate.replace(/-/g, '')}`;
+      fileName = `outstanding-collections-${startDate.replace(/-/g, "")}-to-${endDate.replace(/-/g, "")}`;
     } else {
-      fileName = `outstanding-collections-${formattedDate.replace(/-/g, '')}`;
+      fileName = `outstanding-collections-${new Date().toISOString().split("T")[0].replace(/-/g, "")}`;
     }
-    fileName += '.xlsx';
+    fileName += ".xlsx";
 
     res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${fileName}"`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     const buffer = await workbook.xlsx.writeBuffer();
     res.send(buffer);
-
   } catch (error) {
     console.error("Error in /export/excel:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate Excel export",
       error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
 
-// Helper function to generate empty Excel file
+// Helper: generate empty Excel
 async function generateEmptyExcel(res) {
   const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Outstanding Collections Report');
-  
+  const worksheet = workbook.addWorksheet("Outstanding Collections Report");
+
   worksheet.columns = [
-    { header: 'Sr.No', key: 'serialNo', width: 8 },
-    { header: 'Customer Code', key: 'customerCode', width: 15 },
-    { header: 'Customer Name', key: 'customerName', width: 25 },
-    { header: 'Phone', key: 'phone', width: 15 },
-    { header: 'Email', key: 'email', width: 30 },
-    { header: 'Address', key: 'address', width: 30 },
-    { header: 'Total Outstanding ($)', key: 'totalOutstandingAmount', width: 20 },
-    { header: 'Overdue Amount ($)', key: 'overdueAmount', width: 18 },
-    { header: 'Overdue Days', key: 'overdueDays', width: 12 },
-    { header: 'Last Transaction Date', key: 'lastTransactionDate', width: 18 },
-    { header: 'Total Invoices', key: 'invoiceCount', width: 12 },
+    { header: "Sr.No", key: "serialNo", width: 8 },
+    { header: "Invoice Number", key: "invoiceNumber", width: 18 },
+    { header: "Invoice Date", key: "invoiceDate", width: 15 },
+    { header: "Customer Code", key: "customerCode", width: 15 },
+    { header: "Customer Name", key: "customerName", width: 25 },
+    { header: "Phone", key: "phone", width: 15 },
+    { header: "Email", key: "email", width: 30 },
+    { header: "Address", key: "address", width: 30 },
+    {
+      header: "Total Outstanding ($)",
+      key: "totalOutstandingAmount",
+      width: 20,
+    },
+    { header: "Overdue Amount ($)", key: "overdueAmount", width: 18 },
+    { header: "Overdue Days", key: "overdueDays", width: 12 },
+    { header: "Last Transaction Date", key: "lastTransactionDate", width: 18 },
   ];
 
   const headerRow = worksheet.getRow(1);
   headerRow.font = { bold: true, size: 12 };
-  headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+  headerRow.alignment = { horizontal: "center", vertical: "middle" };
   headerRow.height = 25;
   headerRow.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFE0E0E0' }
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFE0E0E0" },
   };
 
-  worksheet.addRow(['No data available']);
-  worksheet.mergeCells(`A2:K2`);
+  worksheet.addRow(["No data available"]);
+  worksheet.mergeCells("A2:L2");
 
   res.setHeader(
-    'Content-Type',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   );
   res.setHeader(
-    'Content-Disposition',
-    `attachment; filename="outstanding-collections-report-empty.xlsx"`
+    "Content-Disposition",
+    'attachment; filename="outstanding-collections-report-empty.xlsx"',
   );
 
   const buffer = await workbook.xlsx.writeBuffer();

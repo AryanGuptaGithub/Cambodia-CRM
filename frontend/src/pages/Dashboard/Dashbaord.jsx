@@ -28,7 +28,6 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const searchInputRef = useRef(null);
 
   const {
     loading,
@@ -49,7 +48,6 @@ const Dashboard = () => {
     setMrList,
   } = useDashboardData();
 
-  const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("Sales");
   const [previousActiveTab, setPreviousActiveTab] = useState("Sales");
 
@@ -73,10 +71,8 @@ const Dashboard = () => {
   const [pendingCollectionData, setPendingCollectionData] = useState([]);
   const [loadingPendingCollectionData, setLoadingPendingCollectionData] =
     useState(false);
-
   const [overdueTableData, setOverdueTableData] = useState([]);
   const [loadingOverdueData, setLoadingOverdueData] = useState(false);
-
   const [creditSaleTableData, setCreditSaleTableData] = useState([]);
   const [loadingCreditSaleData, setLoadingCreditSaleData] = useState(false);
 
@@ -182,7 +178,6 @@ const Dashboard = () => {
 
   const handleApplyDateFilter = () => {
     if (!selectedCardForFilter || !customStartDate || !customEndDate) return;
-
     setCustomDateRanges((prev) => ({
       ...prev,
       [selectedCardForFilter]: { start: customStartDate, end: customEndDate },
@@ -191,7 +186,6 @@ const Dashboard = () => {
       ...prev,
       [selectedCardForFilter]: true,
     }));
-
     switch (selectedCardForFilter) {
       case "Total Sales":
         setActiveSalesSubTab("Custom");
@@ -247,9 +241,7 @@ const Dashboard = () => {
   // =================== SUBTAB CHANGE HANDLERS ===================
   const handleSalesSubTabChange = (subTab) => {
     setActiveSalesSubTab(subTab);
-    if (isSalesMonthOnly && subTab !== "Month") {
-      setIsSalesMonthOnly(false);
-    }
+    if (isSalesMonthOnly && subTab !== "Month") setIsSalesMonthOnly(false);
     if (activeTab === "Sales") {
       if (subTab === "Custom") {
         if (!isCustomDateActive["Total Sales"]) return;
@@ -316,23 +308,18 @@ const Dashboard = () => {
         All: "All",
         Custom: "custom",
       };
-      const backendPeriod = periodMap[period] || period;
-      const params = { period: backendPeriod };
-
+      const params = { period: periodMap[period] || period };
       if (period === "Custom") {
         params.startDate =
           startDateParam || customDateRanges["Total Sales"]?.start;
         params.endDate = endDateParam || customDateRanges["Total Sales"]?.end;
       }
-
       const response = await axios.get(`${backendUrl}/api/sales/table-data`, {
         params,
       });
       const data = response.data.success ? response.data.data : [];
       setSalesTableData(data);
-
       const total = data.reduce((sum, sale) => sum + (sale.amount || 0), 0);
-
       setSalesData((prev) => {
         switch (period) {
           case "Today":
@@ -370,29 +357,23 @@ const Dashboard = () => {
         All: "All",
         Custom: "custom",
       };
-      const backendPeriod = periodMap[period] || period;
-      const params = { period: backendPeriod };
-
+      const params = { period: periodMap[period] || period };
       if (period === "Custom") {
         params.startDate =
           startDateParam || customDateRanges["Total Expense"]?.start;
         params.endDate = endDateParam || customDateRanges["Total Expense"]?.end;
       }
-
       const response = await axios.get(`${backendUrl}/api/expenses`, {
         params,
       });
-
       const rawData = response.data.data || [];
-      const transformedData = rawData.map((expense) => ({
-        ...expense,
-        category: expense.category?.category || expense.category || "Unknown",
-      }));
-
-      setExpenseTableData(transformedData);
-
+      setExpenseTableData(
+        rawData.map((expense) => ({
+          ...expense,
+          category: expense.category?.category || expense.category || "Unknown",
+        })),
+      );
       const total = rawData.reduce((sum, exp) => sum + (exp.amount || 0), 0);
-
       setExpenseSummary((prev) => {
         switch (period) {
           case "Month":
@@ -423,17 +404,13 @@ const Dashboard = () => {
     try {
       setLoadingPayrollData(true);
       let params = {};
-
       if (period === "Custom") {
         params.period = "custom";
         params.startDate =
           startDateParam || customDateRanges["Total Payroll"]?.start;
         params.endDate = endDateParam || customDateRanges["Total Payroll"]?.end;
-      } else if (period === "All") {
-        params = {};
-      } else {
+      } else if (period !== "All") {
         const currentDate = new Date();
-        let payrollPeriod;
         if (period === "Prev Month") {
           let pm = currentDate.getMonth() - 1;
           let y = currentDate.getFullYear();
@@ -441,17 +418,15 @@ const Dashboard = () => {
             pm = 11;
             y -= 1;
           }
-          payrollPeriod = `${y}-${String(pm + 1).padStart(2, "0")}`;
+          params.period = `${y}-${String(pm + 1).padStart(2, "0")}`;
         } else if (period === "YTD") {
-          payrollPeriod = `${currentDate.getFullYear()}-YTD`;
+          params.period = `${currentDate.getFullYear()}-YTD`;
         } else if (period === "Overdue") {
-          payrollPeriod = "overdue";
+          params.period = "overdue";
         } else if (period === "Unreceive_Payment") {
-          payrollPeriod = "unreceived";
+          params.period = "unreceived";
         }
-        params.period = payrollPeriod;
       }
-
       const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
         params,
       });
@@ -461,18 +436,10 @@ const Dashboard = () => {
         0,
       );
       setPayrollTableData(payrolls);
-
-      if (period === "Prev Month" || period === "Custom") {
+      if (["Prev Month", "Custom", "Overdue", "All"].includes(period))
         setCurrentPayrollTotal(totalNetSalary);
-      } else if (period === "YTD") {
+      else if (["YTD", "Unreceive_Payment"].includes(period))
         setCurrentYTDTotal(totalNetSalary);
-      } else if (period === "Overdue") {
-        setCurrentPayrollTotal(totalNetSalary);
-      } else if (period === "Unreceive_Payment") {
-        setCurrentYTDTotal(totalNetSalary);
-      } else if (period === "All") {
-        setCurrentPayrollTotal(totalNetSalary);
-      }
     } catch (error) {
       console.error("Error in fetchPayrollTableData:", error);
       setPayrollTableData([]);
@@ -488,14 +455,15 @@ const Dashboard = () => {
         params: { currentDate: new Date().toISOString() },
       });
       if (response.data.success) {
-        const formattedData = response.data.data.map((invoice) => ({
-          ...invoice,
-          overdueAmount:
-            invoice.dueAmount > 0
-              ? invoice.dueAmount
-              : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
-        }));
-        setOverdueTableData(formattedData);
+        setOverdueTableData(
+          response.data.data.map((invoice) => ({
+            ...invoice,
+            overdueAmount:
+              invoice.dueAmount > 0
+                ? invoice.dueAmount
+                : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
+          })),
+        );
         if (salesData) {
           setSalesData((prev) => ({
             ...prev,
@@ -519,21 +487,18 @@ const Dashboard = () => {
     try {
       setLoadingCreditSaleData(true);
       let params = {};
-
       if (period === "Custom") {
         params.period = "custom";
         params.startDate =
           startDateParam || customDateRanges["Pending Collection"]?.start;
         params.endDate =
           endDateParam || customDateRanges["Pending Collection"]?.end;
-      } else if (period === "All") {
-        params = {};
-      } else {
-        const periodMap = { Today: "today", Month: "month", Year: "year" };
-        const backendPeriod = periodMap[period];
+      } else if (period !== "All") {
+        const backendPeriod = { Today: "today", Month: "month", Year: "year" }[
+          period
+        ];
         if (backendPeriod) params.period = backendPeriod;
       }
-
       const response = await axios.get(
         `${backendUrl}/api/sales/credit-sale-not-received`,
         { params },
@@ -560,9 +525,9 @@ const Dashboard = () => {
       const response = await axios.get(
         `${backendUrl}/api/sales/pending-collection-today`,
       );
-      if (response.data.success)
-        setPendingCollectionData(response.data.data || []);
-      else setPendingCollectionData([]);
+      setPendingCollectionData(
+        response.data.success ? response.data.data || [] : [],
+      );
     } catch (error) {
       console.error("Error fetching pending collection data:", error);
       setPendingCollectionData([]);
@@ -571,30 +536,27 @@ const Dashboard = () => {
     }
   };
 
-  // ✅ FIXED: ensure each account has a transactions array
   const fetchCompanyBalance = async () => {
     try {
       setLoadingCompanyBalance(true);
       const response = await axios.get(`${backendUrl}/api/accounts/balance`);
       if (response.data.success) {
         setCompanyBalance(response.data.totalBalance || 0);
-        // Ensure each account has a transactions array (even if empty)
-        const accounts = (response.data.accounts || []).map((acc) => ({
-          ...acc,
-          transactions: acc.transactions || [], // fallback to empty array
-        }));
-        setCompanyBalanceAccounts(accounts);
+        setCompanyBalanceAccounts(
+          (response.data.accounts || []).map((acc) => ({
+            ...acc,
+            transactions: acc.transactions || [],
+          })),
+        );
       }
     } catch (error) {
       console.error("Error fetching company balance:", error);
       try {
         const res = await axios.get(`${backendUrl}/api/accounts/destinations`);
         const destinations = res.data?.data || res.data || [];
-        const total = destinations.reduce(
-          (sum, acc) => sum + (acc.totalAmount || 0),
-          0,
+        setCompanyBalance(
+          destinations.reduce((sum, acc) => sum + (acc.totalAmount || 0), 0),
         );
-        setCompanyBalance(total);
         setCompanyBalanceAccounts(
           destinations.map((d) => ({
             _id: d._id,
@@ -602,7 +564,7 @@ const Dashboard = () => {
             code: d.code || "",
             totalAmount: d.totalAmount || 0,
             transactionCount: 0,
-            transactions: [], // ensure transactions array exists
+            transactions: [],
           })),
         );
       } catch (err) {
@@ -705,11 +667,7 @@ const Dashboard = () => {
   const handleParentTabChange = (newTab) => {
     setPreviousActiveTab(activeTab);
     setActiveTab(newTab);
-
-    if (newTab !== "Sales") {
-      setIsSalesMonthOnly(false);
-    }
-
+    if (newTab !== "Sales") setIsSalesMonthOnly(false);
     switch (newTab) {
       case "Stock in Hands":
         break;
@@ -782,27 +740,23 @@ const Dashboard = () => {
   // =================== RENDER MAIN TABLE ===================
   const renderMainTable = () => {
     const formatDateRangeSmart = (start, end) => {
-      const startDate = new Date(start);
-      const endDate = new Date(end);
-      const sameYear = startDate.getFullYear() === endDate.getFullYear();
-      const options = { day: "numeric", month: "short" };
-      if (!sameYear) options.year = "numeric";
-      const startStr = startDate.toLocaleDateString("en-US", options);
-      const endStr = endDate.toLocaleDateString("en-US", options);
-      return `${startStr} – ${endStr}`;
+      const s = new Date(start),
+        e = new Date(end);
+      const opts = { day: "numeric", month: "short" };
+      if (s.getFullYear() !== e.getFullYear()) opts.year = "numeric";
+      return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}`;
     };
 
     const getCustomDateRangeText = (cardTitle) => {
       if (!isCustomDateActive[cardTitle] || !customDateRanges[cardTitle])
         return null;
-      const start = new Date(customDateRanges[cardTitle].start);
-      const end = new Date(customDateRanges[cardTitle].end);
-      return formatDateRangeSmart(start, end);
+      return formatDateRangeSmart(
+        customDateRanges[cardTitle].start,
+        customDateRanges[cardTitle].end,
+      );
     };
 
-    if (activeTab === "Company Balance") {
-      return <CompanyBalancePanel />;
-    }
+    if (activeTab === "Company Balance") return <CompanyBalancePanel />;
 
     switch (activeTab) {
       case "Sales":
@@ -866,7 +820,9 @@ const Dashboard = () => {
           />
         );
       default:
-        return <div>Table for {activeTab}</div>;
+        return (
+          <div className="p-4 text-sm text-gray-500">Table for {activeTab}</div>
+        );
     }
   };
 
@@ -874,16 +830,19 @@ const Dashboard = () => {
   const DateFilterModal = () => {
     if (!showDateFilter || !selectedCardForFilter) return null;
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
+        <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md mx-auto">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">
-              <Calendar className="inline-block w-5 h-5 mr-2" />
-              Custom Date Range for {selectedCardForFilter}
+            <h3 className="text-base sm:text-lg font-semibold flex items-center gap-2">
+              <Calendar className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+              <span className="truncate">
+                Custom Date – {selectedCardForFilter}
+              </span>
             </h3>
             <button
               onClick={() => setShowDateFilter(false)}
-              className="text-gray-500 hover:text-gray-700"
+              className="text-gray-500 hover:text-gray-700 flex-shrink-0 ml-2"
+              aria-label="Close"
             >
               <X size={20} />
             </button>
@@ -897,7 +856,7 @@ const Dashboard = () => {
                 type="date"
                 value={customStartDate}
                 onChange={(e) => setCustomStartDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 max={customEndDate || undefined}
               />
             </div>
@@ -909,25 +868,21 @@ const Dashboard = () => {
                 type="date"
                 value={customEndDate}
                 onChange={(e) => setCustomEndDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 min={customStartDate || undefined}
               />
             </div>
-            <div className="flex justify-end space-x-3 pt-4">
+            <div className="flex justify-end gap-2 sm:gap-3 pt-4">
               <button
                 onClick={() => setShowDateFilter(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
+                className="px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleApplyDateFilter}
                 disabled={!customStartDate || !customEndDate}
-                className={`px-4 py-2 text-sm font-medium text-white rounded-md cursor-pointer ${
-                  !customStartDate || !customEndDate
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
-                }`}
+                className={`px-3 sm:px-4 py-2 text-sm font-medium text-white rounded-md cursor-pointer ${!customStartDate || !customEndDate ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
               >
                 Apply Filter
               </button>
@@ -947,103 +902,111 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="p-6">
-      <DashboardHeader
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        searchInputRef={searchInputRef}
-        user={user}
-      />
+    <div className="p-3 sm:p-4 md:p-6">
+      {/* ── Header: no search props needed anymore ── */}
+      <DashboardHeader user={user} />
 
-      <DashboardCards
-        activeTab={activeTab}
-        onTabChange={handleParentTabChange}
-        salesData={salesData}
-        outstandingData={outstandingData}
-        stockData={stockData}
-        expenseData={mergedExpenseData}
-        totalPayroll={currentPayrollTotal}
-        payrollYTDTotal={currentYTDTotal}
-        companyBalance={companyBalance}
-        activeSalesSubTab={activeSalesSubTab}
-        activeOutstandingSubTab="Today"
-        activeExpenseSubTab={activeExpenseSubTab}
-        activePayrollSubTab={activePayrollSubTab}
-        activeStockSubTab={activeStockSubTab}
-        activePendingCollectionSubTab={activePendingCollectionSubTab}
-        creditSaleTotal={creditSaleTotal}
-        onSalesSubTabChange={handleSalesSubTabChange}
-        onExpenseSubTabChange={handleExpenseSubTabChange}
-        onPayrollSubTabChange={handlePayrollSubTabChange}
-        onOutstandingSubTabChange={() => {}}
-        onStockSubTabChange={handleStockSubTabChange}
-        onPendingCollectionSubTabChange={handlePendingCollectionSubTabChange}
-        dateRanges={dateRanges}
-        prevMonthRanges={prevMonthRanges}
-        overdueTableData={overdueTableData}
-        creditSaleTableData={creditSaleTableData}
-        onDateFilterClick={handleDateFilterClick}
-        onClearDateFilter={handleClearDateFilter}
-        isCustomDateActive={isCustomDateActive}
-        customDateRanges={customDateRanges}
-        onCurrentMonthSaleClick={handleCurrentMonthSaleClick}
-      />
+      {/* Dashboard Cards */}
+      <div className="w-full overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+        <DashboardCards
+          activeTab={activeTab}
+          onTabChange={handleParentTabChange}
+          salesData={salesData}
+          outstandingData={outstandingData}
+          stockData={stockData}
+          expenseData={mergedExpenseData}
+          totalPayroll={currentPayrollTotal}
+          payrollYTDTotal={currentYTDTotal}
+          companyBalance={companyBalance}
+          activeSalesSubTab={activeSalesSubTab}
+          activeOutstandingSubTab="Today"
+          activeExpenseSubTab={activeExpenseSubTab}
+          activePayrollSubTab={activePayrollSubTab}
+          activeStockSubTab={activeStockSubTab}
+          activePendingCollectionSubTab={activePendingCollectionSubTab}
+          creditSaleTotal={creditSaleTotal}
+          onSalesSubTabChange={handleSalesSubTabChange}
+          onExpenseSubTabChange={handleExpenseSubTabChange}
+          onPayrollSubTabChange={handlePayrollSubTabChange}
+          onOutstandingSubTabChange={() => {}}
+          onStockSubTabChange={handleStockSubTabChange}
+          onPendingCollectionSubTabChange={handlePendingCollectionSubTabChange}
+          dateRanges={dateRanges}
+          prevMonthRanges={prevMonthRanges}
+          overdueTableData={overdueTableData}
+          creditSaleTableData={creditSaleTableData}
+          onDateFilterClick={handleDateFilterClick}
+          onClearDateFilter={handleClearDateFilter}
+          isCustomDateActive={isCustomDateActive}
+          customDateRanges={customDateRanges}
+          onCurrentMonthSaleClick={handleCurrentMonthSaleClick}
+        />
+      </div>
 
       <DateFilterModal />
 
-      <SubTabs
-        activeTab={activeTab}
-        activeSalesSubTab={activeSalesSubTab}
-        activeExpenseSubTab={activeExpenseSubTab}
-        activePayrollSubTab={activePayrollSubTab}
-        activeOutstandingSubTab="Today"
-        activeStockSubTab={activeStockSubTab}
-        activePendingCollectionSubTab={activePendingCollectionSubTab}
-        onSalesSubTabChange={handleSalesSubTabChange}
-        onExpenseSubTabChange={handleExpenseSubTabChange}
-        onPayrollSubTabChange={handlePayrollSubTabChange}
-        onOutstandingSubTabChange={() => {}}
-        onStockSubTabChange={handleStockSubTabChange}
-        onPendingCollectionSubTabChange={handlePendingCollectionSubTabChange}
-        dateRanges={dateRanges}
-        prevMonthRanges={prevMonthRanges}
-        isCustomDateActive={isCustomDateActive}
-        customDateRanges={customDateRanges}
-        onDateFilterClick={handleDateFilterClick}
-        forceSalesMonthOnly={isSalesMonthOnly}
-      />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <SidePanel
+      {/* Sub Tabs */}
+      <div className="w-full overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
+        <SubTabs
           activeTab={activeTab}
-          showAllMRsInSidePanel={showAllMRsInSidePanel}
-          onPanelIconClick={() => {}}
-          sidePanelCurrentPage={sidePanelCurrentPage}
-          onSidePanelPageChange={(page) => setSidePanelCurrentPage(page)}
-          salesTableData={salesTableData}
-          loadingSalesData={loadingSalesData}
-          outstandingTableData={[]}
-          loadingOutstandingData={false}
-          expenseTableData={expenseTableData}
-          loadingExpenseData={loadingExpenseData}
-          stockData={stockData}
-          expenseData={mergedExpenseData}
-          mrList={mrList}
-          onViewProducts={handleViewProducts}
-          onViewInvoices={handleViewInvoices}
-          onViewExpenseDetails={handleViewExpenseDetails}
-          overdueTableData={overdueTableData}
-          loadingOverdueData={loadingOverdueData}
-          pendingCollectionData={pendingCollectionData || []}
-          loadingPendingCollectionData={loadingPendingCollectionData || false}
-          creditSaleTableData={creditSaleTableData || []}
-          loadingCreditSaleData={loadingCreditSaleData || false}
-          companyBalanceAccounts={companyBalanceAccounts}
-          loadingCompanyBalance={loadingCompanyBalance}
+          activeSalesSubTab={activeSalesSubTab}
+          activeExpenseSubTab={activeExpenseSubTab}
+          activePayrollSubTab={activePayrollSubTab}
+          activeOutstandingSubTab="Today"
+          activeStockSubTab={activeStockSubTab}
+          activePendingCollectionSubTab={activePendingCollectionSubTab}
+          onSalesSubTabChange={handleSalesSubTabChange}
+          onExpenseSubTabChange={handleExpenseSubTabChange}
+          onPayrollSubTabChange={handlePayrollSubTabChange}
+          onOutstandingSubTabChange={() => {}}
+          onStockSubTabChange={handleStockSubTabChange}
+          onPendingCollectionSubTabChange={handlePendingCollectionSubTabChange}
+          dateRanges={dateRanges}
+          prevMonthRanges={prevMonthRanges}
+          isCustomDateActive={isCustomDateActive}
+          customDateRanges={customDateRanges}
+          onDateFilterClick={handleDateFilterClick}
+          forceSalesMonthOnly={isSalesMonthOnly}
         />
-        <div className="lg:col-span-2">{renderMainTable()}</div>
       </div>
 
+      {/* Main grid: table first on mobile, side panel below */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mt-2">
+        <div className="order-1 lg:order-2 lg:col-span-2 min-w-0 overflow-x-auto">
+          {renderMainTable()}
+        </div>
+        <div className="order-2 lg:order-1 lg:col-span-1 min-w-0">
+          <SidePanel
+            activeTab={activeTab}
+            showAllMRsInSidePanel={showAllMRsInSidePanel}
+            onPanelIconClick={() => {}}
+            sidePanelCurrentPage={sidePanelCurrentPage}
+            onSidePanelPageChange={(page) => setSidePanelCurrentPage(page)}
+            salesTableData={salesTableData}
+            loadingSalesData={loadingSalesData}
+            outstandingTableData={[]}
+            loadingOutstandingData={false}
+            expenseTableData={expenseTableData}
+            loadingExpenseData={loadingExpenseData}
+            stockData={stockData}
+            expenseData={mergedExpenseData}
+            mrList={mrList}
+            onViewProducts={handleViewProducts}
+            onViewInvoices={handleViewInvoices}
+            onViewExpenseDetails={handleViewExpenseDetails}
+            overdueTableData={overdueTableData}
+            loadingOverdueData={loadingOverdueData}
+            pendingCollectionData={pendingCollectionData || []}
+            loadingPendingCollectionData={loadingPendingCollectionData || false}
+            creditSaleTableData={creditSaleTableData || []}
+            loadingCreditSaleData={loadingCreditSaleData || false}
+            companyBalanceAccounts={companyBalanceAccounts}
+            loadingCompanyBalance={loadingCompanyBalance}
+          />
+        </div>
+      </div>
+
+      {/* Modals */}
       <ProductsModal
         showModal={showProductsModal}
         onClose={() => setShowProductsModal(false)}
