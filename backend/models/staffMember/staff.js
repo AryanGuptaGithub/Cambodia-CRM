@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 // Helper function to normalize strings
 const normalizeString = (str) => {
@@ -11,28 +12,25 @@ const counterSchema = new mongoose.Schema({
   _id: { type: String, required: true },
   seq: { type: Number, default: 0 },
 });
-
 const Counter = mongoose.model("Counter", counterSchema);
 
-// Staff / MR schema – no reference to User
 const staffSchema = new mongoose.Schema(
   {
     MRId: { type: Number, unique: true },
     medicalRepName: {
       type: String,
       required: true,
-      set: normalizeString, // Auto-normalize on set
+      set: normalizeString,
     },
-    // Add lowercase index for case-insensitive uniqueness
     medicalRepNameLower: {
       type: String,
       unique: true,
-      select: false, // Don't include in queries by default
+      select: false,
     },
     teamName: {
       type: String,
       required: true,
-      set: normalizeString, // Auto-normalize on set
+      set: normalizeString,
     },
     contactNo: {
       type: String,
@@ -46,26 +44,37 @@ const staffSchema = new mongoose.Schema(
       sparse: true,
       set: (val) => (val ? normalizeString(val).toLowerCase() : val),
     },
+    password: {
+      type: String,
+      required: true,
+      select: false,  // not returned by default
+    },
     date: { type: Date, required: true },
-    isActive: { type: Boolean, default: true }, // staff-specific active flag
+    isActive: { type: Boolean, default: true },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
-// Pre-save hook to set medicalRepNameLower and auto-increment MRId
+// Pre-save hook for MRId auto-increment, medicalRepNameLower, and password hashing
 staffSchema.pre("save", async function (next) {
-  // Always set the lowercase version for uniqueness checking
+  // Set lowercase version for case‑insensitive uniqueness
   if (this.medicalRepName) {
     this.medicalRepNameLower = this.medicalRepName.toLowerCase();
   }
 
-  // Auto-increment MRId only for new documents
+  // Hash password if modified
+  if (this.isModified("password")) {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+  }
+
+  // Auto‑increment MRId only for new documents
   if (this.isNew) {
     try {
       const counter = await Counter.findByIdAndUpdate(
         "staffMRId",
         { $inc: { seq: 1 } },
-        { new: true, upsert: true },
+        { new: true, upsert: true }
       );
       this.MRId = counter.seq;
       next();
@@ -77,8 +86,16 @@ staffSchema.pre("save", async function (next) {
   }
 });
 
-// Create compound index for case-insensitive uniqueness
+// Compound index for case‑insensitive name uniqueness
 staffSchema.index({ medicalRepNameLower: 1 }, { unique: true });
+
+// Hide password in JSON responses
+staffSchema.methods.toJSON = function () {
+  const obj = this.toObject();
+  delete obj.password;
+  delete obj.__v;
+  return obj;
+};
 
 const Staff = mongoose.model("Staff", staffSchema);
 export default Staff;

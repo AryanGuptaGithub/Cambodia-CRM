@@ -249,14 +249,10 @@ const buildCustomerMaps = (custRaw) => {
   return { byId, byCode, byName };
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AddCreditCollectionModal
-// ─────────────────────────────────────────────────────────────────────────────
 const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
   const [destinationOptions, setDestinationOptions] = useState([]);
   const [categoryLabel, setCategoryLabel] = useState("Credit Collection");
   const [allSales, setAllSales] = useState([]);
-  const [usedInvoices, setUsedInvoices] = useState(new Set());
   const [allInvoiceOptions, setAllInvoiceOptions] = useState([]);
 
   const [invoicesLoading, setInvoicesLoading] = useState(false);
@@ -271,7 +267,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
   const [isMrInStockTransfer, setIsMrInStockTransfer] = useState(false);
   const [mrCashLoading, setMrCashLoading] = useState(false);
 
-  // Track the selected sale for dueAmount updates
   const [selectedSale, setSelectedSale] = useState(null);
 
   const [form, setForm] = useState({
@@ -315,27 +310,12 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
   const loadData = async () => {
     setInvoicesLoading(true);
     try {
-      const [salesRes, txRes] = await Promise.all([
-        axios.get(`${backendUrl}/api/sales/all`),
-        axios.get(`${backendUrl}/api/transactions`),
-      ]);
-
-      const allTx = txRes.data?.data || [];
-
-      // ── FIX: Build a map of invoiceNo → total collected so far ──────────
-      const collectedMap = {};
-      allTx
-        .filter((tx) => tx.invoiceNo && tx.invoiceNo !== "NA")
-        .forEach((tx) => {
-          const inv = tx.invoiceNo;
-          collectedMap[inv] = (collectedMap[inv] || 0) + (tx.amount || 0);
-        });
-
+      // Only fetch sales – no transaction subtraction needed
+      const salesRes = await axios.get(`${backendUrl}/api/sales/all`);
       const allSalesData = salesRes.data?.summaries || [];
       setAllSales(allSalesData);
 
-      // ── FIX: Show invoice if effective dueAmount > 0 (after subtracting
-      //    already-collected amounts from transactions) ────────────────────
+      // Filter invoices where dueAmount > 0
       const invoiceOpts = allSalesData
         .filter((s) => {
           const ps = (s.paymentStatus || "").toLowerCase();
@@ -345,21 +325,16 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
             ps === "unpaid" ||
             ps === "due";
           const notPaid = (s.pendingAmountPaid || "").toLowerCase() !== "paid";
-          const collected = collectedMap[s.invoiceNumber] || 0;
-          const effectiveDue = Math.max(0, (s.dueAmount || 0) - collected);
-          return isCredit && notPaid && effectiveDue > 0 && s.invoiceNumber;
+          return (
+            isCredit && notPaid && (s.dueAmount || 0) > 0 && s.invoiceNumber
+          );
         })
-        .map((s) => {
-          const collected = collectedMap[s.invoiceNumber] || 0;
-          const effectiveDue = Math.max(0, (s.dueAmount || 0) - collected);
-          return {
-            value: s.invoiceNumber,
-            label: `${s.invoiceNumber} — Due: $${effectiveDue.toFixed(2)}`,
-            effectiveDue,
-          };
-        });
+        .map((s) => ({
+          value: s.invoiceNumber,
+          label: `${s.invoiceNumber} — Due: $${(s.dueAmount || 0).toFixed(2)}`,
+          dueAmount: s.dueAmount || 0,
+        }));
 
-      setUsedInvoices(collectedMap);
       setAllInvoiceOptions([
         { value: "", label: "Select Invoice Number" },
         ...invoiceOpts,
@@ -371,6 +346,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
       setInvoicesLoading(false);
     }
 
+    // Rest of the static data loading (destinations, categories, customers) remains unchanged
     const now = Date.now();
     const cacheValid = _cache.ts && now - _cache.ts < CACHE_TTL;
 
@@ -506,14 +482,8 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
     const sale = allSales.find((s) => s.invoiceNumber === invoiceNumber);
     if (!sale) return;
 
-    // ── FIX: Calculate effective due (subtract already-collected amounts) ──
-    const alreadyCollected =
-      typeof usedInvoices === "object" && !(usedInvoices instanceof Set)
-        ? usedInvoices[invoiceNumber] || 0
-        : 0;
-    const effectiveDue = Math.max(0, (sale.dueAmount || 0) - alreadyCollected);
-
-    if (effectiveDue <= 0) {
+    const dueAmount = sale.dueAmount || 0;
+    if (dueAmount <= 0) {
       showToast(
         "error",
         `Invoice "${invoiceNumber}" has no outstanding due amount.`,
@@ -521,7 +491,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
       return;
     }
 
-    setInvoiceDueAmount(effectiveDue);
+    setInvoiceDueAmount(dueAmount);
     setSelectedSale(sale);
 
     const resolvedAddress = resolveAddress(
@@ -537,7 +507,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
       invoiceDate: sale.invoiceDate ? sale.invoiceDate.split("T")[0] : "",
       customerName: sale.customerName || "",
       customerAddress: resolvedAddress,
-      amount: effectiveDue.toFixed(2),
+      amount: dueAmount.toFixed(2),
       destinationAccount: "",
     }));
     setErrors((prev) => ({
@@ -663,7 +633,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
 
     setSubmitting(true);
     try {
-      // ── Step 1: Post the transaction ─────────────────────────────────────
       const response = await axios.post(
         `${backendUrl}/api/transactions`,
         payload,
@@ -673,8 +642,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
         throw new Error(response.data.message || "Transaction failed");
       }
 
-      // ── Step 2: Update the sale's paidAmount / dueAmount ─────────────────
-      // Calculate new paid and due amounts for this sale
       if (selectedSale) {
         const currentPaid = parseFloat(selectedSale.paidAmount) || 0;
         const currentTotal = parseFloat(selectedSale.totalAmount) || 0;
@@ -697,8 +664,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
             },
           );
         } catch (updateErr) {
-          // Don't fail the whole operation — transaction was saved successfully.
-          // Log it and warn the user to refresh.
           console.error("Sale due amount update failed:", updateErr);
           showToast(
             "warning",
@@ -1009,7 +974,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
     document.body,
   );
 };
-
 // ─────────────────────────────────────────────────────────────────────────────
 // OutstandingCollection — main component
 // ─────────────────────────────────────────────────────────────────────────────

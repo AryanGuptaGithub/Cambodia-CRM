@@ -54,12 +54,11 @@ export const DashboardHeader = ({ user, onLogout }) => {
       <div className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-3 gap-2 min-h-[56px]">
         {/*
           ── Left: Title
-          On mobile, we add pl-10 so the text clears the fixed hamburger button
-          (the ☰ button in Sidebar.jsx is fixed at top-3 left-3, ~44px wide).
-          On lg+ the sidebar is static so no padding needed.
+          pl-12 on mobile to clear the fixed hamburger button (≈48px wide).
+          On lg+ the sidebar is static, no padding needed.
         */}
-        <div className="pl-10 lg:pl-0 flex-shrink-0">
-          <h1 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 leading-tight">
+        <div className="pl-12 lg:pl-0 flex-shrink-0 min-w-0">
+          <h1 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 leading-tight truncate">
             CRM Cambodia
           </h1>
           <p className="text-xs sm:text-sm text-gray-500 font-medium leading-tight">
@@ -68,13 +67,13 @@ export const DashboardHeader = ({ user, onLogout }) => {
         </div>
 
         {/* ── Right: date/time + user chip + logout ── */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-shrink-0">
           {/* Date & Time pill – hidden on very small screens */}
           <div className="hidden xs:flex sm:flex flex-col items-end bg-indigo-50 border border-indigo-100 rounded-lg px-2 sm:px-3 py-1 sm:py-1.5 flex-shrink-0">
-            <span className="text-xs sm:text-sm font-semibold text-indigo-700 leading-tight tabular-nums">
+            <span className="text-xs sm:text-sm font-semibold text-indigo-700 leading-tight tabular-nums whitespace-nowrap">
               {dateStr}
             </span>
-            <span className="text-[10px] sm:text-xs text-indigo-500 leading-tight tabular-nums">
+            <span className="text-[10px] sm:text-xs text-indigo-500 leading-tight tabular-nums whitespace-nowrap">
               {timeStr}
             </span>
           </div>

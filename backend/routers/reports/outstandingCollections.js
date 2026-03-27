@@ -7,6 +7,7 @@ import Staff from "../../models/staffMember/staff.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
+//suraj 
 
 // Helper function to fix precision
 const fixPrecision = (num) => {
@@ -27,19 +28,17 @@ const normalizeCustomerCode = (code) => {
   return code.toString().replace(/^0+/, "");
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared match stage builder — includes Credit AND Partial Paid
-// FIX: use invoiceDate instead of deliveryDate (deliveryDate is null on many records)
+
 // ─────────────────────────────────────────────────────────────────────────────
 const buildMatchStage = ({ startDate, endDate, customerCode } = {}) => {
   const matchStage = {
-    // Match credit OR partial paid (case-insensitive)
+    // Match credit OR partial paid (case-insensitive) — including "Cash" is optional
     paymentStatus: {
-      $in: [/^credit$/i, /^partial paid$/i, /^unpaid$/i, /^due$/i],
+      $in: [/^credit$/i, /^partial paid$/i, /^unpaid$/i, /^due$/i, /^cash$/i],
     },
-    dueAmount: { $gt: 0 },
-    // Exclude records that have been fully collected
-    pendingAmountPaid: { $ne: "paid" },
+    // REMOVED: dueAmount: { $gt: 0 },   <-- this line is removed
+    // Exclude records that have been fully collected (if you want to keep them, you can comment this out)
+    // pendingAmountPaid: { $ne: "paid" }, // optionally remove this too if you want all
     // Only show non-returned, non-exchanged sales
     $or: [
       { isReturn: { $exists: false } },
@@ -70,6 +69,7 @@ const buildMatchStage = ({ startDate, endDate, customerCode } = {}) => {
 
   return matchStage;
 };
+
 
 // Helper function to update MR Cash
 const updateMRCash = async (
@@ -271,6 +271,11 @@ router.post("/bulk-update", async (req, res) => {
           creditDays: resolvedCreditDays,
         };
 
+        // Mark pendingAmountPaid as "paid" only when fully paid (optional, you can remove this line)
+        if (newDueAmount === 0) {
+          updateData.pendingAmountPaid = "paid";
+        }
+
         if (remarks) updateData.remark = remarks;
 
         // Always calculate dueDate from invoiceDate + creditDays
@@ -385,6 +390,10 @@ router.post("/bulk-update", async (req, res) => {
 // Outstanding Collections Report — GET /
 // FIX: group by invoiceNumber (one row per invoice, not per customer)
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Outstanding Collections Report — GET /
+// Optimized with aggregation, dueAmount filter, and single customer lookup
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const {
@@ -397,169 +406,203 @@ router.get("/", async (req, res) => {
       status,
     } = req.query;
 
-    // Validate date params early
+    // Validate dates
     if (startDate && isNaN(new Date(startDate).getTime())) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid startDate format" });
+      return res.status(400).json({ success: false, message: "Invalid startDate format" });
     }
     if (endDate && isNaN(new Date(endDate).getTime())) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid endDate format" });
+      return res.status(400).json({ success: false, message: "Invalid endDate format" });
     }
-
-    const matchStage = buildMatchStage({ startDate, endDate, customerCode });
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
     const now = new Date();
 
-    const sales = await Sale.find(matchStage).lean();
+    // Build match stage – include dueAmount > 0!
+    const matchStage = {
+      dueAmount: { $gt: 0 },                       // ← ONLY invoices with outstanding balance
+      paymentStatus: {
+        $in: [/^credit$/i, /^partial paid$/i, /^unpaid$/i, /^due$/i, /^cash$/i],
+      },
+      $or: [
+        { isReturn: { $exists: false } },
+        { isReturn: false },
+        { isReturn: null },
+      ],
+    };
 
-    if (sales.length === 0) {
-      return res.json({
-        success: true,
-        data: {
-          summary: {
-            totalOutstandingAmount: 0,
-            totalDueAmount: 0,
-            totalOverdueAmount: 0,
-            totalCustomers: 0,
-            totalInvoices: 0,
-            totalOverdueInvoices: 0,
-            totalRecords: 0,
-          },
-          records: [],
-        },
-        pagination: {
-          currentPage: pageNum,
-          totalPages: 0,
-          totalRecords: 0,
-          hasNext: false,
-          hasPrev: false,
-        },
-        count: 0,
-      });
-    }
-
-    // Format customer codes and look up customer master
-    const formattedSales = sales.map((sale) => ({
-      ...sale,
-      formattedCustomerCode: formatCustomerCode(sale.customerCode),
-    }));
-
-    const uniqueFormattedCodes = [
-      ...new Set(formattedSales.map((s) => s.formattedCustomerCode)),
-    ];
-
-    const customerPromises = uniqueFormattedCodes.map(async (code) => {
-      let customer = await Customer.findOne({ customerCode: code }).lean();
-      if (!customer) {
-        const normalizedCode = normalizeCustomerCode(code);
-        customer = await Customer.findOne({
-          $or: [
-            { customerCode: normalizedCode },
-            { customerCode: formatCustomerCode(normalizedCode) },
-            { customerCode: { $regex: new RegExp(`${normalizedCode}$`) } },
-          ],
-        }).lean();
+    // Date filter
+    if (startDate || endDate) {
+      matchStage.invoiceDate = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        if (!isNaN(start.getTime())) matchStage.invoiceDate.$gte = start;
       }
-      return { saleCode: code, customer };
-    });
-
-    const customerResults = await Promise.all(customerPromises);
-    const customerMap = {};
-    customerResults.forEach(({ saleCode, customer }) => {
-      customerMap[saleCode] = customer;
-    });
-
-    // ── FIX: Group by invoiceNumber — one row per invoice ──────────────────
-    const invoiceGroups = {};
-
-    formattedSales.forEach((sale) => {
-      const custCode = sale.formattedCustomerCode;
-      const customer = customerMap[custCode];
-      const invoiceKey = sale.invoiceNumber;
-
-      // Determine overdue date:
-      // 1. Use stored dueDate if available
-      // 2. Fall back to invoiceDate + creditDays (never use deliveryDate — it can be null)
-      let overdueDate = sale.dueDate ? new Date(sale.dueDate) : null;
-      if (!overdueDate && sale.creditDays && sale.invoiceDate) {
-        const baseDate = new Date(sale.invoiceDate);
-        if (!isNaN(baseDate.getTime())) {
-          overdueDate = new Date(baseDate);
-          overdueDate.setDate(overdueDate.getDate() + (sale.creditDays || 0));
+      if (endDate) {
+        const end = new Date(endDate);
+        if (!isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+          matchStage.invoiceDate.$lte = end;
         }
       }
-      const isOverdue =
-        overdueDate &&
-        !isNaN(overdueDate.getTime()) &&
-        overdueDate < now &&
-        (sale.dueAmount || 0) > 0;
+    }
 
-      invoiceGroups[invoiceKey] = {
-        invoiceNumber: sale.invoiceNumber,
-        invoiceDate: sale.invoiceDate,
-        customerCode: custCode,
-        customerName: customer?.name || sale.customerName || "N/A",
-        customerPhone: customer?.customerNumber || null,
-        customerEmail: customer?.email || null,
-        customerAddress: customer?.address || null,
-        totalDueAmount: sale.dueAmount || 0,
-        totalPaidAmount: sale.paidAmount || 0,
-        overdueAmount: isOverdue ? sale.dueAmount || 0 : 0,
-        overdueInvoices: isOverdue ? 1 : 0,
-        // Use invoiceDate as the reference date (deliveryDate may be null)
-        latestDeliveryDate: sale.invoiceDate || sale.deliveryDate,
-        invoiceCount: 1,
-      };
-    });
+    // Customer code filter
+    if (customerCode) {
+      matchStage.customerCode = formatCustomerCode(customerCode);
+    }
 
-    let invoiceList = Object.values(invoiceGroups).map((inv) => ({
-      ...inv,
-      outstandingAmount: inv.totalDueAmount,
+    // Aggregation pipeline
+    const pipeline = [
+      { $match: matchStage },
+      {
+        $project: {
+          invoiceNumber: 1,
+          invoiceDate: 1,
+          customerCode: 1,
+          customerName: 1,
+          dueAmount: 1,
+          paidAmount: 1,
+          totalAmount: 1,
+          creditDays: 1,
+          dueDate: 1,
+          deliveryDate: 1,
+          mrName: 1,
+          formattedCustomerCode: { $concat: [{ $toString: "$customerCode" }] }, // simple, but you may need padding
+        },
+      },
+      {
+        $lookup: {
+          from: "customers",
+          let: { custCode: "$customerCode" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$customerCode", "$$custCode"] },
+                    { $eq: ["$customerCode", { $concat: ["0", "$$custCode"] }] },
+                    // Add more patterns if needed
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+          ],
+          as: "customer",
+        },
+      },
+      { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          customerNameFromMaster: { $ifNull: ["$customer.name", "$customerName"] },
+          customerPhone: "$customer.customerNumber",
+          customerEmail: "$customer.email",
+          customerAddress: "$customer.address",
+        },
+      },
+      // Optional: apply search filter on invoiceNumber, customerName, etc.
+      ...(search && search.trim()
+        ? [
+            {
+              $match: {
+                $or: [
+                  { invoiceNumber: { $regex: search.trim(), $options: "i" } },
+                  { customerNameFromMaster: { $regex: search.trim(), $options: "i" } },
+                  { customerCode: { $regex: search.trim(), $options: "i" } },
+                  { customerPhone: { $regex: search.trim(), $options: "i" } },
+                  { customerEmail: { $regex: search.trim(), $options: "i" } },
+                  { customerAddress: { $regex: search.trim(), $options: "i" } },
+                ],
+              },
+            },
+          ]
+        : []),
+      // Add computed fields
+      {
+        $addFields: {
+          overdueDate: {
+            $cond: {
+              if: { $ne: ["$dueDate", null] },
+              then: "$dueDate",
+              else: {
+                $add: [
+                  "$invoiceDate",
+                  { $multiply: [{ $ifNull: ["$creditDays", 0] }, 86400000] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      {
+        $addFields: {
+          isOverdue: {
+            $and: [
+              { $lt: ["$overdueDate", now] },
+              { $gt: ["$dueAmount", 0] },
+            ],
+          },
+        },
+      },
+      {
+        $project: {
+          invoiceNumber: 1,
+          invoiceDate: 1,
+          customerCode: 1,
+          customerName: "$customerNameFromMaster",
+          phone: "$customerPhone",
+          email: "$customerEmail",
+          address: "$customerAddress",
+          totalDueAmount: "$dueAmount",
+          paidAmount: 1,
+          overdueAmount: { $cond: ["$isOverdue", "$dueAmount", 0] },
+          latestDeliveryDate: { $ifNull: ["$invoiceDate", "$deliveryDate"] },
+        },
+      },
+    ];
+
+    // Count total matching records (for pagination)
+    const countPipeline = [...pipeline];
+    countPipeline.push({ $count: "total" });
+    const countResult = await Sale.aggregate(countPipeline);
+    const totalCount = countResult.length > 0 ? countResult[0].total : 0;
+    const totalPages = Math.ceil(totalCount / limitNum);
+
+    // Paginate
+    pipeline.push({ $skip: skip }, { $limit: limitNum });
+    // Sort by overdueAmount descending (can't sort computed field directly in aggregation easily)
+    // We'll fetch and sort in memory
+    let results = await Sale.aggregate(pipeline);
+
+    // Add computed fields: outstandingAmount = totalDueAmount, overdueDays
+    results = results.map((r) => ({
+      ...r,
+      outstandingAmount: r.totalDueAmount,
       overdueDays:
-        inv.overdueAmount > 0 && inv.latestDeliveryDate
+        r.overdueAmount > 0 && r.latestDeliveryDate
           ? Math.max(
               0,
               Math.floor(
-                (now - new Date(inv.latestDeliveryDate)) /
-                  (1000 * 60 * 60 * 24),
-              ),
+                (now - new Date(r.latestDeliveryDate)) / (1000 * 60 * 60 * 24)
+              )
             )
           : 0,
     }));
 
-    // Search filter — now also searches invoiceNumber
-    if (search && search.trim() !== "") {
-      const searchTerm = search.trim().toLowerCase();
-      invoiceList = invoiceList.filter((inv) => {
-        return (
-          (inv.invoiceNumber || "").toLowerCase().includes(searchTerm) ||
-          (inv.customerName || "").toLowerCase().includes(searchTerm) ||
-          (inv.customerCode || "").toLowerCase().includes(searchTerm) ||
-          (inv.customerPhone || "").toLowerCase().includes(searchTerm) ||
-          (inv.customerEmail || "").toLowerCase().includes(searchTerm) ||
-          (inv.customerAddress || "").toLowerCase().includes(searchTerm)
-        );
-      });
-    }
-
-    // Sort by overdue amount descending
-    invoiceList.sort((a, b) => b.overdueAmount - a.overdueAmount);
+    // Sort by overdueAmount descending
+    results.sort((a, b) => b.overdueAmount - a.overdueAmount);
 
     // Aggregate totals
-    const totals = invoiceList.reduce(
+    const totals = results.reduce(
       (acc, curr) => {
         acc.totalOutstandingAmount += curr.outstandingAmount || 0;
         acc.totalDueAmount += curr.totalDueAmount || 0;
         acc.totalOverdueAmount += curr.overdueAmount || 0;
-        acc.totalCustomers += 1; // one row per invoice
+        acc.totalCustomers += 1;
         acc.totalInvoices += 1;
-        acc.totalOverdueInvoices += curr.overdueInvoices || 0;
+        acc.totalOverdueInvoices += curr.overdueAmount > 0 ? 1 : 0;
         return acc;
       },
       {
@@ -569,30 +612,25 @@ router.get("/", async (req, res) => {
         totalCustomers: 0,
         totalInvoices: 0,
         totalOverdueInvoices: 0,
-      },
+        totalRecords: totalCount,
+      }
     );
-    totals.totalRecords = invoiceList.length;
 
-    // Pagination
-    const totalCount = invoiceList.length;
-    const totalPages = Math.ceil(totalCount / limitNum);
-    const paginatedInvoices = invoiceList.slice(skip, skip + limitNum);
-
-    // ── FIX: return invoiceNumber instead of customerCode as primary identifier ──
-    const records = paginatedInvoices.map((inv) => ({
+    // Build response records
+    const records = results.map((inv) => ({
       invoiceNumber: inv.invoiceNumber,
       invoiceDate: inv.invoiceDate,
       customerCode: inv.customerCode,
       customerName: inv.customerName || "N/A",
-      phone: inv.customerPhone || "N/A",
-      email: inv.customerEmail || "N/A",
-      address: inv.customerAddress || "N/A",
+      phone: inv.phone || "N/A",
+      email: inv.email || "N/A",
+      address: inv.address || "N/A",
       totalOutstandingAmount: inv.outstandingAmount || 0,
       dueAmount: inv.totalDueAmount || 0,
       overdueAmount: inv.overdueAmount || 0,
       lastTransactionDate: inv.latestDeliveryDate,
       invoiceCount: 1,
-      overdueInvoices: inv.overdueInvoices || 0,
+      overdueInvoices: inv.overdueAmount > 0 ? 1 : 0,
       overdueDays: inv.overdueDays || 0,
     }));
 

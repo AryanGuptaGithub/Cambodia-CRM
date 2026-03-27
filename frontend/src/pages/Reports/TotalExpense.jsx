@@ -3,8 +3,6 @@ import {
   PieChart,
   Download,
   Filter,
-  DollarSign,
-  TrendingDown,
   X,
   ChevronLeft,
   ChevronRight,
@@ -29,6 +27,7 @@ const TotalExpense = () => {
     totalRemittance: 0,
     totalExpense: 0,
     totalSalary: 0,
+    totalOtherExpense: 0,
     totalTransactions: 0,
   });
   const [loading, setLoading] = useState(false);
@@ -47,41 +46,35 @@ const TotalExpense = () => {
     hasNext: false,
     hasPrev: false,
   });
-  const [exportLoading, setExportLoading] = useState(false); // Add export loading state
+  const [exportLoading, setExportLoading] = useState(false);
   const inputRef = useRef(null);
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
 
-  const getCurrentMonthName = () => {
-    return new Date().toLocaleString("default", { month: "long" });
-  };
-
-  const getCurrentYear = () => {
-    return new Date().getFullYear();
-  };
+  const getCurrentMonthName = () =>
+    new Date().toLocaleString("default", { month: "long" });
+  const getCurrentYear = () => new Date().getFullYear();
 
   const getPreviousMonthName = () => {
-    const previousMonth = new Date();
-    previousMonth.setMonth(previousMonth.getMonth() - 1);
-    return previousMonth.toLocaleString("default", { month: "long" });
+    const prev = new Date();
+    prev.setMonth(prev.getMonth() - 1);
+    return prev.toLocaleString("default", { month: "long" });
   };
 
   const getJanToPreviousMonthRange = () => {
     const currentYear = getCurrentYear();
     const currentMonth = new Date().getMonth();
-
     if (currentMonth === 0) {
-      const previousYear = currentYear - 1;
+      const prevYear = currentYear - 1;
       return {
-        startDate: `${previousYear}-01-01`,
-        endDate: `${previousYear}-12-31`,
-        label: `Jan - Dec ${previousYear}`,
+        startDate: `${prevYear}-01-01`,
+        endDate: `${prevYear}-12-31`,
+        label: `Jan - Dec ${prevYear}`,
       };
     }
-
     const endDate = new Date(currentYear, currentMonth, 0);
     return {
       startDate: `${currentYear}-01-01`,
@@ -103,10 +96,8 @@ const TotalExpense = () => {
           startDate: firstDay.toISOString().split("T")[0],
           endDate: lastDay.toISOString().split("T")[0],
         };
-
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange();
-
       case "custom":
         return {
           startDate: customDateRange.startDate
@@ -116,7 +107,6 @@ const TotalExpense = () => {
             ? customDateRange.endDate.toISOString().split("T")[0]
             : "",
         };
-
       default:
         return {};
     }
@@ -126,11 +116,7 @@ const TotalExpense = () => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
-
-      let params = {
-        page: page,
-        limit: 7,
-      };
+      let params = { page, limit: 7 };
 
       if (selectedTab !== "all") {
         if (
@@ -146,18 +132,12 @@ const TotalExpense = () => {
           endDate: dateRange.endDate,
         };
       }
-
-      if (search && search.trim() !== "") {
-        params.search = search.trim();
-      }
+      if (search && search.trim() !== "") params.search = search.trim();
 
       const response = await axios.get(
         `${backendUrl}/api/reports/total-expense/`,
-        {
-          params,
-        }
+        { params },
       );
-
       setData(response.data.data || []);
       setSummary(
         response.data.summary || {
@@ -166,8 +146,9 @@ const TotalExpense = () => {
           totalRemittance: 0,
           totalExpense: 0,
           totalSalary: 0,
+          totalOtherExpense: 0,
           totalTransactions: 0,
-        }
+        },
       );
       setPagination(
         response.data.pagination || {
@@ -176,7 +157,7 @@ const TotalExpense = () => {
           totalRecords: 0,
           hasNext: false,
           hasPrev: false,
-        }
+        },
       );
     } catch (error) {
       console.error("Error fetching financial data:", error);
@@ -190,9 +171,8 @@ const TotalExpense = () => {
     if (
       selectedTab === "custom" &&
       (!customDateRange.startDate || !customDateRange.endDate)
-    ) {
+    )
       return;
-    }
     fetchFinancialData(1);
   }, [selectedTab]);
 
@@ -207,50 +187,35 @@ const TotalExpense = () => {
   }, [customDateRange.startDate, customDateRange.endDate]);
 
   const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) {
-      fetchFinancialData(page);
-    }
+    if (page >= 1 && page <= pagination.totalPages) fetchFinancialData(page);
   };
 
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-  };
-
+  const handleSearchChange = (e) => setSearchTerm(e.target.value);
   const handleClearSearch = () => {
     setSearchTerm("");
     fetchFinancialData(1);
   };
 
-  const handleCustomDateChange = (name, date) => {
+  const handleCustomDateChange = (name, date) =>
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
-  };
 
-  // Debounced search effect
+  // Debounced search
   useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      fetchFinancialData(1);
-    }, 500);
-
-    return () => clearTimeout(delayDebounce);
+    const timer = setTimeout(() => fetchFinancialData(1), 500);
+    return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  const handleSearch = (e) => {
-    if (e.key === "Enter") {
-      fetchFinancialData(1);
-    }
-  };
+  const handleSearchKey = (e) => e.key === "Enter" && fetchFinancialData(1);
 
   const handleApplyCustomFilter = () => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
       showToast("warning", "Please select both start and end dates");
       return;
     }
-
     if (customDateRange.startDate > customDateRange.endDate) {
       showToast("warning", "Start date cannot be after end date");
       return;
     }
-
     setSelectedTab("custom");
     setShowCustomFilter(false);
     fetchFinancialData(1);
@@ -258,22 +223,15 @@ const TotalExpense = () => {
 
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
-    if (tab === "custom") {
-      setShowCustomFilter(true);
-    } else {
-      setCustomDateRange({
-        startDate: null,
-        endDate: null,
-      });
+    if (tab === "custom") setShowCustomFilter(true);
+    else {
+      setCustomDateRange({ startDate: null, endDate: null });
       fetchFinancialData(1);
     }
   };
 
   const handleClearFilters = () => {
-    setCustomDateRange({
-      startDate: null,
-      endDate: null,
-    });
+    setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
     fetchFinancialData(1);
   };
@@ -282,104 +240,85 @@ const TotalExpense = () => {
     try {
       setExportLoading(true);
       const dateRange = getDateRange();
-
       if (
         selectedTab === "custom" &&
         (!dateRange.startDate || !dateRange.endDate)
       ) {
-        showToast("warning", "Please select both start and end dates for export");
+        showToast(
+          "warning",
+          "Please select both start and end dates for export",
+        );
         setExportLoading(false);
         return;
       }
 
       const params = new URLSearchParams();
-
       if (dateRange.startDate) params.append("startDate", dateRange.startDate);
       if (dateRange.endDate) params.append("endDate", dateRange.endDate);
       if (searchTerm) params.append("search", searchTerm);
 
       const downloadUrl = `${backendUrl}/api/reports/total-expense/export/excel?${params.toString()}`;
-
-      const response = await axios.get(downloadUrl, {
-        responseType: "blob",
-      });
+      const response = await axios.get(downloadUrl, { responseType: "blob" });
 
       const blob = new Blob([response.data], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
-
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-
       let fileName = "financial-summary-report";
       if (dateRange.startDate && dateRange.endDate) {
-        fileName = `financial-summary-${dateRange.startDate.replace(
-          /-/g,
-          ""
-        )}-to-${dateRange.endDate.replace(/-/g, "")}`;
+        fileName = `financial-summary-${dateRange.startDate.replace(/-/g, "")}-to-${dateRange.endDate.replace(/-/g, "")}`;
       } else {
         const today = new Date().toISOString().split("T")[0];
         fileName = `financial-summary-${today.replace(/-/g, "")}`;
       }
       fileName += ".xlsx";
-
       link.download = fileName;
       document.body.appendChild(link);
       link.click();
-
       window.URL.revokeObjectURL(url);
       document.body.removeChild(link);
-
       showToast("success", "Excel file downloaded successfully!");
     } catch (error) {
       console.error("Error exporting to Excel:", error);
-      if (error.response?.status === 400) {
+      if (error.response?.status === 400)
         showToast("error", "Invalid date format for export");
-      } else if (error.response?.status === 404) {
+      else if (error.response?.status === 404)
         showToast("error", "Export service not available");
-      } else {
-        showToast("error", "Failed to export to Excel");
-      }
+      else showToast("error", "Failed to export to Excel");
     } finally {
       setExportLoading(false);
     }
   };
 
-  const formatDateForDisplay = (date) => {
-    return date ? formatDateToReadable(date) : "";
-  };
+  const formatDateForDisplay = (date) =>
+    date ? formatDateToReadable(date) : "";
 
   const getActiveFilterDisplay = () => {
     switch (selectedTab) {
       case "currentMonth":
         return `${getCurrentMonthName()} ${getCurrentYear()}`;
-
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange().label;
-
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
-          return `${formatDateForDisplay(
-            customDateRange.startDate
-          )} to ${formatDateForDisplay(customDateRange.endDate)}`;
+          return `${formatDateForDisplay(customDateRange.startDate)} to ${formatDateForDisplay(customDateRange.endDate)}`;
         }
         return "Select custom dates";
-
       default:
         return "All Records";
     }
   };
 
-  // Calculate total amount from all categories
   const totalAmount =
     summary.totalPurchase +
     summary.totalExchangeLoss +
     summary.totalRemittance +
     summary.totalExpense +
-    summary.totalSalary;
+    summary.totalSalary +
+    summary.totalOtherExpense;
 
-  // Create summary data for the table
   const summaryData = [
     { type: "purchase", label: "Purchase", amount: summary.totalPurchase },
     {
@@ -394,12 +333,15 @@ const TotalExpense = () => {
     },
     { type: "expense", label: "Expense", amount: summary.totalExpense },
     { type: "salary", label: "Salary", amount: summary.totalSalary },
-  ].filter((item) => item.amount > 0); // Only show types with amount > 0
+    {
+      type: "other_expense",
+      label: "Other Expenses",
+      amount: summary.totalOtherExpense,
+    },
+  ].filter((item) => item.amount > 0);
 
-  // Render Pagination Component
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
-
     return (
       <div className="flex items-center justify-start gap-2 mt-6">
         <button
@@ -414,30 +356,30 @@ const TotalExpense = () => {
           <ChevronLeft size={16} />
           Prev
         </button>
-
-        {/* Page Numbers */}
         <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
-            <button
-              key={index}
-              onClick={() =>
-                typeof page === "number" ? handlePageChange(page) : null
-              }
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number"
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
-              }`}
-              disabled={typeof page !== "number"}
-            >
-              {page}
-            </button>
-          ))}
+          {visiblePages.map((page, idx) =>
+            page === "..." ? (
+              <span
+                key={`ellipsis-${idx}`}
+                className="px-3 py-1 text-gray-500 select-none"
+              >
+                ...
+              </span>
+            ) : (
+              <button
+                key={page}
+                onClick={() => handlePageChange(page)}
+                className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
+                  page === pagination.currentPage
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                }`}
+              >
+                {page}
+              </button>
+            ),
+          )}
         </div>
-
-        {/* Next Button */}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
@@ -454,7 +396,6 @@ const TotalExpense = () => {
     );
   };
 
-  // Don't disable export button based on empty data
   const isExportDisabled = exportLoading || false;
 
   return (
@@ -528,15 +469,12 @@ const TotalExpense = () => {
           </button>
         </div>
 
-        {/* Active Filter Display with View Button */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <Filter size={16} />
             <span>Active Filter: </span>
             <span className="font-medium">{getActiveFilterDisplay()}</span>
           </div>
-
-          {/* View/Hide Breakdown Button */}
           <button
             onClick={() => setShowBreakdown(!showBreakdown)}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg cursor-pointer"
@@ -563,7 +501,7 @@ const TotalExpense = () => {
         </div>
       </div>
 
-      {/* Financial Breakdown Card - Conditionally Rendered */}
+      {/* Financial Breakdown Card */}
       {showBreakdown && totalAmount > 0 && (
         <div className="bg-white rounded-xl shadow-md mb-6 border border-gray-200">
           <div className="p-6 border-b">
@@ -608,6 +546,11 @@ const TotalExpense = () => {
                   amount: summary.totalSalary,
                   color: "bg-orange-500",
                 },
+                {
+                  type: "Other Expenses",
+                  amount: summary.totalOtherExpense,
+                  color: "bg-pink-500",
+                },
               ].map((item) => (
                 <div key={item.type} className="bg-gray-50 p-4 rounded-lg">
                   <div className="flex justify-between items-center">
@@ -622,13 +565,9 @@ const TotalExpense = () => {
                     <div
                       className={`${item.color} h-2 rounded-full`}
                       style={{
-                        width: `${
-                          totalAmount > 0
-                            ? (item.amount / totalAmount) * 100
-                            : 0
-                        }%`,
+                        width: `${totalAmount > 0 ? (item.amount / totalAmount) * 100 : 0}%`,
                       }}
-                    ></div>
+                    />
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
                     {totalAmount > 0
@@ -643,7 +582,7 @@ const TotalExpense = () => {
         </div>
       )}
 
-      {/* Data Table - Now showing summary data */}
+      {/* Data Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -664,9 +603,7 @@ const TotalExpense = () => {
               summaryData.map((item, index) => (
                 <tr
                   key={item.type}
-                  className={`hover:bg-gray-50 ${
-                    index === summaryData.length - 1 ? "" : "border-b"
-                  }`}
+                  className={`hover:bg-gray-50 ${index === summaryData.length - 1 ? "" : "border-b"}`}
                 >
                   <td className="p-3">
                     <div className="text-sm text-gray-600 font-medium">
@@ -697,9 +634,10 @@ const TotalExpense = () => {
         </table>
       </div>
 
-      {/* Remove pagination since we're showing summary data (no pagination needed) */}
-      {/* {renderPagination()} */}
+      {/* Pagination (if needed) */}
+      {renderPagination()}
 
+      {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -714,55 +652,46 @@ const TotalExpense = () => {
               >
                 <X size={20} />
               </button>
-
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
                 Total Expense Filter
               </h2>
-
               <div className="space-y-4 mb-6">
-                {/* Date Range - Now in separate rows */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Start Date
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.startDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("startDate", date)
-                      }
-                      selectsStart
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholderText="Start date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      End Date
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.endDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("endDate", date)
-                      }
-                      selectsEnd
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      minDate={customDateRange.startDate}
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholderText="End date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Start Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.startDate}
+                    onChange={(date) =>
+                      handleCustomDateChange("startDate", date)
+                    }
+                    selectsStart
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholderText="Start date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.endDate}
+                    onChange={(date) => handleCustomDateChange("endDate", date)}
+                    selectsEnd
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    minDate={customDateRange.startDate}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholderText="End date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
                 </div>
               </div>
-
               <div className="flex justify-between gap-3">
                 <button
                   onClick={handleClearFilters}
@@ -787,7 +716,7 @@ const TotalExpense = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

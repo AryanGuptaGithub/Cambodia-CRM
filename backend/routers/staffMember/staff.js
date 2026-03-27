@@ -1,19 +1,17 @@
 import express from "express";
 import bcrypt from "bcryptjs";
-import staffSchema from "../../models/staffMember/staff.js";
-import User from "../../models/User.js";
+import Staff from "../../models/staffMember/staff.js";
 import mongoose from "mongoose";
 
 const router = express.Router();
 
-// Helper function to normalize strings (remove extra spaces)
+// Helper: normalize strings
 const normalizeString = (str) => {
   if (!str || typeof str !== "string") return "";
-  // Replace multiple spaces with single space and trim
   return str.replace(/\s+/g, " ").trim();
 };
 
-// COMMON ERROR HANDLER
+// Error handler
 const sendError = (res, error, code = 400) => {
   console.error("❌ ERROR:", error);
   res.status(code).json({
@@ -25,7 +23,7 @@ const sendError = (res, error, code = 400) => {
 // GET ALL STAFF
 router.get("/", async (_, res) => {
   try {
-    const staff = await staffSchema.find().sort({ updatedAt: -1 });
+    const staff = await Staff.find().sort({ updatedAt: -1 });
     res.json(staff);
   } catch (error) {
     sendError(res, error, 500);
@@ -35,7 +33,7 @@ router.get("/", async (_, res) => {
 // GET TEAMS
 router.get("/teams", async (_, res) => {
   try {
-    const staff = await staffSchema.find({}, "teamName");
+    const staff = await Staff.find({}, "teamName");
     const teams = [
       ...new Set(staff.map((i) => normalizeString(i.teamName)).filter(Boolean)),
     ];
@@ -48,7 +46,7 @@ router.get("/teams", async (_, res) => {
 // GET SINGLE STAFF
 router.get("/:id", async (req, res) => {
   try {
-    const staff = await staffSchema.findById(req.params.id);
+    const staff = await Staff.findById(req.params.id);
     if (!staff) {
       return res
         .status(404)
@@ -75,92 +73,64 @@ router.post("/", async (req, res) => {
       enabled,
     } = req.body;
 
-    // Normalize all string inputs
     const name = normalizeString(medicalRepName);
     const team = normalizeString(teamName);
-    const emailLower = email ? normalizeString(email).toLowerCase() : "";
     const contact = contactNo ? normalizeString(contactNo.toString()) : "";
+    const emailLower = email ? normalizeString(email).toLowerCase() : "";
+    const plainPassword = password && password.trim() ? password.trim() : "password123";
 
-    if (!name) {
-      throw new Error("Staff name is required");
-    }
+    if (!name) throw new Error("Staff name is required");
 
-    // Case-insensitive duplicate check for name
-    const existingByName = await staffSchema
-      .findOne({
-        medicalRepNameLower: name.toLowerCase(),
-      })
-      .session(session);
+    // Case‑insensitive duplicate check for name
+    const existingByName = await Staff.findOne({
+      medicalRepNameLower: name.toLowerCase(),
+    }).session(session);
     if (existingByName)
-      throw new Error(
-        `Staff name "${name}" already exists (case-insensitive).`,
-      );
+      throw new Error(`Staff name "${name}" already exists (case‑insensitive).`);
 
+    // Duplicate email check
     if (emailLower) {
-      const existingByEmail = await User.findOne({ email: emailLower }).session(
-        session,
-      );
+      const existingByEmail = await Staff.findOne({ email: emailLower }).session(session);
       if (existingByEmail)
         throw new Error(`Email "${emailLower}" already exists.`);
     }
 
+    // Duplicate contact check
     if (contact) {
-      const existingByContact = await staffSchema
-        .findOne({ contactNo: contact })
-        .session(session);
+      const existingByContact = await Staff.findOne({ contactNo: contact }).session(session);
       if (existingByContact)
         throw new Error(`Contact "${contact}" already exists.`);
     }
 
-    // Password hashing
-    const finalPassword = password ? normalizeString(password) : "password123";
-    const hashedPassword = await bcrypt.hash(finalPassword, 10);
-
-    // Email fallback
-    let finalEmail = emailLower;
-    if (!finalEmail) {
-      const base = name.toLowerCase().replace(/\s+/g, ".");
-      let candidate = `${base}@company.com`;
-      let i = 1;
-      while (await User.findOne({ email: candidate }).session(session)) {
-        candidate = `${base}${i++}@company.com`;
-      }
-      finalEmail = candidate;
+    // Prepare date
+    let joinDate;
+    if (date) {
+      joinDate = new Date(date);
+      if (isNaN(joinDate.getTime())) joinDate = new Date();
+    } else {
+      joinDate = new Date();
     }
 
-    const isActive =
-      enabled === true || enabled === "true" || enabled === "enabled";
+    const isActive = enabled === true || enabled === "true" || enabled === "enabled";
 
-    // CREATE STAFF (no userId)
-    const newStaff = await new staffSchema({
+    // Create staff (password will be hashed by the pre‑save hook)
+    const newStaff = new Staff({
       medicalRepName: name,
       teamName: team,
       contactNo: contact,
-      email: finalEmail,
-      date: date ? new Date(date) : new Date(),
-      isActive: isActive,
-    }).save({ session });
+      email: emailLower,
+      password: plainPassword,
+      date: joinDate,
+      isActive,
+    });
 
-    // CREATE USER with staffId reference (optional but kept for login)
-    const newUser = await new User({
-      name,
-      email: finalEmail,
-      password: hashedPassword,
-      role: "user",
-      isActive: true,
-      staffId: newStaff._id, // user points to staff
-    }).save({ session });
-
+    await newStaff.save({ session });
     await session.commitTransaction();
 
     res.status(201).json({
       success: true,
       message: `Staff "${name}" created successfully.`,
       staff: newStaff,
-      userAccount: {
-        email: finalEmail,
-        password: finalPassword,
-      },
     });
   } catch (error) {
     await session.abortTransaction();
@@ -174,66 +144,44 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
   try {
     const { id } = req.params;
-    const { medicalRepName, teamName, contactNo, email, date, isActive } =
-      req.body;
+    const { medicalRepName, teamName, contactNo, email, date, isActive, password } = req.body;
 
     // Normalize inputs
     const normalizedName = normalizeString(medicalRepName);
     const normalizedTeam = normalizeString(teamName);
-    const normalizedContact = contactNo
-      ? normalizeString(contactNo.toString())
-      : "";
+    const normalizedContact = contactNo ? normalizeString(contactNo.toString()) : "";
     const normalizedEmail = email ? normalizeString(email).toLowerCase() : "";
 
-    // Check for duplicate name (case-insensitive), excluding current record
+    // Check for duplicate name (excluding current staff)
     if (normalizedName) {
-      const existingByName = await staffSchema
-        .findOne({
-          medicalRepNameLower: normalizedName.toLowerCase(),
-          _id: { $ne: id },
-        })
-        .session(session);
+      const existingByName = await Staff.findOne({
+        medicalRepNameLower: normalizedName.toLowerCase(),
+        _id: { $ne: id },
+      }).session(session);
       if (existingByName) {
-        throw new Error(
-          `Staff name "${normalizedName}" already exists (case-insensitive).`,
-        );
+        throw new Error(`Staff name "${normalizedName}" already exists (case‑insensitive).`);
       }
     }
 
-    // Update staff
-    const updateData = {
-      medicalRepName: normalizedName,
-      teamName: normalizedTeam,
-      contactNo: normalizedContact,
-      email: normalizedEmail,
-      date,
-    };
-    if (isActive !== undefined) {
-      updateData.isActive = isActive;
-    }
+    // Build update object
+    const updateData = {};
+    if (normalizedName) updateData.medicalRepName = normalizedName;
+    if (normalizedTeam) updateData.teamName = normalizedTeam;
+    if (normalizedContact) updateData.contactNo = normalizedContact;
+    if (normalizedEmail) updateData.email = normalizedEmail;
+    if (date) updateData.date = new Date(date);
+    if (isActive !== undefined) updateData.isActive = isActive;
+    if (password) updateData.password = password; // will be hashed by pre‑save
 
-    const updatedStaff = await staffSchema.findByIdAndUpdate(id, updateData, {
+    const updatedStaff = await Staff.findByIdAndUpdate(id, updateData, {
       new: true,
       session,
+      runValidators: true,  // ensures uniqueness and other validations
     });
 
-    // Optionally update the linked user's name and email (if user exists)
-    if (normalizedEmail) {
-      await User.findOneAndUpdate(
-        { staffId: id },
-        { email: normalizedEmail, name: normalizedName },
-        { session },
-      );
-    } else if (normalizedName) {
-      await User.findOneAndUpdate(
-        { staffId: id },
-        { name: normalizedName },
-        { session },
-      );
-    }
+    if (!updatedStaff) throw new Error("Staff not found");
 
     await session.commitTransaction();
 
@@ -260,13 +208,8 @@ router.delete("/", async (req, res) => {
   session.startTransaction();
   try {
     const ids = req.body;
-    const staffList = await staffSchema
-      .find({ _id: { $in: ids } })
-      .session(session);
-    // Delete staff
-    await staffSchema.deleteMany({ _id: { $in: ids } }).session(session);
-    // Delete linked users
-    await User.deleteMany({ staffId: { $in: ids } }).session(session);
+    const staffList = await Staff.find({ _id: { $in: ids } }).session(session);
+    await Staff.deleteMany({ _id: { $in: ids } }).session(session);
     await session.commitTransaction();
     res.json({
       success: true,
@@ -285,11 +228,9 @@ router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const staff = await staffSchema.findById(req.params.id).session(session);
+    const staff = await Staff.findById(req.params.id).session(session);
     if (!staff) throw new Error("Staff not found");
-    await staffSchema.findByIdAndDelete(req.params.id).session(session);
-    // Delete linked user if exists
-    await User.deleteOne({ staffId: req.params.id }).session(session);
+    await Staff.findByIdAndDelete(req.params.id).session(session);
     await session.commitTransaction();
     res.json({
       success: true,
@@ -317,7 +258,7 @@ router.post("/import", async (req, res) => {
       list = req.body.list;
     }
     if (!Array.isArray(list) || list.length === 0) {
-      throw new Error("Invalid import format: Expected non-empty array");
+      throw new Error("Invalid import format: Expected non‑empty array");
     }
 
     const duplicateEmails = [];
@@ -325,62 +266,40 @@ router.post("/import", async (req, res) => {
     const duplicateContacts = [];
     const seenNames = new Map();
 
-    // First pass: Check for duplicates
+    // First pass: check for duplicates
     for (let i = 0; i < list.length; i++) {
       const row = list[i];
-      const medicalRepName =
-        row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+      const medicalRepName = row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
       const email = row.email || row.Email || "";
-      const contactNo =
-        row.contactNo ||
-        row.phone ||
-        row["Contact No"] ||
-        row["contact no"] ||
-        row["Contact"] ||
-        row["contact"];
+      const contactNo = row.contactNo || row.phone || row["Contact No"] || row["contact no"] || row["Contact"] || row["contact"];
 
       const name = normalizeString(medicalRepName);
       const nameLower = name.toLowerCase();
       const emailLower = email ? normalizeString(email).toLowerCase() : null;
       const contact = contactNo ? normalizeString(contactNo.toString()) : null;
 
-      if (!name) {
-        throw new Error(`medicalRepName is required in row ${i + 1}`);
-      }
+      if (!name) throw new Error(`medicalRepName is required in row ${i + 1}`);
 
       if (seenNames.has(nameLower)) {
         if (!duplicateNames.includes(name)) duplicateNames.push(name);
       } else {
         seenNames.set(nameLower, name);
-        const existingStaffByName = await staffSchema
-          .findOne({ medicalRepNameLower: nameLower })
-          .session(session);
-        if (existingStaffByName && !duplicateNames.includes(name))
-          duplicateNames.push(name);
+        const existingStaffByName = await Staff.findOne({ medicalRepNameLower: nameLower }).session(session);
+        if (existingStaffByName && !duplicateNames.includes(name)) duplicateNames.push(name);
       }
 
       if (emailLower) {
-        const existingUser = await User.findOne({ email: emailLower }).session(
-          session,
-        );
-        if (existingUser && !duplicateEmails.includes(emailLower))
-          duplicateEmails.push(emailLower);
+        const existingStaffByEmail = await Staff.findOne({ email: emailLower }).session(session);
+        if (existingStaffByEmail && !duplicateEmails.includes(emailLower)) duplicateEmails.push(emailLower);
       }
 
       if (contact) {
-        const existingStaffByContact = await staffSchema
-          .findOne({ contactNo: contact })
-          .session(session);
-        if (existingStaffByContact && !duplicateContacts.includes(contact))
-          duplicateContacts.push(contact);
+        const existingStaffByContact = await Staff.findOne({ contactNo: contact }).session(session);
+        if (existingStaffByContact && !duplicateContacts.includes(contact)) duplicateContacts.push(contact);
       }
     }
 
-    if (
-      duplicateNames.length ||
-      duplicateEmails.length ||
-      duplicateContacts.length
-    ) {
+    if (duplicateNames.length || duplicateEmails.length || duplicateContacts.length) {
       return res.status(400).json({
         success: false,
         message: "Duplicate entries found",
@@ -395,49 +314,28 @@ router.post("/import", async (req, res) => {
     const importedStaff = [];
     const failedImports = [];
 
-    // Second pass: Create records
+    // Second pass: create records
     for (let i = 0; i < list.length; i++) {
       const row = list[i];
       try {
-        const medicalRepName =
-          row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
-        const teamName =
-          row.teamName || row["Team Name"] || row["team name"] || row.team;
+        const medicalRepName = row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+        const teamName = row.teamName || row["Team Name"] || row["team name"] || row.team;
         const email = row.email || row.Email || "";
-        const contactNo =
-          row.contactNo ||
-          row.phone ||
-          row["Contact No"] ||
-          row["contact no"] ||
-          row["Contact"] ||
-          row["contact"];
+        const contactNo = row.contactNo || row.phone || row["Contact No"] || row["contact no"] || row["Contact"] || row["contact"];
         const password = row.password || row.Password || "123456";
-        const date =
-          row.date ||
-          row.Date ||
-          row["Joining Date"] ||
-          row["joining date"] ||
-          row["Instance of Joining Date"] ||
-          new Date();
+        const date = row.date || row.Date || row["Joining Date"] || row["joining date"] || row["Instance of Joining Date"] || new Date();
         const enabled = row.enabled !== undefined ? row.enabled : true;
 
         const name = normalizeString(medicalRepName);
         const team = normalizeString(teamName);
         if (!team) {
-          failedImports.push({
-            row: i + 1,
-            name,
-            error: "Team name is required",
-          });
+          failedImports.push({ row: i + 1, name, error: "Team name is required" });
           continue;
         }
 
-        const plaintextPassword = password;
-        const hashedPassword = await bcrypt.hash(plaintextPassword, 10);
+        const plainPassword = password ? normalizeString(password) : "123456";
         const emailLower = email ? normalizeString(email).toLowerCase() : "";
-        const finalEmail =
-          emailLower ||
-          `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
+        const finalEmail = emailLower || `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
         const contact = contactNo ? normalizeString(contactNo.toString()) : "";
 
         let joinDate;
@@ -450,9 +348,7 @@ router.post("/import", async (req, res) => {
               const excelNum = parseFloat(date);
               if (!isNaN(excelNum) && excelNum > 0) {
                 const excelDate = new Date((excelNum - 25569) * 86400 * 1000);
-                if (!isNaN(excelDate.getTime())) {
-                  joinDate = excelDate;
-                }
+                if (!isNaN(excelDate.getTime())) joinDate = excelDate;
               }
             } else {
               joinDate = parsed;
@@ -461,39 +357,20 @@ router.post("/import", async (req, res) => {
         } catch (dateError) {
           console.log(`Date parsing error for ${name}:`, dateError);
         }
+        if (!joinDate || isNaN(joinDate.getTime())) joinDate = new Date();
 
-        if (!joinDate || isNaN(joinDate.getTime())) {
-          joinDate = new Date();
-        }
-
-        // Create staff (no userId)
-        const staff = new staffSchema({
+        const staff = new Staff({
           medicalRepName: name,
           teamName: team,
           contactNo: contact,
           email: finalEmail,
+          password: plainPassword,   // will be hashed by pre‑save hook
           date: joinDate,
           isActive: enabled,
         });
+
         await staff.save({ session });
-
-        // Create user with staffId reference
-        const newUser = new User({
-          name,
-          email: finalEmail,
-          password: hashedPassword,
-          role: "user",
-          isActive: true,
-          staffId: staff._id,
-        });
-        await newUser.save({ session });
-
-        importedStaff.push({
-          name,
-          email: finalEmail,
-          team,
-          staffId: staff._id,
-        });
+        importedStaff.push({ name, email: finalEmail, team, staffId: staff._id });
       } catch (rowError) {
         console.error(`Error processing row ${i + 1}:`, rowError);
         failedImports.push({
@@ -520,17 +397,15 @@ router.post("/import", async (req, res) => {
   }
 });
 
-// UPDATE STAFF STATUS (staff-specific)
+// UPDATE STAFF STATUS
 router.put("/status/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { isActive } = req.body;
 
-    const staff = await staffSchema.findById(id);
+    const staff = await Staff.findById(id);
     if (!staff) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Staff not found" });
+      return res.status(404).json({ success: false, message: "Staff not found" });
     }
 
     staff.isActive = isActive;

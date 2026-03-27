@@ -65,20 +65,16 @@ function deriveTransactionType(label = "") {
 
 // =============================================================================
 // Helper: Check if an MR (by name) is in stockTransferToMR
-// Returns true if MR is a field MR (has stock), false otherwise
 // =============================================================================
 async function isMRInStockTransfer(mrName) {
   if (!mrName || mrName.trim() === "") return false;
   try {
-    // stockTransferToMR stores mrId references; we need to find via MRCash
     const nameRegex = new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i");
     const mrCashRecord = await MRCash.findOne({
       mrName: nameRegex,
       isActive: true,
     }).lean();
     if (!mrCashRecord) return false;
-
-    // Check if this mrId has stock transfers
     const stockTransfer = await stockTransferToMR
       .findOne({ mrId: mrCashRecord.mrId })
       .lean();
@@ -90,7 +86,7 @@ async function isMRInStockTransfer(mrName) {
 }
 
 // =============================================================================
-// Helper: Adjust Destination account balances
+// adjustBalances — handles all transaction types, including Payment Outward
 // =============================================================================
 async function adjustBalances(transaction, session, isDelete = false) {
   const {
@@ -101,22 +97,25 @@ async function adjustBalances(transaction, session, isDelete = false) {
     finalAmount,
     categoryType,
   } = transaction;
+
   const amountValue = finalAmount || amount;
   if (typeof amountValue !== "number" || amountValue <= 0) return;
 
   const sourceAcc =
-    sourceAccount && sourceAccount !== "--"
+    sourceAccount && sourceAccount !== "--" && sourceAccount.trim() !== ""
       ? await Destination.findOne({ name: sourceAccount }).session(session)
       : null;
+
   const destAcc =
-    destination && destination !== "--"
+    destination && destination !== "--" && destination.trim() !== ""
       ? await Destination.findOne({ name: destination }).session(session)
       : null;
 
   const cat = (categoryType || "").toLowerCase();
   const txType = (transactionType || "").toLowerCase();
-  const isDeposit = cat === "deposit" || txType === "deposit";
-  const isWithdraw = cat === "withdraw" || txType === "withdraw";
+
+  const isDeposit = cat.includes("deposit") || txType === "deposit";
+  const isWithdraw = cat.includes("withdraw") || txType === "withdraw";
   const isCashSale = cat.includes("cash sale") || txType === "cash sale";
   const isCreditCol =
     cat.includes("credit collection") || txType === "credit collection";
@@ -125,6 +124,7 @@ async function adjustBalances(transaction, session, isDelete = false) {
     cat.includes("payment inward") || txType === "payment inward";
   const isPaymentOutward =
     cat.includes("payment outward") || txType === "payment outward";
+
   const m = isDelete ? -1 : 1;
 
   if (isDeposit) {
@@ -139,7 +139,7 @@ async function adjustBalances(transaction, session, isDelete = false) {
       destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
     }
-  } else if (isWithdraw || isRemittance || isPaymentOutward) {
+  } else if (isWithdraw || isRemittance) {
     if (sourceAcc) {
       sourceAcc.totalAmount = Math.max(
         0,
@@ -151,14 +151,20 @@ async function adjustBalances(transaction, session, isDelete = false) {
       destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
     }
-  } else if (isCashSale || isCreditCol) {
-    // Only adjust destination account balance for cash sale/credit collection
-    // (credit collection to MR doesn't affect a Destination account — MRCash handles it)
+  } else if (isPaymentInward) {
     if (destAcc) {
       destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
     }
-  } else if (isPaymentInward) {
+  } else if (isPaymentOutward) {
+    if (sourceAcc) {
+      sourceAcc.totalAmount = Math.max(
+        0,
+        (sourceAcc.totalAmount || 0) - amountValue * m,
+      );
+      await sourceAcc.save({ session });
+    }
+  } else if (isCashSale || isCreditCol) {
     if (destAcc) {
       destAcc.totalAmount = (destAcc.totalAmount || 0) + amountValue * m;
       await destAcc.save({ session });
@@ -172,16 +178,7 @@ async function adjustBalances(transaction, session, isDelete = false) {
 }
 
 // =============================================================================
-// KEY FIX: updateMRCashOnCreditCollection
-//
-// ROUTING LOGIC:
-//   1. Find the Sale by invoiceNo → get mrName
-//   2. Check if mrName is in stockTransferToMR (is a field MR)
-//      YES → add finalAmount to MRCash.currentCash
-//      NO  → add finalAmount to Destination account (via adjustBalances for tour collection)
-//
-// add=true  → adding the transaction
-// add=false → reversing the transaction (delete/update)
+// updateMRCashOnCreditCollection — unchanged
 // =============================================================================
 async function updateMRCashOnCreditCollection(tx, session, add = true) {
   const { invoiceNo, finalAmount, amount, categoryType, transactionType } = tx;
@@ -199,7 +196,6 @@ async function updateMRCashOnCreditCollection(tx, session, add = true) {
 
   const change = add ? collected : -collected;
 
-  // Find sale to get mrName
   const sale = await Sale.findOne({ invoiceNumber: invoiceNo }).lean();
   if (!sale || !sale.mrName) {
     console.warn(
@@ -212,7 +208,6 @@ async function updateMRCashOnCreditCollection(tx, session, add = true) {
   const isFieldMR = await isMRInStockTransfer(mrName);
 
   if (isFieldMR) {
-    // ── Path A: MR is in stockTransferToMR → update MRCash.currentCash ──
     const nameRegex = new RegExp(`^\\s*${mrName}\\s*$`, "i");
     const mrCash = await MRCash.findOne({
       mrName: nameRegex,
@@ -231,10 +226,6 @@ async function updateMRCashOnCreditCollection(tx, session, add = true) {
     await mrCash.save({ session });
     console.log(`[Credit Collection] Added $${change} to MRCash for ${mrName}`);
   } else {
-    // ── Path B: MR is NOT in stockTransferToMR → add to Destination account ──
-    // The destination account is already the tab account (Cash Balance etc.)
-    // This is handled by adjustBalances — nothing extra needed here.
-    // But we also create a "tour collection" transaction note for audit trail.
     console.log(
       `[Credit Collection] MR "${mrName}" not in stockTransferToMR — amount goes to Destination account`,
     );
@@ -242,11 +233,7 @@ async function updateMRCashOnCreditCollection(tx, session, add = true) {
 }
 
 // =============================================================================
-// Helper: Update Sale record (paidAmount, dueAmount, pendingAmountPaid)
-//
-// KEY FIX for partial payment:
-//   - If amount == dueAmount → set pendingAmountPaid = "paid"
-//   - If amount < dueAmount → add to paidAmount, subtract from dueAmount, keep "pending"
+// updateSaleFromTransaction — unchanged
 // =============================================================================
 async function updateSaleFromTransaction(tx, session, add = true) {
   const { invoiceNo, finalAmount, amount, categoryType, transactionType } = tx;
@@ -283,18 +270,15 @@ async function updateSaleFromTransaction(tx, session, add = true) {
       sale.pendingAmountPaid = "pending";
     }
   } else if (isCreditCol) {
-    // KEY FIX: Support partial payments
     const newPaid = Math.max(0, (sale.paidAmount || 0) + change);
     const newDue = Math.max(0, sale.totalAmount - newPaid);
     sale.paidAmount = parseFloat(newPaid.toFixed(4));
     sale.dueAmount = parseFloat(newDue.toFixed(4));
 
     if (newDue <= 0) {
-      // Fully paid → hide from dropdown
       sale.paymentStatus = "Paid";
       sale.pendingAmountPaid = "paid";
     } else if (newPaid > 0) {
-      // Partially paid → still shows in dropdown (outstanding remains)
       sale.paymentStatus = "Partial Paid";
       sale.pendingAmountPaid = "pending";
     } else {
@@ -307,20 +291,25 @@ async function updateSaleFromTransaction(tx, session, add = true) {
 }
 
 // =============================================================================
-// Helper: Verify source account has sufficient balance
+// checkSourceAccountBalance — includes "payment outward" in the check list
 // =============================================================================
 async function checkSourceAccountBalance(name, amount, txType) {
-  if (!name || name === "--") return true;
+  if (!name || name === "--" || name.trim() === "") return true;
   const acc = await Destination.findOne({ name });
-  if (!acc) throw new Error(`Source account not found: ${name}`);
+  if (!acc) throw new Error(`Source account not found: "${name}"`);
   const balance = acc.totalAmount || 0;
-  if (
-    ["deposit", "withdraw", "remittance", "payment outward"].includes(txType)
-  ) {
-    if (balance < amount)
-      throw new Error(
-        `Insufficient balance in "${name}". Available: $${balance.toFixed(2)}, Required: $${amount.toFixed(2)}`,
-      );
+
+  const needsCheck = [
+    "deposit",
+    "withdraw",
+    "remittance",
+    "payment outward",
+  ].includes(txType);
+
+  if (needsCheck && balance < amount) {
+    throw new Error(
+      `Insufficient balance in "${name}". Available: $${balance.toFixed(2)}, Required: $${amount.toFixed(2)}`,
+    );
   }
   return true;
 }
@@ -376,12 +365,16 @@ const getCellValue = (cell) => {
   return v;
 };
 
+// =============================================================================
+// validateTransactionByCategory — Supplier Name is optional for Payment Outward
+// =============================================================================
 const validateTransactionByCategory = (categoryName, rowData) => {
   const errors = [];
   const cat = categoryName.toLowerCase();
   if (!rowData["Date"]) errors.push("Date is required");
   const amount = parseFloat(rowData["Amount"]);
   if (isNaN(amount) || amount <= 0) errors.push("Valid Amount is required");
+
   if (cat.includes("cash sale") || cat.includes("credit collection")) {
     if (!rowData["Destination Account"])
       errors.push(`Destination Account is required for ${categoryName}`);
@@ -409,6 +402,10 @@ const validateTransactionByCategory = (categoryName, rowData) => {
       errors.push("Supplier Name is required for Payment Inward");
     if (!rowData["Destination Account"])
       errors.push("Destination Account is required for Payment Inward");
+  } else if (cat.includes("payment outward")) {
+    // Supplier Name is NOT required for Payment Outward
+    if (!rowData["Source Account"])
+      errors.push("Source Account is required for Payment Outward");
   } else if (cat.includes("remittance")) {
     if (!rowData["Supplier Name"])
       errors.push("Supplier Name is required for Remittance");
@@ -435,22 +432,20 @@ router.get("/check-invoice", async (req, res) => {
       query._id = { $ne: new mongoose.Types.ObjectId(excludeId) };
     const existing = await Transaction.findOne(query).lean();
     if (existing) {
-      return res
-        .status(200)
-        .json({
-          success: true,
-          exists: true,
-          message: `Invoice ${invoiceNumber} already has a transaction`,
-          existingTransaction: {
-            id: existing._id,
-            invoiceNo: existing.invoiceNo,
-            categoryType: existing.categoryType,
-            accountType: existing.accountType,
-            destination: existing.destination,
-            amount: existing.amount,
-            date: existing.date,
-          },
-        });
+      return res.status(200).json({
+        success: true,
+        exists: true,
+        message: `Invoice ${invoiceNumber} already has a transaction`,
+        existingTransaction: {
+          id: existing._id,
+          invoiceNo: existing.invoiceNo,
+          categoryType: existing.categoryType,
+          accountType: existing.accountType,
+          destination: existing.destination,
+          amount: existing.amount,
+          date: existing.date,
+        },
+      });
     }
     return res.status(200).json({ success: true, exists: false });
   } catch (error) {
@@ -471,6 +466,7 @@ router.get("/", async (req, res) => {
       page = 1,
       limit = 500,
     } = req.query;
+
     const query = {};
     if (startDate || endDate) {
       query.date = {};
@@ -486,14 +482,18 @@ router.get("/", async (req, res) => {
     }
     if (categoryType) query.categoryType = categoryType;
     if (accountType) query.accountType = accountType;
+
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, parseInt(limit) || 500);
+
     const transactions = await Transaction.find(query)
       .sort({ date: -1, createdAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
+
     const total = await Transaction.countDocuments(query);
     const destinations = await Destination.find();
+
     res.json({
       success: true,
       data: transactions,
@@ -526,13 +526,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // =============================================================================
-// POST / — create transaction
-// KEY CHANGES:
-//   1. invoiceNo = actual invoice number
-//   2. categoryType = human label (e.g. "Credit Collection")
-//   3. transactionType = derived valid enum
-//   4. Sale.pendingAmountPaid updated with partial payment support
-//   5. MR routing: field MR → MRCash; non-field MR → Destination account
+// POST / — create transaction (Payment Outward works without supplier)
 // =============================================================================
 router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
@@ -558,48 +552,134 @@ router.post("/", async (req, res) => {
       transactionType,
     } = req.body;
 
+    // ── Required fields ──────────────────────────────────────────────────────
     if (!categoryType || !amount || !date || !accountType) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing required fields" });
+      return res.status(400).json({
+        success: false,
+        message:
+          "Missing required fields: categoryType, amount, date, accountType",
+      });
     }
 
     const normalizedTxType = deriveTransactionType(
       categoryType || transactionType || "",
     );
+
+    const isPaymentInward = normalizedTxType === "payment inward";
+    const isPaymentOutward = normalizedTxType === "payment outward";
+
+    // ── Payment Inward validation (supplier required) ────────────────────────
+    if (isPaymentInward) {
+      if (!supplier || supplier.trim() === "") {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Supplier Name is required for Payment Inward",
+        });
+      }
+      if (!destination || destination === "--" || destination.trim() === "") {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Destination Account is required for Payment Inward",
+        });
+      }
+    }
+
+    // ── Payment Outward validation (supplier optional) ───────────────────────
+    if (isPaymentOutward) {
+      if (
+        !sourceAccount ||
+        sourceAccount === "--" ||
+        sourceAccount.trim() === ""
+      ) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Source Account is required for Payment Outward",
+        });
+      }
+      // supplier is allowed to be empty or not provided
+    }
+
     const invoiceNoClean =
       invoiceNo && invoiceNo.trim() && invoiceNo.trim() !== "NA"
         ? invoiceNo.trim()
         : "NA";
 
-    if (invoiceNoClean !== "NA") {
-      const dup = await Transaction.findOne({ invoiceNo: invoiceNoClean });
-      if (dup) {
-        await session.abortTransaction();
-        session.endSession();
-        return res
-          .status(400)
-          .json({
+    // ── Invoice duplicate check (skip for Payment Inward / Outward) ──────────
+    if (invoiceNoClean !== "NA" && !isPaymentInward && !isPaymentOutward) {
+      const sale = await Sale.findOne({
+        invoiceNumber: invoiceNoClean,
+      }).session(session);
+
+      if (accountType === "MR Cash") {
+        if (!sale) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(404).json({
+            success: false,
+            message: `Sale with invoice "${invoiceNoClean}" not found.`,
+          });
+        }
+        const dueAmount = sale.dueAmount || 0;
+        if (dueAmount <= 0) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `Invoice "${invoiceNoClean}" is already fully paid.`,
+          });
+        }
+        const paymentAmount = parseFloat(amount);
+        if (paymentAmount > dueAmount) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `Payment amount (${paymentAmount}) exceeds remaining due amount (${dueAmount}) for invoice "${invoiceNoClean}".`,
+          });
+        }
+      } else {
+        const dup = await Transaction.findOne({
+          invoiceNo: invoiceNoClean,
+        }).session(session);
+        if (dup) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
             success: false,
             message: `Invoice "${invoiceNoClean}" already has a transaction in "${dup.accountType || "another tab"}".`,
           });
+        }
       }
     }
 
+    // ── Amount calculations ───────────────────────────────────────────────────
     const amountNum = parseFloat(amount);
     const exchangeLossNum = parseFloat(exchangeLoss) || 0;
     let calcFinal = parseFloat(finalAmount) || amountNum;
     if (normalizedTxType === "deposit") calcFinal = amountNum - exchangeLossNum;
 
-    if (sourceAccount && sourceAccount !== "--" && sourceAccount !== "")
+    // ── Source account balance check ─────────────────────────────────────────
+    if (
+      sourceAccount &&
+      sourceAccount !== "--" &&
+      sourceAccount.trim() !== ""
+    ) {
       await checkSourceAccountBalance(
         sourceAccount,
         amountNum,
         normalizedTxType,
       );
+    }
 
+    // ── Build and save transaction ────────────────────────────────────────────
     const txData = {
       invoiceNo: invoiceNoClean,
       categoryType: categoryType,
@@ -622,24 +702,19 @@ router.post("/", async (req, res) => {
     const tx = new Transaction(txData);
     await tx.save({ session });
 
-    // 1. Adjust Destination account balances
+    // ── Side effects ──────────────────────────────────────────────────────────
     await adjustBalances(tx, session, false);
-
-    // 2. Update Sale record (partial payment support)
     await updateSaleFromTransaction(tx, session, true);
-
-    // 3. Route to MRCash or Destination based on stockTransferToMR
     await updateMRCashOnCreditCollection(tx, session, true);
 
     await session.commitTransaction();
     session.endSession();
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: tx,
-        message: "Transaction created successfully",
-      });
+
+    res.status(201).json({
+      success: true,
+      data: tx,
+      message: "Transaction created successfully",
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -649,20 +724,8 @@ router.post("/", async (req, res) => {
 });
 
 // =============================================================================
-// POST /import
+// POST /import — unchanged (it uses validateTransactionByCategory which we updated)
 // =============================================================================
-const isTemplateRow = (rowData) => {
-  for (const f of ["Category Type", "Amount", "Date", "Invoice Number"]) {
-    const v = rowData[f];
-    if (v && typeof v === "string") {
-      const t = v.trim();
-      if (t && t !== "--" && !t.startsWith("=IF(") && !t.startsWith("Select"))
-        return false;
-    } else if (v && typeof v === "number" && v !== 0) return false;
-  }
-  return true;
-};
-
 router.post("/import", upload.single("file"), async (req, res) => {
   const session = await mongoose.startSession();
   try {
@@ -684,13 +747,11 @@ router.post("/import", upload.single("file"), async (req, res) => {
           ignoreStyles: true,
         });
     } catch (e) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Error reading Excel file.",
-          error: e.message,
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Error reading Excel file.",
+        error: e.message,
+      });
     }
 
     const ws = workbook.worksheets[0];
@@ -749,6 +810,7 @@ router.post("/import", upload.single("file"), async (req, res) => {
       const row = ws.getRow(rowNumber);
       const rowData = {};
       let hasData = false;
+
       headers.forEach((h, i) => {
         const cell = row.getCell(i + 1);
         let v = getCellValue(cell);
@@ -828,7 +890,10 @@ router.post("/import", upload.single("file"), async (req, res) => {
         const invNo = rowData["Invoice Number"]?.trim() || "";
         const invNoClean = invNo || "NA";
 
-        if (invNoClean !== "NA") {
+        const isPI = normTxType === "payment inward";
+        const isPO = normTxType === "payment outward";
+
+        if (invNoClean !== "NA" && !isPI && !isPO) {
           const exists = await Transaction.findOne({ invoiceNo: invNoClean });
           if (exists) {
             errors.push({
@@ -853,7 +918,10 @@ router.post("/import", upload.single("file"), async (req, res) => {
               continue;
             }
           }
-        } else if (["cash sale", "credit collection"].includes(normTxType)) {
+        } else if (
+          ["cash sale", "credit collection"].includes(normTxType) &&
+          invNoClean === "NA"
+        ) {
           errors.push({
             row: rowNumber,
             errors: ["Invoice Number is required"],
@@ -928,19 +996,17 @@ router.post("/import", upload.single("file"), async (req, res) => {
     if (errors.length) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Import failed with errors",
-          summary: {
-            totalDataRows: dataRows,
-            successCount: imported.length,
-            errorCount: errors.length,
-            skippedRows: skipped,
-            errors: errors.slice(0, 20),
-          },
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Import failed with errors",
+        summary: {
+          totalDataRows: dataRows,
+          successCount: imported.length,
+          errorCount: errors.length,
+          skippedRows: skipped,
+          errors: errors.slice(0, 20),
+        },
+      });
     }
 
     await session.commitTransaction();
@@ -959,13 +1025,11 @@ router.post("/import", upload.single("file"), async (req, res) => {
   } catch (error) {
     if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Import failed due to server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Import failed due to server error",
+      error: error.message,
+    });
   }
 });
 
@@ -993,7 +1057,7 @@ router.post("/import/test", upload.single("file"), async (req, res) => {
 });
 
 // =============================================================================
-// PUT /:id — update transaction
+// PUT /:id — update transaction (Payment Outward supplier optional)
 // =============================================================================
 router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
@@ -1007,6 +1071,7 @@ router.put("/:id", async (req, res) => {
         .status(400)
         .json({ success: false, message: "Invalid transaction ID" });
     }
+
     const existing = await Transaction.findById(id).session(session);
     if (!existing) {
       await session.abortTransaction();
@@ -1016,11 +1081,25 @@ router.put("/:id", async (req, res) => {
         .json({ success: false, message: "Transaction not found" });
     }
 
+    const newCategoryType =
+      req.body.categoryType || existing.categoryType || "";
+    const newNormTxType = deriveTransactionType(
+      req.body.categoryType ||
+        req.body.transactionType ||
+        existing.transactionType ||
+        "",
+    );
+    const isPaymentInward = newNormTxType === "payment inward";
+    const isPaymentOutward = newNormTxType === "payment outward";
+
+    // Invoice dup check (skip for Payment Inward / Outward)
     const newInvoiceNo = req.body.invoiceNo?.trim();
     if (
       newInvoiceNo &&
       newInvoiceNo !== "NA" &&
-      newInvoiceNo !== existing.invoiceNo
+      newInvoiceNo !== existing.invoiceNo &&
+      !isPaymentInward &&
+      !isPaymentOutward
     ) {
       const dup = await Transaction.findOne({
         invoiceNo: newInvoiceNo,
@@ -1029,13 +1108,47 @@ router.put("/:id", async (req, res) => {
       if (dup) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: `Invoice "${newInvoiceNo}" already has a transaction in "${dup.accountType || "another tab"}".`,
-          });
+        return res.status(400).json({
+          success: false,
+          message: `Invoice "${newInvoiceNo}" already has a transaction in "${dup.accountType || "another tab"}".`,
+        });
       }
+    }
+
+    // ── Payment Inward validation (supplier required) ───────────────────────
+    if (isPaymentInward) {
+      const supplierVal = req.body.supplier || existing.supplier || "";
+      if (!supplierVal || supplierVal.trim() === "") {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Supplier Name is required for Payment Inward",
+        });
+      }
+      const destVal = req.body.destination || existing.destination || "";
+      if (!destVal || destVal === "--" || destVal.trim() === "") {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Destination Account is required for Payment Inward",
+        });
+      }
+    }
+
+    // ── Payment Outward validation (supplier optional) ──────────────────────
+    if (isPaymentOutward) {
+      const srcVal = req.body.sourceAccount || existing.sourceAccount || "";
+      if (!srcVal || srcVal === "--" || srcVal.trim() === "") {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Source Account is required for Payment Outward",
+        });
+      }
+      // supplier can be missing or empty
     }
 
     // Reverse old effects
@@ -1043,15 +1156,9 @@ router.put("/:id", async (req, res) => {
     await updateSaleFromTransaction(existing, session, false);
     await updateMRCashOnCreditCollection(existing, session, false);
 
-    const normTxType = deriveTransactionType(
-      req.body.categoryType ||
-        req.body.transactionType ||
-        existing.transactionType ||
-        "",
-    );
     const updateData = {
       ...req.body,
-      transactionType: normTxType,
+      transactionType: newNormTxType,
       amount: parseFloat(req.body.amount || existing.amount),
       exchangeLoss: parseFloat(req.body.exchangeLoss || existing.exchangeLoss),
       finalAmount: parseFloat(req.body.finalAmount || existing.finalAmount),
@@ -1061,16 +1168,19 @@ router.put("/:id", async (req, res) => {
         : existing.invoiceDate,
     };
 
+    // Source balance check on update
+    const updatedSourceAcc = updateData.sourceAccount || "";
     if (
-      updateData.sourceAccount &&
-      updateData.sourceAccount !== "--" &&
-      updateData.sourceAccount !== existing.sourceAccount
-    )
+      updatedSourceAcc &&
+      updatedSourceAcc !== "--" &&
+      updatedSourceAcc !== existing.sourceAccount
+    ) {
       await checkSourceAccountBalance(
-        updateData.sourceAccount,
+        updatedSourceAcc,
         updateData.amount,
-        normTxType,
+        newNormTxType,
       );
+    }
 
     const updated = await Transaction.findByIdAndUpdate(id, updateData, {
       new: true,
@@ -1113,6 +1223,7 @@ router.delete("/:id", async (req, res) => {
         .status(400)
         .json({ success: false, message: "Invalid transaction ID" });
     }
+
     const tx = await Transaction.findById(id).session(session);
     if (!tx) {
       await session.abortTransaction();
@@ -1121,10 +1232,12 @@ router.delete("/:id", async (req, res) => {
         .status(404)
         .json({ success: false, message: "Transaction not found" });
     }
+
     await adjustBalances(tx, session, true);
     await updateSaleFromTransaction(tx, session, false);
     await updateMRCashOnCreditCollection(tx, session, false);
     await Transaction.findByIdAndDelete(id, { session });
+
     await session.commitTransaction();
     session.endSession();
     res.json({
@@ -1134,23 +1247,22 @@ router.delete("/:id", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete transaction",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete transaction",
+      error: error.message,
+    });
   }
 });
 
 // =============================================================================
-// DELETE /bulk-delete
+// DELETE / — bulk delete
 // =============================================================================
-router.delete("/bulk-delete", async (req, res) => {
+router.delete("/", async (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0)
     return res.status(400).json({ success: false, message: "No IDs provided" });
+
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -1158,13 +1270,12 @@ router.delete("/bulk-delete", async (req, res) => {
     if (invalid.length) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: `Invalid IDs: ${invalid.join(", ")}`,
-        });
+      return res.status(400).json({
+        success: false,
+        message: `Invalid IDs: ${invalid.join(", ")}`,
+      });
     }
+
     const txs = await Transaction.find({ _id: { $in: ids } }).session(session);
     if (!txs.length) {
       await session.abortTransaction();
@@ -1173,14 +1284,17 @@ router.delete("/bulk-delete", async (req, res) => {
         .status(404)
         .json({ success: false, message: "No transactions found" });
     }
+
     for (const tx of txs) {
       await adjustBalances(tx, session, true);
       await updateSaleFromTransaction(tx, session, false);
       await updateMRCashOnCreditCollection(tx, session, false);
     }
+
     const result = await Transaction.deleteMany({ _id: { $in: ids } }).session(
       session,
     );
+
     await session.commitTransaction();
     session.endSession();
     res.json({
@@ -1190,13 +1304,11 @@ router.delete("/bulk-delete", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete transactions",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete transactions",
+      error: error.message,
+    });
   }
 });
 

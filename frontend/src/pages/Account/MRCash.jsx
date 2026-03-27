@@ -31,6 +31,9 @@ function MRCash() {
   const [totalCount, setTotalCount] = useState(0);
   const [activeTab, setActiveTab] = useState("carry");
 
+  // FIX: combined cash map: normalizedMrName → combinedTotal
+  const [combinedCashMap, setCombinedCashMap] = useState({});
+
   const [totals, setTotals] = useState({
     totalCurrentCash: 0,
     totalTransferred: 0,
@@ -69,14 +72,16 @@ function MRCash() {
   const [destinationOptions, setDestinationOptions] = useState([]);
   const [destinationsLoading, setDestinationsLoading] = useState(false);
 
-  // ── Credit Collection modal state ────────────────────────────────────────
   const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
   const [creditInvoices, setCreditInvoices] = useState([]);
   const [creditInvoicesLoading, setCreditInvoicesLoading] = useState(false);
   const [selectedMrForCredit, setSelectedMrForCredit] = useState(null);
   const [collectingInvoiceId, setCollectingInvoiceId] = useState(null);
 
-  // ── Edit Credit Invoice modal state ──────────────────────────────────────
+  const [creditModalTab, setCreditModalTab] = useState("collection");
+  const [saleSummaries, setSaleSummaries] = useState([]);
+  const [saleSummariesLoading, setSaleSummariesLoading] = useState(false);
+
   const [isEditCreditModalOpen, setIsEditCreditModalOpen] = useState(false);
   const [editingCreditInvoice, setEditingCreditInvoice] = useState(null);
   const [editCreditForm, setEditCreditForm] = useState({
@@ -88,7 +93,7 @@ function MRCash() {
 
   const inputRef = useRef(null);
 
-  // ─── helpers ───────────────────────────────────────────────────────────────
+  // ─── helpers ────────────────────────────────────────────────────────────────
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return "$0.00";
     return new Intl.NumberFormat("en-US", {
@@ -130,7 +135,13 @@ function MRCash() {
     return null;
   };
 
-  // ─── data fetching ─────────────────────────────────────────────────────────
+  // FIX: helper to get combined cash for a record
+  const getCombinedCash = (record) => {
+    const key = (record.mrName || "").toLowerCase().trim();
+    return combinedCashMap[key] ?? record.currentCash;
+  };
+
+  // ─── data fetching ──────────────────────────────────────────────────────────
   const fetchDestinations = useCallback(async () => {
     try {
       setDestinationsLoading(true);
@@ -192,6 +203,24 @@ function MRCash() {
       setTransferHistory([]);
     } finally {
       setTransferHistoryLoading(false);
+    }
+  }, []);
+
+  // FIX: fetch combined cash summary (collection + sale paid per MR)
+  const fetchCombinedCashSummary = useCallback(async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/mr-cash/combined-cash-summary`,
+      );
+      if (response.data.success) {
+        const map = {};
+        (response.data.data || []).forEach((item) => {
+          map[item.mrNameKey] = item.combinedTotal;
+        });
+        setCombinedCashMap(map);
+      }
+    } catch (error) {
+      console.error("Error fetching combined cash summary:", error);
     }
   }, []);
 
@@ -262,14 +291,20 @@ function MRCash() {
     fetchAllMRCashes();
     fetchMRList();
     fetchDestinations();
-  }, [fetchAllMRCashes, fetchMRList, fetchDestinations]);
+    fetchCombinedCashSummary(); // FIX: load combined totals on mount
+  }, [
+    fetchAllMRCashes,
+    fetchMRList,
+    fetchDestinations,
+    fetchCombinedCashSummary,
+  ]);
 
   useEffect(() => {
     const timer = setTimeout(() => handleSearch(), 500);
     return () => clearTimeout(timer);
   }, [searchTerm, handleSearch]);
 
-  // ─── action handlers ───────────────────────────────────────────────────────
+  // ─── action handlers ────────────────────────────────────────────────────────
   const handleAdd = () => {
     setFormData({
       mrCashId: "",
@@ -418,6 +453,7 @@ function MRCash() {
         fetchAllMRCashes();
         fetchMRList();
         fetchDestinations();
+        fetchCombinedCashSummary(); // FIX: refresh combined totals
       }
     } catch (error) {
       showToast(
@@ -459,6 +495,7 @@ function MRCash() {
         fetchAllMRCashes();
         fetchMRList();
         fetchDestinations();
+        fetchCombinedCashSummary(); // FIX: refresh combined totals
       }
     } catch (error) {
       showToast(
@@ -498,6 +535,7 @@ function MRCash() {
         fetchAllMRCashes();
         fetchMRList();
         fetchDestinations();
+        fetchCombinedCashSummary(); // FIX: refresh combined totals
         if (selectedRecord) fetchTransferHistory(selectedRecord._id);
       }
     } catch (error) {
@@ -526,6 +564,7 @@ function MRCash() {
           fetchAllMRCashes();
           fetchMRList();
           fetchDestinations();
+          fetchCombinedCashSummary(); // FIX: refresh combined totals
           if (selectedRecord) fetchTransferHistory(selectedRecord._id);
         }
       } catch (error) {
@@ -552,7 +591,7 @@ function MRCash() {
     filterAndPaginateData(allMRCashes, newPage, activeTab, searchTerm);
   };
 
-  // ─── Credit Collection helpers ─────────────────────────────────────────────
+  // ─── Credit Collection helpers ──────────────────────────────────────────────
   const fetchCreditCollectionInvoices = async (mrName) => {
     try {
       setCreditInvoicesLoading(true);
@@ -575,20 +614,45 @@ function MRCash() {
     }
   };
 
+  const fetchSaleSummaries = async (mrName) => {
+    try {
+      setSaleSummariesLoading(true);
+      const response = await axios.get(
+        `${backendUrl}/api/mr-cash/sales-by-mr/${encodeURIComponent(mrName)}`,
+      );
+      if (response.data.success) {
+        setSaleSummaries(response.data.data || []);
+      } else {
+        showToast("error", "Failed to load sale summaries");
+      }
+    } catch (error) {
+      console.error("Error fetching sale summaries:", error);
+      showToast(
+        "error",
+        error.response?.data?.message || "Error loading sales",
+      );
+    } finally {
+      setSaleSummariesLoading(false);
+    }
+  };
+
   const openCreditModal = (record) => {
     setSelectedMrForCredit(record);
+    setCreditModalTab("collection");
     fetchCreditCollectionInvoices(record.mrName);
+    fetchSaleSummaries(record.mrName);
     setIsCreditModalOpen(true);
   };
 
   const closeCreditModal = () => {
     setIsCreditModalOpen(false);
     setCreditInvoices([]);
+    setSaleSummaries([]);
     setSelectedMrForCredit(null);
     setCollectingInvoiceId(null);
+    setCreditModalTab("collection");
   };
 
-  // ─── Credit Invoice Edit ───────────────────────────────────────────────────
   const handleEditCreditInvoice = (inv) => {
     setEditingCreditInvoice(inv);
     setEditCreditForm({
@@ -610,13 +674,6 @@ function MRCash() {
     }
   };
 
-  /**
-   * PUT /api/mr-cash/credit-collection-invoices/:id
-   * Backend:
-   *   difference = newAmount - oldAmount
-   *   mrCash.currentCash += difference
-   *   sale.paidAmount += difference → recalculates dueAmount, paymentStatus, pendingAmountPaid
-   */
   const handleSubmitEditCreditInvoice = async (e) => {
     e.preventDefault();
     const newAmount = parseFloat(editCreditForm.amount);
@@ -636,7 +693,6 @@ function MRCash() {
         },
       );
       if (response.data.success) {
-        // Show sale update info in toast if available
         const saleInfo = response.data.data?.sale;
         const msg = saleInfo
           ? `Invoice updated. MR cash adjusted. Sale: paid ${formatCurrency(saleInfo.paidAmount)}, due ${formatCurrency(saleInfo.dueAmount)} (${saleInfo.paymentStatus})`
@@ -648,6 +704,7 @@ function MRCash() {
           fetchCreditCollectionInvoices(selectedMrForCredit.mrName);
         fetchAllMRCashes();
         fetchMRList();
+        fetchCombinedCashSummary(); // FIX: refresh combined totals
       }
     } catch (error) {
       showToast(
@@ -659,13 +716,6 @@ function MRCash() {
     }
   };
 
-  /**
-   * DELETE /api/mr-cash/credit-collection-invoices/:id
-   * Backend:
-   *   mrCash.currentCash -= collectedAmount
-   *   sale.paidAmount -= collectedAmount → recalculates dueAmount, paymentStatus, pendingAmountPaid
-   *   pendingAmountPaid = "pending" → sale reappears in outstanding report
-   */
   const handleDeleteCreditInvoice = async (inv) => {
     const invoiceNo = inv.invoiceNumber || inv.invoiceNo || "this invoice";
     const amount = getSafeAmount(inv);
@@ -692,6 +742,7 @@ function MRCash() {
             fetchCreditCollectionInvoices(selectedMrForCredit.mrName);
           fetchAllMRCashes();
           fetchMRList();
+          fetchCombinedCashSummary(); // FIX: refresh combined totals
         }
       } catch (error) {
         showToast(
@@ -795,7 +846,7 @@ function MRCash() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Main Tabs */}
       <div className="mb-6 border-b border-gray-200">
         <div className="flex space-x-4">
           <button
@@ -843,27 +894,25 @@ function MRCash() {
           <table className="w-full min-w-max">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="py-3 px-4 text-center">
-                  <span>MR Name</span>
-                </th>
+                <th className="py-3 px-4 text-center">MR Name</th>
                 {activeTab === "carry" ? (
                   <>
+                    {/* FIX: Column header explains the combined value */}
                     <th className="py-3 px-4 text-center">
-                      <span>Current Cash</span>
+                      Current Cash
+                      <div className="text-xs font-normal text-gray-400">
+                        Collection + Sale Paid
+                      </div>
                     </th>
-                    <th className="py-3 px-4 text-center">
-                      <span>Last Transfer</span>
-                    </th>
+                    <th className="py-3 px-4 text-center">Last Transfer</th>
                     <th className="py-3 px-4 text-center">Actions</th>
                   </>
                 ) : (
                   <>
                     <th className="py-3 px-4 text-center">
-                      <span>Transferred to Admin</span>
+                      Transferred to Admin
                     </th>
-                    <th className="py-3 px-4 text-center">
-                      <span>Last Transfer</span>
-                    </th>
+                    <th className="py-3 px-4 text-center">Last Transfer</th>
                     <th className="py-3 px-4 text-center">Actions</th>
                   </>
                 )}
@@ -894,9 +943,12 @@ function MRCash() {
                     {activeTab === "carry" ? (
                       <>
                         <td className="py-3 px-4 text-center">
+                          {/* FIX: Show combined cash (collection + sale paid) */}
                           <div className="text-blue-700 font-semibold">
-                            {formatCurrency(record.currentCash)}
+                            {formatCurrency(getCombinedCash(record))}
                           </div>
+                          {/* Sub-breakdown hint */}
+                    
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="text-gray-700">
@@ -1006,7 +1058,7 @@ function MRCash() {
         </div>
       )}
 
-      {/* ── View Modal ─────────────────────────────────────────────────────── */}
+      {/* ══ View Modal ══ */}
       {isViewModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -1047,7 +1099,7 @@ function MRCash() {
                         Current Cash
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 font-bold text-blue-700">
-                        {formatCurrency(selectedRecord.currentCash)}
+                        {formatCurrency(getCombinedCash(selectedRecord))}
                       </p>
                     </div>
                   </div>
@@ -1118,22 +1170,22 @@ function MRCash() {
                         <table className="w-full min-w-max text-center">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className="py-3 px-4 font-medium text-gray-700">
+                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
                                 Transfer Date
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700">
+                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
                                 Amount
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700">
+                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
                                 Destination Account
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700">
+                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
                                 Notes
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700">
+                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
                                 Transferred By
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700">
+                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
                                 Actions
                               </th>
                             </tr>
@@ -1144,19 +1196,19 @@ function MRCash() {
                                 key={transfer._id}
                                 className={`hover:bg-gray-50 ${index < transferHistory.length - 1 ? "border-b" : ""}`}
                               >
-                                <td className="py-3 px-4">
+                                <td className="py-3 px-4 text-center">
                                   {formatDate(transfer.transferredAt)}
                                 </td>
-                                <td className="py-3 px-4 font-medium text-green-700">
+                                <td className="py-3 px-4 text-center font-medium text-green-700">
                                   {formatCurrency(transfer.amount)}
                                 </td>
-                                <td className="py-3 px-4 text-gray-600">
+                                <td className="py-3 px-4 text-center text-gray-600">
                                   {transfer.toAccountName || "N/A"}
                                 </td>
-                                <td className="py-3 px-4 text-gray-600">
+                                <td className="py-3 px-4 text-center text-gray-600">
                                   {transfer.notes || "N/A"}
                                 </td>
-                                <td className="py-3 px-4 text-gray-600">
+                                <td className="py-3 px-4 text-center text-gray-600">
                                   {transfer.transferredBy?.name || "System"}
                                 </td>
                                 <td className="py-3 px-4 text-center">
@@ -1206,7 +1258,7 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ── Add / Transfer to Admin Modal ──────────────────────────────────── */}
+      {/* ══ Add / Transfer to Admin Modal ══ */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1360,7 +1412,7 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ── Transfer Modal (from table row) ────────────────────────────────── */}
+      {/* ══ Transfer Modal (from table row) ══ */}
       {isTransferModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -1472,7 +1524,7 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ── Edit Transfer Modal ─────────────────────────────────────────────── */}
+      {/* ══ Edit Transfer Modal ══ */}
       {isEditTransferModalOpen &&
         editingTransfer &&
         ReactDOM.createPortal(
@@ -1563,12 +1615,12 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ── Credit Collection Invoices Modal ───────────────────────────────── */}
+      {/* ══ Credit Collection Invoices Modal ══ */}
       {isCreditModalOpen &&
         selectedMrForCredit &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center p-6 border-b">
                 <div>
                   <h2 className="text-xl font-bold text-gray-800">
@@ -1589,152 +1641,314 @@ function MRCash() {
                 </button>
               </div>
 
+              {/* Inner Tabs */}
+              <div className="px-6 pt-4 border-b border-gray-200">
+                <div className="flex space-x-1">
+                  <button
+                    onClick={() => setCreditModalTab("collection")}
+                    className={`py-2 px-6 font-medium text-sm transition-all border-b-2 -mb-px ${creditModalTab === "collection" ? "text-indigo-600 border-indigo-600 bg-indigo-50 rounded-t-lg" : "text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50 rounded-t-lg"}`}
+                  >
+                    Collection
+                    <span
+                      className={`ml-2 text-xs px-2 py-0.5 rounded-full ${creditModalTab === "collection" ? "bg-indigo-100 text-indigo-700" : "bg-gray-100 text-gray-600"}`}
+                    >
+                      {creditInvoices.length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCreditModalTab("sale")}
+                    className={`py-2 px-6 font-medium text-sm transition-all border-b-2 -mb-px ${creditModalTab === "sale" ? "text-orange-600 border-orange-500 bg-orange-50 rounded-t-lg" : "text-gray-500 border-transparent hover:text-gray-700 hover:bg-gray-50 rounded-t-lg"}`}
+                  >
+                    Sale
+                    <span
+                      className={`ml-2 text-xs px-2 py-0.5 rounded-full ${creditModalTab === "sale" ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-600"}`}
+                    >
+                      {saleSummaries.length}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
               <div className="p-6">
-                {creditInvoicesLoading ? (
-                  <div className="text-center py-12">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-3"></div>
-                    <p className="text-gray-500">Loading invoices...</p>
-                  </div>
-                ) : creditInvoices.length === 0 ? (
-                  <div className="text-center py-12">
-                    <HandCoins
-                      className="mx-auto text-gray-300 mb-3"
-                      size={48}
-                    />
-                    <p className="text-gray-500 font-medium">
-                      No credit collection invoices found
-                    </p>
-                    <p className="text-gray-400 text-sm mt-1">
-                      No Credit Collection transactions have been recorded for
-                      this MR yet.
-                    </p>
-                  </div>
-                ) : (
+                {/* COLLECTION TAB */}
+                {creditModalTab === "collection" && (
                   <>
-                    <div className="mb-4 p-3 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-between">
-                      <span className="text-sm text-indigo-700 font-medium">
-                        {creditInvoices.length} invoice
-                        {creditInvoices.length !== 1 ? "s" : ""} collected
-                      </span>
-                      <span className="text-sm text-indigo-700 font-bold">
-                        Total:{" "}
-                        {formatCurrency(
-                          creditInvoices.reduce(
-                            (sum, inv) => sum + getSafeAmount(inv),
-                            0,
-                          ),
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="py-3 px-4 text-left font-medium text-gray-700">
-                              Invoice #
-                            </th>
-                            <th className="py-3 px-4 text-left font-medium text-gray-700">
-                              Customer
-                            </th>
-                            <th className="py-3 px-4 text-left font-medium text-gray-700">
-                              Date
-                            </th>
-                            <th className="py-3 px-4 text-right font-medium text-gray-700">
-                              Amount
-                            </th>
-                            <th className="py-3 px-4 text-left font-medium text-gray-700">
-                              Account
-                            </th>
-                            <th className="py-3 px-4 text-center font-medium text-gray-700">
-                              Actions
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {creditInvoices.map((inv, index) => {
-                            const invoiceNo =
-                              inv.invoiceNumber ||
-                              inv.invoiceNo ||
-                              inv.invoice_number ||
-                              "—";
-                            const customer =
-                              inv.customerName ||
-                              inv.customer_name ||
-                              inv.customer ||
-                              "—";
-                            const rawDate =
-                              inv.date ||
-                              inv.invoiceDate ||
-                              inv.createdAt ||
-                              null;
-                            const amount = getSafeAmount(inv);
-                            const account = (() => {
-                              const dest =
-                                inv.destination || inv.destinationAccount || "";
-                              const type = inv.accountType || "";
-                              if (
-                                dest &&
-                                dest.toLowerCase() !== type.toLowerCase()
-                              )
-                                return dest;
-                              if (type) return type;
-                              if (dest) return dest;
-                              return "—";
-                            })();
-
-                            return (
-                              <tr
-                                key={inv._id || index}
-                                className="border-t hover:bg-gray-50"
-                              >
-                                <td className="py-3 px-4">
-                                  <span className="font-medium text-indigo-700">
-                                    {invoiceNo}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-4 text-gray-600">
-                                  {customer}
-                                </td>
-                                <td className="py-3 px-4 text-gray-600">
-                                  {rawDate ? formatDateShort(rawDate) : "—"}
-                                </td>
-                                <td className="py-3 px-4 text-right font-semibold text-green-700">
-                                  {formatCurrency(amount)}
-                                </td>
-                                <td className="py-3 px-4">
-                                  <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
-                                    {account}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-4 text-center">
-                                  <div className="flex items-center justify-center gap-2">
-                                    <button
-                                      onClick={() =>
-                                        handleEditCreditInvoice(inv)
-                                      }
-                                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                                      title="Edit — adjusts MR cash &amp; sale by the difference"
-                                    >
-                                      <Edit size={16} />
-                                    </button>
-                                    <button
-                                      onClick={() =>
-                                        handleDeleteCreditInvoice(inv)
-                                      }
-                                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                                      title="Delete — reverses cash &amp; restores sale to outstanding"
-                                    >
-                                      <Trash2 size={16} />
-                                    </button>
-                                  </div>
-                                </td>
+                    {creditInvoicesLoading ? (
+                      <div className="text-center py-12">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-3" />
+                        <p className="text-gray-500">Loading invoices...</p>
+                      </div>
+                    ) : creditInvoices.length === 0 ? (
+                      <div className="text-center py-12">
+                        <HandCoins
+                          className="mx-auto text-gray-300 mb-3"
+                          size={48}
+                        />
+                        <p className="text-gray-500 font-medium">
+                          No credit collection invoices found
+                        </p>
+                        <p className="text-gray-400 text-sm mt-1">
+                          No Credit Collection transactions have been recorded
+                          for this MR yet.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-4 p-3 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-between">
+                          <span className="text-sm text-indigo-700 font-medium">
+                            {creditInvoices.length} invoice
+                            {creditInvoices.length !== 1 ? "s" : ""} collected
+                          </span>
+                          <span className="text-sm text-indigo-700 font-bold">
+                            Total:{" "}
+                            {formatCurrency(
+                              creditInvoices.reduce(
+                                (sum, inv) => sum + getSafeAmount(inv),
+                                0,
+                              ),
+                            )}
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                  Invoice #
+                                </th>
+                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                  Customer
+                                </th>
+                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                  Date
+                                </th>
+                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                  Amount
+                                </th>
+                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                  Account
+                                </th>
+                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                  Actions
+                                </th>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                            </thead>
+                            <tbody>
+                              {creditInvoices.map((inv, index) => {
+                                const invoiceNo =
+                                  inv.invoiceNumber || inv.invoiceNo || "—";
+                                const customer =
+                                  inv.customerName ||
+                                  inv.customer_name ||
+                                  inv.customer ||
+                                  "—";
+                                const rawDate =
+                                  inv.date ||
+                                  inv.invoiceDate ||
+                                  inv.createdAt ||
+                                  null;
+                                const amount = getSafeAmount(inv);
+                                const account = (() => {
+                                  const dest =
+                                    inv.destination ||
+                                    inv.destinationAccount ||
+                                    "";
+                                  const type = inv.accountType || "";
+                                  if (
+                                    dest &&
+                                    dest.toLowerCase() !== type.toLowerCase()
+                                  )
+                                    return dest;
+                                  if (type) return type;
+                                  if (dest) return dest;
+                                  return "—";
+                                })();
+                                return (
+                                  <tr
+                                    key={inv._id || index}
+                                    className="border-t hover:bg-gray-50"
+                                  >
+                                    <td className="py-3 px-4 text-center">
+                                      <span className="font-medium text-indigo-700">
+                                        {invoiceNo}
+                                      </span>
+                                    </td>
+                                    <td className="py-3 px-4 text-center text-gray-600">
+                                      {customer}
+                                    </td>
+                                    <td className="py-3 px-4 text-center text-gray-600">
+                                      {rawDate ? formatDateShort(rawDate) : "—"}
+                                    </td>
+                                    <td className="py-3 px-4 text-center font-semibold text-green-700">
+                                      {formatCurrency(amount)}
+                                    </td>
+                                    <td className="py-3 px-4 text-center">
+                                      <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+                                        {account}
+                                      </span>
+                                    </td>
+                                    <td className="py-3 px-4 text-center">
+                                      <div className="flex items-center justify-center gap-2">
+                                        <button
+                                          onClick={() =>
+                                            handleEditCreditInvoice(inv)
+                                          }
+                                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                                          title="Edit"
+                                        >
+                                          <Edit size={16} />
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            handleDeleteCreditInvoice(inv)
+                                          }
+                                          className="text-red-600 hover:text-red-800 cursor-pointer"
+                                          title="Delete"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {/* SALE TAB */}
+                {creditModalTab === "sale" && (
+                  <>
+                    {saleSummariesLoading ? (
+                      <div className="text-center py-12">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto mb-3" />
+                        <p className="text-gray-500">Loading sales...</p>
+                      </div>
+                    ) : saleSummaries.length === 0 ? (
+                      <div className="text-center py-12">
+                        <DollarSign
+                          className="mx-auto text-gray-300 mb-3"
+                          size={48}
+                        />
+                        <p className="text-gray-500 font-medium">
+                          No Cash / Paid sales this month
+                        </p>
+                        <p className="text-gray-400 text-sm mt-1">
+                          No matching sales were found for this MR in the
+                          current month.
+                        </p>
+                      </div>
+                    ) : (
+                      (() => {
+                        const totalPaid = saleSummaries.reduce(
+                          (sum, s) => sum + (s.paidAmount || 0),
+                          0,
+                        );
+                        return (
+                          <>
+                            <div className="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-100 flex items-center justify-between">
+                              <span className="text-sm text-orange-700 font-medium">
+                                {saleSummaries.length} sale
+                                {saleSummaries.length !== 1 ? "s" : ""} in{" "}
+                                {new Date().toLocaleString("default", {
+                                  month: "long",
+                                  year: "numeric",
+                                })}
+                                &nbsp;·&nbsp;
+                                <span className="text-green-700">
+                                  Paid: {formatCurrency(totalPaid)}
+                                </span>
+                              </span>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                      Invoice #
+                                    </th>
+                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                      Customer
+                                    </th>
+                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                      Date
+                                    </th>
+                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                      Total
+                                    </th>
+                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                      Paid
+                                    </th>
+                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                      Status
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {saleSummaries.map((sale, index) => {
+                                    const collectedSet = new Set(
+                                      creditInvoices.map((inv) =>
+                                        String(
+                                          inv.invoiceNumber ||
+                                            inv.invoiceNo ||
+                                            "",
+                                        ),
+                                      ),
+                                    );
+                                    const isCollected = collectedSet.has(
+                                      String(sale.invoiceNumber),
+                                    );
+                                    return (
+                                      <tr
+                                        key={sale._id || index}
+                                        className={`border-t hover:bg-gray-50 ${isCollected ? "bg-green-50" : ""}`}
+                                      >
+                                        <td className="py-3 px-4 text-center">
+                                          <span className="font-medium text-orange-700">
+                                            {sale.invoiceNumber || "—"}
+                                          </span>
+                                          {isCollected && (
+                                            <span className="ml-2 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full">
+                                              collected
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-3 px-4 text-center text-gray-600">
+                                          {sale.customerName || "—"}
+                                        </td>
+                                        <td className="py-3 px-4 text-center text-gray-600">
+                                          {formatDateShort(
+                                            sale.invoiceDate ||
+                                              sale.recordingDate,
+                                          )}
+                                        </td>
+                                        <td className="py-3 px-4 text-center font-medium text-gray-700">
+                                          {formatCurrency(sale.totalAmount)}
+                                        </td>
+                                        <td className="py-3 px-4 text-center font-medium text-green-700">
+                                          {formatCurrency(sale.paidAmount)}
+                                        </td>
+                                        <td className="py-3 px-4 text-center">
+                                          <span
+                                            className={`px-2 py-0.5 rounded-full text-xs font-medium ${sale.paymentStatus === "Paid" || sale.paymentStatus === "Cash" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
+                                          >
+                                            {sale.paymentStatus || "—"}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        );
+                      })()
+                    )}
                   </>
                 )}
               </div>
@@ -1752,7 +1966,7 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ── Edit Credit Invoice Modal ──────────────────────────────────────── */}
+      {/* ══ Edit Credit Invoice Modal ══ */}
       {isEditCreditModalOpen &&
         editingCreditInvoice &&
         ReactDOM.createPortal(
@@ -1782,13 +1996,10 @@ function MRCash() {
                   <X size={24} />
                 </button>
               </div>
-
-              {/* Cash & Sale impact note */}
               <div className="mx-6 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                 ⚠️ Changing the amount adjusts this MR's current cash <b>and</b>{" "}
                 updates the sale's paid/due amounts in the outstanding report.
               </div>
-
               <form
                 onSubmit={handleSubmitEditCreditInvoice}
                 className="p-6 space-y-4"

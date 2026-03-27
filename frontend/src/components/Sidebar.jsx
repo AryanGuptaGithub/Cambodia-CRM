@@ -57,154 +57,113 @@ import {
   RefreshCw,
   BanknoteIcon,
   ReceiptText,
+  X,
+  Menu,
 } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 // Complete mapping dictionary for tab labels
 const tabLabelMap = {
-  // Reports tab IDs
-  reports_dailyreport: 'Daily Report',
-  reports_averageprice: 'Average Price',
-  reports_newcustomeraddition: 'New Customer Addition',
-  reports_masterCustomerReports: 'Master Customer Report',
-  reports_monthlyrepeatrate: 'Monthly Repeat Rate',
-  reports_annualrepeatrate: 'Annual Repeat Rate',
-  reports_productreport: 'Product Report',
-  reports_mrwiseoutstanding: 'MR Wise Outstanding',
-  reports_mrwisesales: 'MR Wise Sales',
-  reports_cashsales: 'Cash Sales',
-  reports_outstandingcollection: 'Outstanding Collection',
-  reports_totalexpense: 'Total Expense',
-  reports_remittance: 'Remittance',
-  reports_provincewisesale: 'Province Wise Sale',
-  reports_provincewisecustomer: 'Province Wise Customer',
-  reports_profitloss: 'Profit Loss',
-  reports_financeReports: 'Finance Reports',
-  reports_reportsinhand: 'Reports in Hand',
-  reports_salesummary: 'Sale Summary',
-  reports_dailysample: 'Daily Sample',
-  reports_expirystock: 'Expiry Stock',
-  
-  // Master Customer Report sub-tabs
-  masterCustomerReports_retention: 'Customer Retention Rate',
-  masterCustomerReports_acceptance: 'Product Acceptance Rate',
-  masterCustomerReports_zonewise: 'Zone Wise Customers',
-  
-  // Finance Reports sub-tabs
-  financeReports_salessalary: 'Sales Salary Ratio',
-  financeReports_salarycogs: 'Salary COGS Ratio',
-  financeReports_operationcostcogs: 'Operation Cost COGS Ratio',
-  financeReports_operationcostsales: 'Operation Cost Sales Ratio',
-  financeReports_tourexpensesales: 'Tour Expense Sales Ratio',
-  
-  // Other main tabs
-  dashboard: 'Dashboard',
-  master: 'Master',
-  settings: 'Settings',
-  products: 'Product Manager',
-  purchase: 'Purchase',
-  sales: 'Sales',
-  stockAdjustment: 'Stock Adjustment',
-  stockTransfer: 'Stock Transfer',
-  mrCarryStock: 'MR Carry Stock',
-  accounts: 'Accounts',
-  expense: 'Expense',
-  reports: 'Reports',
-  staff: 'Staff',
-  utility: 'Utility',
-  onlineOrders: 'Online Orders',
-  hrm: 'HRM',
-  
-  // Master sub-tabs
-  master_customers: 'Customers',
-  master_suppliers: 'Suppliers',
-  
-  // Products sub-tabs
-  products_products: 'Products',
-  products_pricelist: 'Price List',
-  
-  // Purchase sub-tabs
-  purchase_purchase: 'Purchase',
-  purchase_purchasereturn: 'Purchase Return',
-  purchase_purchaseout: 'Purchase Out',
-  
-  // Sales sub-tabs
-  sales_sale: 'Sale',
-  sales_salereturn: 'Sale Return',
-  
-  // Expense sub-tabs
-  expense_categories: 'Expense Categories',
-  expense_expenses: 'Expenses',
-  
-  // MR Carry Stock sub-tabs
-  mrCarryStock_carrystockview: 'Carry Stock View',
-  mrCarryStock_stockreturn: 'Stock Return',
-  
-  // Accounts sub-tabs
-  accounts_cashbank: 'Cash & Bank',
-  accounts_mrcash: 'MR Cash',
-  
-  // HRM sub-tabs
-  hrm_dashboard: 'Dashboard',
-  hrm_holidays: 'Holidays',
-  hrm_leaveattendance: 'Leave & Attendance',
-  hrm_payroll: 'Payroll',
-  hrm_mrbasicpayroll: 'MR Basic Payroll',
-  
-  // Utility sub-tabs
-  utility_companyprofile: 'Company Profile',
-  utility_tabhideview: 'Tab Hide and Show',
-  
-  // Settings sub-tabs
-  settings_companyprofile: 'Company Profile',
-  settings_tabmanipulation: 'Tab Manipulation',
+  reports_dailyreport: "Daily Report",
+  reports_averageprice: "Average Price",
+  reports_newcustomeraddition: "New Customer Addition",
+  reports_masterCustomerReports: "Master Customer Report",
+  reports_monthlyrepeatrate: "Monthly Repeat Rate",
+  reports_annualrepeatrate: "Annual Repeat Rate",
+  reports_productreport: "Product Report",
+  reports_mrwiseoutstanding: "MR Wise Outstanding",
+  reports_mrwisesales: "MR Wise Sales",
+  reports_cashsales: "Cash Sales",
+  reports_outstandingcollection: "Outstanding Collection",
+  reports_totalexpense: "Total Expense",
+  reports_remittance: "Remittance",
+  reports_provincewisesale: "Province Wise Sale",
+  reports_provincewisecustomer: "Province Wise Customer",
+  reports_profitloss: "Profit Loss",
+  reports_financeReports: "Finance Reports",
+  reports_reportsinhand: "Reports in Hand",
+  reports_salesummary: "Sale Summary",
+  reports_dailysample: "Daily Sample",
+  reports_expirystock: "Expiry Stock",
+  masterCustomerReports_retention: "Customer Retention Rate",
+  masterCustomerReports_acceptance: "Product Acceptance Rate",
+  masterCustomerReports_zonewise: "Zone Wise Customers",
+  financeReports_salessalary: "Sales Salary Ratio",
+  financeReports_salarycogs: "Salary COGS Ratio",
+  financeReports_operationcostcogs: "Operation Cost COGS Ratio",
+  financeReports_operationcostsales: "Operation Cost Sales Ratio",
+  financeReports_tourexpensesales: "Tour Expense Sales Ratio",
+  dashboard: "Dashboard",
+  master: "Master",
+  settings: "Settings",
+  products: "Product Manager",
+  purchase: "Purchase",
+  sales: "Sales",
+  stockAdjustment: "Stock Adjustment",
+  stockTransfer: "Stock Transfer",
+  mrCarryStock: "MR Carry Stock",
+  accounts: "Accounts",
+  expense: "Expense",
+  reports: "Reports",
+  staff: "Staff",
+  utility: "Utility",
+  onlineOrders: "Online Orders",
+  hrm: "HRM",
+  master_customers: "Customers",
+  master_suppliers: "Suppliers",
+  products_products: "Products",
+  products_pricelist: "Price List",
+  purchase_purchase: "Purchase",
+  purchase_purchasereturn: "Purchase Return",
+  purchase_purchaseout: "Purchase Out",
+  sales_sale: "Sale",
+  sales_salereturn: "Sale Return",
+  expense_categories: "Expense Categories",
+  expense_expenses: "Expenses",
+  mrCarryStock_carrystockview: "Carry Stock View",
+  mrCarryStock_stockreturn: "Stock Return",
+  accounts_cashbank: "Cash & Bank",
+  accounts_mrcash: "MR Cash",
+  hrm_dashboard: "Dashboard",
+  hrm_holidays: "Holidays",
+  hrm_leaveattendance: "Leave & Attendance",
+  hrm_payroll: "Payroll",
+  hrm_mrbasicpayroll: "MR Basic Payroll",
+  utility_companyprofile: "Company Profile",
+  utility_tabhideview: "Tab Hide and Show",
+  settings_companyprofile: "Company Profile",
+  settings_tabmanipulation: "Tab Manipulation",
 };
 
-// Helper function to format tab labels using mapping dictionary
 const formatTabLabel = (tabId) => {
-  // First check the mapping dictionary
-  if (tabLabelMap[tabId]) {
-    return tabLabelMap[tabId];
-  }
-  
-  // Fallback for unmapped labels
-  const parts = tabId.split('_');
+  if (tabLabelMap[tabId]) return tabLabelMap[tabId];
+  const parts = tabId.split("_");
   const label = parts.length > 1 ? parts[1] : parts[0];
-  
-  // Add spaces before capital letters
-  let formatted = label.replace(/([a-z])([A-Z])/g, '$1 $2');
-  
-  // Capitalize first letter of each word
+  let formatted = label.replace(/([a-z])([A-Z])/g, "$1 $2");
   formatted = formatted
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-  
-  // Handle acronyms
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
   formatted = formatted
-    .replace(/\bMr\b/gi, 'MR')
-    .replace(/\bCogs\b/gi, 'COGS')
-    .replace(/\bPl\b/gi, 'PL')
-    .replace(/\bHrm\b/gi, 'HRM')
-    .replace(/\bMrcash\b/gi, 'MR Cash');
-  
+    .replace(/\bMr\b/gi, "MR")
+    .replace(/\bCogs\b/gi, "COGS")
+    .replace(/\bPl\b/gi, "PL")
+    .replace(/\bHrm\b/gi, "HRM")
+    .replace(/\bMrcash\b/gi, "MR Cash");
   return formatted;
 };
 
-// API service for tab management
 const tabService = {
   async getVisibleTabs() {
     try {
       const response = await fetch(`${backendUrl}/api/h-tabs/visible`);
-      if (!response.ok) {
+      if (!response.ok)
         throw new Error(`HTTP error! status: ${response.status}`);
-      }
       const data = await response.json();
       if (Array.isArray(data.data) || Array.isArray(data)) {
         const tabsArray = Array.isArray(data.data) ? data.data : data;
         const transformed = {};
-
         tabsArray.forEach((tab) => {
           if (tab.tabId && tab.isVisible !== undefined) {
             transformed[tab.tabId] = {
@@ -213,14 +172,9 @@ const tabService = {
             };
           }
         });
-
         return transformed;
       }
-
-      if (data.data && typeof data.data === "object") {
-        return data.data;
-      }
-
+      if (data.data && typeof data.data === "object") return data.data;
       return data.data || {};
     } catch (error) {
       return this.getDefaultVisibleTabs();
@@ -231,16 +185,11 @@ const tabService = {
     try {
       const response = await fetch(`${backendUrl}/api/h-tabs/visibility`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ updates: tabUpdates }),
       });
-
-      if (!response.ok) {
+      if (!response.ok)
         throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       return await response.json();
     } catch (error) {
       throw error;
@@ -249,7 +198,6 @@ const tabService = {
 
   getDefaultVisibleTabs() {
     return {
-      // Main tabs
       dashboard: { visible: true, sequence: 1 },
       master: { visible: true, sequence: 2 },
       settings: { visible: true, sequence: 3 },
@@ -266,51 +214,33 @@ const tabService = {
       utility: { visible: true, sequence: 14 },
       onlineOrders: { visible: true, sequence: 15 },
       hrm: { visible: true, sequence: 16 },
-
-      // Master sub-tabs
       master_customers: { visible: true, sequence: 1 },
       master_suppliers: { visible: true, sequence: 2 },
-
-      // Products sub-tabs
       products_products: { visible: true, sequence: 1 },
       products_pricelist: { visible: true, sequence: 2 },
-
-      // Purchase sub-tabs
       purchase_purchase: { visible: true, sequence: 1 },
       purchase_purchasereturn: { visible: true, sequence: 2 },
       purchase_purchaseout: { visible: true, sequence: 3 },
-
-      // Sales sub-tabs
       sales_sale: { visible: true, sequence: 1 },
       sales_salereturn: { visible: true, sequence: 2 },
-
-      // Expense sub-tabs
       expense_categories: { visible: true, sequence: 1 },
       expense_expenses: { visible: true, sequence: 2 },
-
-      // MR Carry Stock sub-tabs
       mrCarryStock_carrystockview: { visible: true, sequence: 1 },
       mrCarryStock_stockreturn: { visible: true, sequence: 2 },
-
-      // Accounts sub-tabs
       accounts_cashbank: { visible: true, sequence: 1 },
       accounts_mrcash: { visible: true, sequence: 2 },
-
-      // HRM sub-tabs
       hrm_dashboard: { visible: true, sequence: 1 },
       hrm_holidays: { visible: true, sequence: 2 },
       hrm_leaveattendance: { visible: true, sequence: 3 },
       hrm_payroll: { visible: true, sequence: 4 },
       hrm_mrbasicpayroll: { visible: true, sequence: 5 },
-
-      // Reports sub-tabs
       reports_dailyreport: { visible: true, sequence: 1 },
       reports_averageprice: { visible: true, sequence: 2 },
       reports_newcustomeraddition: { visible: true, sequence: 3 },
       reports_masterCustomerReports: { visible: true, sequence: 4 },
       reports_monthlyrepeatrate: { visible: true, sequence: 5 },
       reports_annualrepeatrate: { visible: true, sequence: 6 },
-      reports_productreport: { productReports: true, sequence: 7 },
+      reports_productreport: { visible: true, sequence: 7 },
       reports_mrwiseoutstanding: { visible: true, sequence: 8 },
       reports_mrwisesales: { visible: true, sequence: 9 },
       reports_cashsales: { visible: true, sequence: 10 },
@@ -325,13 +255,9 @@ const tabService = {
       reports_salesummary: { visible: true, sequence: 19 },
       reports_dailysample: { visible: true, sequence: 20 },
       reports_expirystock: { visible: true, sequence: 21 },
-
-      // Master Customer Report sub-tabs
       masterCustomerReports_retention: { visible: true, sequence: 1 },
       masterCustomerReports_acceptance: { visible: true, sequence: 2 },
       masterCustomerReports_zonewise: { visible: true, sequence: 3 },
-
-      // Finance Reports sub-tabs
       financeReports_salessalary: { visible: true, sequence: 1 },
       financeReports_salarycogs: { visible: true, sequence: 2 },
       financeReports_operationcostcogs: { visible: true, sequence: 3 },
@@ -341,20 +267,16 @@ const tabService = {
   },
 };
 
-// MR Carry Stock paths
 const mrCarryStockPaths = [
   "/mrcarrystocklayout/carrystockview",
   "/mrcarrystocklayout/stockreturn",
 ];
-
-// Path constants
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
 const purchasePaths = [
   "/purchaselayout/purchase",
   "/purchaselayout/purchasereturn",
   "/purchaselayout/purchaseout",
 ];
-
 const productPaths = [
   "/productmanagerlayout/brands",
   "/productmanagerlayout/categories",
@@ -362,34 +284,24 @@ const productPaths = [
   "/productmanagerlayout/pricelist",
   "/productmanagerlayout/printbarcode",
 ];
-
-// FIXED: HRM paths - Changed from hyphenated to camelCase to match App.jsx route
 const hrmPaths = [
   "/hrmlayout/dashboard",
   "/hrmlayout/holidays",
   "/hrmlayout/leaveattendance",
   "/hrmlayout/payroll",
-  "/hrmlayout/mrbasicpayroll",  // FIXED: Changed from /mr-basic-payroll to /mrbasicpayroll
+  "/hrmlayout/mrbasicpayroll",
 ];
-
 const salesPaths = [
   "/salelayout/sale",
   "/salelayout/salereturn",
   "/salelayout/payment",
   "/salelayout/quotation",
 ];
-
 const expensePaths = [
   "/expenselayout/expensecategories",
   "/expenselayout/expenses",
 ];
-
-// Accounts paths
-const accountPaths = [
-  "/accountlayout",
-  "/accountlayout/mrcash"
-];
-
+const accountPaths = ["/accountlayout", "/accountlayout/mrcash"];
 const reportPaths = [
   "/reportlayout/dailyreport",
   "/reportlayout/averageprice",
@@ -423,8 +335,6 @@ const reportPaths = [
   "/reportlayout/product-report",
   "/reportlayout/expiry-stock-report",
 ];
-
-// Finance Report paths
 const financeReportPaths = [
   "/reportlayout/sales-salary-ratio",
   "/reportlayout/salary-cogs-ratio",
@@ -432,11 +342,7 @@ const financeReportPaths = [
   "/reportlayout/operation-cost-sales-ratio",
   "/reportlayout/tour-expense-sales-ratio",
 ];
-
-// Reports in Hand paths
 const reportsInHandPaths = ["/reportlayout/reports-in-hand"];
-
-// Product Report paths
 const productReportPaths = [
   "/reportlayout/product-performance",
   "/reportlayout/stock-movement",
@@ -444,8 +350,6 @@ const productReportPaths = [
   "/reportlayout/product-profitability",
   "/reportlayout/product-report",
 ];
-
-// Master Customer Report paths
 const masterCustomerReportPaths = [
   "/reportlayout/customerretention",
   "/reportlayout/customeracceptance",
@@ -453,12 +357,10 @@ const masterCustomerReportPaths = [
   "/reportlayout/monthlyrepeatrate",
   "/reportlayout/annualrepeatrate",
 ];
-
 const settingsPaths = [
   "/settinglayout/companyprofile",
   "/settinglayout/tabHideView",
 ];
-
 const utilityPaths = [
   "/utilitylayout/companyprofile",
   "/utilitylayout/tabHideView",
@@ -466,19 +368,35 @@ const utilityPaths = [
 
 function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
   const location = useLocation();
+  const [isMobile, setIsMobile] = useState(false);
 
   const [activeParentMenu, setActiveParentMenu] = useState(null);
   const [activeSubMenu, setActiveSubMenu] = useState(null);
   const [activeFinanceSubMenu, setActiveFinanceSubMenu] = useState(null);
-  const [activeReportsInHandSubMenu, setActiveReportsInHandSubMenu] = useState(null);
-  const [activeProductReportSubMenu, setActiveProductReportSubMenu] = useState(null);
+  const [activeReportsInHandSubMenu, setActiveReportsInHandSubMenu] =
+    useState(null);
+  const [activeProductReportSubMenu, setActiveProductReportSubMenu] =
+    useState(null);
   const [visibleTabs, setVisibleTabs] = useState({});
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
 
-  const refreshTabData = React.useCallback(() => {
-    setLastUpdate(Date.now());
+  // Detect mobile
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 1024);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
   }, []);
+
+  // Close sidebar on mobile when route changes
+  useEffect(() => {
+    if (isMobile && isOpen) {
+      toggleSidebar();
+    }
+  }, [location.pathname]);
+
+  const refreshTabData = React.useCallback(() => setLastUpdate(Date.now()), []);
 
   useEffect(() => {
     const loadVisibleTabs = async () => {
@@ -487,118 +405,94 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         const tabs = await tabService.getVisibleTabs();
         setVisibleTabs(tabs);
       } catch (error) {
-        console.error("Error loading tabs:", error);
         setVisibleTabs(tabService.getDefaultVisibleTabs());
       } finally {
         setLoading(false);
       }
     };
-
     loadVisibleTabs();
   }, [lastUpdate]);
 
   useEffect(() => {
-    if (location.pathname.startsWith("/masterlayout")) {
+    if (location.pathname.startsWith("/masterlayout"))
       setActiveParentMenu("master");
-    } else if (location.pathname.startsWith("/productmanagerlayout")) {
+    else if (location.pathname.startsWith("/productmanagerlayout"))
       setActiveParentMenu("products");
-    } else if (location.pathname.startsWith("/purchaselayout")) {
+    else if (location.pathname.startsWith("/purchaselayout"))
       setActiveParentMenu("purchase");
-    } else if (location.pathname.startsWith("/salelayout")) {
+    else if (location.pathname.startsWith("/salelayout"))
       setActiveParentMenu("sales");
-    } else if (location.pathname.startsWith("/expenselayout")) {
+    else if (location.pathname.startsWith("/expenselayout"))
       setActiveParentMenu("expense");
-    } else if (location.pathname.startsWith("/reportlayout")) {
+    else if (location.pathname.startsWith("/reportlayout")) {
       setActiveParentMenu("reports");
-      if (masterCustomerReportPaths.some((path) => location.pathname.startsWith(path))) {
+      if (
+        masterCustomerReportPaths.some((p) => location.pathname.startsWith(p))
+      )
         setActiveSubMenu("masterCustomerReports");
-      }
-      if (financeReportPaths.some((path) => location.pathname.startsWith(path))) {
+      if (financeReportPaths.some((p) => location.pathname.startsWith(p)))
         setActiveFinanceSubMenu("financeReports");
-      }
-      if (reportsInHandPaths.some((path) => location.pathname.startsWith(path))) {
+      if (reportsInHandPaths.some((p) => location.pathname.startsWith(p)))
         setActiveReportsInHandSubMenu("reportsInHand");
-      }
-      if (productReportPaths.some((path) => location.pathname.startsWith(path))) {
+      if (productReportPaths.some((p) => location.pathname.startsWith(p)))
         setActiveProductReportSubMenu("productReports");
-      }
-    } else if (location.pathname.startsWith("/utilitylayout")) {
+    } else if (location.pathname.startsWith("/utilitylayout"))
       setActiveParentMenu("utility");
-    } else if (location.pathname.startsWith("/hrmlayout")) {
+    else if (location.pathname.startsWith("/hrmlayout"))
       setActiveParentMenu("hrm");
-    } else if (location.pathname.startsWith("/accountlayout")) {
+    else if (location.pathname.startsWith("/accountlayout"))
       setActiveParentMenu("accounts");
-    } else if (location.pathname.startsWith("/settingslayout")) {
+    else if (location.pathname.startsWith("/settingslayout"))
       setActiveParentMenu("settings");
-    } else if (location.pathname.startsWith("/mrcarrystocklayout")) {
+    else if (location.pathname.startsWith("/mrcarrystocklayout"))
       setActiveParentMenu("mrCarryStock");
-    } else {
-      setActiveParentMenu(null);
-    }
+    else setActiveParentMenu(null);
   }, [location.pathname]);
 
   useEffect(() => {
-    const handleTabVisibilityChange = () => {
-      refreshTabData();
-    };
-
+    const handleTabVisibilityChange = () => refreshTabData();
     window.addEventListener("tabVisibilityChanged", handleTabVisibilityChange);
-    return () => {
-      window.removeEventListener("tabVisibilityChanged", handleTabVisibilityChange);
-    };
+    return () =>
+      window.removeEventListener(
+        "tabVisibilityChanged",
+        handleTabVisibilityChange,
+      );
   }, [refreshTabData]);
 
   useEffect(() => {
     const handleStorageChange = (event) => {
-      if (event.key === "tabVisibilityUpdated") {
-        refreshTabData();
-      }
+      if (event.key === "tabVisibilityUpdated") refreshTabData();
     };
-
     window.addEventListener("storage", handleStorageChange);
-    return () => {
-      window.removeEventListener("storage", handleStorageChange);
-    };
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, [refreshTabData]);
 
   const isActive = (path) => location.pathname === path;
-  const isChildActive = (paths) => paths.some((p) => location.pathname.startsWith(p));
-
-  const toggleMenu = (menuKey) => {
+  const isChildActive = (paths) =>
+    paths.some((p) => location.pathname.startsWith(p));
+  const toggleMenu = (menuKey) =>
     setActiveParentMenu((prev) => (prev === menuKey ? null : menuKey));
-  };
-
-  const toggleSubMenu = (subMenuKey) => {
+  const toggleSubMenu = (subMenuKey) =>
     setActiveSubMenu((prev) => (prev === subMenuKey ? null : subMenuKey));
-  };
-
-  const toggleFinanceSubMenu = (subMenuKey) => {
-    setActiveFinanceSubMenu((prev) => prev === subMenuKey ? null : subMenuKey);
-  };
-
-  const toggleReportsInHandSubMenu = (subMenuKey) => {
-    setActiveReportsInHandSubMenu((prev) => prev === subMenuKey ? null : subMenuKey);
-  };
-
-  const toggleProductReportSubMenu = (subMenuKey) => {
-    setActiveProductReportSubMenu((prev) => prev === subMenuKey ? null : subMenuKey);
-  };
+  const toggleFinanceSubMenu = (subMenuKey) =>
+    setActiveFinanceSubMenu((prev) =>
+      prev === subMenuKey ? null : subMenuKey,
+    );
+  const toggleReportsInHandSubMenu = (subMenuKey) =>
+    setActiveReportsInHandSubMenu((prev) =>
+      prev === subMenuKey ? null : subMenuKey,
+    );
+  const toggleProductReportSubMenu = (subMenuKey) =>
+    setActiveProductReportSubMenu((prev) =>
+      prev === subMenuKey ? null : subMenuKey,
+    );
 
   const shouldShowTab = (tabId) => {
-    if (loading) {
-      return true;
-    }
-
+    if (loading) return true;
     const tabConfig = visibleTabs[tabId];
-
-    if (tabConfig === undefined || tabConfig === null) {
-      return false;
-    }
-
-    if (typeof tabConfig === "object" && tabConfig !== null) {
+    if (tabConfig === undefined || tabConfig === null) return false;
+    if (typeof tabConfig === "object" && tabConfig !== null)
       return tabConfig.visible === true;
-    }
-
     return tabConfig === true;
   };
 
@@ -639,63 +533,83 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         : "hover:bg-gray-600 text-gray-200"
     }`;
 
-  const getSortedTabs = (tabIds) => {
-    const filteredTabs = tabIds
-      .filter((tabId) => {
-        const shouldShow = shouldShowTab(tabId);
-        return shouldShow;
-      })
-      .sort((a, b) => {
-        const seqA = visibleTabs[a]?.sequence || 0;
-        const seqB = visibleTabs[b]?.sequence || 0;
-        return seqA - seqB;
-      });
-    return filteredTabs;
-  };
+  const getSortedTabs = (tabIds) =>
+    tabIds
+      .filter((tabId) => shouldShowTab(tabId))
+      .sort(
+        (a, b) =>
+          (visibleTabs[a]?.sequence || 0) - (visibleTabs[b]?.sequence || 0),
+      );
+
+  // On mobile: sidebar is a fixed overlay. On desktop: it's a static sidebar.
+  // isOpen controls visibility on mobile AND collapsed/expanded on desktop.
 
   if (loading) {
     return (
-      <div
-        className={`bg-gray-900 text-white transition-all duration-300 ${
-          isOpen ? "w-64" : "w-16"
-        } flex flex-col`}
-      >
-        <div className="w-full h-16 flex items-center justify-center border-b border-gray-700 bg-gray-900">
-          <img
-            src="/mainlogo.png"
-            alt="CRM Logo"
-            className={`${isOpen ? "h-10" : "h-8"} object-contain`}
-          />
+      <>
+        {/* Mobile hamburger button when sidebar is loading */}
+        {isMobile && (
+          <button
+            onClick={toggleSidebar}
+            className="fixed top-3 left-3 z-50 p-2 bg-gray-900 text-white rounded-md"
+            aria-label="Toggle menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+        <div
+          className={`
+            ${
+              isMobile
+                ? `fixed inset-y-0 left-0 z-40 w-64 transform transition-transform duration-300 ${isOpen ? "translate-x-0" : "-translate-x-full"}`
+                : `bg-gray-900 text-white transition-all duration-300 ${isOpen ? "w-64" : "w-16"} flex flex-col`
+            }
+            bg-gray-900 text-white flex flex-col
+          `}
+        >
+          <div className="w-full h-16 flex items-center justify-center border-b border-gray-700 bg-gray-900">
+            <img
+              src="/mainlogo.png"
+              alt="CRM Logo"
+              className={`${isOpen ? "h-10" : "h-8"} object-contain`}
+            />
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-gray-400">Loading...</div>
+          </div>
         </div>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-gray-400">Loading...</div>
-        </div>
-      </div>
+      </>
     );
   }
 
-  return (
-    <div
-      className={`bg-gray-900 text-white transition-all duration-300 ${
-        isOpen ? "w-64" : "w-16"
-      } flex flex-col`}
-    >
-      {/* Logo */}
-      <div className="w-full h-16 flex items-center justify-center border-b border-gray-700 bg-gray-900">
+  const sidebarContent = (
+    <div className="bg-gray-900 text-white flex flex-col h-full">
+      {/* Logo + close button on mobile */}
+      <div className="w-full h-16 flex items-center justify-between px-3 border-b border-gray-700 bg-gray-900 flex-shrink-0">
         <img
           src="/mainlogo.png"
           alt="CRM Logo"
           className={`${isOpen ? "h-10" : "h-8"} object-contain`}
         />
+        {/* Close button - only on mobile when open */}
+        {isMobile && isOpen && (
+          <button
+            onClick={toggleSidebar}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+            aria-label="Close menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 px-2 py-4 space-y-2">
+      {/* Navigation - scrollable */}
+      <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-2">
         {/* Dashboard */}
         {shouldShowTab("dashboard") && (
           <Link to="/" className={getLinkClass("/")}>
-            <Home className="w-5 h-5" />
-            {isOpen && <span className="mx-auto">Dashboard</span>}
+            <Home className="w-5 h-5 flex-shrink-0" />
+            {isOpen && <span>Dashboard</span>}
           </Link>
         )}
 
@@ -707,14 +621,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("master", masterPaths)}
             >
               <span className="flex items-center gap-3">
-                <Users className="w-5 h-5" />
+                <Users className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Master</span>}
               </span>
-              <span>{isOpen && "Master"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "master" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "master" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -725,8 +637,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     to="/masterlayout/customer"
                     className={getChildLinkClass("/masterlayout/customer")}
                   >
-                    <Users className="w-4 h-4" />
-                    <span className="mx-auto">Customers</span>
+                    <Users className="w-4 h-4 flex-shrink-0" />
+                    <span>Customers</span>
                   </Link>
                 )}
                 {shouldShowTab("master_suppliers") && (
@@ -734,8 +646,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     to="/masterlayout/supplier"
                     className={getChildLinkClass("/masterlayout/supplier")}
                   >
-                    <Truck className="w-4 h-4" />
-                    <span className="mx-auto">Suppliers</span>
+                    <Truck className="w-4 h-4 flex-shrink-0" />
+                    <span>Suppliers</span>
                   </Link>
                 )}
               </div>
@@ -754,14 +666,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               ])}
             >
               <span className="flex items-center gap-3">
-                <Settings className="w-5 h-5" />
+                <Settings className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Settings</span>}
               </span>
-              <span>{isOpen && "Settings"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "settings" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "settings" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -770,19 +680,23 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 {shouldShowTab("settings_companyprofile") && (
                   <Link
                     to="/settingslayout/company-profile"
-                    className={getChildLinkClass("/settingslayout/company-profile")}
+                    className={getChildLinkClass(
+                      "/settingslayout/company-profile",
+                    )}
                   >
-                    <Building className="w-4 h-4" />
-                    <span className="mx-auto">Company Profile</span>
+                    <Building className="w-4 h-4 flex-shrink-0" />
+                    <span>Company Profile</span>
                   </Link>
                 )}
                 {shouldShowTab("settings_tabmanipulation") && (
                   <Link
                     to="/settingslayout/tab-manipulation"
-                    className={getChildLinkClass("/settingslayout/tab-manipulation")}
+                    className={getChildLinkClass(
+                      "/settingslayout/tab-manipulation",
+                    )}
                   >
-                    <Eye className="w-4 h-4" />
-                    <span className="mx-auto">Tab Manipulation</span>
+                    <Eye className="w-4 h-4 flex-shrink-0" />
+                    <span>Tab Manipulation</span>
                   </Link>
                 )}
               </div>
@@ -798,14 +712,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("products", productPaths)}
             >
               <span className="flex items-center gap-3">
-                <Package className="w-5 h-5" />
+                <Package className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Product Manager</span>}
               </span>
-              <span>{isOpen && "Product Manager"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "products" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "products" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -813,31 +725,34 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <div className="ml-6 mt-1 space-y-1">
                 {getSortedTabs(["products_products", "products_pricelist"]).map(
                   (tabId) => {
-                    if (tabId === "products_products") {
+                    if (tabId === "products_products")
                       return (
                         <Link
                           key={tabId}
                           to="/productmanagerlayout/product"
-                          className={getChildLinkClass("/productmanagerlayout/product")}
+                          className={getChildLinkClass(
+                            "/productmanagerlayout/product",
+                          )}
                         >
-                          <Boxes className="w-4 h-4" />
-                          <span className="mx-auto">Products</span>
+                          <Boxes className="w-4 h-4 flex-shrink-0" />
+                          <span>Products</span>
                         </Link>
                       );
-                    } else if (tabId === "products_pricelist") {
+                    if (tabId === "products_pricelist")
                       return (
                         <Link
                           key={tabId}
                           to="/productmanagerlayout/pricelist"
-                          className={getChildLinkClass("/productmanagerlayout/pricelist")}
+                          className={getChildLinkClass(
+                            "/productmanagerlayout/pricelist",
+                          )}
                         >
-                          <ClipboardList className="w-4 h-4" />
-                          <span className="mx-auto">Price List</span>
+                          <ClipboardList className="w-4 h-4 flex-shrink-0" />
+                          <span>Price List</span>
                         </Link>
                       );
-                    }
                     return null;
-                  }
+                  },
                 )}
               </div>
             )}
@@ -852,14 +767,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("purchase", purchasePaths)}
             >
               <span className="flex items-center gap-3">
-                <ShoppingCart className="w-5 h-5" />
+                <ShoppingCart className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Purchase</span>}
               </span>
-              <span>{isOpen && "Purchase"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "purchase" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "purchase" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -870,41 +783,30 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "purchase_purchasereturn",
                   "purchase_purchaseout",
                 ]).map((tabId) => {
-                  if (tabId === "purchase_purchase") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/purchaselayout/purchase"
-                        className={getChildLinkClass("/purchaselayout/purchase")}
-                      >
-                        <Package className="w-4 h-4" />
-                        <span className="mx-auto">Purchase</span>
-                      </Link>
-                    );
-                  } else if (tabId === "purchase_purchasereturn") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/purchaselayout/purchasereturn"
-                        className={getChildLinkClass("/purchaselayout/purchasereturn")}
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span className="mx-auto">Purchase Return</span>
-                      </Link>
-                    );
-                  } else if (tabId === "purchase_purchaseout") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/purchaselayout/purchaseout"
-                        className={getChildLinkClass("/purchaselayout/purchaseout")}
-                      >
-                        <Truck className="w-4 h-4" />
-                        <span className="mx-auto">Purchase Out</span>
-                      </Link>
-                    );
-                  }
-                  return null;
+                  const map = {
+                    purchase_purchase: {
+                      to: "/purchaselayout/purchase",
+                      icon: Package,
+                      label: "Purchase",
+                    },
+                    purchase_purchasereturn: {
+                      to: "/purchaselayout/purchasereturn",
+                      icon: FileText,
+                      label: "Purchase Return",
+                    },
+                    purchase_purchaseout: {
+                      to: "/purchaselayout/purchaseout",
+                      icon: Truck,
+                      label: "Purchase Out",
+                    },
+                  };
+                  const { to, icon: Icon, label } = map[tabId] || {};
+                  return to ? (
+                    <Link key={tabId} to={to} className={getChildLinkClass(to)}>
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span>{label}</span>
+                    </Link>
+                  ) : null;
                 })}
               </div>
             )}
@@ -919,14 +821,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("sales", salesPaths)}
             >
               <span className="flex items-center gap-3">
-                <TrendingUp className="w-5 h-5" />
+                <TrendingUp className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Sales</span>}
               </span>
-              <span>{isOpen && "Sales"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "sales" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "sales" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -934,31 +834,30 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <div className="ml-6 mt-1 space-y-1">
                 {getSortedTabs(["sales_sale", "sales_salereturn"]).map(
                   (tabId) => {
-                    if (tabId === "sales_sale") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/salelayout/sale"
-                          className={getChildLinkClass("/salelayout/sale")}
-                        >
-                          <DollarSign className="w-4 h-4" />
-                          <span className="mx-auto">Sale</span>
-                        </Link>
-                      );
-                    } else if (tabId === "sales_salereturn") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/salelayout/salereturn"
-                          className={getChildLinkClass("/salelayout/salereturn")}
-                        >
-                          <FileText className="w-4 h-4" />
-                          <span className="mx-auto">Sale Return</span>
-                        </Link>
-                      );
-                    }
-                    return null;
-                  }
+                    const map = {
+                      sales_sale: {
+                        to: "/salelayout/sale",
+                        icon: DollarSign,
+                        label: "Sale",
+                      },
+                      sales_salereturn: {
+                        to: "/salelayout/salereturn",
+                        icon: FileText,
+                        label: "Sale Return",
+                      },
+                    };
+                    const { to, icon: Icon, label } = map[tabId] || {};
+                    return to ? (
+                      <Link
+                        key={tabId}
+                        to={to}
+                        className={getChildLinkClass(to)}
+                      >
+                        <Icon className="w-4 h-4 flex-shrink-0" />
+                        <span>{label}</span>
+                      </Link>
+                    ) : null;
+                  },
                 )}
               </div>
             )}
@@ -971,16 +870,16 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             to="/stockadjustment"
             className={getLinkClass("/stockadjustment")}
           >
-            <ListChecks className="w-5 h-5" />
-            {isOpen && <span className="mx-auto">Stock Adjustment</span>}
+            <ListChecks className="w-5 h-5 flex-shrink-0" />
+            {isOpen && <span>Stock Adjustment</span>}
           </Link>
         )}
 
         {/* Stock Transfer */}
         {shouldShowTab("stockTransfer") && (
           <Link to="/stocktransfer" className={getLinkClass("/stocktransfer")}>
-            <Truck className="w-5 h-5" />
-            {isOpen && <span className="mx-auto">Stock Transfer</span>}
+            <Truck className="w-5 h-5 flex-shrink-0" />
+            {isOpen && <span>Stock Transfer</span>}
           </Link>
         )}
 
@@ -989,17 +888,18 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           <div>
             <button
               onClick={() => toggleMenu("mrCarryStock")}
-              className={getDropdownButtonClass("mrCarryStock", mrCarryStockPaths)}
+              className={getDropdownButtonClass(
+                "mrCarryStock",
+                mrCarryStockPaths,
+              )}
             >
               <span className="flex items-center gap-3">
-                <BriefcaseMedical className="w-5 h-5" />
+                <BriefcaseMedical className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>MR Carry Stock</span>}
               </span>
-              <span>{isOpen && "MR Carry Stock"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "mrCarryStock" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "mrCarryStock" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -1009,35 +909,25 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "mrCarryStock_carrystockview",
                   "mrCarryStock_stockreturn",
                 ]).map((tabId) => {
-                  const linkMap = {
-                    mrCarryStock_carrystockview: "/mrcarrystocklayout/carrystockview",
-                    mrCarryStock_stockreturn: "/mrcarrystocklayout/stockreturn",
+                  const map = {
+                    mrCarryStock_carrystockview: {
+                      to: "/mrcarrystocklayout/carrystockview",
+                      icon: Eye,
+                      label: "Carry Stock View",
+                    },
+                    mrCarryStock_stockreturn: {
+                      to: "/mrcarrystocklayout/stockreturn",
+                      icon: RefreshCw,
+                      label: "Stock Return",
+                    },
                   };
-
-                  const iconMap = {
-                    mrCarryStock_carrystockview: Eye,
-                    mrCarryStock_stockreturn: RefreshCw,
-                  };
-
-                  const labelMap = {
-                    mrCarryStock_carrystockview: "Carry Stock View",
-                    mrCarryStock_stockreturn: "Stock Return",
-                  };
-
-                  const IconComponent = iconMap[tabId];
-                  const path = linkMap[tabId];
-                  const label = labelMap[tabId];
-
-                  return (
-                    <Link
-                      key={tabId}
-                      to={path}
-                      className={getChildLinkClass(path)}
-                    >
-                      <IconComponent className="w-4 h-4" />
-                      <span className="mx-auto">{label}</span>
+                  const { to, icon: Icon, label } = map[tabId] || {};
+                  return to ? (
+                    <Link key={tabId} to={to} className={getChildLinkClass(to)}>
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span>{label}</span>
                     </Link>
-                  );
+                  ) : null;
                 })}
               </div>
             )}
@@ -1052,14 +942,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("accounts", accountPaths)}
             >
               <span className="flex items-center gap-3">
-                <Landmark className="w-5 h-5" />
+                <Landmark className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Accounts</span>}
               </span>
-              <span>{isOpen && "Accounts"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "accounts" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "accounts" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -1067,36 +955,30 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <div className="ml-6 mt-1 space-y-1">
                 {getSortedTabs(["accounts_cashbank", "accounts_mrcash"]).map(
                   (tabId) => {
-                    const linkMap = {
-                      accounts_cashbank: "/accountlayout",
-                      accounts_mrcash: "/accountlayout/mrcash",
+                    const map = {
+                      accounts_cashbank: {
+                        to: "/accountlayout",
+                        icon: Wallet,
+                        label: "Cash & Bank",
+                      },
+                      accounts_mrcash: {
+                        to: "/accountlayout/mrcash",
+                        icon: Coins,
+                        label: "MR Cash",
+                      },
                     };
-
-                    const iconMap = {
-                      accounts_cashbank: Wallet,
-                      accounts_mrcash: Coins,
-                    };
-
-                    const labelMap = {
-                      accounts_cashbank: "Cash & Bank",
-                      accounts_mrcash: "MR Cash",
-                    };
-
-                    const IconComponent = iconMap[tabId];
-                    const path = linkMap[tabId];
-                    const label = labelMap[tabId];
-
-                    return (
+                    const { to, icon: Icon, label } = map[tabId] || {};
+                    return to ? (
                       <Link
                         key={tabId}
-                        to={path}
-                        className={getChildLinkClass(path)}
+                        to={to}
+                        className={getChildLinkClass(to)}
                       >
-                        <IconComponent className="w-4 h-4" />
-                        <span className="mx-auto">{label}</span>
+                        <Icon className="w-4 h-4 flex-shrink-0" />
+                        <span>{label}</span>
                       </Link>
-                    );
-                  }
+                    ) : null;
+                  },
                 )}
               </div>
             )}
@@ -1111,14 +993,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("expense", expensePaths)}
             >
               <span className="flex items-center gap-3">
-                <FileText className="w-5 h-5" />
+                <FileText className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Expense</span>}
               </span>
-              <span>{isOpen && "Expense"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "expense" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "expense" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -1126,31 +1006,30 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <div className="ml-6 mt-1 space-y-1">
                 {getSortedTabs(["expense_categories", "expense_expenses"]).map(
                   (tabId) => {
-                    if (tabId === "expense_categories") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/expenselayout/expensecategories"
-                          className={getChildLinkClass("/expenselayout/expensecategories")}
-                        >
-                          <Layers className="w-4 h-4" />
-                          <span className="mx-auto">Expense Categories</span>
-                        </Link>
-                      );
-                    } else if (tabId === "expense_expenses") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/expenselayout/expenses"
-                          className={getChildLinkClass("/expenselayout/expenses")}
-                        >
-                          <DollarSign className="w-4 h-4" />
-                          <span className="mx-auto">Expenses</span>
-                        </Link>
-                      );
-                    }
-                    return null;
-                  }
+                    const map = {
+                      expense_categories: {
+                        to: "/expenselayout/expensecategories",
+                        icon: Layers,
+                        label: "Expense Categories",
+                      },
+                      expense_expenses: {
+                        to: "/expenselayout/expenses",
+                        icon: DollarSign,
+                        label: "Expenses",
+                      },
+                    };
+                    const { to, icon: Icon, label } = map[tabId] || {};
+                    return to ? (
+                      <Link
+                        key={tabId}
+                        to={to}
+                        className={getChildLinkClass(to)}
+                      >
+                        <Icon className="w-4 h-4 flex-shrink-0" />
+                        <span>{label}</span>
+                      </Link>
+                    ) : null;
+                  },
                 )}
               </div>
             )}
@@ -1165,18 +1044,15 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("reports", reportPaths)}
             >
               <span className="flex items-center gap-3">
-                <BarChart3 className="w-5 h-5" />
+                <BarChart3 className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Reports</span>}
               </span>
-              <span>{isOpen && "Reports"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "reports" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "reports" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
-
             {activeParentMenu === "reports" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
                 {getSortedTabs([
@@ -1202,27 +1078,25 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "reports_dailysample",
                   "reports_expirystock",
                 ]).map((tabId) => {
-                  // Handle master customer reports dropdown
-                  if (tabId === "reports_masterCustomerReports" && shouldShowTab("reports_masterCustomerReports")) {
+                  if (
+                    tabId === "reports_masterCustomerReports" &&
+                    shouldShowTab("reports_masterCustomerReports")
+                  ) {
                     return (
                       <div key={tabId}>
                         <button
                           onClick={() => toggleSubMenu("masterCustomerReports")}
                           className={getSubDropdownButtonClass(
                             "masterCustomerReports",
-                            masterCustomerReportPaths
+                            masterCustomerReportPaths,
                           )}
                         >
                           <span className="flex items-center gap-3">
-                            <Users className="w-4 h-4" />
+                            <Users className="w-4 h-4 flex-shrink-0" />
                             <span>Master Customer Report</span>
                           </span>
                           <ChevronDown
-                            className={`w-4 h-4 transform transition-transform ${
-                              activeSubMenu === "masterCustomerReports"
-                                ? "rotate-180"
-                                : ""
-                            }`}
+                            className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeSubMenu === "masterCustomerReports" ? "rotate-180" : ""}`}
                           />
                         </button>
                         {activeSubMenu === "masterCustomerReports" && (
@@ -1232,41 +1106,38 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                               "masterCustomerReports_acceptance",
                               "masterCustomerReports_zonewise",
                             ]).map((subTabId) => {
-                              if (subTabId === "masterCustomerReports_retention") {
-                                return (
-                                  <Link
-                                    key={subTabId}
-                                    to="/reportlayout/customerretention"
-                                    className={getChildLinkClass("/reportlayout/customerretention")}
-                                  >
-                                    <Repeat className="w-4 h-4" />
-                                    <span>Customer Retention Rate</span>
-                                  </Link>
-                                );
-                              } else if (subTabId === "masterCustomerReports_acceptance") {
-                                return (
-                                  <Link
-                                    key={subTabId}
-                                    to="/reportlayout/customeracceptance"
-                                    className={getChildLinkClass("/reportlayout/customeracceptance")}
-                                  >
-                                    <CheckCircle className="w-4 h-4" />
-                                    <span>Product Acceptance Rate</span>
-                                  </Link>
-                                );
-                              } else if (subTabId === "masterCustomerReports_zonewise") {
-                                return (
-                                  <Link
-                                    key={tabId}
-                                    to="/reportlayout/zonewisecustomers"
-                                    className={getChildLinkClass("/reportlayout/zonewisecustomers")}
-                                  >
-                                    <MapPin className="w-4 h-4" />
-                                    <span>Zone Wise Customers</span>
-                                  </Link>
-                                );
-                              }
-                              return null;
+                              const map = {
+                                masterCustomerReports_retention: {
+                                  to: "/reportlayout/customerretention",
+                                  icon: Repeat,
+                                  label: "Customer Retention Rate",
+                                },
+                                masterCustomerReports_acceptance: {
+                                  to: "/reportlayout/customeracceptance",
+                                  icon: CheckCircle,
+                                  label: "Product Acceptance Rate",
+                                },
+                                masterCustomerReports_zonewise: {
+                                  to: "/reportlayout/zonewisecustomers",
+                                  icon: MapPin,
+                                  label: "Zone Wise Customers",
+                                },
+                              };
+                              const {
+                                to,
+                                icon: Icon,
+                                label,
+                              } = map[subTabId] || {};
+                              return to ? (
+                                <Link
+                                  key={subTabId}
+                                  to={to}
+                                  className={getChildLinkClass(to)}
+                                >
+                                  <Icon className="w-4 h-4 flex-shrink-0" />
+                                  <span>{label}</span>
+                                </Link>
+                              ) : null;
                             })}
                           </div>
                         )}
@@ -1274,27 +1145,25 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     );
                   }
 
-                  // Handle finance reports dropdown
-                  if (tabId === "reports_financeReports" && shouldShowTab("reports_financeReports")) {
+                  if (
+                    tabId === "reports_financeReports" &&
+                    shouldShowTab("reports_financeReports")
+                  ) {
                     return (
                       <div key={tabId}>
                         <button
                           onClick={() => toggleFinanceSubMenu("financeReports")}
                           className={getFinanceSubDropdownButtonClass(
                             "financeReports",
-                            financeReportPaths
+                            financeReportPaths,
                           )}
                         >
                           <span className="flex items-center gap-3">
-                            <FileBarChart className="w-4 h-4" />
+                            <FileBarChart className="w-4 h-4 flex-shrink-0" />
                             <span>Finance Reports</span>
                           </span>
                           <ChevronDown
-                            className={`w-4 h-4 transform transition-transform ${
-                              activeFinanceSubMenu === "financeReports"
-                                ? "rotate-180"
-                                : ""
-                            }`}
+                            className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeFinanceSubMenu === "financeReports" ? "rotate-180" : ""}`}
                           />
                         </button>
                         {activeFinanceSubMenu === "financeReports" && (
@@ -1307,13 +1176,17 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                               "financeReports_tourexpensesales",
                             ]).map((subTabId) => {
                               const linkMap = {
-                                financeReports_salessalary: "/reportlayout/sales-salary-ratio",
-                                financeReports_salarycogs: "/reportlayout/salary-cogs-ratio",
-                                financeReports_operationcostcogs: "/reportlayout/operation-cost-cogs-ratio",
-                                financeReports_operationcostsales: "/reportlayout/operation-cost-sales-ratio",
-                                financeReports_tourexpensesales: "/reportlayout/tour-expense-sales-ratio",
+                                financeReports_salessalary:
+                                  "/reportlayout/sales-salary-ratio",
+                                financeReports_salarycogs:
+                                  "/reportlayout/salary-cogs-ratio",
+                                financeReports_operationcostcogs:
+                                  "/reportlayout/operation-cost-cogs-ratio",
+                                financeReports_operationcostsales:
+                                  "/reportlayout/operation-cost-sales-ratio",
+                                financeReports_tourexpensesales:
+                                  "/reportlayout/tour-expense-sales-ratio",
                               };
-
                               const iconMap = {
                                 financeReports_salessalary: Percent,
                                 financeReports_salarycogs: Scale,
@@ -1321,20 +1194,18 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                                 financeReports_operationcostsales: BarChart3,
                                 financeReports_tourexpensesales: MapPin,
                               };
-
-                              const IconComponent = iconMap[subTabId];
+                              const Icon = iconMap[subTabId];
                               const path = linkMap[subTabId];
-
-                              return (
+                              return path ? (
                                 <Link
                                   key={subTabId}
                                   to={path}
                                   className={getChildLinkClass(path)}
                                 >
-                                  <IconComponent className="w-4 h-4" />
+                                  <Icon className="w-4 h-4 flex-shrink-0" />
                                   <span>{formatTabLabel(subTabId)}</span>
                                 </Link>
-                              );
+                              ) : null;
                             })}
                           </div>
                         )}
@@ -1342,42 +1213,47 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     );
                   }
 
-                  // Handle PL report as standalone
                   if (tabId === "reports_profitloss") {
                     return (
                       <Link
                         key={tabId}
                         to="/reportlayout/profitloss"
-                        className={getChildLinkClass("/reportlayout/profitloss")}
+                        className={getChildLinkClass(
+                          "/reportlayout/profitloss",
+                        )}
                       >
-                        <DollarSign className="w-4 h-4" />
+                        <DollarSign className="w-4 h-4 flex-shrink-0" />
                         <span>Profit Loss</span>
                       </Link>
                     );
                   }
 
-                  // Handle regular report links
                   const linkMap = {
                     reports_dailyreport: "/reportlayout/dailyreport",
                     reports_averageprice: "/reportlayout/averageprice",
-                    reports_newcustomeraddition: "/reportlayout/newcustomeraddition",
-                    reports_monthlyrepeatrate: "/reportlayout/monthlyrepeatrate",
+                    reports_newcustomeraddition:
+                      "/reportlayout/newcustomeraddition",
+                    reports_monthlyrepeatrate:
+                      "/reportlayout/monthlyrepeatrate",
                     reports_annualrepeatrate: "/reportlayout/annualrepeatrate",
                     reports_productreport: "/reportlayout/product-report",
-                    reports_mrwiseoutstanding: "/reportlayout/mrwiseoutstanding",
+                    reports_mrwiseoutstanding:
+                      "/reportlayout/mrwiseoutstanding",
                     reports_mrwisesales: "/reportlayout/mrwisesales",
                     reports_cashsales: "/reportlayout/cashsales",
-                    reports_outstandingcollection: "/reportlayout/outstandingcollection",
+                    reports_outstandingcollection:
+                      "/reportlayout/outstandingcollection",
                     reports_totalexpense: "/reportlayout/totalexpense",
                     reports_remittance: "/reportlayout/remittance",
-                    reports_provincewisesale: "/reportlayout/province-wise-sale",
-                    reports_provincewisecustomer: "/reportlayout/province-wise-customer",
+                    reports_provincewisesale:
+                      "/reportlayout/province-wise-sale",
+                    reports_provincewisecustomer:
+                      "/reportlayout/province-wise-customer",
                     reports_reportsinhand: "/reportlayout/reports-in-hand",
                     reports_salesummary: "/reportlayout/salesummary",
                     reports_dailysample: "/reportlayout/dailysample",
                     reports_expirystock: "/reportlayout/expiry-stock-report",
                   };
-
                   const iconMap = {
                     reports_dailyreport: CreditCard,
                     reports_averageprice: Calculator,
@@ -1398,24 +1274,18 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     reports_dailysample: Boxes,
                     reports_expirystock: Clock,
                   };
-
-                  const IconComponent = iconMap[tabId];
+                  const Icon = iconMap[tabId];
                   const path = linkMap[tabId];
-
-                  if (IconComponent && path) {
-                    return (
-                      <Link
-                        key={tabId}
-                        to={path}
-                        className={getChildLinkClass(path)}
-                      >
-                        <IconComponent className="w-4 h-4" />
-                        <span>{formatTabLabel(tabId)}</span>
-                      </Link>
-                    );
-                  }
-
-                  return null;
+                  return Icon && path ? (
+                    <Link
+                      key={tabId}
+                      to={path}
+                      className={getChildLinkClass(path)}
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span>{formatTabLabel(tabId)}</span>
+                    </Link>
+                  ) : null;
                 })}
               </div>
             )}
@@ -1430,47 +1300,41 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("utility", utilityPaths)}
             >
               <span className="flex items-center gap-3">
-                <Settings className="w-5 h-5" />
+                <Settings className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>Settings</span>}
               </span>
-              <span>{isOpen && "Settings"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "utility" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "utility" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
             {activeParentMenu === "utility" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                {getSortedTabs(["utility_companyprofile", "utility_tabhideview"]).map(
-                  (tabId) => {
-                    if (tabId === "utility_companyprofile") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/utilitylayout/companyprofile"
-                          className={getChildLinkClass("/utilitylayout/companyprofile")}
-                        >
-                          <Building className="w-4 h-4" />
-                          <span className="mx-auto">Company Profile</span>
-                        </Link>
-                      );
-                    } else if (tabId === "utility_tabhideview") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/utilitylayout/tabHideView"
-                          className={getChildLinkClass("/utilitylayout/tabHideView")}
-                        >
-                          <Eye className="w-4 h-4" />
-                          <span className="mx-auto">Tab Hide and Show</span>
-                        </Link>
-                      );
-                    }
-                    return null;
-                  }
-                )}
+                {getSortedTabs([
+                  "utility_companyprofile",
+                  "utility_tabhideview",
+                ]).map((tabId) => {
+                  const map = {
+                    utility_companyprofile: {
+                      to: "/utilitylayout/companyprofile",
+                      icon: Building,
+                      label: "Company Profile",
+                    },
+                    utility_tabhideview: {
+                      to: "/utilitylayout/tabHideView",
+                      icon: Eye,
+                      label: "Tab Hide and Show",
+                    },
+                  };
+                  const { to, icon: Icon, label } = map[tabId] || {};
+                  return to ? (
+                    <Link key={tabId} to={to} className={getChildLinkClass(to)}>
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span>{label}</span>
+                    </Link>
+                  ) : null;
+                })}
               </div>
             )}
           </div>
@@ -1484,14 +1348,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               className={getDropdownButtonClass("hrm", hrmPaths)}
             >
               <span className="flex items-center gap-3">
-                <UserCog className="w-5 h-5" />
+                <UserCog className="w-5 h-5 flex-shrink-0" />
+                {isOpen && <span>HRM</span>}
               </span>
-              <span>{isOpen && "HRM"}</span>
               {isOpen && (
                 <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "hrm" ? "rotate-180" : ""
-                  }`}
+                  className={`w-4 h-4 transform transition-transform flex-shrink-0 ${activeParentMenu === "hrm" ? "rotate-180" : ""}`}
                 />
               )}
             </button>
@@ -1504,46 +1366,91 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "hrm_payroll",
                   "hrm_mrbasicpayroll",
                 ]).map((tabId) => {
-                  // FIXED: Changed linkMap to use camelCase instead of hyphenated
-                  const linkMap = {
-                    hrm_dashboard: "/hrmlayout/dashboard",
-                    hrm_holidays: "/hrmlayout/holidays",
-                    hrm_leaveattendance: "/hrmlayout/leaveattendance",
-                    hrm_payroll: "/hrmlayout/payroll",
-                    hrm_mrbasicpayroll: "/hrmlayout/mrbasicpayroll", // FIXED: Changed from /mr-basic-payroll to /mrbasicpayroll
+                  const map = {
+                    hrm_dashboard: {
+                      to: "/hrmlayout/dashboard",
+                      icon: Home,
+                      label: "Dashboard",
+                    },
+                    hrm_holidays: {
+                      to: "/hrmlayout/holidays",
+                      icon: Umbrella,
+                      label: "Holidays",
+                    },
+                    hrm_leaveattendance: {
+                      to: "/hrmlayout/leaveattendance",
+                      icon: Calendar,
+                      label: "Leave & Attendance",
+                    },
+                    hrm_payroll: {
+                      to: "/hrmlayout/payroll",
+                      icon: DollarSign,
+                      label: "Payroll",
+                    },
+                    hrm_mrbasicpayroll: {
+                      to: "/hrmlayout/mrbasicpayroll",
+                      icon: BanknoteIcon,
+                      label: "MR Basic Payroll",
+                    },
                   };
-
-                  const iconMap = {
-                    hrm_dashboard: Home,
-                    hrm_holidays: Umbrella,
-                    hrm_leaveattendance: Calendar,
-                    hrm_payroll: DollarSign,
-                    hrm_mrbasicpayroll: BanknoteIcon,
-                  };
-
-                  const IconComponent = iconMap[tabId];
-                  const path = linkMap[tabId];
-
-                  return (
-                    <Link
-                      key={tabId}
-                      to={path}
-                      className={getChildLinkClass(path)}
-                    >
-                      <IconComponent className="w-4 h-4" />
-                      <span className="mx-auto">
-                        {tabId === "hrm_leaveattendance"
-                          ? "Leave & Attendance"
-                          : formatTabLabel(tabId)}
-                      </span>
+                  const { to, icon: Icon, label } = map[tabId] || {};
+                  return to ? (
+                    <Link key={tabId} to={to} className={getChildLinkClass(to)}>
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      <span>{label}</span>
                     </Link>
-                  );
+                  ) : null;
                 })}
               </div>
             )}
           </div>
         )}
       </nav>
+    </div>
+  );
+
+  // MOBILE: fixed overlay drawer
+  if (isMobile) {
+    return (
+      <>
+        {/* Hamburger button - always visible on mobile */}
+        <button
+          onClick={toggleSidebar}
+          className="fixed top-3 left-3 z-50 p-2 bg-gray-900 text-white rounded-md shadow-lg"
+          aria-label="Toggle menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        {/* Backdrop */}
+        {isOpen && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-30"
+            onClick={toggleSidebar}
+            aria-hidden="true"
+          />
+        )}
+
+        {/* Drawer */}
+        <div
+          className={`fixed inset-y-0 left-0 z-40 w-64 transform transition-transform duration-300 ease-in-out ${
+            isOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          {sidebarContent}
+        </div>
+      </>
+    );
+  }
+
+  // DESKTOP: static sidebar (collapsed or expanded)
+  return (
+    <div
+      className={`bg-gray-900 text-white transition-all duration-300 ${
+        isOpen ? "w-64" : "w-16"
+      } flex flex-col flex-shrink-0`}
+    >
+      {sidebarContent}
     </div>
   );
 }

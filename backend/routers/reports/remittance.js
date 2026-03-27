@@ -10,28 +10,44 @@ const router = express.Router();
 const getRemittanceData = async (filters) => {
   const { startDate, endDate, search, supplierId, period, year, month } = filters;
 
-  // First, get the remittance category ID
+  // First, get the remittance category
   const remittanceCategory = await Category.findOne({ code: "remittance" });
-
   if (!remittanceCategory) {
     throw new Error("Remittance category not found");
   }
 
-  const matchStage = {
-    categoryType: remittanceCategory._id,
+  // Build match condition for remittance transactions
+  // Allow multiple ways: categoryType as ObjectId, categoryType as string "Remittance", or transactionType as "remittance"
+  const categoryMatch = {
+    $or: [
+      { categoryType: remittanceCategory._id },
+      { categoryType: { $regex: /^remittance$/i } },
+      { transactionType: "remittance" }
+    ]
   };
 
-  // Handle supplier filter
-  if (supplierId) {
-    matchStage.supplier = supplierId;
+  let matchStage = { ...categoryMatch };
+
+  // Date filters
+  if (startDate || endDate) {
+    matchStage.date = {};
+    if (startDate) {
+      const start = new Date(startDate);
+      if (!isNaN(start.getTime())) matchStage.date.$gte = start;
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      if (!isNaN(end.getTime())) {
+        end.setHours(23, 59, 59, 999);
+        matchStage.date.$lte = end;
+      }
+    }
   }
 
-  // Handle period filtering
+  // Period filtering (if used)
   if (period || year || month) {
-    matchStage.date = {};
-
+    matchStage.date = matchStage.date || {};
     let start, end;
-
     if (period === "monthly" && year && month) {
       start = new Date(year, month - 1, 1);
       end = new Date(year, month, 0);
@@ -46,76 +62,45 @@ const getRemittanceData = async (filters) => {
       end = new Date(year, 11, 31);
       end.setHours(23, 59, 59, 999);
     }
-
     if (start && end) {
       matchStage.date.$gte = start;
       matchStage.date.$lte = end;
     }
   }
 
-  // Handle custom date range
-  if (startDate || endDate) {
-    matchStage.date = matchStage.date || {};
-
-    if (startDate) {
-      const start = new Date(startDate);
-      if (!isNaN(start.getTime())) {
-        matchStage.date.$gte = start;
-      }
-    }
-
-    if (endDate) {
-      const end = new Date(endDate);
-      if (!isNaN(end.getTime())) {
-        end.setHours(23, 59, 59, 999);
-        matchStage.date.$lte = end;
-      }
+  // Supplier filter: if supplierId is provided, fetch the supplier name and filter by name
+  let supplierName = null;
+  if (supplierId) {
+    const supplier = await Supplier.findById(supplierId);
+    if (supplier) {
+      supplierName = supplier.name;
+      matchStage.supplier = supplierName; // Assuming supplier field contains the name string
     }
   }
 
-  // Build aggregation pipeline with grouping by supplier
+  // Build aggregation pipeline
   const pipeline = [
     { $match: matchStage },
-    // Lookup supplier details first for grouping
-    {
-      $lookup: {
-        from: "suppliers",
-        localField: "supplier",
-        foreignField: "_id",
-        as: "supplierInfo",
-      },
-    },
-    {
-      $unwind: {
-        path: "$supplierInfo",
-        preserveNullAndEmptyArrays: true,
-      },
-    },
-    // Group by supplier
+    // Group by supplier (which is a string name)
     {
       $group: {
         _id: "$supplier",
-        supplierName: { $first: "$supplierInfo.name" },
-        supplierCode: { $first: "$supplierInfo.code" }, // Added supplier code
         totalRemittanceAmount: { $sum: "$amount" },
         totalFinalAmount: { $sum: "$finalAmount" },
         totalExchangeLoss: { $sum: "$exchangeLoss" },
         transactionCount: { $sum: 1 },
         latestTransactionDate: { $max: "$date" },
-      },
-    },
+      }
+    }
   ];
 
-  // Apply search filter after grouping
+  // Apply search filter after grouping (search by supplier name)
   if (search && search.trim() !== "") {
     const searchRegex = new RegExp(search.trim(), "i");
     pipeline.push({
       $match: {
-        $or: [
-          { supplierName: { $regex: searchRegex } },
-          { supplierCode: { $regex: searchRegex } }, // Added search by supplier code
-        ],
-      },
+        _id: { $regex: searchRegex } // _id is the supplier name
+      }
     });
   }
 
@@ -124,19 +109,30 @@ const getRemittanceData = async (filters) => {
 
   const records = await Transaction.aggregate(pipeline);
 
+  // Prepare records with supplier name
+  const formattedRecords = records.map(record => ({
+    supplierId: null, // we don't have ObjectId; could be set if we had a way to map name to id
+    supplierName: record._id || "Unknown Supplier",
+    totalRemittanceAmount: record.totalRemittanceAmount,
+    totalFinalAmount: record.totalFinalAmount,
+    totalExchangeLoss: record.totalExchangeLoss,
+    transactionCount: record.transactionCount,
+    latestTransactionDate: record.latestTransactionDate,
+  }));
+
   // Calculate summary
   const summary = {
-    totalRemittanceAmount: records.reduce((sum, record) => sum + (record.totalRemittanceAmount || 0), 0),
-    totalFinalAmount: records.reduce((sum, record) => sum + (record.totalFinalAmount || 0), 0),
-    totalExchangeLoss: records.reduce((sum, record) => sum + (record.totalExchangeLoss || 0), 0),
-    totalSuppliers: records.length,
-    totalTransactions: records.reduce((sum, record) => sum + (record.transactionCount || 0), 0),
+    totalRemittanceAmount: formattedRecords.reduce((sum, rec) => sum + (rec.totalRemittanceAmount || 0), 0),
+    totalFinalAmount: formattedRecords.reduce((sum, rec) => sum + (rec.totalFinalAmount || 0), 0),
+    totalExchangeLoss: formattedRecords.reduce((sum, rec) => sum + (rec.totalExchangeLoss || 0), 0),
+    totalSuppliers: formattedRecords.length,
+    totalTransactions: formattedRecords.reduce((sum, rec) => sum + (rec.transactionCount || 0), 0),
   };
 
-  return { records, summary };
+  return { records: formattedRecords, summary };
 };
 
-// FIXED: Changed from '/reports/remittance' to '/'
+// Route: GET / (now mounted at /api/reports/remittance)
 router.get("/", async (req, res) => {
   try {
     const {
@@ -152,24 +148,17 @@ router.get("/", async (req, res) => {
     } = req.query;
 
     // Validate date parameters
-    if (startDate) {
-      const start = new Date(startDate);
-      if (isNaN(start.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid startDate format. Use YYYY-MM-DD format.",
-        });
-      }
+    if (startDate && isNaN(new Date(startDate).getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid startDate format. Use YYYY-MM-DD format.",
+      });
     }
-
-    if (endDate) {
-      const end = new Date(endDate);
-      if (isNaN(end.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid endDate format. Use YYYY-MM-DD format.",
-        });
-      }
+    if (endDate && isNaN(new Date(endDate).getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid endDate format. Use YYYY-MM-DD format.",
+      });
     }
 
     const pageNum = parseInt(page);
@@ -198,9 +187,9 @@ router.get("/", async (req, res) => {
           totalRecords: totalCount,
         },
         records: paginatedData.map(record => ({
-          supplierId: record._id,
+          supplierId: record.supplierId,
           supplierName: record.supplierName,
-          supplierCode: record.supplierCode, // Include supplierCode in API response
+          supplierCode: record.supplierCode,
           totalRemittanceAmount: record.totalRemittanceAmount,
           totalFinalAmount: record.totalFinalAmount,
           totalExchangeLoss: record.totalExchangeLoss,
@@ -227,32 +216,24 @@ router.get("/", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/reports/remittance/export/excel' to '/export/excel'
+// Export to Excel route
 router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, supplierId } = req.query;
-    // Validate date parameters for export
-    if (startDate) {
-      const start = new Date(startDate);
-      if (isNaN(start.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid startDate format for export. Use YYYY-MM-DD format.",
-        });
-      }
+
+    if (startDate && isNaN(new Date(startDate).getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid startDate format for export. Use YYYY-MM-DD format.",
+      });
+    }
+    if (endDate && isNaN(new Date(endDate).getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid endDate format for export. Use YYYY-MM-DD format.",
+      });
     }
 
-    if (endDate) {
-      const end = new Date(endDate);
-      if (isNaN(end.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid endDate format for export. Use YYYY-MM-DD format.",
-        });
-      }
-    }
-
-    // Get remittance data using the same helper function
     const { records, summary } = await getRemittanceData({
       startDate,
       endDate,
@@ -266,11 +247,9 @@ router.get("/export/excel", async (req, res) => {
     workbook.created = new Date();
 
     const worksheet = workbook.addWorksheet('Remittance Report');
-    
-    // Define columns
+
     worksheet.columns = [
       { header: 'Sr.No', key: 'serialNo', width: 8 },
-      { header: 'Supplier Code', key: 'supplierCode', width: 15 },
       { header: 'Supplier Name', key: 'supplierName', width: 25 },
       { header: 'Total Remittance Amount ($)', key: 'totalRemittanceAmount', width: 22 },
       { header: 'Total Final Amount ($)', key: 'totalFinalAmount', width: 20 },
@@ -279,13 +258,10 @@ router.get("/export/excel", async (req, res) => {
       { header: 'Last Transaction Date', key: 'latestTransactionDate', width: 18 },
     ];
 
-    // Style the header row
+    // Style header row
     const headerRow = worksheet.getRow(1);
     headerRow.font = { bold: true, size: 12 };
-    headerRow.alignment = { 
-      horizontal: 'center', 
-      vertical: 'middle'
-    };
+    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
     headerRow.height = 25;
     headerRow.fill = {
       type: 'pattern',
@@ -293,11 +269,9 @@ router.get("/export/excel", async (req, res) => {
       fgColor: { argb: 'FFE0E0E0' }
     };
 
-    // Add data rows with serial numbers
     records.forEach((record, index) => {
       const row = worksheet.addRow({
         serialNo: index + 1,
-        supplierCode: record.supplierCode || 'N/A',
         supplierName: record.supplierName || 'N/A',
         totalRemittanceAmount: record.totalRemittanceAmount || 0,
         totalFinalAmount: record.totalFinalAmount || 0,
@@ -306,45 +280,27 @@ router.get("/export/excel", async (req, res) => {
         latestTransactionDate: record.latestTransactionDate,
       });
 
-      // Style the row
       row.font = { size: 11 };
-      row.alignment = { 
-        vertical: 'middle',
-        horizontal: 'center'
-      };
+      row.alignment = { vertical: 'middle', horizontal: 'center' };
 
-      // Format date cell
       const dateCell = row.getCell('latestTransactionDate');
       if (record.latestTransactionDate) {
         dateCell.value = new Date(record.latestTransactionDate);
         dateCell.numFmt = 'dd-mm-yyyy';
         dateCell.alignment = { horizontal: 'center' };
       }
-      
-      // Format currency cells
+
       const remittanceCell = row.getCell('totalRemittanceAmount');
       remittanceCell.numFmt = '$#,##0.00';
-      remittanceCell.alignment = { horizontal: 'center' };
-      
       const finalAmountCell = row.getCell('totalFinalAmount');
       finalAmountCell.numFmt = '$#,##0.00';
-      finalAmountCell.alignment = { horizontal: 'center' };
-      
       const exchangeLossCell = row.getCell('totalExchangeLoss');
       exchangeLossCell.numFmt = '$#,##0.00';
-      exchangeLossCell.alignment = { horizontal: 'center' };
-      
-      // Format transaction count
-      const transactionCell = row.getCell('transactionCount');
-      transactionCell.alignment = { horizontal: 'center' };
     });
 
-    // Add summary section if there's data or even if empty
+    // Summary section
     if (records.length > 0) {
-      // Add empty row for spacing
       worksheet.addRow({});
-
-      // Add summary header
       const summaryHeader = worksheet.addRow(['SUMMARY']);
       summaryHeader.font = { bold: true, size: 12 };
       summaryHeader.alignment = { horizontal: 'center' };
@@ -353,45 +309,36 @@ router.get("/export/excel", async (req, res) => {
         pattern: 'solid',
         fgColor: { argb: 'FFD0D0D0' }
       };
-      worksheet.mergeCells(`A${summaryHeader.number}:H${summaryHeader.number}`);
+      worksheet.mergeCells(`A${summaryHeader.number}:G${summaryHeader.number}`);
 
-      // Add summary data
       const summaryData = [
         { label: 'Total Suppliers:', value: summary.totalSuppliers },
         { label: 'Total Transactions:', value: summary.totalTransactions },
         { label: 'Total Remittance Amount:', value: summary.totalRemittanceAmount },
         { label: 'Total Exchange Loss:', value: summary.totalExchangeLoss },
-        { label: 'Grand Total:', value: summary.totalRemittanceAmount  + summary.totalExchangeLoss }
+        { label: 'Grand Total:', value: summary.totalRemittanceAmount + summary.totalExchangeLoss }
       ];
 
-      summaryData.forEach((item, index) => {
-        const row = worksheet.addRow({
-          serialNo: item.label,
-          supplierName: item.value
-        });
+      summaryData.forEach((item) => {
+        const row = worksheet.addRow({ serialNo: item.label, supplierName: item.value });
         row.font = { bold: true };
-        
-        // Format value cells
         const valueCell = row.getCell('supplierName');
         if (item.label.includes('Amount') || item.label.includes('Loss') || item.label.includes('Grand Total')) {
           valueCell.numFmt = '$#,##0.00';
-          valueCell.alignment = { horizontal: 'right' };
-        } else {
-          valueCell.alignment = { horizontal: 'right' };
         }
+        valueCell.alignment = { horizontal: 'right' };
       });
     } else {
-      // Add "No Data" message if empty
       const noDataRow = worksheet.addRow(['No remittance data found for the selected criteria']);
       noDataRow.font = { italic: true, color: { argb: 'FF666666' } };
       noDataRow.alignment = { horizontal: 'center' };
       noDataRow.height = 30;
-      worksheet.mergeCells(`A${noDataRow.number}:H${noDataRow.number}`);
+      worksheet.mergeCells(`A${noDataRow.number}:G${noDataRow.number}`);
     }
 
-    // Apply borders to all cells
-    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+    // Borders
+    worksheet.eachRow({ includeEmpty: false }, (row) => {
+      row.eachCell({ includeEmpty: false }, (cell) => {
         cell.border = {
           top: { style: 'thin' },
           left: { style: 'thin' },
@@ -401,7 +348,6 @@ router.get("/export/excel", async (req, res) => {
       });
     });
 
-    // Auto-filter on header row if there's data
     if (records.length > 0) {
       worksheet.autoFilter = {
         from: { row: 1, column: 1 },
@@ -409,47 +355,24 @@ router.get("/export/excel", async (req, res) => {
       };
     }
 
-    // Auto-size columns for better fit
+    // Auto-size columns
     worksheet.columns.forEach(column => {
       let maxLength = 0;
       column.eachCell({ includeEmpty: true }, (cell) => {
         const cellLength = cell.value ? cell.value.toString().length : 10;
-        if (cellLength > maxLength) {
-          maxLength = cellLength;
-        }
+        if (cellLength > maxLength) maxLength = cellLength;
       });
-      column.width = Math.min(maxLength + 2, 30); // Cap at 30 characters
+      column.width = Math.min(maxLength + 2, 30);
     });
 
-    // Generate filename with timestamp
-    const currentDate = new Date();
-    const timestamp = currentDate.getTime();
-    const formattedDate = currentDate.toISOString().split('T')[0];
-    
-    let fileName = `remittance-report-${timestamp}`;
-    if (startDate && endDate) {
-      fileName = `remittance-${startDate.replace(/-/g, '')}-to-${endDate.replace(/-/g, '')}-${timestamp}`;
-    } else if (startDate) {
-      fileName = `remittance-from-${startDate.replace(/-/g, '')}-${timestamp}`;
-    } else if (endDate) {
-      fileName = `remittance-to-${endDate.replace(/-/g, '')}-${timestamp}`;
-    }
-    fileName += '.xlsx';
+    const timestamp = Date.now();
+    const fileName = `remittance-report-${timestamp}.xlsx`;
 
-    // Set response headers
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${fileName}"`
-    );
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
 
-    // Write workbook to buffer and send
     const buffer = await workbook.xlsx.writeBuffer();
     res.send(buffer);
-
   } catch (error) {
     console.error("Error in /export/excel:", error);
     res.status(500).json({

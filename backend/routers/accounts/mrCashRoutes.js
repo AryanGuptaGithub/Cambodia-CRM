@@ -23,8 +23,6 @@ const formatCurrency = (value) => {
 };
 
 // ─── helper: recalculate and save sale payment fields ─────────────────────────
-// Call this after changing paidAmount on a sale object (inside a session).
-// It recomputes dueAmount, paymentStatus, pendingAmountPaid and saves.
 async function recalculateSalePayment(sale, session) {
   const total = parseFloat(sale.totalAmount) || 0;
   const paid = parseFloat(Math.max(0, sale.paidAmount).toFixed(4));
@@ -35,13 +33,13 @@ async function recalculateSalePayment(sale, session) {
 
   if (due <= 0) {
     sale.paymentStatus = "Paid";
-    sale.pendingAmountPaid = "paid"; // hides from outstanding report
+    sale.pendingAmountPaid = "paid";
   } else if (paid > 0) {
     sale.paymentStatus = "Partial Paid";
-    sale.pendingAmountPaid = "pending"; // shows in outstanding report
+    sale.pendingAmountPaid = "pending";
   } else {
     sale.paymentStatus = "Unpaid";
-    sale.pendingAmountPaid = "pending"; // shows in outstanding report
+    sale.pendingAmountPaid = "pending";
   }
 
   sale.updatedAt = new Date();
@@ -185,12 +183,10 @@ router.post("/", async (req, res) => {
 
     const existingMRCash = await MRCash.findOne({ mrId, isActive: true });
     if (existingMRCash)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Cash record already exists for this MR",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Cash record already exists for this MR",
+      });
 
     const mrCash = new MRCash({
       mrId,
@@ -206,13 +202,11 @@ router.post("/", async (req, res) => {
     await mrCash.save();
     await mrCash.populate("categoryType", "name code");
 
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "MR Cash record created successfully",
-        data: mrCash,
-      });
+    res.status(201).json({
+      success: true,
+      message: "MR Cash record created successfully",
+      data: mrCash,
+    });
   } catch (error) {
     console.error("Error creating MR Cash:", error);
     res
@@ -425,12 +419,10 @@ router.get("/mr/:mrId", async (req, res) => {
       .populate("categoryType", "name code");
 
     if (!mrCash)
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "MR Cash record not found for this MR",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "MR Cash record not found for this MR",
+      });
 
     res.status(200).json({
       success: true,
@@ -510,13 +502,11 @@ router.put("/:id", async (req, res) => {
     await mrCash.save();
     await mrCash.populate("categoryType", "name code");
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "MR Cash record updated successfully",
-        data: mrCash,
-      });
+    res.status(200).json({
+      success: true,
+      message: "MR Cash record updated successfully",
+      data: mrCash,
+    });
   } catch (error) {
     console.error("Error updating MR Cash:", error);
     res
@@ -681,12 +671,10 @@ router.post("/:mrCashId/transfer-to/:destinationCode", async (req, res) => {
     if (!destinationAcc) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: `Destination account (${destinationCode}) not found`,
-        });
+      return res.status(404).json({
+        success: false,
+        message: `Destination account (${destinationCode}) not found`,
+      });
     }
 
     const mrCash = await MRCash.findById(mrCashId).session(session);
@@ -911,12 +899,10 @@ router.put("/transfers/:transferId", async (req, res) => {
       if (destAcc.totalAmount < 0) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Destination account would go negative.",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Destination account would go negative.",
+        });
       }
     }
 
@@ -989,12 +975,10 @@ router.delete("/:mrCashId/transfers/:transferId", async (req, res) => {
     if (transferRecord.fromAccount.toString() !== mrCashId) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Transfer does not belong to this MR Cash record",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Transfer does not belong to this MR Cash record",
+      });
     }
 
     const refundAmount = transferRecord.amount;
@@ -1084,12 +1068,10 @@ router.delete("/:id", async (req, res) => {
     mrCash.updatedBy = req.user?.id || mrCash.updatedBy;
     await mrCash.save();
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "MR Cash record deactivated successfully",
-      });
+    res.status(200).json({
+      success: true,
+      message: "MR Cash record deactivated successfully",
+    });
   } catch (error) {
     console.error("Error deleting MR Cash:", error);
     res
@@ -1126,12 +1108,10 @@ router.post("/stock-transfer-to-mr", async (req, res) => {
     if (isNaN(transferQty) || transferQty <= 0) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Valid positive quantity is required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Valid positive quantity is required",
+      });
     }
 
     const mr = await Staff.findById(mrId).session(session);
@@ -1148,12 +1128,10 @@ router.post("/stock-transfer-to-mr", async (req, res) => {
     if (!warehouseStock) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: `Product "${productName}" not found in warehouse`,
-        });
+      return res.status(404).json({
+        success: false,
+        message: `Product "${productName}" not found in warehouse`,
+      });
     }
 
     const realBatches = (warehouseStock.batches || []).filter(
@@ -1166,12 +1144,10 @@ router.post("/stock-transfer-to-mr", async (req, res) => {
     if (availableInWarehouse < transferQty) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: `Insufficient warehouse stock. Available: ${availableInWarehouse}, Requested: ${transferQty}`,
-        });
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient warehouse stock. Available: ${availableInWarehouse}, Requested: ${transferQty}`,
+      });
     }
 
     let mrStock = await stockInMRHand.findOne({ mrId }).session(session);
@@ -1269,13 +1245,11 @@ router.post("/stock-transfer-to-mr", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: `Successfully transferred ${transferQty} units of "${productName}" to ${mrName}`,
-        data: { warehouseStock, mrStock },
-      });
+    res.status(200).json({
+      success: true,
+      message: `Successfully transferred ${transferQty} units of "${productName}" to ${mrName}`,
+      data: { warehouseStock, mrStock },
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -1338,17 +1312,47 @@ router.get("/credit-collection-invoices/:mrName", async (req, res) => {
   }
 });
 
+router.get("/sales-by-mr/:mrName", async (req, res) => {
+  try {
+    const { mrName } = req.params;
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
+
+    // Get invoice numbers already collected via credit collection for this MR
+    const mrSaleInvoiceNos = await Sale.distinct("invoiceNumber", {
+      mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
+    });
+
+    const creditCollectedInvoiceNos = await Transaction.distinct("invoiceNo", {
+      transactionType: "credit collection",
+      invoiceNo: { $in: mrSaleInvoiceNos },
+    });
+
+    const sales = await Sale.find({
+      mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
+      paymentStatus: { $in: ["Partial Paid", "Cash", "Paid"] },
+      invoiceDate: { $gte: startOfMonth, $lte: endOfMonth },
+      // Exclude invoices already in credit collection tab
+      invoiceNumber: { $nin: creditCollectedInvoiceNos },
+    })
+      .select(
+        "invoiceNumber invoiceDate customerName dueAmount totalAmount paidAmount paymentStatus mrName recordingDate dueDate"
+      )
+      .sort({ invoiceDate: -1 })
+      .lean();
+
+    res.status(200).json({ success: true, data: sales });
+  } catch (error) {
+    console.error("Error fetching sales by MR:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
 // =============================================================================
 // PUT /credit-collection-invoices/:transactionId
 // Edit a credit collection Transaction.
-//
-// Cash & Sale update logic:
-//   difference = newAmount - oldAmount
-//   mrCash.currentCash  += difference  (positive = more cash, negative = less)
-//   sale.paidAmount     += difference
-//   sale.dueAmount       = totalAmount - paidAmount  (recalculated)
-//   sale.paymentStatus   recalculated → "Paid" / "Partial Paid" / "Unpaid"
-//   sale.pendingAmountPaid → "paid" (hides from outstanding) or "pending" (shows)
 // =============================================================================
 router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
   const session = await mongoose.startSession();
@@ -1367,7 +1371,6 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
         .json({ success: false, message: "Valid positive amount is required" });
     }
 
-    // ── 1. Find the Transaction ──────────────────────────────────────────────
     const txn = await Transaction.findById(transactionId).session(session);
     if (!txn) {
       await session.abortTransaction();
@@ -1379,18 +1382,15 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
     if (txn.transactionType !== "credit collection") {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Only credit collection transactions can be edited here",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Only credit collection transactions can be edited here",
+      });
     }
 
     const oldAmount = parseFloat(txn.amount) || 0;
     const difference = parseFloat((newAmount - oldAmount).toFixed(4));
 
-    // ── 2. Find MRCash (destination field holds the MR name) ─────────────────
     const mrName = txn.destination;
     const mrCash = await MRCash.findOne({
       mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
@@ -1405,7 +1405,6 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
         .json({ success: false, message: "MR Cash record not found" });
     }
 
-    // ── 3. Validate cash won't go negative when reducing ─────────────────────
     const newCurrentCash = parseFloat(
       (mrCash.currentCash + difference).toFixed(4),
     );
@@ -1418,25 +1417,20 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
       });
     }
 
-    // ── 4. Adjust MRCash.currentCash ─────────────────────────────────────────
     mrCash.currentCash = newCurrentCash;
     mrCash.updatedAt = new Date();
 
-    // ── 5. Find the Sale by invoiceNumber and update paidAmount/dueAmount ────
-    //       invoiceNumber in Sale == invoiceNo in Transaction
     const sale = await Sale.findOne({
       invoiceNumber: String(txn.invoiceNo),
     }).session(session);
 
     if (sale) {
-      // Add the difference to paidAmount, then recalculate everything
       sale.paidAmount = parseFloat(
         ((sale.paidAmount || 0) + difference).toFixed(4),
       );
       await recalculateSalePayment(sale, session);
     }
 
-    // ── 6. Update the Transaction record ────────────────────────────────────
     txn.amount = newAmount;
     txn.finalAmount = newAmount;
     if (customerName !== undefined) txn.customerName = customerName;
@@ -1481,13 +1475,6 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
 // =============================================================================
 // DELETE /credit-collection-invoices/:transactionId
 // Delete a credit collection Transaction.
-//
-// Cash & Sale reversal logic:
-//   mrCash.currentCash  -= collectedAmount   (reversal)
-//   sale.paidAmount     -= collectedAmount
-//   sale.dueAmount       = totalAmount - paidAmount  (recalculated)
-//   sale.paymentStatus   recalculated → "Partial Paid" / "Unpaid"
-//   sale.pendingAmountPaid → "pending"  (always shows back in outstanding report)
 // =============================================================================
 router.delete(
   "/credit-collection-invoices/:transactionId",
@@ -1498,7 +1485,6 @@ router.delete(
     try {
       const { transactionId } = req.params;
 
-      // ── 1. Find the Transaction ──────────────────────────────────────────────
       const txn = await Transaction.findById(transactionId).session(session);
       if (!txn) {
         await session.abortTransaction();
@@ -1510,17 +1496,14 @@ router.delete(
       if (txn.transactionType !== "credit collection") {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Only credit collection transactions can be deleted here",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Only credit collection transactions can be deleted here",
+        });
       }
 
       const collectedAmount = parseFloat(txn.amount) || 0;
 
-      // ── 2. Find MRCash (destination = MR name) ────────────────────────────────
       const mrName = txn.destination;
       const mrCash = await MRCash.findOne({
         mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
@@ -1535,27 +1518,22 @@ router.delete(
           .json({ success: false, message: "MR Cash record not found" });
       }
 
-      // ── 3. Subtract amount from MRCash.currentCash (reversal) ────────────────
       mrCash.currentCash = parseFloat(
         Math.max(0, mrCash.currentCash - collectedAmount).toFixed(4),
       );
       mrCash.updatedAt = new Date();
 
-      // ── 4. Find the Sale and reverse paidAmount / dueAmount / paymentStatus ──
-      //       Sale.invoiceNumber is a string → match exactly
       const sale = await Sale.findOne({
         invoiceNumber: String(txn.invoiceNo),
       }).session(session);
 
       if (sale) {
-        // Subtract the collected amount back from paidAmount
         sale.paidAmount = parseFloat(
           Math.max(0, (sale.paidAmount || 0) - collectedAmount).toFixed(4),
         );
         await recalculateSalePayment(sale, session);
       }
 
-      // ── 5. Reverse linked Destination account if any ─────────────────────────
       const dest = await Account.findOne({ name: mrCash.mrName }).session(
         session,
       );
@@ -1566,7 +1544,6 @@ router.delete(
         await dest.save({ session });
       }
 
-      // ── 6. Delete the transaction ─────────────────────────────────────────────
       await Transaction.findByIdAndDelete(transactionId).session(session);
       await mrCash.save({ session });
 
@@ -1597,17 +1574,80 @@ router.delete(
       await session.abortTransaction();
       session.endSession();
       console.error("Error deleting credit collection invoice:", error);
-      res
-        .status(500)
-        .json({
-          success: false,
-          message: "Server error",
-          error: error.message,
-        });
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
     }
   },
 );
 
+router.get("/combined-cash-summary", async (req, res) => {
+  try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
+
+    // 1. Credit collection totals per MR (all time)
+    const creditTotals = await Transaction.aggregate([
+      { $match: { transactionType: "credit collection" } },
+      {
+        $group: {
+          _id: { $toLower: { $trim: { input: "$destination" } } },
+          creditCollectionTotal: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    // 2. Get all invoice numbers already counted in credit collection
+    const creditCollectedInvoiceNos = await Transaction.distinct("invoiceNo", {
+      transactionType: "credit collection",
+    });
+
+    // 3. Cash / Paid / Partial Paid sales paidAmount for current month
+    //    EXCLUDE invoices already counted in credit collection
+    const saleTotals = await Sale.aggregate([
+      {
+        $match: {
+          paymentStatus: { $in: ["Cash", "Paid", "Partial Paid"] },
+          invoiceDate: { $gte: startOfMonth, $lte: endOfMonth },
+          paidAmount: { $gt: 0 },
+          invoiceNumber: { $nin: creditCollectedInvoiceNos },
+        },
+      },
+      {
+        $group: {
+          _id: { $toLower: { $trim: { input: "$mrName" } } },
+          salePaidTotal: { $sum: "$paidAmount" },
+        },
+      },
+    ]);
+
+    // 4. Merge
+    const creditMap = new Map(
+      creditTotals.map((c) => [c._id, c.creditCollectionTotal])
+    );
+    const saleMap = new Map(
+      saleTotals.map((s) => [s._id, s.salePaidTotal])
+    );
+
+    const allKeys = new Set([...creditMap.keys(), ...saleMap.keys()]);
+
+    const combined = Array.from(allKeys).map((key) => ({
+      mrNameKey: key,
+      creditCollectionTotal: creditMap.get(key) || 0,
+      salePaidTotal: saleMap.get(key) || 0,
+      combinedTotal: (creditMap.get(key) || 0) + (saleMap.get(key) || 0),
+    }));
+
+    res.status(200).json({ success: true, data: combined });
+  } catch (error) {
+    console.error("Error fetching combined cash summary:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+});
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /collect-payment
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1621,13 +1661,11 @@ router.post("/collect-payment", async (req, res) => {
     if (!mrName || !invoiceNumber || !collectedAmount || collectedAmount <= 0) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message:
-            "Invalid input: mrName, invoiceNumber, collectedAmount are required",
-        });
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid input: mrName, invoiceNumber, collectedAmount are required",
+      });
     }
 
     const nameRegex = new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i");
@@ -1641,12 +1679,10 @@ router.post("/collect-payment", async (req, res) => {
     if (!sale) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "Due invoice not found or already fully paid",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "Due invoice not found or already fully paid",
+      });
     }
 
     if (collectedAmount > sale.dueAmount) {
@@ -1658,7 +1694,6 @@ router.post("/collect-payment", async (req, res) => {
       });
     }
 
-    // Update sale payment fields
     sale.paidAmount = parseFloat(
       ((sale.paidAmount || 0) + collectedAmount).toFixed(4),
     );

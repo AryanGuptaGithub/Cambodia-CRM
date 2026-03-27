@@ -57,11 +57,14 @@ router.get("/", async (req, res) => {
     const matchConditions = {};
 
     // 1. Payment Status Condition
+    // FIX: When filtering by Cash Sales or Credit Sales, also include Partial Paid records
     if (saleType && saleType !== "Total sales") {
       if (saleType.toLowerCase().includes("cash")) {
-        matchConditions.paymentStatus = "Cash";
+        // Include Cash and Partial Paid (paidAmount goes to cash)
+        matchConditions.paymentStatus = { $in: ["Cash", "Partial Paid"] };
       } else if (saleType.toLowerCase().includes("credit")) {
-        matchConditions.paymentStatus = "Credit";
+        // Include Credit and Partial Paid (dueAmount goes to credits)
+        matchConditions.paymentStatus = { $in: ["Credit", "Partial Paid"] };
       }
     }
 
@@ -136,10 +139,12 @@ router.get("/", async (req, res) => {
       basePipeline.push({ $match: matchConditions });
     }
 
-    // FIX: Group only by mrName (case-insensitive) to avoid duplicate rows per MR
+    // Group by mrName
+    // FIX: Credits = Credit paymentStatus totalAmount + Partial Paid dueAmount
+    //      Cash    = Cash paymentStatus totalAmount   + Partial Paid paidAmount
     basePipeline.push({
       $group: {
-        _id: { $toLower: { $trim: { input: "$mrName" } } }, // group key = normalized name
+        _id: { $toLower: { $trim: { input: "$mrName" } } },
         mrName: { $first: "$mrName" },
         mrId: { $first: "$mrId" },
         totalSalesAmount: { $sum: "$totalAmount" },
@@ -149,18 +154,44 @@ router.get("/", async (req, res) => {
         totalSalesQty: { $sum: "$salesQty" },
         totalBonusQty: { $sum: "$bonusQty" },
         totalQty: { $sum: "$totalQty" },
+        // Credits: full amount for Credit status + dueAmount for Partial Paid
         credits: {
           $sum: {
-            $cond: [{ $eq: ["$paymentStatus", "Credit"] }, "$totalAmount", 0],
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ["$paymentStatus", "Credit"] },
+                  then: "$totalAmount",
+                },
+                {
+                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                  then: "$dueAmount",
+                },
+              ],
+              default: 0,
+            },
           },
         },
+        // Cash: full amount for Cash status + paidAmount for Partial Paid
         cash: {
           $sum: {
-            $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ["$paymentStatus", "Cash"] },
+                  then: "$totalAmount",
+                },
+                {
+                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                  then: "$paidAmount",
+                },
+              ],
+              default: 0,
+            },
           },
         },
         uniqueCustomers: { $addToSet: "$customerCode" },
-        latestInvoiceDate: { $max: "$invoiceDate" }, // latest date
+        latestInvoiceDate: { $max: "$invoiceDate" },
         earliestInvoiceDate: { $min: "$invoiceDate" },
       },
     });
@@ -231,7 +262,7 @@ router.get("/", async (req, res) => {
         date: {
           $dateToString: {
             format: "%Y-%m-%d",
-            date: "$latestInvoiceDate", // always the latest date
+            date: "$latestInvoiceDate",
             timezone: "Asia/Dhaka",
           },
         },
@@ -298,7 +329,6 @@ router.get("/", async (req, res) => {
 
     basePipeline.push({ $sort: { totalSalesAmount: -1 } });
 
-    // FIX: Count pipeline also groups only by mrName
     const countPipeline = [
       ...(Object.keys(matchConditions).length > 0
         ? [{ $match: matchConditions }]
@@ -317,6 +347,114 @@ router.get("/", async (req, res) => {
       },
     ];
 
+    // Summary pipeline
+    // FIX: Summary also uses $switch for credits/cash to handle Partial Paid
+    const summaryMatchConditions = { ...matchConditions };
+    // For Total sales summary, include all payment statuses including Partial Paid
+    // Remove the paymentStatus filter for summary so we get full picture
+    if (saleType === "Total sales" || !saleType) {
+      delete summaryMatchConditions.paymentStatus;
+    }
+
+    const summaryPipelineStages = [
+      ...(Object.keys(summaryMatchConditions).length > 0
+        ? [{ $match: summaryMatchConditions }]
+        : []),
+      {
+        $group: {
+          _id: null,
+          totalSalesAmount: { $sum: "$totalAmount" },
+          totalOrders: { $sum: 1 },
+          totalPaidAmount: { $sum: "$paidAmount" },
+          totalDueAmount: { $sum: "$dueAmount" },
+          // Credits: Credit full amount + Partial Paid dueAmount
+          credits: {
+            $sum: {
+              $switch: {
+                branches: [
+                  {
+                    case: { $eq: ["$paymentStatus", "Credit"] },
+                    then: "$totalAmount",
+                  },
+                  {
+                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                    then: "$dueAmount",
+                  },
+                ],
+                default: 0,
+              },
+            },
+          },
+          // Cash: Cash full amount + Partial Paid paidAmount
+          cash: {
+            $sum: {
+              $switch: {
+                branches: [
+                  {
+                    case: { $eq: ["$paymentStatus", "Cash"] },
+                    then: "$totalAmount",
+                  },
+                  {
+                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                    then: "$paidAmount",
+                  },
+                ],
+                default: 0,
+              },
+            },
+          },
+          uniqueCustomers: { $addToSet: "$customerCode" },
+          uniqueMRs: { $addToSet: "$mrName" },
+          latestInvoiceDate: { $max: "$invoiceDate" },
+          earliestInvoiceDate: { $min: "$invoiceDate" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
+          totalOrders: 1,
+          totalPaidAmount: { $round: ["$totalPaidAmount", 2] },
+          totalDueAmount: { $round: ["$totalDueAmount", 2] },
+          credits: { $round: ["$credits", 2] },
+          cash: { $round: ["$cash", 2] },
+          totalCustomers: { $size: "$uniqueCustomers" },
+          totalMRs: { $size: "$uniqueMRs" },
+          dateRange: {
+            $cond: {
+              if: { $eq: ["$earliestInvoiceDate", "$latestInvoiceDate"] },
+              then: {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$earliestInvoiceDate",
+                  timezone: "Asia/Dhaka",
+                },
+              },
+              else: {
+                $concat: [
+                  {
+                    $dateToString: {
+                      format: "%Y-%m-%d",
+                      date: "$earliestInvoiceDate",
+                      timezone: "Asia/Dhaka",
+                    },
+                  },
+                  " to ",
+                  {
+                    $dateToString: {
+                      format: "%Y-%m-%d",
+                      date: "$latestInvoiceDate",
+                      timezone: "Asia/Dhaka",
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    ];
+
     // Execute pipelines in parallel
     const [countResult, reportsData, summaryResult] = await Promise.all([
       SaleSummary.aggregate(countPipeline),
@@ -325,80 +463,7 @@ router.get("/", async (req, res) => {
         { $skip: skip },
         { $limit: limitNum },
       ]),
-      SaleSummary.aggregate([
-        { $match: matchConditions },
-        {
-          $group: {
-            _id: null,
-            totalSalesAmount: { $sum: "$totalAmount" },
-            totalOrders: { $sum: 1 },
-            totalPaidAmount: { $sum: "$paidAmount" },
-            totalDueAmount: { $sum: "$dueAmount" },
-            credits: {
-              $sum: {
-                $cond: [
-                  { $eq: ["$paymentStatus", "Credit"] },
-                  "$totalAmount",
-                  0,
-                ],
-              },
-            },
-            cash: {
-              $sum: {
-                $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
-              },
-            },
-            uniqueCustomers: { $addToSet: "$customerCode" },
-            uniqueMRs: { $addToSet: "$mrName" },
-            latestInvoiceDate: { $max: "$invoiceDate" },
-            earliestInvoiceDate: { $min: "$invoiceDate" },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
-            totalOrders: 1,
-            totalPaidAmount: { $round: ["$totalPaidAmount", 2] },
-            totalDueAmount: { $round: ["$totalDueAmount", 2] },
-            credits: { $round: ["$credits", 2] },
-            cash: { $round: ["$cash", 2] },
-            totalCustomers: { $size: "$uniqueCustomers" },
-            totalMRs: { $size: "$uniqueMRs" },
-            dateRange: {
-              $cond: {
-                if: { $eq: ["$earliestInvoiceDate", "$latestInvoiceDate"] },
-                then: {
-                  $dateToString: {
-                    format: "%Y-%m-%d",
-                    date: "$earliestInvoiceDate",
-                    timezone: "Asia/Dhaka",
-                  },
-                },
-                else: {
-                  $concat: [
-                    {
-                      $dateToString: {
-                        format: "%Y-%m-%d",
-                        date: "$earliestInvoiceDate",
-                        timezone: "Asia/Dhaka",
-                      },
-                    },
-                    " to ",
-                    {
-                      $dateToString: {
-                        format: "%Y-%m-%d",
-                        date: "$latestInvoiceDate",
-                        timezone: "Asia/Dhaka",
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        },
-      ]),
+      SaleSummary.aggregate(summaryPipelineStages),
     ]);
 
     const totalRecords = countResult[0]?.totalCount || 0;
@@ -557,11 +622,12 @@ router.get("/export", async (req, res) => {
     // Build match conditions
     const matchConditions = {};
 
+    // FIX: When filtering by Cash Sales or Credit Sales, also include Partial Paid records
     if (saleType && saleType !== "Total sales") {
       if (saleType.toLowerCase().includes("cash")) {
-        matchConditions.paymentStatus = "Cash";
+        matchConditions.paymentStatus = { $in: ["Cash", "Partial Paid"] };
       } else if (saleType.toLowerCase().includes("credit")) {
-        matchConditions.paymentStatus = "Credit";
+        matchConditions.paymentStatus = { $in: ["Credit", "Partial Paid"] };
       }
     }
 
@@ -626,7 +692,7 @@ router.get("/export", async (req, res) => {
       exportPipeline.push({ $match: matchConditions });
     }
 
-    // FIX: Group only by mrName to avoid duplicates
+    // FIX: Group with $switch to handle Partial Paid credits/cash correctly
     exportPipeline.push({
       $group: {
         _id: { $toLower: { $trim: { input: "$mrName" } } },
@@ -634,17 +700,43 @@ router.get("/export", async (req, res) => {
         mrId: { $first: "$mrId" },
         totalSalesAmount: { $sum: "$totalAmount" },
         totalOrders: { $sum: 1 },
+        // Credits: Credit full amount + Partial Paid dueAmount
         credits: {
           $sum: {
-            $cond: [{ $eq: ["$paymentStatus", "Credit"] }, "$totalAmount", 0],
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ["$paymentStatus", "Credit"] },
+                  then: "$totalAmount",
+                },
+                {
+                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                  then: "$dueAmount",
+                },
+              ],
+              default: 0,
+            },
           },
         },
+        // Cash: Cash full amount + Partial Paid paidAmount
         cash: {
           $sum: {
-            $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ["$paymentStatus", "Cash"] },
+                  then: "$totalAmount",
+                },
+                {
+                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                  then: "$paidAmount",
+                },
+              ],
+              default: 0,
+            },
           },
         },
-        latestInvoiceDate: { $max: "$invoiceDate" }, // always the latest date
+        latestInvoiceDate: { $max: "$invoiceDate" },
       },
     });
 
@@ -711,7 +803,7 @@ router.get("/export", async (req, res) => {
         date: {
           $dateToString: {
             format: "%Y-%m-%d",
-            date: "$latestInvoiceDate", // latest date
+            date: "$latestInvoiceDate",
             timezone: "Asia/Dhaka",
           },
         },
@@ -798,9 +890,17 @@ router.get("/export", async (req, res) => {
     filterRow.getCell(1).alignment = { horizontal: "center" };
     worksheet.mergeCells(2, 1, 2, columnCount);
 
-    // Summary row
+    // Summary pipeline for export
+    // FIX: Also use $switch here for accurate summary in exported file
+    const exportSummaryMatchConditions = { ...matchConditions };
+    if (saleType === "Total sales" || !saleType) {
+      delete exportSummaryMatchConditions.paymentStatus;
+    }
+
     const summaryPipeline = [
-      { $match: matchConditions },
+      ...(Object.keys(exportSummaryMatchConditions).length > 0
+        ? [{ $match: exportSummaryMatchConditions }]
+        : []),
       {
         $group: {
           _id: null,
@@ -808,12 +908,36 @@ router.get("/export", async (req, res) => {
           totalOrders: { $sum: 1 },
           credits: {
             $sum: {
-              $cond: [{ $eq: ["$paymentStatus", "Credit"] }, "$totalAmount", 0],
+              $switch: {
+                branches: [
+                  {
+                    case: { $eq: ["$paymentStatus", "Credit"] },
+                    then: "$totalAmount",
+                  },
+                  {
+                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                    then: "$dueAmount",
+                  },
+                ],
+                default: 0,
+              },
             },
           },
           cash: {
             $sum: {
-              $cond: [{ $eq: ["$paymentStatus", "Cash"] }, "$totalAmount", 0],
+              $switch: {
+                branches: [
+                  {
+                    case: { $eq: ["$paymentStatus", "Cash"] },
+                    then: "$totalAmount",
+                  },
+                  {
+                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
+                    then: "$paidAmount",
+                  },
+                ],
+                default: 0,
+              },
             },
           },
           uniqueCustomers: { $addToSet: "$customerCode" },

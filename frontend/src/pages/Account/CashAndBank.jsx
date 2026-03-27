@@ -95,14 +95,18 @@ const useDropdownOptions = () => {
   const [sourceOptions, setSourceOptions] = useState([]);
   const [destinationOptions, setDestinationOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [loadingDestinations, setLoadingDestinations] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchDropdownOptions = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  const loading = loadingCategories || loadingDestinations;
 
+  const fetchDropdownOptions = async () => {
+    setError(null);
+
+    setLoadingCategories(true);
+    try {
       const categoryResponse = await axios.get(
         `${backendUrl}/api/accounts/category-type`,
       );
@@ -117,7 +121,15 @@ const useDropdownOptions = () => {
       setCategoryOptions(
         categoriesData.map((cat) => ({ value: cat._id, label: cat.name })),
       );
+    } catch (err) {
+      console.error("Failed to fetch categories:", err);
+      setError(err.message);
+    } finally {
+      setLoadingCategories(false);
+    }
 
+    setLoadingDestinations(true);
+    try {
       const destinationResponse = await axios.get(
         `${backendUrl}/api/accounts/destinations`,
       );
@@ -136,7 +148,15 @@ const useDropdownOptions = () => {
       }));
       setDestinationOptions(destinations);
       setSourceOptions(destinations);
+    } catch (err) {
+      console.error("Failed to fetch destinations:", err);
+      setError(err.message);
+    } finally {
+      setLoadingDestinations(false);
+    }
 
+    setLoadingSuppliers(true);
+    try {
       const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
       let suppliers = [];
       if (supplierResponse.data && Array.isArray(supplierResponse.data))
@@ -146,13 +166,19 @@ const useDropdownOptions = () => {
         Array.isArray(supplierResponse.data.data)
       )
         suppliers = supplierResponse.data.data;
+      else if (
+        supplierResponse.data?.suppliers &&
+        Array.isArray(supplierResponse.data.suppliers)
+      )
+        suppliers = supplierResponse.data.suppliers;
       setSupplierOptions(
         suppliers.map((s) => ({ value: s._id, label: s.name })),
       );
     } catch (err) {
-      setError(err.message);
+      console.error("Failed to fetch suppliers:", err.message);
+      setSupplierOptions([]);
     } finally {
-      setLoading(false);
+      setLoadingSuppliers(false);
     }
   };
 
@@ -166,6 +192,7 @@ const useDropdownOptions = () => {
     destinationOptions,
     supplierOptions,
     loading,
+    loadingSuppliers,
     error,
     refetch: fetchDropdownOptions,
   };
@@ -178,34 +205,49 @@ const CustomDropdown = ({
   error,
   disabled,
   placeholder,
+  isLoading = false,
+  emptyLabel = "No options found",
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+
   const handleSelect = (optionValue) => {
     onChange({ target: { value: optionValue } });
     setIsOpen(false);
   };
+
   const selectedOption = options.find((opt) => opt.value === value);
+
+  const buttonLabel = () => {
+    if (isLoading) return "Loading...";
+    if (selectedOption) return selectedOption.label;
+    if (options.length === 0) return emptyLabel;
+    return placeholder || "Select an option";
+  };
+
+  const isDisabled = disabled || isLoading || options.length === 0;
+
   return (
     <div className="relative w-full">
       <button
         type="button"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left ${error ? "border-red-500" : "border-gray-300"} ${disabled ? "bg-gray-200 cursor-not-allowed" : "bg-white cursor-pointer"}`}
-        disabled={disabled || options.length === 0}
+        onClick={() => !isDisabled && setIsOpen(!isOpen)}
+        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${isDisabled ? "bg-gray-100 cursor-not-allowed text-gray-400" : "bg-white cursor-pointer"}`}
+        disabled={isDisabled}
       >
-        {selectedOption
-          ? selectedOption.label
-          : options.length === 0
-            ? "Loading..."
-            : placeholder || "Select an option"}
+        {buttonLabel()}
       </button>
-      {isOpen && !disabled && (
+
+      {isOpen && !isDisabled && options.length > 0 && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
           {options.map((option) => (
             <div
               key={option.value}
               onClick={() => handleSelect(option.value)}
-              className={`p-2 cursor-pointer hover:bg-indigo-50 ${value === option.value ? "bg-indigo-100 text-indigo-700" : ""}`}
+              className={`p-2 cursor-pointer hover:bg-indigo-50 ${
+                value === option.value ? "bg-indigo-100 text-indigo-700" : ""
+              }`}
             >
               {option.label}
             </div>
@@ -216,9 +258,6 @@ const CustomDropdown = ({
   );
 };
 
-// ============================================================================
-// useInvoiceOptions — filters out already-used and fully-paid invoices
-// ============================================================================
 const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
   const [sales, setSales] = useState([]);
   const [usedInvoiceNumbers, setUsedInvoiceNumbers] = useState(new Set());
@@ -333,9 +372,83 @@ const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
 };
 
 // ============================================================================
+// KEY FIX: resolveEditFormData
+// Resolves all IDs from editData robustly by checking both direct ID match
+// AND label-based fallback. Works for categoryType, source, destination,
+// supplier. Called once when modal opens in edit mode.
+// ============================================================================
+const resolveEditFormData = (
+  editData,
+  categoryOptions,
+  sourceOptions,
+  destinationOptions,
+  supplierOptions,
+) => {
+  if (!editData) return {};
+
+  const findId = (options, rawValue) => {
+    if (!rawValue || rawValue === "--") return "";
+    // First try direct value (ID) match
+    const byId = options.find((o) => o.value === rawValue);
+    if (byId) return byId.value;
+    // Fallback: match by label (name)
+    const byLabel = options.find(
+      (o) => o.label?.toLowerCase() === rawValue?.toString()?.toLowerCase(),
+    );
+    return byLabel ? byLabel.value : rawValue;
+  };
+
+  // Resolve category — editData.categoryType may be an ID or a label name
+  const categoryId = findId(categoryOptions, editData.categoryType);
+
+  // Resolve source — may be stored as sourceAccount or source
+  const rawSource = editData.source || editData.sourceAccount || "";
+  const sourceId = findId(sourceOptions, rawSource);
+
+  // Resolve destination
+  const rawDest = editData.destination || "";
+  const destId =
+    rawDest && rawDest !== "--" ? findId(destinationOptions, rawDest) : "";
+
+  // Resolve supplier
+  const rawSupplier = editData.supplier || "";
+  const supplierId = rawSupplier ? findId(supplierOptions, rawSupplier) : "";
+
+  // Normalize date to YYYY-MM-DD for <input type="date">
+  const normalizeDate = (d) => {
+    if (!d) return new Date().toISOString().split("T")[0];
+    if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    try {
+      return new Date(d).toISOString().split("T")[0];
+    } catch {
+      return new Date().toISOString().split("T")[0];
+    }
+  };
+
+  return {
+    categoryType: categoryId || editData.categoryType || "",
+    date: normalizeDate(editData.date),
+    amount: editData.amount != null ? String(editData.amount) : "",
+    exchangeLoss:
+      editData.exchangeLoss != null ? String(editData.exchangeLoss) : "",
+    finalAmount:
+      editData.finalAmount != null ? String(editData.finalAmount) : "0.00",
+    source: sourceId,
+    destination: destId,
+    supplier: supplierId,
+    invoiceNumber:
+      editData.invoiceNo && editData.invoiceNo !== "NA"
+        ? editData.invoiceNo
+        : editData.invoiceNumber || "",
+    invoiceDate: normalizeDate(editData.invoiceDate),
+    customerName: editData.customerName || "",
+    customerAddress: editData.customerAddress || "",
+    remarks: editData.remarks || "",
+  };
+};
+
+// ============================================================================
 // AddTransactionModal
-// KEY CHANGE: For Credit Collection, Amount field shows dueAmount (not totalAmount)
-//             and is editable (user can enter partial amount ≤ dueAmount)
 // ============================================================================
 const AddTransactionModal = ({
   isOpen,
@@ -348,6 +461,7 @@ const AddTransactionModal = ({
   sourceOptions = [],
   destinationOptions = [],
   supplierOptions = [],
+  loadingSuppliers = false,
   currentData = [],
 }) => {
   const [form, setForm] = useState({});
@@ -359,8 +473,11 @@ const AddTransactionModal = ({
   const [originalAmount, setOriginalAmount] = useState(0);
   const [invoiceGloballyChecked, setInvoiceGloballyChecked] = useState(false);
   const [invoiceCheckLoading, setInvoiceCheckLoading] = useState(false);
-  // For credit collection: track the invoice's dueAmount to enforce max
   const [invoiceDueAmount, setInvoiceDueAmount] = useState(0);
+
+  // Track whether options are loaded enough to resolve edit data
+  const optionsReady =
+    categoryOptions.length > 0 && destinationOptions.length > 0;
 
   const getCategoryName = useMemo(() => {
     if (!form.categoryType) return "";
@@ -374,7 +491,12 @@ const AddTransactionModal = ({
   );
 
   const editInvoiceNumber =
-    isEdit && editData?.invoiceNumber ? editData.invoiceNumber : "";
+    isEdit && editData?.invoiceNo && editData.invoiceNo !== "NA"
+      ? editData.invoiceNo
+      : isEdit && editData?.invoiceNumber
+        ? editData.invoiceNumber
+        : "";
+
   const {
     sales,
     filteredSales,
@@ -387,6 +509,7 @@ const AddTransactionModal = ({
     const cn = getCategoryName.toLowerCase();
     return cn.includes("payment inward") || cn.includes("remittance");
   }, [getCategoryName]);
+
   const isRemittance = useMemo(
     () => getCategoryName.toLowerCase().includes("remittance"),
     [getCategoryName],
@@ -431,6 +554,8 @@ const AddTransactionModal = ({
     requiresInvoiceDropdown,
   ]);
 
+  const needsSupplierDropdown = requiresSupplier;
+
   const getFilteredSourceOptions = useMemo(() => {
     if (!isDepositOrWithdraw) return sourceOptions;
     return sourceOptions.filter(
@@ -473,7 +598,6 @@ const AddTransactionModal = ({
         type: "number",
         required: true,
         layout: "half",
-        // For credit collection: show dueAmount hint and allow partial
         hint:
           isCreditCollection && invoiceDueAmount > 0
             ? `Max (Due Amount): $${invoiceDueAmount.toFixed(2)}`
@@ -488,6 +612,7 @@ const AddTransactionModal = ({
         type: "select",
         required: true,
         options: supplierOptions,
+        isLoadingOptions: loadingSuppliers,
         layout: "half",
       });
       if (isRemittance)
@@ -510,14 +635,6 @@ const AddTransactionModal = ({
         });
     } else if (isPaymentOutward) {
       baseFields.splice(1, 0, {
-        key: "supplier",
-        label: "Payment To",
-        type: "select",
-        required: true,
-        options: supplierOptions,
-        layout: "half",
-      });
-      baseFields.splice(2, 0, {
         key: "source",
         label: "Source Account",
         type: "select",
@@ -647,6 +764,7 @@ const AddTransactionModal = ({
     sourceOptions,
     destinationOptions,
     supplierOptions,
+    loadingSuppliers,
     getCategoryName,
     getFilteredSourceOptions,
     getFilteredDestinationOptions,
@@ -665,84 +783,92 @@ const AddTransactionModal = ({
   ]);
 
   const initializeFormData = () => {
-    const initialData = {};
-    formFields.forEach((field) => {
-      if (field.type === "date")
-        initialData[field.key] = new Date().toISOString().split("T")[0];
-      else if (field.key === "finalAmount") initialData[field.key] = "0.00";
-      else initialData[field.key] = "";
-    });
-    return initialData;
+    return {
+      categoryType: "",
+      date: new Date().toISOString().split("T")[0],
+      amount: "",
+      exchangeLoss: "",
+      finalAmount: "0.00",
+      source: "",
+      destination: "",
+      supplier: "",
+      invoiceNumber: "",
+      invoiceDate: new Date().toISOString().split("T")[0],
+      customerName: "",
+      customerAddress: "",
+      remarks: "",
+    };
   };
 
+  // ============================================================================
+  // FIX: Edit mode initialization
+  // Wait until options are loaded (optionsReady) before resolving IDs so the
+  // label→ID lookup actually has data to search. Re-runs if options change
+  // (e.g., suppliers finish loading after categories already loaded).
+  // ============================================================================
   useEffect(() => {
-    if (isOpen) {
-      if (isEdit && editData) {
-        const findIdByLabel = (options, label) => {
-          if (!label || label === "--") return null;
-          const opt = options.find((o) => o.label === label);
-          return opt ? opt.value : null;
-        };
-        const categoryId =
-          editData.categoryType &&
-          (categoryOptions.find((o) => o.value === editData.categoryType)
-            ? editData.categoryType
-            : findIdByLabel(categoryOptions, editData.categoryType));
-        const sourceId =
-          (editData.source || editData.sourceAccount) &&
-          (sourceOptions.find(
-            (o) => o.value === (editData.source || editData.sourceAccount),
-          )
-            ? editData.source || editData.sourceAccount
-            : findIdByLabel(
-                sourceOptions,
-                editData.source || editData.sourceAccount,
-              ));
-        const destId =
-          editData.destination &&
-          editData.destination !== "--" &&
-          (destinationOptions.find((o) => o.value === editData.destination)
-            ? editData.destination
-            : findIdByLabel(destinationOptions, editData.destination));
-        const supplierId =
-          editData.supplier &&
-          (supplierOptions.find((o) => o.value === editData.supplier)
-            ? editData.supplier
-            : findIdByLabel(supplierOptions, editData.supplier));
-        setForm({
-          ...editData,
-          categoryType: categoryId || editData.categoryType,
-          source: sourceId || editData.source || editData.sourceAccount,
-          destination: destId || editData.destination,
-          supplier: supplierId || editData.supplier,
-          remarks: editData.remarks || "",
-        });
-        setInvoiceDataFetched(true);
-        setOriginalAmount(editData.amount || 0);
-        setInvoiceGloballyChecked(true);
-      } else {
-        setForm(initializeFormData());
-        setInvoiceDataFetched(false);
-        setSourceAccountBalance(0);
-        setDestinationAccountBalance(0);
-        setOriginalAmount(0);
-        setInvoiceGloballyChecked(false);
-        setInvoiceDueAmount(0);
-      }
+    if (!isOpen) return;
+
+    if (isEdit && editData) {
+      if (!optionsReady) return; // Wait for at least categories + destinations
+
+      const resolved = resolveEditFormData(
+        editData,
+        categoryOptions,
+        sourceOptions,
+        destinationOptions,
+        supplierOptions,
+      );
+      setForm(resolved);
+      setInvoiceDataFetched(true);
+      setOriginalAmount(editData.amount || 0);
+      setInvoiceGloballyChecked(true);
+      setErrors({});
+    } else {
+      // Add mode — always reset
+      setForm(initializeFormData());
+      setInvoiceDataFetched(false);
+      setSourceAccountBalance(0);
+      setDestinationAccountBalance(0);
+      setOriginalAmount(0);
+      setInvoiceGloballyChecked(false);
+      setInvoiceDueAmount(0);
       setErrors({});
       refetchSales();
     }
   }, [
     isOpen,
     isEdit,
-    editData,
-    activeTab,
-    categoryOptions,
-    sourceOptions,
-    destinationOptions,
-    supplierOptions,
+    // Re-resolve when options finish loading (supplier may arrive late)
+    optionsReady,
+    supplierOptions.length,
+    // editData identity
+    editData?._id,
   ]);
 
+  // Sync source balance when form.source changes
+  useEffect(() => {
+    if (form.source) {
+      const selected = sourceOptions.find((o) => o.value === form.source);
+      setSourceAccountBalance(selected?.totalAmount || 0);
+    } else {
+      setSourceAccountBalance(0);
+    }
+  }, [form.source, sourceOptions]);
+
+  // Sync destination balance when form.destination changes
+  useEffect(() => {
+    if (form.destination) {
+      const selected = destinationOptions.find(
+        (o) => o.value === form.destination,
+      );
+      setDestinationAccountBalance(selected?.totalAmount || 0);
+    } else {
+      setDestinationAccountBalance(0);
+    }
+  }, [form.destination, destinationOptions]);
+
+  // Auto-calculate finalAmount for deposits
   useEffect(() => {
     if (isDeposit) {
       const amount = parseFloat(form.amount) || 0;
@@ -755,60 +881,47 @@ const AddTransactionModal = ({
     }
   }, [form.amount, form.exchangeLoss, isDeposit]);
 
+  // Reset invoice/supplier fields when category changes (only in add mode or when
+  // the user manually changes the category in edit mode)
+  const prevCategoryRef = useRef(null);
   useEffect(() => {
-    if (form.source) {
-      const selected = sourceOptions.find((o) => o.value === form.source);
-      setSourceAccountBalance(selected?.totalAmount || 0);
-    } else setSourceAccountBalance(0);
-  }, [form.source, sourceOptions]);
-
-  useEffect(() => {
-    if (form.destination) {
-      const selected = destinationOptions.find(
-        (o) => o.value === form.destination,
-      );
-      setDestinationAccountBalance(selected?.totalAmount || 0);
-    } else setDestinationAccountBalance(0);
-  }, [form.destination, destinationOptions]);
-
-  useEffect(() => {
-    if (form.categoryType) {
-      setForm((prev) => {
-        const newForm = { ...prev };
-        if (!requiresSupplier && !isPaymentOutward && newForm.supplier)
-          newForm.supplier = "";
-        if (
-          !requiresInvoiceFields &&
-          !requiresInvoiceDropdown &&
-          newForm.invoiceNumber
-        ) {
-          newForm.invoiceNumber = "";
-          newForm.invoiceDate = "";
-          newForm.customerName = "";
-          newForm.customerAddress = "";
-          newForm.amount = "";
-        }
-        if (
-          !isDepositOrWithdraw &&
-          !isPaymentOutward &&
-          !isRemittance &&
-          newForm.source
-        )
-          newForm.source = "";
-        if (!isDeposit) {
-          if (newForm.exchangeLoss) newForm.exchangeLoss = "";
-          if (newForm.finalAmount) newForm.finalAmount = "0.00";
-        }
-        return newForm;
-      });
-      setInvoiceDataFetched(false);
-      setInvoiceGloballyChecked(false);
-      setSourceAccountBalance(0);
-      setDestinationAccountBalance(0);
-      setOriginalAmount(0);
-      setInvoiceDueAmount(0);
+    if (!form.categoryType) return;
+    // Skip the very first run when we're populating edit data
+    if (prevCategoryRef.current === null) {
+      prevCategoryRef.current = form.categoryType;
+      return;
     }
+    if (prevCategoryRef.current === form.categoryType) return;
+    prevCategoryRef.current = form.categoryType;
+
+    // Category changed — clear dependent fields
+    setForm((prev) => ({
+      ...prev,
+      invoiceNumber: "",
+      source: "",
+      destination: "",
+      exchangeLoss: "",
+      finalAmount: "0.00",
+      invoiceDate: "",
+      customerName: "",
+      customerAddress: "",
+      amount: "",
+      supplier: "",
+    }));
+    setInvoiceDataFetched(false);
+    setInvoiceGloballyChecked(false);
+    setSourceAccountBalance(0);
+    setDestinationAccountBalance(0);
+    setOriginalAmount(0);
+    setInvoiceDueAmount(0);
   }, [form.categoryType]);
+
+  // Reset prevCategoryRef when modal closes or switches between add/edit
+  useEffect(() => {
+    if (!isOpen) {
+      prevCategoryRef.current = null;
+    }
+  }, [isOpen, isEdit]);
 
   const findSaleByInvoice = (invoiceNumber) =>
     filteredSales.find((s) => s.invoiceNumber === invoiceNumber) ||
@@ -871,7 +984,6 @@ const AddTransactionModal = ({
             return;
           }
 
-          // KEY FIX: For credit collection use dueAmount; for cash sale use totalAmount
           const amountToSet = isCreditCollection
             ? saleRecord.dueAmount || saleRecord.totalAmount || ""
             : saleRecord.totalAmount || saleRecord.amount || "";
@@ -987,28 +1099,6 @@ const AddTransactionModal = ({
     setForm((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors((prev) => ({ ...prev, [field]: "" }));
 
-    if (field === "categoryType") {
-      setForm((prev) => ({
-        ...prev,
-        invoiceNumber: "",
-        source: "",
-        destination: "",
-        exchangeLoss: "",
-        finalAmount: "0.00",
-        invoiceDate: "",
-        customerName: "",
-        customerAddress: "",
-        amount: "",
-        supplier: "",
-      }));
-      setInvoiceDataFetched(false);
-      setInvoiceGloballyChecked(false);
-      setSourceAccountBalance(0);
-      setDestinationAccountBalance(0);
-      setOriginalAmount(0);
-      setInvoiceDueAmount(0);
-    }
-
     if (field === "source" && value) {
       const selected = sourceOptions.find((o) => o.value === value);
       if (selected) setSourceAccountBalance(selected.totalAmount || 0);
@@ -1028,7 +1118,6 @@ const AddTransactionModal = ({
       setInvoiceDueAmount(0);
     }
 
-    // For credit collection, validate amount against dueAmount
     if (
       field === "amount" &&
       value &&
@@ -1086,7 +1175,6 @@ const AddTransactionModal = ({
         if (isNaN(amountValue) || amountValue <= 0)
           newErrors[field.key] =
             `${field.label} must be a valid positive number`;
-        // For credit collection: enforce max = dueAmount
         if (
           isCreditCollection &&
           invoiceDueAmount > 0 &&
@@ -1203,7 +1291,6 @@ const AddTransactionModal = ({
         payload.destination = destinationName;
       }
     } else if (isPaymentOutward) {
-      payload.supplier = supplierName;
       payload.sourceAccount = sourceAccountName;
       payload.destination = "--";
       payload.invoiceNo = "NA";
@@ -1242,7 +1329,6 @@ const AddTransactionModal = ({
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
-      // For credit collection: block input above dueAmount
       if (field === "amount" && isCreditCollection && invoiceDueAmount > 0) {
         const numericValue = parseFloat(value);
         if (!isNaN(numericValue) && numericValue > invoiceDueAmount) {
@@ -1294,6 +1380,12 @@ const AddTransactionModal = ({
               error={fieldError}
               disabled={field.disabled || false}
               placeholder={field.placeholder || `Select ${field.label}`}
+              isLoading={field.isLoadingOptions || false}
+              emptyLabel={
+                field.key === "supplier"
+                  ? "No suppliers found"
+                  : `No ${field.label.toLowerCase()} found`
+              }
             />
             {field.key === "destination" &&
               value &&
@@ -1307,6 +1399,20 @@ const AddTransactionModal = ({
                 Current Balance: ${sourceAccountBalance.toFixed(2)}
               </div>
             )}
+            {field.key === "supplier" &&
+              !field.isLoadingOptions &&
+              supplierOptions.length === 0 && (
+                <p className="mt-1 text-xs text-red-500">
+                  Suppliers failed to load.{" "}
+                  <button
+                    type="button"
+                    className="underline text-indigo-600"
+                    onClick={() => window.location.reload()}
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
           </div>
         );
       case "invoiceDropdown":
@@ -1360,7 +1466,6 @@ const AddTransactionModal = ({
               disabled={field.disabled || false}
               placeholder={field.placeholder || ""}
             />
-            {/* Credit collection: show due amount hint and allow partial payment */}
             {field.key === "amount" &&
               isCreditCollection &&
               invoiceDueAmount > 0 && (
@@ -1416,6 +1521,12 @@ const AddTransactionModal = ({
     }
   };
 
+  const isSubmitDisabled =
+    categoryOptions.length === 0 ||
+    destinationOptions.length === 0 ||
+    invoiceCheckLoading ||
+    (needsSupplierDropdown && loadingSuppliers);
+
   if (!isOpen) return null;
 
   return ReactDOM.createPortal(
@@ -1448,6 +1559,33 @@ const AddTransactionModal = ({
                   {field.required && !field.readonly && !field.disabled && (
                     <span className="text-red-500 ml-1">*</span>
                   )}
+                  {field.key === "supplier" && loadingSuppliers && (
+                    <span className="ml-2 inline-block align-middle">
+                      <svg
+                        className="animate-spin h-3 w-3 text-indigo-500 inline"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v8z"
+                        />
+                      </svg>
+                      <span className="ml-1 text-xs text-gray-400">
+                        Loading...
+                      </span>
+                    </span>
+                  )}
                 </label>
                 {renderFormField(field)}
                 {errors[field.key] && (
@@ -1468,17 +1606,15 @@ const AddTransactionModal = ({
             </button>
             <button
               type="submit"
-              disabled={
-                categoryOptions.length === 0 ||
-                destinationOptions.length === 0 ||
-                invoiceCheckLoading
-              }
+              disabled={isSubmitDisabled}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus size={16} />
               {invoiceCheckLoading
                 ? "Checking..."
-                : `${isEdit ? "Update" : "Add"} Transaction`}
+                : needsSupplierDropdown && loadingSuppliers
+                  ? "Loading suppliers..."
+                  : `${isEdit ? "Update" : "Add"} Transaction`}
             </button>
           </div>
         </form>
@@ -1488,7 +1624,9 @@ const AddTransactionModal = ({
   );
 };
 
-// ImportExcelModal — unchanged from original
+// ============================================================================
+// ImportExcelModal — unchanged
+// ============================================================================
 const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   const [uploading, setUploading] = useState(false);
   const [importSummary, setImportSummary] = useState(null);
@@ -1748,9 +1886,6 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   );
 };
 
-// ============================================================================
-// CashAndBank — main component (same as before, no changes needed here)
-// ============================================================================
 const CashAndBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
   const [searchTerm, setSearchTerm] = useState("");
@@ -1790,9 +1925,11 @@ const CashAndBank = () => {
     destinationOptions,
     supplierOptions,
     loading: optionsLoading,
+    loadingSuppliers,
     error: optionsError,
     refetch: refetchDropdownOptions,
   } = useDropdownOptions();
+
   const visiblePages = useVisiblePages(currentPage, totalPages);
 
   const allFields = useMemo(
@@ -1932,12 +2069,13 @@ const CashAndBank = () => {
               : tx.destination.toString().toLowerCase()
             : "";
           const activeTabLower = activeTab.toLowerCase();
+
           if (txType === "deposit" || txType === "withdraw")
             return (
               sourceName === activeTabLower ||
               destinationName === activeTabLower
             );
-          else if (txType === "remittance")
+          else if (txType === "remittance" || txType === "payment outward")
             return sourceName === activeTabLower;
           else return destinationName === activeTabLower;
         });
@@ -2106,6 +2244,7 @@ const CashAndBank = () => {
       const activeTabLower = activeTab.toLowerCase();
       const isNeg =
         txType === "remittance" ||
+        txType === "payment outward" ||
         ((txType === "withdraw" || txType === "deposit") &&
           sourceName === activeTabLower);
       const isPos =
@@ -2561,6 +2700,7 @@ const CashAndBank = () => {
           sourceOptions={sourceOptions}
           destinationOptions={destinationOptions}
           supplierOptions={supplierOptions}
+          loadingSuppliers={loadingSuppliers}
           currentData={currentData}
         />
         <AddTransactionModal
@@ -2578,6 +2718,7 @@ const CashAndBank = () => {
           sourceOptions={sourceOptions}
           destinationOptions={destinationOptions}
           supplierOptions={supplierOptions}
+          loadingSuppliers={loadingSuppliers}
           currentData={currentData}
         />
         <ImportExcelModal
