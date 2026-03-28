@@ -19,7 +19,7 @@ const attendanceSchema = new mongoose.Schema(
     },
     workingHoursPerDay: {
       type: Number,
-      default: 8, // Changed from 9 to 8 as per your logic
+      default: 8,
     },
     extraHours: {
       type: String,
@@ -33,17 +33,15 @@ const attendanceSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    // REMOVED leaveType from Attendance model
     remarks: {
       type: String,
     },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// Calculate total time and extra hours before saving
 attendanceSchema.pre("save", function (next) {
   if (this.logoutTime && this.loginTime) {
     const timeDiff = this.logoutTime - this.loginTime;
@@ -55,13 +53,10 @@ attendanceSchema.pre("save", function (next) {
       .toString()
       .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 
-    // Calculate total minutes worked
     const totalMinutesWorked = Math.floor(timeDiff / (1000 * 60));
     const totalMinutesExpected = this.workingHoursPerDay * 60;
-    
-    // Calculate extra minutes (if worked more than expected)
     const extraMinutes = Math.max(0, totalMinutesWorked - totalMinutesExpected);
-    
+
     if (extraMinutes > 0) {
       this.extraHoursInMinutes = extraMinutes;
       const extraHours = Math.floor(extraMinutes / 60);
@@ -71,7 +66,6 @@ attendanceSchema.pre("save", function (next) {
         .padStart(2, "0")}:00`;
     }
   }
-  
   next();
 });
 

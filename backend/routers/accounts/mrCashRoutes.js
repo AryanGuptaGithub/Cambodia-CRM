@@ -355,12 +355,29 @@ router.get("/mr-list", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /mr-list-with-cash
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /mr-list-with-cash
 router.get("/mr-list-with-cash", async (req, res) => {
   try {
     const { minCash = 0 } = req.query;
 
+    // 1. Get all MR IDs that have stock transfers
+    const stockTransfers = await stockTransferToMR.find({}, { mrId: 1 }).lean();
+    const mrIdsWithStock = stockTransfers.map((t) => t.mrId).filter(Boolean);
+
+    if (mrIdsWithStock.length === 0) {
+      // No MRs have stock transfers → return empty list
+      return res.status(200).json({
+        success: true,
+        data: [],
+        count: 0,
+        message: "No MRs found with stock transfers",
+      });
+    }
+
+    // 2. Query MRCash for active records with positive cash AND mrId in the list
     const mrsWithCash = await MRCash.find({
       isActive: true,
+      mrId: { $in: mrIdsWithStock },
       currentCash: { $gt: parseFloat(minCash) >= 0 ? parseFloat(minCash) : 0 },
     })
       .populate("mrId", "medicalRepName contactNo email MRId teamName")
@@ -398,7 +415,7 @@ router.get("/mr-list-with-cash", async (req, res) => {
       success: true,
       data: formattedMRs,
       count: formattedMRs.length,
-      message: `Found ${formattedMRs.length} MRs with positive cash balance`,
+      message: `Found ${formattedMRs.length} MRs with positive cash balance and stock transfers`,
     });
   } catch (error) {
     console.error("Error fetching MR list with cash:", error);
@@ -407,7 +424,6 @@ router.get("/mr-list-with-cash", async (req, res) => {
       .json({ success: false, message: "Server error", error: error.message });
   }
 });
-
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /mr/:mrId
 // ─────────────────────────────────────────────────────────────────────────────
@@ -518,13 +534,16 @@ router.put("/:id", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /:mrCashId/transfer
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /:mrCashId/transfer
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/:mrCashId/transfer", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { mrCashId } = req.params;
-    const { amount, notes, destinationAccount } = req.body;
+    const { amount, notes, destinationAccount, transferDate } = req.body;
 
     if (!amount || amount <= 0) {
       await session.abortTransaction();
@@ -580,9 +599,12 @@ router.post("/:mrCashId/transfer", async (req, res) => {
     }
 
     const transferAmount = parseFloat(amount);
+    // Use the provided date or default to now
+    const effectiveDate = transferDate ? new Date(transferDate) : new Date();
+
     mrCash.currentCash -= transferAmount;
     mrCash.cashTransferredToAdmin += transferAmount;
-    mrCash.lastTransferDate = new Date();
+    mrCash.lastTransferDate = effectiveDate;
     mrCash.updatedAt = new Date();
 
     destinationAcc.totalAmount += transferAmount;
@@ -597,7 +619,7 @@ router.post("/:mrCashId/transfer", async (req, res) => {
       amount: transferAmount,
       notes:
         notes || `Transfer from ${mrCash.mrName} to ${destinationAcc.name}`,
-      transferredAt: new Date(),
+      transferredAt: effectiveDate,
     };
     if (transferredBy) transferData.transferredBy = transferredBy;
 
@@ -610,7 +632,7 @@ router.post("/:mrCashId/transfer", async (req, res) => {
       amount: transferAmount,
       exchangeLoss: 0,
       finalAmount: transferAmount,
-      date: new Date(),
+      date: effectiveDate,
       invoiceNo: "NA",
       accountType: destinationAcc.accountType || "Cash Balance",
       description: notes || `Transfer from MR ${mrCash.mrName}`,
@@ -1339,7 +1361,7 @@ router.get("/sales-by-mr/:mrName", async (req, res) => {
       invoiceNumber: { $nin: creditCollectedInvoiceNos },
     })
       .select(
-        "invoiceNumber invoiceDate customerName dueAmount totalAmount paidAmount paymentStatus mrName recordingDate dueDate"
+        "invoiceNumber invoiceDate customerName dueAmount totalAmount paidAmount paymentStatus mrName recordingDate dueDate",
       )
       .sort({ invoiceDate: -1 })
       .lean();
@@ -1347,7 +1369,9 @@ router.get("/sales-by-mr/:mrName", async (req, res) => {
     res.status(200).json({ success: true, data: sales });
   } catch (error) {
     console.error("Error fetching sales by MR:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 // =============================================================================
@@ -1627,11 +1651,9 @@ router.get("/combined-cash-summary", async (req, res) => {
 
     // 4. Merge
     const creditMap = new Map(
-      creditTotals.map((c) => [c._id, c.creditCollectionTotal])
+      creditTotals.map((c) => [c._id, c.creditCollectionTotal]),
     );
-    const saleMap = new Map(
-      saleTotals.map((s) => [s._id, s.salePaidTotal])
-    );
+    const saleMap = new Map(saleTotals.map((s) => [s._id, s.salePaidTotal]));
 
     const allKeys = new Set([...creditMap.keys(), ...saleMap.keys()]);
 
@@ -1645,7 +1667,9 @@ router.get("/combined-cash-summary", async (req, res) => {
     res.status(200).json({ success: true, data: combined });
   } catch (error) {
     console.error("Error fetching combined cash summary:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────

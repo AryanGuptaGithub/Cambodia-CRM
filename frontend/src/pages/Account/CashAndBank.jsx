@@ -310,29 +310,35 @@ const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
         const ps = s.paymentStatus?.toLowerCase() || "";
         return ps === "cash" || ps === "paid";
       });
+      // For cash sale, exclude invoices already used
+      filteredSales = filteredSales.filter(
+        (s) => !usedInvoiceNumbers.has(s.invoiceNumber),
+      );
     } else if (cat.includes("credit collection")) {
       filteredSales = sales.filter((s) => {
         const ps = s.paymentStatus?.toLowerCase() || "";
         const isPending = s.pendingAmountPaid?.toLowerCase() !== "paid";
+        const hasDue = (s.dueAmount || 0) > 0;
+        // For credit collection, do NOT filter out invoices with existing transactions
         return (
           isPending &&
           (ps === "credit" ||
             ps === "partial paid" ||
             ps === "unpaid" ||
-            ps === "due")
+            ps === "due") &&
+          hasDue
         );
       });
+    } else {
+      // Other categories: exclude used invoices
+      filteredSales = sales.filter(
+        (s) => !usedInvoiceNumbers.has(s.invoiceNumber),
+      );
     }
 
     const uniqueInvoices = [
-      ...new Set(
-        filteredSales
-          .map((s) => s.invoiceNumber)
-          .filter(Boolean)
-          .filter((inv) => !usedInvoiceNumbers.has(inv)),
-      ),
+      ...new Set(filteredSales.map((s) => s.invoiceNumber).filter(Boolean)),
     ];
-
     return [
       { value: "", label: "Select Invoice Number" },
       ...uniqueInvoices.map((inv) => ({ value: inv, label: inv })),
@@ -350,12 +356,14 @@ const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
       return sales.filter((s) => {
         const ps = s.paymentStatus?.toLowerCase() || "";
         const isPending = s.pendingAmountPaid?.toLowerCase() !== "paid";
+        const hasDue = (s.dueAmount || 0) > 0;
         return (
           isPending &&
           (ps === "credit" ||
             ps === "partial paid" ||
             ps === "unpaid" ||
-            ps === "due")
+            ps === "due") &&
+          hasDue
         );
       });
     return sales;
@@ -371,12 +379,6 @@ const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
   };
 };
 
-// ============================================================================
-// KEY FIX: resolveEditFormData
-// Resolves all IDs from editData robustly by checking both direct ID match
-// AND label-based fallback. Works for categoryType, source, destination,
-// supplier. Called once when modal opens in edit mode.
-// ============================================================================
 const resolveEditFormData = (
   editData,
   categoryOptions,
@@ -387,34 +389,31 @@ const resolveEditFormData = (
   if (!editData) return {};
 
   const findId = (options, rawValue) => {
-    if (!rawValue || rawValue === "--") return "";
-    // First try direct value (ID) match
+    if (!rawValue || rawValue === "--" || rawValue === "") return "";
+
+    // Try direct value match (ID)
     const byId = options.find((o) => o.value === rawValue);
     if (byId) return byId.value;
-    // Fallback: match by label (name)
+
+    // Fallback: match by label (this fixes most edit issues)
     const byLabel = options.find(
-      (o) => o.label?.toLowerCase() === rawValue?.toString()?.toLowerCase(),
+      (o) =>
+        o.label?.toLowerCase().trim() === String(rawValue).toLowerCase().trim(),
     );
     return byLabel ? byLabel.value : rawValue;
   };
 
-  // Resolve category — editData.categoryType may be an ID or a label name
   const categoryId = findId(categoryOptions, editData.categoryType);
-
-  // Resolve source — may be stored as sourceAccount or source
-  const rawSource = editData.source || editData.sourceAccount || "";
+  const rawSource = editData.sourceAccount || editData.source || "";
   const sourceId = findId(sourceOptions, rawSource);
 
-  // Resolve destination
   const rawDest = editData.destination || "";
   const destId =
     rawDest && rawDest !== "--" ? findId(destinationOptions, rawDest) : "";
 
-  // Resolve supplier
   const rawSupplier = editData.supplier || "";
   const supplierId = rawSupplier ? findId(supplierOptions, rawSupplier) : "";
 
-  // Normalize date to YYYY-MM-DD for <input type="date">
   const normalizeDate = (d) => {
     if (!d) return new Date().toISOString().split("T")[0];
     if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
@@ -428,11 +427,9 @@ const resolveEditFormData = (
   return {
     categoryType: categoryId || editData.categoryType || "",
     date: normalizeDate(editData.date),
-    amount: editData.amount != null ? String(editData.amount) : "",
-    exchangeLoss:
-      editData.exchangeLoss != null ? String(editData.exchangeLoss) : "",
-    finalAmount:
-      editData.finalAmount != null ? String(editData.finalAmount) : "0.00",
+    amount: String(editData.finalAmount || editData.amount || ""),
+    exchangeLoss: String(editData.exchangeLoss || "0"),
+    finalAmount: String(editData.finalAmount || editData.amount || "0"),
     source: sourceId,
     destination: destId,
     supplier: supplierId,
@@ -444,6 +441,9 @@ const resolveEditFormData = (
     customerName: editData.customerName || "",
     customerAddress: editData.customerAddress || "",
     remarks: editData.remarks || "",
+    // For remittance, these will be populated from the actual transaction if needed
+    lossCharges: "",
+    lossRemarks: "",
   };
 };
 
@@ -474,6 +474,77 @@ const AddTransactionModal = ({
   const [invoiceGloballyChecked, setInvoiceGloballyChecked] = useState(false);
   const [invoiceCheckLoading, setInvoiceCheckLoading] = useState(false);
   const [invoiceDueAmount, setInvoiceDueAmount] = useState(0);
+
+  // --- Address resolution state ---
+  const [customerById, setCustomerById] = useState({});
+  const [customerByCode, setCustomerByCode] = useState({});
+  const [customerByName, setCustomerByName] = useState({});
+
+  // Helper: pick a non-empty address from an object
+  const pickAddress = (obj) => {
+    if (!obj) return "";
+    const candidates = [
+      obj.address,
+      obj.customerAddress,
+      obj.billingAddress,
+      obj.shippingAddress,
+      obj.deliveryAddress,
+      obj.custAddress,
+      obj.customer_address,
+      obj.billing_address,
+      obj.permanentAddress,
+      obj.contactAddress,
+    ];
+    for (const c of candidates) {
+      if (c && String(c).trim() !== "") return String(c).trim();
+    }
+    return "";
+  };
+
+  // Build lookup maps from raw customers
+  const buildCustomerMaps = (custRaw) => {
+    const byId = {},
+      byCode = {},
+      byName = {};
+    if (!Array.isArray(custRaw)) return { byId, byCode, byName };
+    custRaw.forEach((c) => {
+      const addr = pickAddress(c);
+      if (c._id)
+        byId[String(c._id)] = { addr, name: c.name, phone: c.customerNumber };
+      if (c.customerCode) {
+        byCode[String(c.customerCode)] = addr;
+        byCode[String(c.customerCode).replace(/^0+/, "") || "0"] = addr;
+      }
+      if (c.name) byName[c.name.toLowerCase().trim()] = addr;
+    });
+    return { byId, byCode, byName };
+  };
+
+  // Resolve address using the maps
+  const resolveAddress = (sale, byId, byCode, byName) => {
+    const fromSale = pickAddress(sale);
+    if (fromSale) return fromSale;
+
+    if (sale.customerId) {
+      const rec = byId[String(sale.customerId)];
+      if (rec?.addr) return rec.addr;
+      if (typeof rec === "string" && rec) return rec;
+    }
+
+    if (sale.customerCode) {
+      const raw = String(sale.customerCode);
+      const stripped = raw.replace(/^0+/, "") || "0";
+      if (byCode[raw]) return byCode[raw];
+      if (byCode[stripped]) return byCode[stripped];
+    }
+
+    if (sale.customerName) {
+      const byNameAddr = byName[sale.customerName.toLowerCase().trim()];
+      if (byNameAddr) return byNameAddr;
+    }
+
+    return "";
+  };
 
   // Track whether options are loaded enough to resolve edit data
   const optionsReady =
@@ -575,6 +646,9 @@ const AddTransactionModal = ({
     [getInvoiceOptions],
   );
 
+  // ============================================================================
+  // Define form fields dynamically (including remittance loss charges)
+  // ============================================================================
   const formFields = useMemo(() => {
     const baseFields = [
       {
@@ -594,7 +668,7 @@ const AddTransactionModal = ({
       },
       {
         key: "amount",
-        label: "Amount ($)",
+        label: "Amount ($)", // will be overridden in render for remittance
         type: "number",
         required: true,
         layout: "half",
@@ -606,6 +680,7 @@ const AddTransactionModal = ({
     ];
 
     if (requiresSupplier) {
+      // Insert supplier field after categoryType
       baseFields.splice(1, 0, {
         key: "supplier",
         label: "Supplier Name",
@@ -615,7 +690,8 @@ const AddTransactionModal = ({
         isLoadingOptions: loadingSuppliers,
         layout: "half",
       });
-      if (isRemittance)
+      if (isRemittance) {
+        // Insert source account field after supplier
         baseFields.splice(2, 0, {
           key: "source",
           label: "Source Account",
@@ -624,7 +700,22 @@ const AddTransactionModal = ({
           options: sourceOptions,
           layout: "half",
         });
-      else if (isPaymentInward)
+        // Insert loss charges and remarks for remittance
+        baseFields.splice(3, 0, {
+          key: "lossCharges",
+          label: "Loss Charges ($)",
+          type: "number",
+          required: false,
+          layout: "half",
+        });
+        baseFields.splice(4, 0, {
+          key: "lossRemarks",
+          label: "Loss Charges Remarks",
+          type: "textarea",
+          required: false,
+          layout: "full",
+        });
+      } else if (isPaymentInward) {
         baseFields.splice(2, 0, {
           key: "destination",
           label: "Destination Account",
@@ -633,6 +724,7 @@ const AddTransactionModal = ({
           options: destinationOptions,
           layout: "half",
         });
+      }
     } else if (isPaymentOutward) {
       baseFields.splice(1, 0, {
         key: "source",
@@ -797,21 +889,17 @@ const AddTransactionModal = ({
       customerName: "",
       customerAddress: "",
       remarks: "",
+      lossCharges: "",
+      lossRemarks: "",
     };
   };
 
-  // ============================================================================
-  // FIX: Edit mode initialization
-  // Wait until options are loaded (optionsReady) before resolving IDs so the
-  // label→ID lookup actually has data to search. Re-runs if options change
-  // (e.g., suppliers finish loading after categories already loaded).
-  // ============================================================================
+  // Edit mode initialization
   useEffect(() => {
     if (!isOpen) return;
 
     if (isEdit && editData) {
-      if (!optionsReady) return; // Wait for at least categories + destinations
-
+      if (!optionsReady) return;
       const resolved = resolveEditFormData(
         editData,
         categoryOptions,
@@ -825,7 +913,6 @@ const AddTransactionModal = ({
       setInvoiceGloballyChecked(true);
       setErrors({});
     } else {
-      // Add mode — always reset
       setForm(initializeFormData());
       setInvoiceDataFetched(false);
       setSourceAccountBalance(0);
@@ -836,17 +923,31 @@ const AddTransactionModal = ({
       setErrors({});
       refetchSales();
     }
-  }, [
-    isOpen,
-    isEdit,
-    // Re-resolve when options finish loading (supplier may arrive late)
-    optionsReady,
-    supplierOptions.length,
-    // editData identity
-    editData?._id,
-  ]);
+  }, [isOpen, isEdit, optionsReady, supplierOptions.length, editData?._id]);
 
-  // Sync source balance when form.source changes
+  // Fetch customers when modal opens (for address resolution)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const fetchCustomers = async () => {
+      try {
+        const response = await axios.get(`${backendUrl}/api/customers`);
+        const custRaw =
+          response.data?.customers ||
+          response.data?.data ||
+          (Array.isArray(response.data) ? response.data : []);
+        const maps = buildCustomerMaps(custRaw);
+        setCustomerById(maps.byId);
+        setCustomerByCode(maps.byCode);
+        setCustomerByName(maps.byName);
+      } catch (err) {
+        console.error("Failed to fetch customers", err);
+      }
+    };
+    fetchCustomers();
+  }, [isOpen]);
+
+  // Source balance sync
   useEffect(() => {
     if (form.source) {
       const selected = sourceOptions.find((o) => o.value === form.source);
@@ -856,7 +957,7 @@ const AddTransactionModal = ({
     }
   }, [form.source, sourceOptions]);
 
-  // Sync destination balance when form.destination changes
+  // Destination balance sync
   useEffect(() => {
     if (form.destination) {
       const selected = destinationOptions.find(
@@ -881,12 +982,9 @@ const AddTransactionModal = ({
     }
   }, [form.amount, form.exchangeLoss, isDeposit]);
 
-  // Reset invoice/supplier fields when category changes (only in add mode or when
-  // the user manually changes the category in edit mode)
   const prevCategoryRef = useRef(null);
   useEffect(() => {
     if (!form.categoryType) return;
-    // Skip the very first run when we're populating edit data
     if (prevCategoryRef.current === null) {
       prevCategoryRef.current = form.categoryType;
       return;
@@ -894,7 +992,6 @@ const AddTransactionModal = ({
     if (prevCategoryRef.current === form.categoryType) return;
     prevCategoryRef.current = form.categoryType;
 
-    // Category changed — clear dependent fields
     setForm((prev) => ({
       ...prev,
       invoiceNumber: "",
@@ -907,6 +1004,8 @@ const AddTransactionModal = ({
       customerAddress: "",
       amount: "",
       supplier: "",
+      lossCharges: "",
+      lossRemarks: "",
     }));
     setInvoiceDataFetched(false);
     setInvoiceGloballyChecked(false);
@@ -916,7 +1015,6 @@ const AddTransactionModal = ({
     setInvoiceDueAmount(0);
   }, [form.categoryType]);
 
-  // Reset prevCategoryRef when modal closes or switches between add/edit
   useEffect(() => {
     if (!isOpen) {
       prevCategoryRef.current = null;
@@ -969,7 +1067,14 @@ const AddTransactionModal = ({
       if (requiresInvoiceDropdown) {
         const saleRecord = findSaleByInvoice(invoiceNumber);
         if (saleRecord) {
-          const isGloballyUnique = await checkInvoiceGlobally(invoiceNumber);
+          // For credit collection, allow multiple transactions, so skip global check.
+          const isCreditCollection = getCategoryName
+            .toLowerCase()
+            .includes("credit collection");
+          let isGloballyUnique = true;
+          if (!isCreditCollection) {
+            isGloballyUnique = await checkInvoiceGlobally(invoiceNumber);
+          }
           if (!isGloballyUnique) {
             setForm((prev) => ({
               ...prev,
@@ -992,6 +1097,14 @@ const AddTransactionModal = ({
             isCreditCollection ? saleRecord.dueAmount || 0 : 0,
           );
 
+          // Resolve customer address
+          const resolvedAddress = resolveAddress(
+            saleRecord,
+            customerById,
+            customerByCode,
+            customerByName,
+          );
+
           setForm((prev) => ({
             ...prev,
             invoiceNumber: saleRecord.invoiceNumber || "",
@@ -1000,13 +1113,7 @@ const AddTransactionModal = ({
               new Date().toISOString().split("T")[0],
             customerName:
               saleRecord.customerName || saleRecord.customer?.name || "",
-            customerAddress:
-              saleRecord.customerAddress ||
-              saleRecord.customer?.address ||
-              saleRecord.billingAddress ||
-              saleRecord.shippingAddress ||
-              saleRecord.address ||
-              "",
+            customerAddress: resolvedAddress,
             amount: amountToSet,
           }));
           setInvoiceDataFetched(true);
@@ -1202,130 +1309,9 @@ const AddTransactionModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validateForm()) return;
-
-    if (
-      (requiresInvoiceDropdown || requiresInvoiceFields) &&
-      form.invoiceNumber
-    ) {
-      if (!invoiceGloballyChecked && !invoiceCheckLoading) {
-        const isUnique = await checkInvoiceGlobally(form.invoiceNumber);
-        if (!isUnique) return;
-      }
-    }
-
-    const amount = parseFloat(form.amount) || 0;
-    const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
-    const finalAmount = isDeposit ? amount - exchangeLoss : amount;
-
-    const categoryOption = categoryOptions.find(
-      (opt) => opt.value === form.categoryType,
-    );
-    const categoryName = categoryOption ? categoryOption.label : "";
-
-    let transactionType = "sale";
-    const catLower = categoryName.toLowerCase();
-    if (catLower.includes("deposit")) transactionType = "deposit";
-    else if (catLower.includes("withdraw")) transactionType = "withdraw";
-    else if (catLower.includes("remittance")) transactionType = "remittance";
-    else if (catLower.includes("payment inward"))
-      transactionType = "payment inward";
-    else if (catLower.includes("payment outward"))
-      transactionType = "payment outward";
-    else if (catLower.includes("cash sale")) transactionType = "cash sale";
-    else if (catLower.includes("credit collection"))
-      transactionType = "credit collection";
-
-    const categoryTypeForPayload = categoryName;
-
-    let sourceAccountName = "";
-    if (form.source) {
-      const sourceOpt = sourceOptions.find((opt) => opt.value === form.source);
-      sourceAccountName = sourceOpt ? sourceOpt.label : "";
-    }
-
-    let destinationName = "";
-    if (form.destination) {
-      const destOpt = destinationOptions.find(
-        (opt) => opt.value === form.destination,
-      );
-      destinationName = destOpt ? destOpt.label : "";
-    }
-
-    let supplierName = "";
-    if (form.supplier) {
-      const suppOpt = supplierOptions.find(
-        (opt) => opt.value === form.supplier,
-      );
-      supplierName = suppOpt ? suppOpt.label : "";
-    }
-
-    const payload = {
-      categoryType: categoryTypeForPayload,
-      date: form.date,
-      amount,
-      exchangeLoss,
-      finalAmount,
-      accountType: activeTab,
-      remarks: form.remarks || "",
-      transactionType,
-    };
-
-    if (requiresInvoiceDropdown || requiresInvoiceFields) {
-      payload.invoiceNo = form.invoiceNumber || "";
-      payload.sourceAccount = "";
-      payload.destination = destinationName;
-      payload.invoiceDate = form.invoiceDate;
-      payload.customerName = form.customerName;
-      payload.customerAddress = form.customerAddress;
-    } else if (requiresSupplier) {
-      payload.supplier = supplierName;
-      payload.invoiceNo = "NA";
-      if (isRemittance) {
-        payload.sourceAccount = sourceAccountName;
-        payload.destination = "--";
-      } else if (isPaymentInward) {
-        payload.sourceAccount = "";
-        payload.destination = destinationName;
-      }
-    } else if (isPaymentOutward) {
-      payload.sourceAccount = sourceAccountName;
-      payload.destination = "--";
-      payload.invoiceNo = "NA";
-    } else if (isDepositOrWithdraw) {
-      payload.sourceAccount = sourceAccountName;
-      payload.destination = destinationName || "--";
-      payload.invoiceNo = "NA";
-    } else {
-      payload.invoiceNo = form.invoiceNumber || "NA";
-      payload.destination = destinationName;
-    }
-
-    try {
-      let response;
-      if (isEdit && editData) {
-        response = await axios.put(
-          `${backendUrl}/api/transactions/${editData._id}`,
-          payload,
-        );
-      } else {
-        response = await axios.post(`${backendUrl}/api/transactions`, payload);
-      }
-      if (response.data.success) {
-        onAddTransaction(response.data.data, isEdit);
-        onClose();
-      }
-    } catch (err) {
-      console.error("Transaction submission error:", err);
-      showToast(
-        "error",
-        err.response?.data?.message || "Failed to submit transaction",
-      );
-    }
-  };
-
+  // ============================================================================
+  // Numeric and date handlers
+  // ============================================================================
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
@@ -1365,6 +1351,239 @@ const AddTransactionModal = ({
     handleInputChange(field, parseDateFromInput(e.target.value));
   };
 
+  // ============================================================================
+  // SUBMIT: Complete logic for both remittance and other categories
+  // ============================================================================
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    // --- REMITTANCE HANDLING (with loss charges) ---
+    if (isRemittance) {
+      const lossCharges = parseFloat(form.lossCharges) || 0;
+      const amount = parseFloat(form.amount) || 0;
+
+      if (amount <= 0) {
+        showToast("error", "Remittance amount must be greater than zero");
+        return;
+      }
+
+      // Get source account name
+      const sourceAccountName = sourceOptions.find(
+        (opt) => opt.value === form.source,
+      )?.label;
+
+      if (!sourceAccountName) {
+        showToast("error", "Please select a source account");
+        return;
+      }
+
+      const supplierName = supplierOptions.find(
+        (opt) => opt.value === form.supplier,
+      )?.label;
+
+      // Base payload for the remittance transaction
+      const remittancePayload = {
+        categoryType: getCategoryName,
+        date: form.date,
+        amount: amount,
+        exchangeLoss: 0,
+        finalAmount: amount,
+        accountType: activeTab,
+        remarks: form.remarks || "",
+        transactionType: "remittance",
+        sourceAccount: sourceAccountName,
+        destination: "--",
+        supplier: supplierName || "",
+        invoiceNo: "NA",
+        customerName: "",
+        customerAddress: "",
+        invoiceDate: null,
+      };
+
+      // If there are loss charges, create a withdraw transaction as well
+      if (lossCharges > 0) {
+        const withdrawPayload = {
+          categoryType: "Withdraw", // Ensure this category exists in CategoryType master
+          date: form.date,
+          amount: lossCharges,
+          exchangeLoss: 0,
+          finalAmount: lossCharges,
+          accountType: activeTab,
+          remarks: form.lossRemarks || "",
+          transactionType: "withdraw",
+          sourceAccount: sourceAccountName,
+          destination: "--",
+          supplier: "",
+          invoiceNo: "NA",
+          customerName: "",
+          customerAddress: "",
+          invoiceDate: null,
+        };
+
+        try {
+          const response = await axios.post(
+            `${backendUrl}/api/transactions/bulk`,
+            { transactions: [remittancePayload, withdrawPayload] },
+          );
+          if (response.data.success) {
+            onAddTransaction(response.data.data, isEdit);
+            onClose();
+          } else {
+            showToast(
+              "error",
+              response.data.message || "Bulk transaction failed",
+            );
+          }
+        } catch (err) {
+          console.error("Bulk transaction error:", err);
+          showToast(
+            "error",
+            err.response?.data?.message || "Failed to submit transactions",
+          );
+        }
+      } else {
+        // No loss charges – just a single remittance
+        try {
+          const response = await axios.post(
+            `${backendUrl}/api/transactions`,
+            remittancePayload,
+          );
+          if (response.data.success) {
+            onAddTransaction(response.data.data, isEdit);
+            onClose();
+          }
+        } catch (err) {
+          console.error("Transaction submission error:", err);
+          showToast(
+            "error",
+            err.response?.data?.message || "Failed to submit transaction",
+          );
+        }
+      }
+    }
+    // --- OTHER CATEGORIES (ORIGINAL LOGIC) ---
+    else {
+      // Build payload as per original code (unchanged)
+      const amount = parseFloat(form.amount) || 0;
+      const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
+      const finalAmount = isDeposit ? amount - exchangeLoss : amount;
+
+      const categoryOption = categoryOptions.find(
+        (opt) => opt.value === form.categoryType,
+      );
+      const categoryName = categoryOption ? categoryOption.label : "";
+
+      let transactionType = "sale";
+      const catLower = categoryName.toLowerCase();
+      if (catLower.includes("deposit")) transactionType = "deposit";
+      else if (catLower.includes("withdraw")) transactionType = "withdraw";
+      else if (catLower.includes("remittance")) transactionType = "remittance";
+      else if (catLower.includes("payment inward"))
+        transactionType = "payment inward";
+      else if (catLower.includes("payment outward"))
+        transactionType = "payment outward";
+      else if (catLower.includes("cash sale")) transactionType = "cash sale";
+      else if (catLower.includes("credit collection"))
+        transactionType = "credit collection";
+
+      const categoryTypeForPayload = categoryName;
+
+      let sourceAccountName = "";
+      if (form.source) {
+        const sourceOpt = sourceOptions.find(
+          (opt) => opt.value === form.source,
+        );
+        sourceAccountName = sourceOpt ? sourceOpt.label : "";
+      }
+
+      let destinationName = "";
+      if (form.destination) {
+        const destOpt = destinationOptions.find(
+          (opt) => opt.value === form.destination,
+        );
+        destinationName = destOpt ? destOpt.label : "";
+      }
+
+      let supplierName = "";
+      if (form.supplier) {
+        const suppOpt = supplierOptions.find(
+          (opt) => opt.value === form.supplier,
+        );
+        supplierName = suppOpt ? suppOpt.label : "";
+      }
+
+      const payload = {
+        categoryType: categoryTypeForPayload,
+        date: form.date,
+        amount,
+        exchangeLoss,
+        finalAmount,
+        accountType: activeTab,
+        remarks: form.remarks || "",
+        transactionType,
+      };
+
+      if (requiresInvoiceDropdown || requiresInvoiceFields) {
+        payload.invoiceNo = form.invoiceNumber || "";
+        payload.sourceAccount = "";
+        payload.destination = destinationName;
+        payload.invoiceDate = form.invoiceDate;
+        payload.customerName = form.customerName;
+        payload.customerAddress = form.customerAddress;
+      } else if (requiresSupplier) {
+        payload.supplier = supplierName;
+        payload.invoiceNo = "NA";
+        if (isRemittance) {
+          payload.sourceAccount = sourceAccountName;
+          payload.destination = "--";
+        } else if (isPaymentInward) {
+          payload.sourceAccount = "";
+          payload.destination = destinationName;
+        }
+      } else if (isPaymentOutward) {
+        payload.sourceAccount = sourceAccountName;
+        payload.destination = "--";
+        payload.invoiceNo = "NA";
+      } else if (isDepositOrWithdraw) {
+        payload.sourceAccount = sourceAccountName;
+        payload.destination = destinationName || "--";
+        payload.invoiceNo = "NA";
+      } else {
+        payload.invoiceNo = form.invoiceNumber || "NA";
+        payload.destination = destinationName;
+      }
+
+      try {
+        let response;
+        if (isEdit && editData) {
+          response = await axios.put(
+            `${backendUrl}/api/transactions/${editData._id}`,
+            payload,
+          );
+        } else {
+          response = await axios.post(
+            `${backendUrl}/api/transactions`,
+            payload,
+          );
+        }
+        if (response.data.success) {
+          onAddTransaction(response.data.data, isEdit);
+          onClose();
+        }
+      } catch (err) {
+        console.error("Transaction submission error:", err);
+        showToast(
+          "error",
+          err.response?.data?.message || "Failed to submit transaction",
+        );
+      }
+    }
+  };
+
+  // ============================================================================
+  // Render form field with dynamic label for amount
+  // ============================================================================
   const renderFormField = (field) => {
     const value = form[field.key] || "";
     const fieldError = errors[field.key];
@@ -1555,7 +1774,9 @@ const AddTransactionModal = ({
                 className={`space-y-2 ${field.layout === "full" ? "md:col-span-2" : "md:col-span-1"}`}
               >
                 <label className="block text-sm font-medium text-gray-700">
-                  {field.label}
+                  {field.key === "amount" && isRemittance
+                    ? "Remittance Amount ($)"
+                    : field.label}
                   {field.required && !field.readonly && !field.disabled && (
                     <span className="text-red-500 ml-1">*</span>
                   )}
@@ -1886,6 +2107,9 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   );
 };
 
+// ============================================================================
+// CashAndBank Component (unchanged from your original)
+// ============================================================================
 const CashAndBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
   const [searchTerm, setSearchTerm] = useState("");
@@ -1918,6 +2142,11 @@ const CashAndBank = () => {
     "remarks",
     "actions",
   ]);
+
+  // Store all transactions once
+  const [allTransactions, setAllTransactions] = useState([]);
+  // Store destinations separately
+  const [destinations, setDestinations] = useState([]);
 
   const {
     categoryOptions,
@@ -2036,12 +2265,14 @@ const CashAndBank = () => {
     );
   }, [selectedItems, chunkedItems]);
 
+  // Fetch all transactions once and store them
   const fetchTransactions = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${backendUrl}/api/transactions`);
       if (response.data.success) {
-        const { data: transactions, destinations } = response.data;
+        const { data: transactions, destinations: destinationsData } =
+          response.data;
         const normalized = transactions.map((tx) => ({
           ...tx,
           invoiceNumber:
@@ -2054,48 +2285,14 @@ const CashAndBank = () => {
           amount: Number(tx.amount) || 0,
           finalAmount: Number(tx.finalAmount) || 0,
         }));
-
-        const filteredData = normalized.filter((tx) => {
-          let txType = tx.transactionType?.toLowerCase() || "";
-          if (txType === "expense") txType = "withdraw";
-          let sourceName = tx.source
-            ? typeof tx.source === "object"
-              ? tx.source.name?.toLowerCase() || ""
-              : tx.source.toString().toLowerCase()
-            : "";
-          let destinationName = tx.destination
-            ? typeof tx.destination === "object"
-              ? tx.destination.name?.toLowerCase() || ""
-              : tx.destination.toString().toLowerCase()
-            : "";
-          const activeTabLower = activeTab.toLowerCase();
-
-          if (txType === "deposit" || txType === "withdraw")
-            return (
-              sourceName === activeTabLower ||
-              destinationName === activeTabLower
-            );
-          else if (txType === "remittance" || txType === "payment outward")
-            return sourceName === activeTabLower;
-          else return destinationName === activeTabLower;
-        });
-
-        const matchingDestination = destinations?.find(
-          (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),
-        );
-        setTotalAmountTab(matchingDestination?.totalAmount || 0);
-        const totalCount = filteredData.length;
-        setTotalPages(Math.ceil(totalCount / ITEMS_PER_PAGE));
-        setTotalCount(totalCount);
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        setData(filteredData.slice(startIndex, startIndex + ITEMS_PER_PAGE));
+        setAllTransactions(normalized);
+        setDestinations(destinationsData);
       }
     } catch (error) {
       console.error("Fetch error:", error);
       showToast("error", "Failed to fetch transactions");
-      setData([]);
-      setTotalPages(0);
-      setTotalCount(0);
+      setAllTransactions([]);
+      setDestinations([]);
     } finally {
       setLoading(false);
     }
@@ -2103,7 +2300,63 @@ const CashAndBank = () => {
 
   useEffect(() => {
     fetchTransactions();
-  }, [activeTab, currentPage]);
+  }, []);
+
+  // Update total amount for the current tab when activeTab or destinations change
+  useEffect(() => {
+    const matchingDestination = destinations?.find(
+      (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),
+    );
+    setTotalAmountTab(matchingDestination?.totalAmount || 0);
+  }, [activeTab, destinations]);
+
+  // Filtering: when search term is present, ignore tab and search across all transactions by invoice number
+  useEffect(() => {
+    if (!allTransactions.length) return;
+
+    let filtered = [...allTransactions];
+
+    if (searchTerm.trim() !== "") {
+      // Search across all accounts
+      filtered = filtered.filter((item) =>
+        item.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()),
+      );
+    } else {
+      // No search term: apply tab filter
+      filtered = filtered.filter((item) => {
+        let txType = item.transactionType?.toLowerCase() || "";
+        if (txType === "expense") txType = "withdraw";
+        let sourceName = item.source
+          ? typeof item.source === "object"
+            ? item.source.name?.toLowerCase() || ""
+            : item.source.toString().toLowerCase()
+          : "";
+        let destinationName = item.destination
+          ? typeof item.destination === "object"
+            ? item.destination.name?.toLowerCase() || ""
+            : item.destination.toString().toLowerCase()
+          : "";
+        const activeTabLower = activeTab.toLowerCase();
+
+        if (txType === "deposit" || txType === "withdraw")
+          return (
+            sourceName === activeTabLower || destinationName === activeTabLower
+          );
+        else if (txType === "remittance" || txType === "payment outward")
+          return sourceName === activeTabLower;
+        else return destinationName === activeTabLower;
+      });
+    }
+
+    const total = filtered.length;
+    setTotalCount(total);
+    setTotalPages(Math.ceil(total / ITEMS_PER_PAGE));
+
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    setData(filtered.slice(startIndex, startIndex + ITEMS_PER_PAGE));
+  }, [allTransactions, activeTab, searchTerm, currentPage]);
+
+  // Helper functions (unchanged)
   const currentData = data || [];
 
   const handleAddTransaction = async (transactionData, isEdit = false) => {
@@ -2115,7 +2368,7 @@ const CashAndBank = () => {
         );
         if (response.data.success) {
           showToast("success", "Transaction updated successfully");
-          fetchTransactions();
+          fetchTransactions(); // refresh all data
           refetchDropdownOptions();
         }
       } else {
@@ -2332,7 +2585,7 @@ const CashAndBank = () => {
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setCurrentPage(1);
-    setSearchTerm("");
+    setSearchTerm(""); // clear search when switching tabs
     setSelected([]);
     refetchDropdownOptions();
   };
@@ -2413,38 +2666,50 @@ const CashAndBank = () => {
               <button
                 key={`tab-${tab}`}
                 onClick={() => handleTabChange(tab)}
-                className={`px-4 py-2 rounded-lg capitalize transition-colors ${activeTab === tab ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                className={`px-4 py-2 rounded-lg capitalize transition-colors ${
+                  activeTab === tab
+                    ? "bg-indigo-600 text-white shadow-md"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
               >
                 {tab}
               </button>
             ))}
           </div>
-          {currentData.length > 0 && (
-            <div className="flex items-center gap-4 ml-4">
+          <div className="flex items-center gap-4 ml-4">
+            {currentData.length > 0 && (
               <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
                 Total Count:{" "}
                 <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
                   {totalCount}
                 </span>
               </p>
-              <div className="relative w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                  onClick={() => inputRef.current?.focus()}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search by Invoice Number or Customer"
-                  value={searchTerm}
-                  onChange={handleSearchChange}
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-                />
-              </div>
+            )}
+            <div className="relative w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={() => inputRef.current?.focus()}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by Invoice Number"
+                value={searchTerm}
+                onChange={handleSearchChange}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
             </div>
-          )}
+          </div>
         </div>
+
+        {/* Show a hint when search is active */}
+        {searchTerm.trim() !== "" && (
+          <div className="mb-4 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm">
+            🔍 Showing results from all accounts for invoice number:{" "}
+            <strong>{searchTerm}</strong>
+          </div>
+        )}
 
         <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
           <h3 className="text-lg font-semibold text-gray-800 mb-1">
@@ -2543,7 +2808,7 @@ const CashAndBank = () => {
             </tbody>
           </table>
 
-          {currentData.length > 1 && (
+          {/* {currentData.length > 1 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
@@ -2564,7 +2829,53 @@ const CashAndBank = () => {
                   <button
                     key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                      currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ),
+              )}
+              <button
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          )} */}
+          {totalPages > 1 && (
+            <div className="mt-4 p-5 flex justify-start gap-2">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Prev
+              </button>
+              {visiblePages.map((page, idx) =>
+                page === "..." ? (
+                  <span
+                    key={`ellipsis-${idx}`}
+                    className="px-3 py-1 text-gray-500 select-none"
+                  >
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                      currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    }`}
                   >
                     {page}
                   </button>
@@ -2604,7 +2915,11 @@ const CashAndBank = () => {
                       setSelectedItems([]);
                       setAllSelected(false);
                     }}
-                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "add" ? "bg-green-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${
+                      activeColumnTab === "add"
+                        ? "bg-green-600 text-white"
+                        : "bg-gray-200 text-gray-700"
+                    }`}
                   >
                     Add Columns ({availableColumns.length})
                   </button>
@@ -2614,7 +2929,11 @@ const CashAndBank = () => {
                       setSelectedItems([]);
                       setAllSelected(false);
                     }}
-                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${activeColumnTab === "remove" ? "bg-red-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${
+                      activeColumnTab === "remove"
+                        ? "bg-red-600 text-white"
+                        : "bg-gray-200 text-gray-700"
+                    }`}
                   >
                     Remove Columns ({removableColumns.length})
                   </button>

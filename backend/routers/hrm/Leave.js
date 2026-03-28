@@ -42,7 +42,6 @@ const isHolidayOrSunday = async (date) => {
 
   const startOfDay = new Date(checkDate);
   startOfDay.setUTCHours(0, 0, 0, 0);
-
   const endOfDay = new Date(checkDate);
   endOfDay.setUTCHours(23, 59, 59, 999);
 
@@ -56,11 +55,44 @@ const isHolidayOrSunday = async (date) => {
   if (holiday) {
     return { isHoliday: true, reason: holiday.name };
   }
-
   return { isHoliday: false, reason: null };
 };
 
-// Calculate total extra hours for a user (all time, excluding leave days)
+// Helper: enforce extra hours consistency – delete swap leaves that exceed available extra hours
+const enforceExtraHoursConsistency = async (userId, session = null) => {
+  try {
+    const attendanceRecords = await Attendance.find({
+      userId,
+      isLeaveDay: { $ne: true },
+    }).session(session);
+
+    const totalExtraMinutes = attendanceRecords.reduce(
+      (sum, rec) => sum + (rec.extraHoursInMinutes || 0),
+      0,
+    );
+
+    const swapLeaves = await Leave.find({
+      userId,
+      leaveType: "swapleave",
+      status: "approved",
+    })
+      .sort({ leaveDate: 1 })
+      .session(session);
+
+    const maxAllowedLeaves = Math.floor(totalExtraMinutes / 480);
+    if (swapLeaves.length > maxAllowedLeaves) {
+      const excess = swapLeaves.length - maxAllowedLeaves;
+      const toDelete = swapLeaves.slice(-excess);
+      await Leave.deleteMany({
+        _id: { $in: toDelete.map((l) => l._id) },
+      }).session(session);
+    }
+  } catch (err) {
+    console.error("Error enforcing extra hours consistency:", err);
+  }
+};
+
+// Helper functions for extra hours calculations
 const calculateExtraHoursSummary = async (userId) => {
   try {
     const attendanceRecords = await Attendance.find({
@@ -79,11 +111,7 @@ const calculateExtraHoursSummary = async (userId) => {
         const minutesWorked = Math.floor(diffMs / (1000 * 60));
         totalWorkedMinutes += minutesWorked;
 
-        if (
-          record.extraHoursInMinutes &&
-          record.extraHoursInMinutes > 0 &&
-          !record.isLeaveDay
-        ) {
+        if (record.extraHoursInMinutes > 0 && !record.isLeaveDay) {
           totalExtraMinutes += record.extraHoursInMinutes;
           recordsWithExtraHours.push({
             id: record._id,
@@ -128,7 +156,6 @@ const calculateExtraHoursSummary = async (userId) => {
   }
 };
 
-// Calculate monthly extra hours for a user
 const calculateMonthlyExtraHoursSummary = async (userId, year, month) => {
   try {
     const startDate = new Date(Date.UTC(year, month, 1));
@@ -151,11 +178,7 @@ const calculateMonthlyExtraHoursSummary = async (userId, year, month) => {
         const minutesWorked = Math.floor(diffMs / (1000 * 60));
         monthlyWorkedMinutes += minutesWorked;
 
-        if (
-          record.extraHoursInMinutes &&
-          record.extraHoursInMinutes > 0 &&
-          !record.isLeaveDay
-        ) {
+        if (record.extraHoursInMinutes > 0 && !record.isLeaveDay) {
           monthlyExtraMinutes += record.extraHoursInMinutes;
           monthlyRecordsWithExtraHours.push({
             id: record._id,
@@ -200,17 +223,13 @@ const calculateMonthlyExtraHoursSummary = async (userId, year, month) => {
   }
 };
 
-// Find existing attendance for a user on a given date
 const findExistingAttendance = async (userId, dateInput, session = null) => {
   const { start, end } = getDayRange(dateInput);
-
   const query = Attendance.findOne({
     userId,
     loginTime: { $gte: start, $lte: end },
   });
-
   if (session) query.session(session);
-
   return query.exec();
 };
 
@@ -221,12 +240,230 @@ const findExistingAttendance = async (userId, dateInput, session = null) => {
 // GET /attendance – all attendance records
 router.get("/attendance", async (req, res) => {
   try {
-    const attendanceRecords = await Attendance.find()
-      .populate("userId", "medicalRepName MRId")
-      .sort({ loginTime: -1 });
-
+    const attendanceRecords = await Attendance.find().sort({ loginTime: -1 });
     res.json(attendanceRecords);
   } catch (error) {
+    res
+      .status(500)
+      .json({ success: false, message: "Server error: " + error.message });
+  }
+});
+
+// DELETE /attendance/:id – delete a single attendance record by ID
+router.delete("/attendance/:id", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid attendance record ID" });
+    }
+
+    const attendance = await Attendance.findById(id).session(session);
+    if (!attendance) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(404)
+        .json({ success: false, message: "Attendance record not found" });
+    }
+
+    const { userId, isLeaveDay, loginTime } = attendance;
+    let warningMessage = null;
+
+    // Format the deleted date for display
+    const deletedDate = loginTime
+      ? new Date(loginTime).toLocaleDateString("en-US", {
+          weekday: "short",
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : "unknown date";
+
+    if (isLeaveDay) {
+      // Leave‑day attendance → find associated swap leave and restore extra hours
+      const { start, end } = getDayRange(loginTime);
+      const swapLeave = await Leave.findOne({
+        userId,
+        leaveDate: { $gte: start, $lte: end },
+        leaveType: "swapleave",
+        status: "approved",
+      }).session(session);
+
+      if (swapLeave) {
+        // Restore exact minutes to each source record
+        for (const source of swapLeave.extraHoursSources) {
+          const sourceRecord = await Attendance.findById(
+            source.attendanceId,
+          ).session(session);
+          if (sourceRecord && !sourceRecord.isLeaveDay) {
+            const currentExtra = sourceRecord.extraHoursInMinutes || 0;
+            const newExtra = currentExtra + source.deductedMinutes;
+            sourceRecord.extraHoursInMinutes = newExtra;
+            sourceRecord.extraHours = formatMinutesToTimeString(newExtra);
+            await sourceRecord.save({ session });
+          }
+        }
+        await Leave.findByIdAndDelete(swapLeave._id).session(session);
+        warningMessage = "Swap leave deleted and extra hours restored.";
+      }
+    } else {
+      // Regular attendance → check if it was used as a source in any swap leave
+      const dependentSwaps = await Leave.find({
+        userId,
+        leaveType: "swapleave",
+        status: "approved",
+        "extraHoursSources.attendanceId": id,
+      }).session(session);
+
+      if (dependentSwaps.length > 0) {
+        for (const swap of dependentSwaps) {
+          await Leave.findByIdAndDelete(swap._id).session(session);
+        }
+        warningMessage = `${dependentSwaps.length} swap leave(s) deleted because they depended on this attendance record.`;
+      }
+    }
+
+    // Delete the attendance record
+    await Attendance.findByIdAndDelete(id).session(session);
+
+    // Enforce consistency
+    await enforceExtraHoursConsistency(userId, session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      success: true,
+      message: isLeaveDay
+        ? `Leave day for ${deletedDate} deleted. ${warningMessage || ""}`
+        : `Attendance record for ${deletedDate} deleted. ${warningMessage || ""}`,
+      deletedId: id,
+      deletedDate: deletedDate,
+      warning: warningMessage,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("❌ Delete attendance error:", error.message);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error: " + error.message });
+  }
+});
+
+// DELETE /attendance/date/:userId/:date – delete attendance by user and date
+router.delete("/attendance/date/:userId/:date", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { userId, date } = req.params;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date format. Use YYYY-MM-DD",
+      });
+    }
+
+    const { start, end } = getDayRange(date);
+
+    const attendance = await Attendance.findOne({
+      userId,
+      loginTime: { $gte: start, $lte: end },
+    }).session(session);
+
+    if (!attendance) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "No attendance record found for this user on the given date",
+      });
+    }
+
+    const { isLeaveDay, loginTime: recordLogin } = attendance;
+    let warningMessage = null;
+
+    // Format the deleted date for display
+    const deletedDate = new Date(date).toLocaleDateString("en-US", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+
+    if (isLeaveDay) {
+      // Find associated swap leave
+      const swapLeave = await Leave.findOne({
+        userId,
+        leaveDate: { $gte: start, $lte: end },
+        leaveType: "swapleave",
+        status: "approved",
+      }).session(session);
+
+      if (swapLeave) {
+        // Restore exact minutes to each source record
+        for (const source of swapLeave.extraHoursSources) {
+          const sourceRecord = await Attendance.findById(
+            source.attendanceId,
+          ).session(session);
+          if (sourceRecord && !sourceRecord.isLeaveDay) {
+            const currentExtra = sourceRecord.extraHoursInMinutes || 0;
+            const newExtra = currentExtra + source.deductedMinutes;
+            sourceRecord.extraHoursInMinutes = newExtra;
+            sourceRecord.extraHours = formatMinutesToTimeString(newExtra);
+            await sourceRecord.save({ session });
+          }
+        }
+        await Leave.findByIdAndDelete(swapLeave._id).session(session);
+        warningMessage = "Swap leave deleted and extra hours restored.";
+      }
+    } else {
+      // Regular attendance → check if it was used as a source
+      const dependentSwaps = await Leave.find({
+        userId,
+        leaveType: "swapleave",
+        status: "approved",
+        "extraHoursSources.attendanceId": attendance._id,
+      }).session(session);
+
+      if (dependentSwaps.length > 0) {
+        for (const swap of dependentSwaps) {
+          await Leave.findByIdAndDelete(swap._id).session(session);
+        }
+        warningMessage = `${dependentSwaps.length} swap leave(s) deleted because they depended on this attendance record.`;
+      }
+    }
+
+    await Attendance.findByIdAndDelete(attendance._id).session(session);
+    await enforceExtraHoursConsistency(userId, session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      success: true,
+      message: isLeaveDay
+        ? `Leave day for ${deletedDate} deleted. ${warningMessage || ""}`
+        : `Attendance record for ${deletedDate} deleted. ${warningMessage || ""}`,
+      deletedDate: date,
+      warning: warningMessage,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("❌ Delete attendance by date error:", error.message);
     res
       .status(500)
       .json({ success: false, message: "Server error: " + error.message });
@@ -253,10 +490,7 @@ router.get("/", async (req, res) => {
     if (leaveType) filter.leaveType = leaveType;
     if (status) filter.status = status;
 
-    const leaves = await Leave.find(filter)
-      .populate("userId", "medicalRepName MRId email contactNo")
-      .sort({ leaveDate: -1 });
-
+    const leaves = await Leave.find(filter).sort({ leaveDate: -1 });
     res.json(leaves);
   } catch (error) {
     res
@@ -343,7 +577,6 @@ router.post("/", async (req, res) => {
     });
 
     await leave.save();
-    await leave.populate("userId", "medicalRepName MRId");
 
     res
       .status(201)
@@ -416,7 +649,9 @@ router.post("/attendance/record", async (req, res) => {
     const hours = Math.floor(diffMs / (1000 * 60 * 60));
     const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
-    const totalTime = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+    const totalTime = `${hours.toString().padStart(2, "0")}:${minutes
+      .toString()
+      .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
     const workingHours = workingHoursPerDay || 8;
     const totalMinutesWorked = Math.floor(diffMs / (1000 * 60));
     const expectedMinutes = workingHours * 60;
@@ -440,7 +675,6 @@ router.post("/attendance/record", async (req, res) => {
     });
 
     await attendance.save();
-    await attendance.populate("userId", "medicalRepName MRId");
 
     res.status(201).json({
       success: true,
@@ -459,9 +693,8 @@ router.post("/attendance/record", async (req, res) => {
   }
 });
 
-// ✅ FINAL FIXED: POST /attendance/convert-to-leave – convert extra hours to leave (swap leave)
+// POST /attendance/convert-to-leave – convert extra hours to leave (swap leave)
 router.post("/attendance/convert-to-leave", async (req, res) => {
-  // We'll use a session only for creating the leave records, not for deductions
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -471,10 +704,9 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
     if (!userId || !date) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "User ID and date are required",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "User ID and date are required" });
     }
 
     const [year, month, day] = date.split("-").map(Number);
@@ -504,7 +736,6 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
       });
     }
 
-    // Check for existing attendance (regular or leave)
     const existingAttendance = await findExistingAttendance(
       userId,
       date,
@@ -519,7 +750,6 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
       });
     }
 
-    // Check if a swap leave already exists for that date
     const { start, end } = getDayRange(date);
     const existingLeave = await Leave.findOne({
       userId,
@@ -536,9 +766,8 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
       });
     }
 
-    const minutesNeeded = leaveDays * 480; // 8 hours per day
+    const minutesNeeded = leaveDays * 480;
 
-    // Total extra minutes check
     const totalSummary = await calculateExtraHoursSummary(userId);
     if (totalSummary.totalExtraMinutes < minutesNeeded) {
       await session.abortTransaction();
@@ -565,34 +794,29 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
       }
     }
 
-    // -------------------- DEDUCTION STEP (outside transaction) --------------------
-    // Deduct extra hours from oldest records first using atomic updates
+    // Deduct extra hours from oldest records first
     let minutesRemaining = minutesNeeded;
     const updatedRecords = [];
     let totalDeducted = 0;
+    const sources = [];
 
     const recordsToDeduct = await Attendance.find({
       userId,
       extraHoursInMinutes: { $gt: 0 },
       isLeaveDay: { $ne: true },
-    }).sort({ loginTime: 1 });
-
-    console.log(
-      `🔍 Found ${recordsToDeduct.length} records with extra hours to deduct from.`,
-    );
+    })
+      .sort({ loginTime: 1 })
+      .session(session);
 
     for (const rec of recordsToDeduct) {
       if (minutesRemaining <= 0) break;
-
       const original = rec.extraHoursInMinutes || 0;
       if (original <= 0) continue;
-
       const deduction = Math.min(original, minutesRemaining);
       const newMinutes = original - deduction;
 
-      // Perform atomic update without transaction
       const updateResult = await Attendance.updateOne(
-        { _id: rec._id, extraHoursInMinutes: original }, // ensure no concurrent modification
+        { _id: rec._id, extraHoursInMinutes: original },
         {
           $set: {
             extraHoursInMinutes: newMinutes,
@@ -600,10 +824,10 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
             updatedAt: new Date(),
           },
         },
+        { session },
       );
 
       if (updateResult.modifiedCount === 0) {
-        // This means the record was changed by another process – we need to abort everything
         throw new Error(
           `Concurrent modification detected on record ${rec._id}. Please try again.`,
         );
@@ -616,19 +840,15 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
         deducted: deduction,
         remaining: newMinutes,
       });
-
-      console.log(
-        `✅ Deducted ${deduction} minutes from record ${rec._id}. New extra minutes: ${newMinutes}`,
-      );
-
       minutesRemaining -= deduction;
       totalDeducted += deduction;
+      sources.push({
+        attendanceId: rec._id,
+        deductedMinutes: deduction,
+      });
     }
 
     if (minutesRemaining > 0) {
-      console.error(
-        `❌ Failed to deduct all required minutes. Only ${totalDeducted} of ${minutesNeeded} deducted.`,
-      );
       await session.abortTransaction();
       session.endSession();
       return res.status(500).json({
@@ -637,8 +857,6 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
       });
     }
 
-    // -------------------- LEAVE CREATION STEP (inside transaction) --------------------
-    // Create or update the leave attendance record (isLeaveDay = true)
     let leaveAttendance;
     if (existingAttendance && existingAttendance.isLeaveDay) {
       existingAttendance.remarks = `Leave converted from ${minutesNeeded / 60} extra working hours (${leaveDays} day${leaveDays > 1 ? "s" : ""})`;
@@ -659,7 +877,6 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
       await leaveAttendance.save({ session });
     }
 
-    // Create the swap leave record
     const swapLeave = new Leave({
       userId,
       leaveDate: leaveDateUTC,
@@ -667,27 +884,14 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
       leaveType: "swapleave",
       status: "approved",
       remarks: `Converted from extra hours on ${new Date().toISOString()}`,
+      extraHoursSources: sources,
     });
     await swapLeave.save({ session });
 
-    // Commit the transaction (only for leave records)
     await session.commitTransaction();
     session.endSession();
 
-    // 🔍 VERIFICATION: Fetch the updated record directly from the database
-    const updatedRecord = await Attendance.findById(
-      recordsToDeduct[0]._id,
-    ).lean();
-    console.log(
-      `🔍 After commit, record ${updatedRecord._id} has extraMinutes: ${updatedRecord.extraHoursInMinutes}, extraHours: ${updatedRecord.extraHours}`,
-    );
-
-    // Fetch updated summary for response
     const updatedSummary = await calculateExtraHoursSummary(userId);
-
-    console.log(
-      `🎉 Conversion successful. New total extra minutes: ${updatedSummary.totalExtraMinutes}`,
-    );
 
     res.json({
       success: true,
@@ -706,10 +910,9 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
     console.error("❌ Conversion error:", error);
     await session.abortTransaction();
     session.endSession();
-    res.status(500).json({
-      success: false,
-      message: "Server error: " + error.message,
-    });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error: " + error.message });
   }
 });
 
@@ -754,7 +957,7 @@ router.get("/attendance/extra-hours/:userId", async (req, res) => {
   }
 });
 
-// GET /extra-hours/:userId – simplified extra hours (backward‑compatible)
+// GET /extra-hours/:userId – simplified extra hours (backward-compatible)
 router.get("/extra-hours/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -783,9 +986,8 @@ router.get("/extra-hours/:userId", async (req, res) => {
     });
 
     const calcExtraFromRecord = (record) => {
-      if (record.extraHoursInMinutes && record.extraHoursInMinutes > 0) {
+      if (record.extraHoursInMinutes && record.extraHoursInMinutes > 0)
         return record.extraHoursInMinutes / 60;
-      }
       if (record.extraHours && record.extraHours !== "00:00:00") {
         const [h, m] = record.extraHours.split(":").map(Number);
         return h + m / 60;
@@ -810,7 +1012,6 @@ router.get("/extra-hours/:userId", async (req, res) => {
 
     const totalExtraMinutes = totalExtraHours * 60;
     const monthlyExtraMinutes = monthlyExtraHours * 60;
-
     const totalLeaveDaysAvailable = Math.floor(totalExtraMinutes / (8 * 60));
     const monthlyLeaveDaysAvailable = Math.floor(
       monthlyExtraMinutes / (8 * 60),
@@ -856,7 +1057,6 @@ router.get("/user/:userId", async (req, res) => {
     }
 
     const records = await Attendance.find(query).sort({ loginTime: 1 }).lean();
-
     res.json({ success: true, data: records, count: records.length });
   } catch (error) {
     console.error("Error getting user attendance:", error);

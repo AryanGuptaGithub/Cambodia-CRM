@@ -26,7 +26,7 @@ const expensesAPI = {
   },
   fetchSourceAccounts: async () => {
     const resp = await axios.get(`${backendUrl}/api/accounts/destinations`);
-    return resp.data; // ✅ return data directly
+    return resp.data;
   },
   deleteExpense: async (id) => {
     const resp = await axios.delete(`${backendUrl}/api/expenses/${id}`);
@@ -81,7 +81,6 @@ const Expenses = () => {
         throw new Error(categoriesResp.message || "Failed to fetch categories");
       }
 
-      // ✅ Extract the accounts array correctly
       const accountsArray = accountsResp?.data || [];
       if (!Array.isArray(accountsArray)) {
         console.warn("Source accounts data is not an array, using empty array");
@@ -91,7 +90,6 @@ const Expenses = () => {
       setExpenseCategories(categoriesResp.data);
       setSourceAccounts(Array.isArray(accountsArray) ? accountsArray : []);
 
-      // Build categoryBalances from categories' availableAmount
       const balances = {};
       categoriesResp.data.forEach((cat) => {
         balances[cat._id] = cat.availableAmount || 0;
@@ -117,19 +115,23 @@ const Expenses = () => {
     [expenseCategories],
   );
 
+  // Enhanced filter: search by source account, category, description, amount, and date
   const filteredExpenses = useMemo(() => {
     if (!searchQuery) return expenses;
     const lower = searchQuery.toLowerCase();
     return expenses.filter((exp) => {
-      const catName = exp.category?.category ?? getCategoryName(exp.category);
       const sourceName = exp.sourceAccount?.name ?? "";
+      const catName = exp.category?.category ?? getCategoryName(exp.category);
       const desc = exp.description ?? exp.remarks ?? "";
       const dt = formatDateToReadable(exp.date).toLowerCase();
+      const amountStr = (exp.amount ?? 0).toString();
+
       return (
-        catName.toLowerCase().includes(lower) ||
         sourceName.toLowerCase().includes(lower) ||
+        catName.toLowerCase().includes(lower) ||
         desc.toLowerCase().includes(lower) ||
-        dt.includes(lower)
+        dt.includes(lower) ||
+        amountStr.includes(lower)
       );
     });
   }, [expenses, searchQuery, getCategoryName]);
@@ -210,7 +212,6 @@ const Expenses = () => {
             );
             setExpenses((prev) => prev.filter((e) => e._id !== id));
 
-            // Return the amount back to the category balance
             const catId = exp.category?._id || exp.category;
             setCategoryBalances((prevBal) => {
               const clone = { ...prevBal };
@@ -272,7 +273,6 @@ const Expenses = () => {
     const oldCat = editingExpense.category?._id || editingExpense.category;
     const oldAmt = editingExpense.amount || 0;
 
-    // Validation: entered amount must not exceed available
     const account = sourceAccounts.find(
       (item) => item._id === editForm.sourceAccount,
     );
@@ -328,7 +328,6 @@ const Expenses = () => {
           return clone;
         });
 
-        // Refresh data after update
         await fetchData();
         setIsEditModalOpen(false);
         setEditingExpense(null);
@@ -347,7 +346,6 @@ const Expenses = () => {
     setCurrentPage(1);
   }, []);
 
-  // Helper function to safely get nested values
   const getSafeValue = (obj, path, defaultValue = "") => {
     const keys = path.split(".");
     let result = obj;
@@ -389,23 +387,22 @@ const Expenses = () => {
           <Plus size={18} /> Add New Expense
         </button>
 
-        {currentExpenses.length > 0 && (
-          <div className="relative w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={() => inputRef.current?.focus()}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by Source Account, Expense Category, or description..."
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              value={searchQuery}
-              onChange={handleSearchChange}
-            />
-          </div>
-        )}
+        {/* Search input is always visible */}
+        <div className="relative w-72">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+            size={16}
+            onClick={() => inputRef.current?.focus()}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search by Source Account, Category, Description, Amount, or Date..."
+            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+            value={searchQuery}
+            onChange={handleSearchChange}
+          />
+        </div>
       </div>
 
       <div className="bg-white shadow rounded-xl overflow-hidden w-full">
@@ -451,7 +448,9 @@ const Expenses = () => {
                 <td colSpan={7} className="p-4 text-center text-gray-500">
                   {searchQuery
                     ? "No matching expenses found."
-                    : "No data available"}
+                    : expenses.length === 0
+                      ? "No expenses added yet."
+                      : "No data available"}
                 </td>
               </tr>
             ) : (
@@ -522,6 +521,7 @@ const Expenses = () => {
           </tbody>
         </table>
       </div>
+
       {currentExpenses.length > 0 && (
         <div className="mt-6 flex justify-start gap-2 text-sm">
           <button
@@ -556,7 +556,7 @@ const Expenses = () => {
         </div>
       )}
 
-      {expenses.length > 0 && (
+      {filteredExpenses.length > 0 && (
         <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
           <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

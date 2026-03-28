@@ -31,7 +31,6 @@ function MRCash() {
   const [totalCount, setTotalCount] = useState(0);
   const [activeTab, setActiveTab] = useState("carry");
 
-  // FIX: combined cash map: normalizedMrName → combinedTotal
   const [combinedCashMap, setCombinedCashMap] = useState({});
 
   const [totals, setTotals] = useState({
@@ -56,6 +55,7 @@ function MRCash() {
     transferAmount: "",
     notes: "",
     destinationAccount: "",
+    transferDate: new Date().toISOString().split("T")[0],
   });
   const [transferForm, setTransferForm] = useState({
     amount: "",
@@ -107,7 +107,7 @@ function MRCash() {
   const formatDate = (dateString) => {
     if (!dateString) return "N/A";
     try {
-      return format(new Date(dateString), "dd MMM yyyy, hh:mm a");
+      return format(new Date(dateString), "dd MMM yyyy");
     } catch {
       return "Invalid Date";
     }
@@ -135,7 +135,6 @@ function MRCash() {
     return null;
   };
 
-  // FIX: helper to get combined cash for a record
   const getCombinedCash = (record) => {
     const key = (record.mrName || "").toLowerCase().trim();
     return combinedCashMap[key] ?? record.currentCash;
@@ -206,7 +205,6 @@ function MRCash() {
     }
   }, []);
 
-  // FIX: fetch combined cash summary (collection + sale paid per MR)
   const fetchCombinedCashSummary = useCallback(async () => {
     try {
       const response = await axios.get(
@@ -291,7 +289,7 @@ function MRCash() {
     fetchAllMRCashes();
     fetchMRList();
     fetchDestinations();
-    fetchCombinedCashSummary(); // FIX: load combined totals on mount
+    fetchCombinedCashSummary();
   }, [
     fetchAllMRCashes,
     fetchMRList,
@@ -311,6 +309,7 @@ function MRCash() {
       transferAmount: "",
       notes: "",
       destinationAccount: destinationOptions[0]?.value || "",
+      transferDate: new Date().toISOString().split("T")[0],
     });
     setSelectedMRCash(null);
     setIsAddModalOpen(true);
@@ -422,6 +421,10 @@ function MRCash() {
       showToast("error", "Please select a destination account");
       return;
     }
+    if (!formData.transferDate) {
+      showToast("error", "Please select a transfer date");
+      return;
+    }
     const selectedMR = mrList.find((mr) => mr.value === formData.mrCashId);
     const transferAmount = parseFloat(formData.transferAmount);
     if (selectedMR && transferAmount > selectedMR.currentCash) {
@@ -438,6 +441,7 @@ function MRCash() {
           amount: transferAmount,
           notes: formData.notes,
           destinationAccount: formData.destinationAccount,
+          transferDate: formData.transferDate,
         },
       );
       if (response.data.success) {
@@ -448,12 +452,13 @@ function MRCash() {
           transferAmount: "",
           notes: "",
           destinationAccount: "",
+          transferDate: new Date().toISOString().split("T")[0],
         });
         setSelectedMRCash(null);
         fetchAllMRCashes();
         fetchMRList();
         fetchDestinations();
-        fetchCombinedCashSummary(); // FIX: refresh combined totals
+        fetchCombinedCashSummary();
       }
     } catch (error) {
       showToast(
@@ -495,7 +500,7 @@ function MRCash() {
         fetchAllMRCashes();
         fetchMRList();
         fetchDestinations();
-        fetchCombinedCashSummary(); // FIX: refresh combined totals
+        fetchCombinedCashSummary();
       }
     } catch (error) {
       showToast(
@@ -535,7 +540,7 @@ function MRCash() {
         fetchAllMRCashes();
         fetchMRList();
         fetchDestinations();
-        fetchCombinedCashSummary(); // FIX: refresh combined totals
+        fetchCombinedCashSummary();
         if (selectedRecord) fetchTransferHistory(selectedRecord._id);
       }
     } catch (error) {
@@ -564,7 +569,7 @@ function MRCash() {
           fetchAllMRCashes();
           fetchMRList();
           fetchDestinations();
-          fetchCombinedCashSummary(); // FIX: refresh combined totals
+          fetchCombinedCashSummary();
           if (selectedRecord) fetchTransferHistory(selectedRecord._id);
         }
       } catch (error) {
@@ -704,7 +709,7 @@ function MRCash() {
           fetchCreditCollectionInvoices(selectedMrForCredit.mrName);
         fetchAllMRCashes();
         fetchMRList();
-        fetchCombinedCashSummary(); // FIX: refresh combined totals
+        fetchCombinedCashSummary();
       }
     } catch (error) {
       showToast(
@@ -742,7 +747,7 @@ function MRCash() {
             fetchCreditCollectionInvoices(selectedMrForCredit.mrName);
           fetchAllMRCashes();
           fetchMRList();
-          fetchCombinedCashSummary(); // FIX: refresh combined totals
+          fetchCombinedCashSummary();
         }
       } catch (error) {
         showToast(
@@ -760,6 +765,8 @@ function MRCash() {
       </div>
     );
   }
+
+  const colSpan = activeTab === "carry" ? 5 : 4;
 
   return (
     <div className="p-6">
@@ -897,12 +904,14 @@ function MRCash() {
                 <th className="py-3 px-4 text-center">MR Name</th>
                 {activeTab === "carry" ? (
                   <>
-                    {/* FIX: Column header explains the combined value */}
                     <th className="py-3 px-4 text-center">
                       Current Cash
                       <div className="text-xs font-normal text-gray-400">
-                        Collection + Sale Paid
+                        Database
                       </div>
+                    </th>
+                    <th className="py-3 px-4 text-center">
+                      Collection + Sale Paid
                     </th>
                     <th className="py-3 px-4 text-center">Last Transfer</th>
                     <th className="py-3 px-4 text-center">Actions</th>
@@ -920,8 +929,11 @@ function MRCash() {
             </thead>
             <tbody>
               {mrCashes.length === 0 ? (
-                <tr>
-                  <td colSpan="4" className="p-8 text-gray-500 text-center">
+                <tr key="empty-row">
+                  <td
+                    colSpan={colSpan}
+                    className="p-8 text-gray-500 text-center"
+                  >
                     {searchTerm
                       ? "No matching records found"
                       : activeTab === "carry"
@@ -943,17 +955,19 @@ function MRCash() {
                     {activeTab === "carry" ? (
                       <>
                         <td className="py-3 px-4 text-center">
-                          {/* FIX: Show combined cash (collection + sale paid) */}
                           <div className="text-blue-700 font-semibold">
+                            {formatCurrency(record.currentCash)}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="text-green-700 font-semibold">
                             {formatCurrency(getCombinedCash(record))}
                           </div>
-                          {/* Sub-breakdown hint */}
-                    
                         </td>
                         <td className="py-3 px-4 text-center">
                           <div className="text-gray-700">
                             {record.lastTransferDate
-                              ? formatDate(record.lastTransferDate)
+                              ? formatDateShort(record.lastTransferDate)
                               : "N/A"}
                           </div>
                         </td>
@@ -1058,7 +1072,6 @@ function MRCash() {
         </div>
       )}
 
-      {/* ══ View Modal ══ */}
       {isViewModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -1110,7 +1123,7 @@ function MRCash() {
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100">
                         {selectedRecord.lastTransferDate
-                          ? formatDate(selectedRecord.lastTransferDate)
+                          ? formatDateShort(selectedRecord.lastTransferDate)
                           : "N/A"}
                       </p>
                     </div>
@@ -1144,7 +1157,7 @@ function MRCash() {
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100">
                         {selectedRecord.lastTransferDate
-                          ? formatDate(selectedRecord.lastTransferDate)
+                          ? formatDateShort(selectedRecord.lastTransferDate)
                           : "N/A"}
                       </p>
                     </div>
@@ -1197,7 +1210,7 @@ function MRCash() {
                                 className={`hover:bg-gray-50 ${index < transferHistory.length - 1 ? "border-b" : ""}`}
                               >
                                 <td className="py-3 px-4 text-center">
-                                  {formatDate(transfer.transferredAt)}
+                                  {formatDateShort(transfer.transferredAt)}
                                 </td>
                                 <td className="py-3 px-4 text-center font-medium text-green-700">
                                   {formatCurrency(transfer.amount)}
@@ -1258,7 +1271,7 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ══ Add / Transfer to Admin Modal ══ */}
+      {/* ══ Add / Transfer to Admin Modal (UPDATED) ══ */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1276,6 +1289,7 @@ function MRCash() {
                       transferAmount: "",
                       notes: "",
                       destinationAccount: "",
+                      transferDate: new Date().toISOString().split("T")[0],
                     });
                   }}
                   className="text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1339,6 +1353,20 @@ function MRCash() {
                     ))}
                   </select>
                 </div>
+                {/* NEW: Transfer Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transfer Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    name="transferDate"
+                    value={formData.transferDate}
+                    onChange={handleFormChange}
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                  />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Transfer Amount ($) <span className="text-red-500">*</span>
@@ -1384,6 +1412,7 @@ function MRCash() {
                         transferAmount: "",
                         notes: "",
                         destinationAccount: "",
+                        transferDate: new Date().toISOString().split("T")[0],
                       });
                     }}
                     className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
@@ -1399,7 +1428,8 @@ function MRCash() {
                       (selectedMRCash &&
                         parseFloat(formData.transferAmount) >
                           selectedMRCash.currentCash) ||
-                      !formData.destinationAccount
+                      !formData.destinationAccount ||
+                      !formData.transferDate
                     }
                     className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >

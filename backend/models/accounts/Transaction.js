@@ -30,7 +30,7 @@ const transactionSchema = new mongoose.Schema(
 
     // Monetary fields
     amount: { type: Number, required: true },
-    exchangeLoss: { type: Number, default: 0 },
+   // exchangeLoss: { type: Number, default: 0 },
     finalAmount: { type: Number, required: true },
 
     // Dates
@@ -66,6 +66,7 @@ const transactionSchema = new mongoose.Schema(
 
     // Account type (tab name: "Cash Balance", "Personal Account", "Company Account")
     accountType: { type: String, required: true },
+     isConversionLoss: { type: Boolean, default: false },
 
     // Reference to expense (for expense transactions)
     referenceId: {

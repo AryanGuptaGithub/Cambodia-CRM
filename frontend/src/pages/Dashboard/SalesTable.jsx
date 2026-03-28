@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { ShoppingCart, ChevronLeft, ChevronRight, Trophy } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
 import { DataTable } from "./DataTable";
@@ -15,13 +15,11 @@ export const SalesTable = ({
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 5;
 
-  // ─── Group sales data by MR, sorted by totalAmount desc ───────────────────
   const groupedSalesData = useMemo(() => {
     const mrGroups = {};
-
     (salesTableData || []).forEach((sale) => {
       const key = sale.salesPerson || sale.mrName || "Unknown";
-      if (!mrGroups[key]) {
+      if (!mrGroups[key])
         mrGroups[key] = {
           mrName: key,
           totalAmount: 0,
@@ -30,26 +28,19 @@ export const SalesTable = ({
           customers: new Set(),
           customerCount: 0,
         };
-      }
       mrGroups[key].totalAmount += sale.amount || 0;
       mrGroups[key].products.push(sale);
       mrGroups[key].productCount += 1;
-
       const customer = sale.customer || sale.customerName;
-      if (customer && customer !== "N/A") {
-        mrGroups[key].customers.add(customer);
-      }
+      if (customer && customer !== "N/A") mrGroups[key].customers.add(customer);
     });
-
     return Object.values(mrGroups)
       .map((mr) => ({ ...mr, customerCount: mr.customers.size }))
-      .sort((a, b) => b.totalAmount - a.totalAmount); // highest first
+      .sort((a, b) => b.totalAmount - a.totalAmount);
   }, [salesTableData]);
 
-  // ─── Pagination ────────────────────────────────────────────────────────────
   const totalRows = groupedSalesData.length;
   const totalPages = Math.ceil(totalRows / rowsPerPage);
-
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * rowsPerPage;
     return groupedSalesData.slice(start, start + rowsPerPage);
@@ -58,13 +49,11 @@ export const SalesTable = ({
   const handlePageChange = (page) => {
     if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
-
   const getPageNumbers = () => {
     const pages = [];
     const max = 5;
-    if (totalPages <= max) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else if (currentPage <= 3) {
+    if (totalPages <= max) for (let i = 1; i <= totalPages; i++) pages.push(i);
+    else if (currentPage <= 3) {
       for (let i = 1; i <= 4; i++) pages.push(i);
       pages.push("...");
       pages.push(totalPages);
@@ -81,13 +70,8 @@ export const SalesTable = ({
     }
     return pages;
   };
+  useEffect(() => setCurrentPage(1), [activeSalesSubTab]);
 
-  // Reset to page 1 when subtab changes
-  React.useEffect(() => {
-    setCurrentPage(1);
-  }, [activeSalesSubTab]);
-
-  // ─── Table title ───────────────────────────────────────────────────────────
   const getTableTitle = () => {
     if (isCustomDateActive && customDateRange)
       return `Sales Details - ${customDateRange}`;
@@ -103,14 +87,9 @@ export const SalesTable = ({
     }
   };
 
-  // ─── Rank badge (now without medals) ────────────────────────────────────────
-  const getRankBadge = (globalIndex) => {
-    return (
-      <span className="text-xs font-bold text-gray-500">
-        #{globalIndex + 1}
-      </span>
-    );
-  };
+  const getRankBadge = (globalIndex) => (
+    <span className="text-xs font-bold text-gray-500">#{globalIndex + 1}</span>
+  );
 
   return (
     <div className="space-y-4">
@@ -123,7 +102,6 @@ export const SalesTable = ({
           {
             header: "Rank",
             render: (row, index) => {
-              // Calculate global index accounting for pagination
               const globalIndex = (currentPage - 1) * rowsPerPage + index;
               return (
                 <div className="flex items-center justify-center">
@@ -195,10 +173,9 @@ export const SalesTable = ({
         data={paginatedData}
       />
 
-      {/* Pagination — only if more than one page */}
       {totalRows > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 rounded-b-lg shadow-sm">
-          <div className="text-sm text-gray-700">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-white border-t border-gray-200 rounded-b-lg shadow-sm">
+          <div className="text-xs sm:text-sm text-gray-700">
             Showing{" "}
             <span className="font-medium">
               {(currentPage - 1) * rowsPerPage + 1}
@@ -209,54 +186,36 @@ export const SalesTable = ({
             </span>{" "}
             of <span className="font-medium">{totalRows}</span> MRs
           </div>
-
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center justify-center gap-1 sm:gap-2">
             <button
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={currentPage === 1}
-              className={`flex items-center justify-center p-2 rounded-md ${
-                currentPage === 1
-                  ? "text-gray-400 cursor-not-allowed bg-gray-100"
-                  : "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
-              }`}
+              className={`p-1.5 sm:p-2 rounded-md ${currentPage === 1 ? "text-gray-400 cursor-not-allowed bg-gray-100" : "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"}`}
             >
-              <ChevronLeft size={18} />
+              <ChevronLeft size={16} className="sm:w-5 sm:h-5" />
             </button>
-
             {getPageNumbers().map((page, idx) => (
               <button
                 key={idx}
                 onClick={() =>
-                  typeof page === "number" ? handlePageChange(page) : null
+                  typeof page === "number" && handlePageChange(page)
                 }
                 disabled={typeof page !== "number"}
-                className={`min-w-[36px] h-9 px-3 rounded-md text-sm font-medium ${
-                  page === currentPage
-                    ? "bg-blue-600 text-white"
-                    : typeof page === "number"
-                      ? "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
-                      : "text-gray-500 cursor-default"
-                }`}
+                className={`min-w-[32px] sm:min-w-[36px] h-8 sm:h-9 px-2 sm:px-3 rounded-md text-xs sm:text-sm font-medium ${page === currentPage ? "bg-blue-600 text-white" : typeof page === "number" ? "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300" : "text-gray-500 cursor-default"}`}
               >
                 {page}
               </button>
             ))}
-
             <button
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className={`flex items-center justify-center p-2 rounded-md ${
-                currentPage === totalPages
-                  ? "text-gray-400 cursor-not-allowed bg-gray-100"
-                  : "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"
-              }`}
+              className={`p-1.5 sm:p-2 rounded-md ${currentPage === totalPages ? "text-gray-400 cursor-not-allowed bg-gray-100" : "text-gray-700 hover:bg-gray-100 cursor-pointer bg-white border border-gray-300"}`}
             >
-              <ChevronRight size={18} />
+              <ChevronRight size={16} className="sm:w-5 sm:h-5" />
             </button>
           </div>
         </div>
       )}
-
       {totalRows > 0 && totalPages === 1 && (
         <div className="text-sm text-gray-500 text-center py-2 bg-white border border-gray-200 rounded-lg px-4">
           Showing all {totalRows} {totalRows === 1 ? "MR" : "MRs"}
@@ -266,7 +225,6 @@ export const SalesTable = ({
   );
 };
 
-// ─── Highest Sales by MR — side panel widget ──────────────────────────────────
 export const HighestSalesByMR = ({
   salesTableData = [],
   loadingSalesData = false,
@@ -274,13 +232,11 @@ export const HighestSalesByMR = ({
   onViewProducts,
   dateRanges,
 }) => {
-  // Same grouping logic, sorted desc, top 5
   const topMRs = useMemo(() => {
     const mrGroups = {};
-
     (salesTableData || []).forEach((sale) => {
       const key = sale.salesPerson || sale.mrName || "Unknown";
-      if (!mrGroups[key]) {
+      if (!mrGroups[key])
         mrGroups[key] = {
           mrName: key,
           totalAmount: 0,
@@ -288,14 +244,12 @@ export const HighestSalesByMR = ({
           productCount: 0,
           customers: new Set(),
         };
-      }
       mrGroups[key].totalAmount += sale.amount || 0;
       mrGroups[key].products.push(sale);
       mrGroups[key].productCount += 1;
       const customer = sale.customer || sale.customerName;
       if (customer && customer !== "N/A") mrGroups[key].customers.add(customer);
     });
-
     return Object.values(mrGroups)
       .map((mr) => ({ ...mr, customerCount: mr.customers.size }))
       .sort((a, b) => b.totalAmount - a.totalAmount)
@@ -315,7 +269,7 @@ export const HighestSalesByMR = ({
     }
   };
 
-  if (loadingSalesData) {
+  if (loadingSalesData)
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((i) => (
@@ -333,16 +287,13 @@ export const HighestSalesByMR = ({
         ))}
       </div>
     );
-  }
-
-  if (topMRs.length === 0) {
+  if (topMRs.length === 0)
     return (
       <div className="text-center py-8 text-gray-400">
         <Trophy size={32} className="mx-auto mb-2 opacity-30" />
         <p className="text-sm">No sales data for {getPeriodLabel()}</p>
       </div>
     );
-  }
 
   return (
     <div className="space-y-2">
@@ -354,14 +305,11 @@ export const HighestSalesByMR = ({
           key={mr.mrName}
           className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 hover:bg-blue-50 transition-colors group"
         >
-          {/* Rank */}
           <div className="flex-shrink-0 w-8 text-center">
             <span className="text-sm font-bold text-gray-400">
               #{index + 1}
             </span>
           </div>
-
-          {/* MR info */}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-gray-800 capitalize truncate">
               {mr.mrName}
@@ -376,8 +324,6 @@ export const HighestSalesByMR = ({
               )}
             </p>
           </div>
-
-          {/* Total + action */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="text-sm font-bold text-green-600">
               ${formatCurrency(mr.totalAmount)}
@@ -386,7 +332,6 @@ export const HighestSalesByMR = ({
               <button
                 onClick={() => onViewProducts(mr.mrName, mr.products)}
                 className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 cursor-pointer"
-                title="View products"
               >
                 <ShoppingCart size={15} />
               </button>

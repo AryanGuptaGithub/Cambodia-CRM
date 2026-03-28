@@ -17,7 +17,7 @@ const leaveSchema = new mongoose.Schema(
     },
     leaveType: {
       type: String,
-      enum: ["paid", "unpaid", "swapleave"], // Added swapleave
+      enum: ["paid", "unpaid", "swapleave"],
       default: "unpaid",
     },
     status: {
@@ -32,13 +32,25 @@ const leaveSchema = new mongoose.Schema(
     approvedAt: {
       type: Date,
     },
+    extraHoursSources: [
+      {
+        attendanceId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Attendance",
+          required: true,
+        },
+        deductedMinutes: {
+          type: Number,
+          required: true,
+        },
+      },
+    ],
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// Index for efficient queries
 leaveSchema.index({ userId: 1, leaveDate: 1 });
 leaveSchema.index({ leaveDate: 1 });
 

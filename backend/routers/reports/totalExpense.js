@@ -2,114 +2,111 @@ import express from "express";
 import Category from "../../models/accounts/CategoryType.js";
 import Transaction from "../../models/accounts/Transaction.js";
 import Expense from "../../models/expenses/addExpense.js";
-import Purchase from "../../models/purcharsing/purchaseInventory.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-// Helper: safe date formatting
-const safeDateToString = (date) => {
-  if (!date) return null;
-  try {
-    const dateObj = new Date(date);
-    if (isNaN(dateObj.getTime())) return null;
-    return dateObj.toISOString().split("T")[0];
-  } catch {
-    return null;
-  }
-};
-
-// Helper: date comparison for sorting
+// =============================================================================
+// Helpers
+// =============================================================================
 const safeDateCompare = (a, b) => {
   try {
-    const dateA = new Date(a.date);
-    const dateB = new Date(b.date);
-    if (isNaN(dateA.getTime()) && isNaN(dateB.getTime())) return 0;
-    if (isNaN(dateA.getTime())) return 1;
-    if (isNaN(dateB.getTime())) return -1;
-    return dateB - dateA;
-  } catch {
-    return 0;
-  }
+    const dA = new Date(a.date);
+    const dB = new Date(b.date);
+    if (isNaN(dA.getTime()) && isNaN(dB.getTime())) return 0;
+    if (isNaN(dA.getTime())) return 1;
+    if (isNaN(dB.getTime())) return -1;
+    return dB - dA;
+  } catch { return 0; }
 };
 
-// Helper to get financial data (reusable for API and export)
+const getTypeDisplayName = (type) => {
+  const map = {
+    exchange_loss: "Exchange Loss",
+    remittance:    "Remittance",
+    expense:       "Expense",
+    salary:        "Salary",
+    other_expense: "Other Expenses",
+  };
+  return map[type] || type;
+};
+
+// =============================================================================
+// Core data fetcher (reused by GET / and GET /export/excel)
+// NOTE: Purchase is intentionally excluded from all queries and summaries.
+// =============================================================================
 const getFinancialData = async (filters) => {
   const { startDate, endDate, search, expenseType } = filters;
 
-  // Build date filter
+  // ── Date filter ──────────────────────────────────────────────────────────
   const dateFilter = {};
   if (startDate || endDate) {
     dateFilter.date = {};
     if (startDate) {
-      const start = new Date(startDate);
-      if (!isNaN(start.getTime())) dateFilter.date.$gte = start;
+      const s = new Date(startDate);
+      if (!isNaN(s.getTime())) dateFilter.date.$gte = s;
     }
     if (endDate) {
-      const end = new Date(endDate);
-      if (!isNaN(end.getTime())) {
-        end.setHours(23, 59, 59, 999);
-        dateFilter.date.$lte = end;
+      const e = new Date(endDate);
+      if (!isNaN(e.getTime())) {
+        e.setHours(23, 59, 59, 999);
+        dateFilter.date.$lte = e;
       }
     }
   }
 
-  // Get category IDs for remittance and salary
-  const remittanceCategory = await Category.findOne({ code: "remittance" });
-  const salaryCategory = await Category.findOne({ code: "salary" });
+  // ── Category lookups ─────────────────────────────────────────────────────
+  const [remittanceCategory, salaryCategory] = await Promise.all([
+    Category.findOne({ code: "remittance" }),
+    Category.findOne({ code: "salary" }),
+  ]);
 
-  // Build a list of IDs to exclude from other_expense
   const excludeCategoryIds = [];
   if (remittanceCategory?._id) excludeCategoryIds.push(remittanceCategory._id);
-  if (salaryCategory?._id) excludeCategoryIds.push(salaryCategory._id);
+  if (salaryCategory?._id)     excludeCategoryIds.push(salaryCategory._id);
 
-  // Fetch all data sources with simple `find()`
+  // ── Parallel DB queries ──────────────────────────────────────────────────
   const [
-    purchases,
-    remittances,
+    normalRemittances,  // isConversionLoss = false → Remittance total
+    exchangeLossTxns,   // isConversionLoss = true  → Exchange Loss total
     expenses,
     salaries,
-    exchangeLosses,
     otherExpenses,
   ] = await Promise.all([
-    // 1. Purchase Data (from Purchase collection)
-    Purchase.find(dateFilter).lean(),
 
-    // 2. Remittance Data: transactions that are either in the remittance category
-    //    OR have transactionType = "remittance"
+    // 1. Normal remittances (NOT flagged as conversion loss)
     Transaction.find({
       ...dateFilter,
-      $or: [
-        { categoryType: remittanceCategory?._id },
-        { transactionType: "remittance" },
-      ],
+      transactionType:  "remittance",
+      isConversionLoss: { $ne: true },
     }).lean(),
 
-    // 3. Expense Data (from Expense collection)
-    Expense.find(dateFilter).lean(),
-
-    // 4. Salary Data: transactions that are either in the salary category
-    //    OR have transactionType = "salary"
+    // 2. Exchange-loss remittances (isConversionLoss = true)
+    //    finalAmount is the full Exchange Loss value
     Transaction.find({
       ...dateFilter,
+      isConversionLoss: true,
+    }).lean(),
+
+    // 3. Expenses (from Expense collection)
+    Expense.find(dateFilter).lean(),
+
+    // 4. Salary transactions
+    Transaction.find({
+      ...dateFilter,
+      isConversionLoss: { $ne: true },
       $or: [
         { categoryType: salaryCategory?._id },
         { transactionType: "salary" },
       ],
     }).lean(),
 
-    // 5. Exchange Loss Data (transactions where exchangeLoss > 0)
+    // 5. Other expenses (withdraw / payment outward / expense,
+    //    NOT remittance / salary / conversionLoss)
     Transaction.find({
       ...dateFilter,
-      exchangeLoss: { $gt: 0 },
-    }).lean(),
-
-    // 6. Other Expenses: all other expense‑type transactions that are NOT already
-    //    captured by remittance or salary (by category or transactionType)
-    Transaction.find({
-      ...dateFilter,
+      isConversionLoss: { $ne: true },
       $and: [
-        // Exclude those already counted as remittance or salary
         {
           $or: [
             { categoryType: { $nin: excludeCategoryIds } },
@@ -117,144 +114,115 @@ const getFinancialData = async (filters) => {
           ],
         },
         { transactionType: { $nin: ["remittance", "salary"] } },
-        // Only expense‑related transaction types
         { transactionType: { $in: ["withdraw", "payment outward", "expense"] } },
       ],
     }).lean(),
   ]);
 
-  // ===== DEBUG: Log other_expense transactions =====
-  console.log("\n========== OTHER EXPENSES ==========");
-  console.log(`Total other_expense records: ${otherExpenses.length}`);
-  if (otherExpenses.length > 0) {
-    otherExpenses.forEach((tx, idx) => {
-      console.log(`${idx + 1}. ID: ${tx._id}`);
-      console.log(`   Date: ${tx.date}`);
-      console.log(`   Description: ${tx.description || tx.remarks || ""}`);
-      console.log(`   Transaction Type: ${tx.transactionType}`);
-      console.log(`   Amount: ${tx.amount}`);
-      console.log(`   Reference: ${tx.referenceNumber || "N/A"}`);
-      console.log("---");
-    });
-  } else {
-    console.log("No other expense transactions found.");
-  }
-  console.log("====================================\n");
-
-  // Combine all data with a unique key (source + _id) to avoid duplication
+  // ── Build unified data array ──────────────────────────────────────────────
   const allData = [];
 
-  const addData = (docs, type, amountField = "amount") => {
+  const push = (docs, type, amountFn) => {
     docs.forEach((doc) => {
-      const uniqueKey = `${type}:${doc._id}`;
-      if (!allData.some((item) => item.uniqueKey === uniqueKey)) {
+      const amount = amountFn(doc);
+      if (amount <= 0) return;
+      const key = `${type}:${doc._id}`;
+      if (!allData.some((i) => i.uniqueKey === key)) {
         allData.push({
-          uniqueKey,
-          _id: doc._id,
-          date: doc.date,
+          uniqueKey:       key,
+          _id:             doc._id,
+          date:            doc.date,
           type,
-          description: doc.description || doc.remarks || "",
-          amount: parseFloat(doc[amountField]) || 0,
+          description:     doc.description || doc.remarks || "",
+          amount,
           referenceNumber: doc.referenceNumber || "",
-          createdAt: doc.createdAt,
-          updatedAt: doc.updatedAt,
+          createdAt:       doc.createdAt,
+          updatedAt:       doc.updatedAt,
         });
       }
     });
   };
 
-  addData(purchases, "purchase");
-  addData(remittances, "remittance");
-  addData(expenses, "expense");
-  addData(salaries, "salary");
-  addData(exchangeLosses, "exchange_loss", "exchangeLoss");
-  addData(otherExpenses, "other_expense");
+  // Normal remittances → finalAmount
+  push(normalRemittances, "remittance",    (d) => parseFloat(d.finalAmount || d.amount) || 0);
 
-  // Apply search filter (if any)
-  let filteredData = allData;
-  if (search && search.trim() !== "") {
-    const regex = new RegExp(search.trim(), "i");
-    filteredData = filteredData.filter(
-      (item) =>
-        (item.description && item.description.match(regex)) ||
-        (item.referenceNumber && item.referenceNumber.match(regex)),
+  // Exchange-loss remittances → full finalAmount = Exchange Loss
+  push(exchangeLossTxns,  "exchange_loss", (d) => parseFloat(d.finalAmount || d.amount) || 0);
+
+  // Expenses → amount
+  push(expenses,          "expense",       (d) => parseFloat(d.amount) || 0);
+
+  // Salaries → finalAmount or amount
+  push(salaries,          "salary",        (d) => parseFloat(d.finalAmount || d.amount) || 0);
+
+  // Other expenses → finalAmount or amount
+  push(otherExpenses,     "other_expense", (d) => parseFloat(d.finalAmount || d.amount) || 0);
+
+  // ── Search filter ─────────────────────────────────────────────────────────
+  let filtered = allData;
+  if (search?.trim()) {
+    const re = new RegExp(search.trim(), "i");
+    filtered = filtered.filter(
+      (i) => re.test(i.description) || re.test(i.referenceNumber),
     );
   }
 
-  // Apply expense type filter (if any)
+  // ── Expense-type filter ───────────────────────────────────────────────────
   if (expenseType && expenseType !== "all") {
-    filteredData = filteredData.filter((item) => item.type === expenseType);
+    filtered = filtered.filter((i) => i.type === expenseType);
   }
 
-  // Sort by date descending
-  filteredData.sort(safeDateCompare);
+  // ── Sort by date desc ─────────────────────────────────────────────────────
+  filtered.sort(safeDateCompare);
 
-  // Calculate summary totals
+  // ── Summary totals (no purchase) ─────────────────────────────────────────
+  const sum = (type) =>
+    filtered.filter((i) => i.type === type).reduce((s, i) => s + i.amount, 0);
+
   const summary = {
-    totalPurchase: filteredData
-      .filter((item) => item.type === "purchase")
-      .reduce((sum, item) => sum + item.amount, 0),
-    totalExchangeLoss: filteredData
-      .filter((item) => item.type === "exchange_loss")
-      .reduce((sum, item) => sum + item.amount, 0),
-    totalRemittance: filteredData
-      .filter((item) => item.type === "remittance")
-      .reduce((sum, item) => sum + item.amount, 0),
-    totalExpense: filteredData
-      .filter((item) => item.type === "expense")
-      .reduce((sum, item) => sum + item.amount, 0),
-    totalSalary: filteredData
-      .filter((item) => item.type === "salary")
-      .reduce((sum, item) => sum + item.amount, 0),
-    totalOtherExpense: filteredData
-      .filter((item) => item.type === "other_expense")
-      .reduce((sum, item) => sum + item.amount, 0),
-    totalTransactions: filteredData.length,
+    totalExchangeLoss: sum("exchange_loss"),
+    totalRemittance:   sum("remittance"),
+    totalExpense:      sum("expense"),
+    totalSalary:       sum("salary"),
+    totalOtherExpense: sum("other_expense"),
+    totalTransactions: filtered.length,
   };
 
-  console.log(`\n[Summary] Other Expenses total: $${summary.totalOtherExpense.toFixed(2)}`);
-
-  return { allData: filteredData, summary };
+  return { allData: filtered, summary };
 };
 
-/**
- * GET /api/reports/total-expense
- */
+// =============================================================================
+// GET /api/reports/total-expense
+// =============================================================================
 router.get("/", async (req, res) => {
   try {
     const {
-      startDate,
-      endDate,
-      page = 1,
+      startDate, endDate,
+      page  = 1,
       limit = 7,
-      search,
-      expenseType,
+      search, expenseType,
     } = req.query;
-    const pageNum = parseInt(page);
+
+    const pageNum  = parseInt(page);
     const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
+    const skip     = (pageNum - 1) * limitNum;
 
-    const { allData, summary } = await getFinancialData({
-      startDate,
-      endDate,
-      search,
-      expenseType,
-    });
+    const { allData, summary } = await getFinancialData({ startDate, endDate, search, expenseType });
 
-    const totalCount = allData.length;
+    const totalCount    = allData.length;
     const paginatedData = allData.slice(skip, skip + limitNum);
-    const totalPages = Math.ceil(totalCount / limitNum);
+    const totalPages    = Math.ceil(totalCount / limitNum);
 
     return res.json({
       success: true,
-      data: paginatedData,
+      data:    paginatedData,
       summary,
       pagination: {
-        currentPage: pageNum,
+        currentPage:  pageNum,
         totalPages,
         totalRecords: totalCount,
-        hasNext: pageNum < totalPages,
-        hasPrev: pageNum > 1,
+        hasNext:      pageNum < totalPages,
+        hasPrev:      pageNum > 1,
       },
     });
   } catch (error) {
@@ -262,23 +230,18 @@ router.get("/", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error fetching financial summary data",
-      error: error.message,
+      error:   error.message,
     });
   }
 });
 
-/**
- * GET /api/reports/total-expense/export/excel
- */
+// =============================================================================
+// GET /api/reports/total-expense/export/excel
+// =============================================================================
 router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, expenseType } = req.query;
-    const { allData, summary } = await getFinancialData({
-      startDate,
-      endDate,
-      search,
-      expenseType,
-    });
+    const { allData, summary } = await getFinancialData({ startDate, endDate, search, expenseType });
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Financial Summary System";
@@ -286,108 +249,95 @@ router.get("/export/excel", async (req, res) => {
 
     const worksheet = workbook.addWorksheet("Financial Summary Report");
     worksheet.columns = [
-      { header: "Sr.No", key: "serialNo", width: 8 },
-      { header: "Date", key: "date", width: 15 },
-      { header: "Type", key: "type", width: 20 },
-      { header: "Amount ($)", key: "amount", width: 15 },
+      { header: "Sr.No",      key: "serialNo", width: 8  },
+      { header: "Date",       key: "date",     width: 15 },
+      { header: "Type",       key: "type",     width: 20 },
+      { header: "Amount ($)", key: "amount",   width: 15 },
     ];
 
+    // Header row styling
     const headerRow = worksheet.getRow(1);
-    headerRow.font = { bold: true, size: 12 };
+    headerRow.font      = { bold: true, size: 12 };
     headerRow.alignment = { horizontal: "center", vertical: "middle" };
-    headerRow.height = 25;
+    headerRow.height    = 25;
     headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
+      type: "pattern", pattern: "solid",
       fgColor: { argb: "FFE0E0E0" },
     };
 
+    // Data rows
     allData.forEach((item, idx) => {
       const row = worksheet.addRow({
         serialNo: idx + 1,
-        date: item.date,
-        type: getTypeDisplayName(item.type),
-        amount: item.amount,
+        date:     item.date,
+        type:     getTypeDisplayName(item.type),
+        amount:   item.amount,
       });
-      row.font = { size: 11 };
+      row.font      = { size: 11 };
       row.alignment = { vertical: "middle", horizontal: "center" };
 
       const dateCell = row.getCell("date");
       if (item.date) {
-        dateCell.value = new Date(item.date);
+        dateCell.value  = new Date(item.date);
         dateCell.numFmt = "dd-mm-yyyy";
       }
-      const amountCell = row.getCell("amount");
-      amountCell.numFmt = "$#,##0.00";
+      row.getCell("amount").numFmt = "$#,##0.00";
     });
 
     // Summary section
     if (allData.length > 0) {
       worksheet.addRow({});
+
       const summaryHeader = worksheet.addRow(["SUMMARY"]);
-      summaryHeader.font = { bold: true, size: 12 };
+      summaryHeader.font      = { bold: true, size: 12 };
       summaryHeader.alignment = { horizontal: "center" };
       summaryHeader.getCell(1).fill = {
-        type: "pattern",
-        pattern: "solid",
+        type: "pattern", pattern: "solid",
         fgColor: { argb: "FFD0D0D0" },
       };
       worksheet.mergeCells(`A${summaryHeader.number}:D${summaryHeader.number}`);
 
+      const grandTotal =
+        summary.totalExchangeLoss +
+        summary.totalRemittance +
+        summary.totalExpense +
+        summary.totalSalary +
+        summary.totalOtherExpense;
+
       const summaryRows = [
-        { label: "Total Purchase:", value: summary.totalPurchase },
-        { label: "Total Exchange Loss:", value: summary.totalExchangeLoss },
-        { label: "Total Remittance:", value: summary.totalRemittance },
-        { label: "Total Expense:", value: summary.totalExpense },
-        { label: "Total Salary:", value: summary.totalSalary },
-        { label: "Total Other Expenses:", value: summary.totalOtherExpense },
-        { label: "Total Transactions:", value: summary.totalTransactions },
-        {
-          label: "Grand Total:",
-          value:
-            summary.totalPurchase +
-            summary.totalExchangeLoss +
-            summary.totalRemittance +
-            summary.totalExpense +
-            summary.totalSalary +
-            summary.totalOtherExpense,
-        },
+        { label: "Total Exchange Loss:",  value: summary.totalExchangeLoss, isMoney: true  },
+        { label: "Total Remittance:",     value: summary.totalRemittance,   isMoney: true  },
+        { label: "Total Expense:",        value: summary.totalExpense,      isMoney: true  },
+        { label: "Total Salary:",         value: summary.totalSalary,       isMoney: true  },
+        { label: "Total Other Expenses:", value: summary.totalOtherExpense, isMoney: true  },
+        { label: "Total Transactions:",   value: summary.totalTransactions, isMoney: false },
+        { label: "Grand Total:",          value: grandTotal,                isMoney: true  },
       ];
 
-      summaryRows.forEach((rowData) => {
-        const row = worksheet.addRow({
-          serialNo: rowData.label,
-          type: rowData.value,
-        });
+      summaryRows.forEach(({ label, value, isMoney }) => {
+        const row = worksheet.addRow({ serialNo: label, type: value });
         row.font = { bold: true };
-        const valueCell = row.getCell("type");
-        if (
-          rowData.label.includes("Total") &&
-          !rowData.label.includes("Transactions")
-        ) {
-          valueCell.numFmt = "$#,##0.00";
-        }
-        valueCell.alignment = { horizontal: "right" };
+        const cell = row.getCell("type");
+        if (isMoney) cell.numFmt = "$#,##0.00";
+        cell.alignment = { horizontal: "right" };
       });
     } else {
-      const noDataRow = worksheet.addRow([
-        "No financial data found for the selected criteria",
-      ]);
-      noDataRow.font = { italic: true, color: { argb: "FF666666" } };
+      const noDataRow = worksheet.addRow(["No financial data found for the selected criteria"]);
+      noDataRow.font      = { italic: true, color: { argb: "FF666666" } };
       noDataRow.alignment = { horizontal: "center" };
-      noDataRow.height = 30;
+      noDataRow.height    = 30;
       worksheet.mergeCells(`A${noDataRow.number}:D${noDataRow.number}`);
     }
 
     // Borders
     worksheet.eachRow({ includeEmpty: true }, (row) => {
-      if (row.values.some((cell) => cell !== undefined && cell !== "")) {
+      if (row.values.some((c) => c !== undefined && c !== "")) {
         row.eachCell({ includeEmpty: true }, (cell) => {
           cell.border = {
-            top: { style: "thin" },
-            left: { style: "thin" },
+            top:    { style: "thin" },
+            left:   { style: "thin" },
             bottom: { style: "thin" },
-            right: { style: "thin" },
+            right:  { style: "thin" },
           };
         });
       }
@@ -396,39 +346,23 @@ router.get("/export/excel", async (req, res) => {
     if (allData.length > 0) {
       worksheet.autoFilter = {
         from: { row: 1, column: 1 },
-        to: { row: 1, column: worksheet.columnCount },
+        to:   { row: 1, column: worksheet.columnCount },
       };
     }
 
     const fileName = `financial-summary-${new Date().toISOString().split("T")[0]}.xlsx`;
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    );
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.send(await workbook.xlsx.writeBuffer());
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    res.send(buffer);
   } catch (error) {
     console.error("Error in /export/excel:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate Excel export",
-      error: error.message,
+      error:   error.message,
     });
   }
 });
-
-const getTypeDisplayName = (type) => {
-  const map = {
-    purchase: "Purchase",
-    exchange_loss: "Exchange Loss",
-    remittance: "Remittance",
-    expense: "Expense",
-    salary: "Salary",
-    other_expense: "Other Expenses",
-  };
-  return map[type] || type;
-};
 
 export default router;

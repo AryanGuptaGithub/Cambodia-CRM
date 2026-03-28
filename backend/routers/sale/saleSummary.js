@@ -3554,6 +3554,7 @@ router.get("/all", async (req, res) => {
           customerPhone: { $arrayElemAt: ["$customerInfo.customerNumber", 0] },
           customerZone: { $arrayElemAt: ["$customerInfo.zone", 0] },
           customerProvince: { $arrayElemAt: ["$customerInfo.province", 0] },
+          customerAddress: { $arrayElemAt: ["$customerInfo.address", 0] }, // <-- Add this line
         },
       },
       { $unset: "customerInfo" },
@@ -3564,6 +3565,38 @@ router.get("/all", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch sale summaries." });
   }
 });
+
+// router.get("/all", async (req, res) => {
+//   try {
+//     const { search = "", tab = "All", saleType = "all" } = req.query;
+//     const matchConditions = buildMatchConditions(search, tab, saleType);
+
+//     const summaries = await SaleSummary.aggregate([
+//       { $match: matchConditions },
+//       { $sort: { recordingDate: -1 } },
+//       {
+//         $lookup: {
+//           from: "customers",
+//           localField: "customerId",
+//           foreignField: "_id",
+//           as: "customerInfo",
+//         },
+//       },
+//       {
+//         $addFields: {
+//           customerPhone: { $arrayElemAt: ["$customerInfo.customerNumber", 0] },
+//           customerZone: { $arrayElemAt: ["$customerInfo.zone", 0] },
+//           customerProvince: { $arrayElemAt: ["$customerInfo.province", 0] },
+//         },
+//       },
+//       { $unset: "customerInfo" },
+//     ]);
+//     res.status(200).json({ summaries, count: summaries.length });
+//   } catch (error) {
+//     console.error("Fetch Sale Summary Error:", error);
+//     res.status(500).json({ message: "Failed to fetch sale summaries." });
+//   }
+// });
 
 router.get("/payment-status", async (req, res) => {
   try {

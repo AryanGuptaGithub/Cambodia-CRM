@@ -1901,12 +1901,10 @@ const ImportSalesModal = ({
           const mrName = invoice.mrName.trim();
           mrNames.add(mrName);
           if (!mrToInvoices.has(mrName)) mrToInvoices.set(mrName, []);
-          mrToInvoices
-            .get(mrName)
-            .push({
-              invoiceNumber: invoice.invoiceNumber,
-              customerName: invoice.customerName,
-            });
+          mrToInvoices.get(mrName).push({
+            invoiceNumber: invoice.invoiceNumber,
+            customerName: invoice.customerName,
+          });
         }
       }
 
@@ -4033,7 +4031,10 @@ const Sales = () => {
                     </h3>
                     <button
                       type="button"
-                      onClick={() => setIsProductModalOpen(true)}
+                      onClick={() => {
+                        setSelectedSaleProducts(form.products || []);
+                        setIsProductModalOpen(true);
+                      }}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
                     >
                       View All Products

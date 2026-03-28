@@ -27,201 +27,6 @@ import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const ConfirmationModal = ({
-  isOpen,
-  onClose,
-  onConfirm,
-  title,
-  message,
-  records = [], // ← NEW: array of { displayDate, timeInfo, isLeaveDay, totalTime, extraHoursInMinutes }
-  confirmLabel = "Confirm",
-  confirmColor = "bg-red-600 hover:bg-red-700",
-  loading = false,
-}) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="bg-red-100 p-2 rounded-full flex-shrink-0">
-            <AlertCircle size={22} className="text-red-600" />
-          </div>
-          <h3 className="text-lg font-bold text-gray-800">{title}</h3>
-        </div>
-
-        {/* Message */}
-        <p className="text-gray-600 mb-4 text-sm leading-relaxed">{message}</p>
-
-        {/* ── Record detail list (shown only for bulk delete) ── */}
-        {records.length > 0 && (
-          <div className="mb-5 border border-red-200 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
-            <div className="bg-red-50 px-3 py-2 border-b border-red-200">
-              <p className="text-xs font-semibold text-red-700 uppercase tracking-wide">
-                Records to be deleted ({records.length})
-              </p>
-            </div>
-            <ul className="divide-y divide-gray-100">
-              {records.map((rec, idx) => (
-                <li
-                  key={rec._id || idx}
-                  className="flex items-center justify-between px-3 py-2.5 bg-white hover:bg-gray-50"
-                >
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-gray-800">
-                      {rec.displayDate}
-                    </span>
-                    {rec.isLeaveDay ? (
-                      <span className="text-xs text-purple-600 font-medium">
-                        Leave Day (swap / extra hours)
-                      </span>
-                    ) : rec.timeInfo ? (
-                      <span className="text-xs text-gray-500">
-                        {rec.timeInfo}
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-col items-end gap-0.5">
-                    {rec.isLeaveDay ? (
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
-                        Leave
-                      </span>
-                    ) : (
-                      <>
-                        {rec.totalTime && (
-                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                            {rec.totalTime}
-                          </span>
-                        )}
-                        {rec.extraHoursInMinutes > 0 && (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                            +{Math.floor(rec.extraHoursInMinutes / 60)}h{" "}
-                            {rec.extraHoursInMinutes % 60}m extra
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Warning note */}
-        <p className="text-xs text-red-500 mb-5 flex items-center gap-1.5">
-          <AlertCircle size={12} className="flex-shrink-0" />
-          This action cannot be undone.
-        </p>
-
-        {/* Buttons */}
-        <div className="flex gap-3 justify-end">
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={loading}
-            className={`px-4 py-2 ${confirmColor} text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center gap-2`}
-          >
-            {loading && (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-            )}
-            {loading ? "Deleting..." : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const CustomDropdown = ({
-  value,
-  onChange,
-  options,
-  disabled,
-  placeholder = "Select MR",
-  required = false,
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = React.useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selectedOption = options.find((opt) => opt.value === value);
-
-  return (
-    <div className="relative w-full" ref={dropdownRef}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full border border-gray-300 rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2
-           focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center ${
-             disabled
-               ? "cursor-not-allowed opacity-60"
-               : "cursor-pointer hover:border-gray-400"
-           } ${!value ? "text-gray-500" : "text-gray-900"}`}
-      >
-        <span className="truncate">
-          {selectedOption ? selectedOption.label : placeholder}
-        </span>
-        {!disabled && (
-          <span className="text-gray-400 flex-shrink-0 ml-2">
-            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </span>
-        )}
-      </button>
-
-      {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-          {options.length === 0 ? (
-            <div className="px-3 py-2 text-gray-500 text-sm">
-              No options available
-            </div>
-          ) : (
-            options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  if (!option.disabled) {
-                    onChange(option.value);
-                    setIsOpen(false);
-                  }
-                }}
-                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 ${
-                  value === option.value
-                    ? "bg-indigo-100 text-indigo-900 font-medium"
-                    : "text-gray-900"
-                } ${option.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                disabled={option.disabled}
-              >
-                {option.label}
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Component
-// ─────────────────────────────────────────────────────────────────────────────
 const LeaveAttendance = () => {
   const [mrList, setMrList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -278,11 +83,13 @@ const LeaveAttendance = () => {
     useState(false);
   const [deleteSelectedMr, setDeleteSelectedMr] = useState(null);
   const [deletableDates, setDeletableDates] = useState([]);
+  // ✅ MODIFICATION: Use array of selected IDs instead of single
   const [selectedDeleteIds, setSelectedDeleteIds] = useState([]);
   const [loadingDeletableDates, setLoadingDeletableDates] = useState(false);
   const [confirmDeleteModal, setConfirmDeleteModal] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // New state to hide MR selector when deleting from calendar
   const [hideMrSelector, setHideMrSelector] = useState(false);
 
   // ─── Calendar Delete State ────────────────────────────────────────────────
@@ -359,7 +166,7 @@ const LeaveAttendance = () => {
     }
   }, [selectedAttendanceMr, showExtraHoursModal]);
 
-  // ✅ MODIFICATION 1: Added attendanceRecords to dependency array
+  // ✅ MODIFICATION: Added attendanceRecords to dependency array
   useEffect(() => {
     if (deleteSelectedMr && showDeleteAttendanceModal) {
       fetchDeletableDates(deleteSelectedMr);
@@ -496,60 +303,54 @@ const LeaveAttendance = () => {
     }
   };
 
-  // ✅ MODIFICATION 2: Bulk delete with date collection and improved messaging
-  const handleBulkDelete = () => {
+  // ✅ MODIFICATION: Bulk delete handler
+  const handleBulkDelete = async () => {
     if (selectedDeleteIds.length === 0) {
       showToast("warning", "Please select at least one record to delete");
       return;
     }
-    // Open modal — record details are already in `deletableDates`
     setConfirmDeleteModal(true);
   };
+
   const handleConfirmDelete = async () => {
     setDeleteLoading(true);
     let successCount = 0;
     let errorCount = 0;
-    let deletedDates = [];
+    let warnings = [];
 
     for (const id of selectedDeleteIds) {
       try {
         const response = await axios.delete(
           `${backendUrl}/api/hrm/leaves/attendance/${id}`,
         );
-
         if (response.data.success) {
           successCount++;
-
-          // ── Warning FIRST (e.g. "1 swap leave(s) deleted…") ──────────────
           if (response.data.warning) {
-            showToast("warning", response.data.warning);
-            // Short pause so the warning toast is visible before success fires
-            await new Promise((resolve) => setTimeout(resolve, 600));
-          }
-
-          if (response.data.deletedDate) {
-            deletedDates.push(response.data.deletedDate);
+            warnings.push(response.data.warning);
           }
         } else {
           errorCount++;
-          showToast("error", `Failed to delete: ${response.data.message}`);
+          showToast(
+            "error",
+            `Failed to delete record ${id}: ${response.data.message}`,
+          );
         }
       } catch (err) {
         errorCount++;
         showToast(
           "error",
-          `Failed to delete: ${err.response?.data?.message || err.message}`,
+          `Failed to delete record: ${err.response?.data?.message || err.message}`,
         );
       }
     }
 
-    // ── Success message AFTER all warnings ───────────────────────────────────
     if (successCount > 0) {
-      const datesPart =
-        deletedDates.length > 0 && deletedDates.length <= 3
-          ? `: ${deletedDates.join(", ")}`
-          : "";
-      showToast("success", `${successCount} record(s) deleted${datesPart}.`);
+      showToast("success", `${successCount} record(s) deleted successfully.`);
+      if (warnings.length > 0) {
+        // Show unique warnings (to avoid duplicate toasts)
+        const uniqueWarnings = [...new Set(warnings)];
+        uniqueWarnings.forEach((w) => showToast("warning", w));
+      }
     }
     if (errorCount > 0) {
       showToast("error", `${errorCount} record(s) failed to delete.`);
@@ -558,11 +359,13 @@ const LeaveAttendance = () => {
     setConfirmDeleteModal(false);
     setSelectedDeleteIds([]);
     await fetchAttendanceRecords();
-    if (deleteSelectedMr) fetchDeletableDates(deleteSelectedMr);
+    if (deleteSelectedMr) {
+      fetchDeletableDates(deleteSelectedMr);
+    }
     setDeleteLoading(false);
   };
 
-  // ─── Calendar Delete Handler (single delete from calendar) ─────────────────
+  // ─── Calendar Delete Handler (unchanged, but we keep it) ─────────────────
   const handleDeleteFromCalendar = async () => {
     const { userId, date } = calendarDeleteData;
     if (!userId || !date) return;
@@ -572,12 +375,7 @@ const LeaveAttendance = () => {
         `${backendUrl}/api/hrm/leaves/attendance/date/${userId}/${date}`,
       );
       if (response.data.success) {
-        const deletedDate = response.data.deletedDate || date;
-        const formattedDate = formatDateDisplay(deletedDate);
-        showToast(
-          "success",
-          `Attendance record for ${formattedDate} deleted successfully.`,
-        );
+        showToast("success", response.data.message);
         if (response.data.warning) {
           showToast("warning", response.data.warning);
         }
@@ -1164,7 +962,6 @@ const LeaveAttendance = () => {
       setLeaveLoading(false);
     }
   };
-
   const handleConvertExtraHoursToLeave = async () => {
     if (!selectedAttendanceMr || !extraHoursDate) {
       showToast("error", "Please select MR and date for leave");
@@ -1541,7 +1338,6 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Record Attendance Modal (unchanged) */}
       {showAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1685,7 +1481,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Leave Modal (unchanged) */}
+      {/* ── Leave Modal (unchanged) ──────────────────────────────────────── */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1851,7 +1647,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Extra Hours Modal (unchanged) */}
+      {/* ── Extra Hours Modal (unchanged) ──────────────────────────────────── */}
       {showExtraHoursModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
@@ -2141,6 +1937,7 @@ const LeaveAttendance = () => {
               >
                 <ChevronLeft size={18} /> Back to MR List
               </button>
+              {/* ========== MODIFIED: pass current MR ID ========== */}
               <button
                 onClick={() => handleOpenDeleteAttendanceModal(selectedMr?._id)}
                 className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg cursor-pointer"
@@ -2148,6 +1945,7 @@ const LeaveAttendance = () => {
                 <Trash2 size={16} />
                 Delete Attendance
               </button>
+              {/* ================================================= */}
             </div>
 
             <div className="flex gap-2">

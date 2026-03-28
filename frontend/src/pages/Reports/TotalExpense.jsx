@@ -19,10 +19,122 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ─── Detail Modal ─────────────────────────────────────────────────────────────
+const DetailModal = ({ isOpen, onClose, title, records }) => {
+  if (!isOpen) return null;
+
+  const total = records.reduce((sum, r) => sum + (r.amount || 0), 0);
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 flex justify-center items-center z-50">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="relative z-10 bg-white w-full max-w-2xl mx-4 rounded-xl shadow-2xl overflow-hidden">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-indigo-50">
+          <div>
+            <h2 className="text-lg font-bold text-indigo-800">
+              {title} — Records
+            </h2>
+            <p className="text-xs text-indigo-500 mt-0.5">
+              {records.length} record{records.length !== 1 ? "s" : ""} found
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-y-auto max-h-[60vh]">
+          {records.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              No records found
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100 sticky top-0">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                    #
+                  </th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                    Description / Remarks
+                  </th>
+                  <th className="px-4 py-3 text-right font-semibold text-gray-700">
+                    Amount ($)
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((rec, idx) => (
+                  <tr
+                    key={rec._id || idx}
+                    className={`border-b last:border-0 hover:bg-gray-50 ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}`}
+                  >
+                    <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
+                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
+                      {rec.date
+                        ? new Date(rec.date).toLocaleDateString("en-US", {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700 max-w-[220px] truncate">
+                      {rec.description || rec.remarks || "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-red-600">
+                      $
+                      {(rec.amount || 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {/* Footer total */}
+              <tfoot className="bg-indigo-50 sticky bottom-0">
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-4 py-3 font-bold text-indigo-800 text-right"
+                  >
+                    Total
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-indigo-800">
+                    $
+                    {total.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 const TotalExpense = () => {
   const [data, setData] = useState([]);
+  const [allRecords, setAllRecords] = useState([]); // full unpaginated list for drill-down
   const [summary, setSummary] = useState({
-    totalPurchase: 0,
     totalExchangeLoss: 0,
     totalRemittance: 0,
     totalExpense: 0,
@@ -47,7 +159,13 @@ const TotalExpense = () => {
     hasPrev: false,
   });
   const [exportLoading, setExportLoading] = useState(false);
-  const inputRef = useRef(null);
+
+  // ── Detail modal state ────────────────────────────────────────────────────
+  const [detailModal, setDetailModal] = useState({
+    isOpen: false,
+    title: "",
+    records: [],
+  });
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
@@ -57,7 +175,6 @@ const TotalExpense = () => {
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
   const getCurrentYear = () => new Date().getFullYear();
-
   const getPreviousMonthName = () => {
     const prev = new Date();
     prev.setMonth(prev.getMonth() - 1);
@@ -85,17 +202,15 @@ const TotalExpense = () => {
 
   const getDateRange = () => {
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-
     switch (selectedTab) {
-      case "currentMonth":
-        const firstDay = new Date(currentYear, currentMonth, 1);
-        const lastDay = new Date(currentYear, currentMonth + 1, 0);
+      case "currentMonth": {
+        const y = now.getFullYear(),
+          m = now.getMonth();
         return {
-          startDate: firstDay.toISOString().split("T")[0],
-          endDate: lastDay.toISOString().split("T")[0],
+          startDate: new Date(y, m, 1).toISOString().split("T")[0],
+          endDate: new Date(y, m + 1, 0).toISOString().split("T")[0],
         };
+      }
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange();
       case "custom":
@@ -112,36 +227,47 @@ const TotalExpense = () => {
     }
   };
 
+  const buildParams = (page, search) => {
+    const dateRange = getDateRange();
+    let params = { page, limit: 7 };
+    if (selectedTab !== "all") {
+      if (
+        selectedTab === "custom" &&
+        (!dateRange.startDate || !dateRange.endDate)
+      )
+        return null;
+      params = {
+        ...params,
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+      };
+    }
+    if (search?.trim()) params.search = search.trim();
+    return params;
+  };
+
   const fetchFinancialData = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
-      const dateRange = getDateRange();
-      let params = { page, limit: 7 };
-
-      if (selectedTab !== "all") {
-        if (
-          selectedTab === "custom" &&
-          (!dateRange.startDate || !dateRange.endDate)
-        ) {
-          setLoading(false);
-          return;
-        }
-        params = {
-          ...params,
-          startDate: dateRange.startDate,
-          endDate: dateRange.endDate,
-        };
+      const params = buildParams(page, search);
+      if (!params) {
+        setLoading(false);
+        return;
       }
-      if (search && search.trim() !== "") params.search = search.trim();
 
-      const response = await axios.get(
-        `${backendUrl}/api/reports/total-expense/`,
-        { params },
-      );
-      setData(response.data.data || []);
+      // Fetch paginated (for table display)
+      const [pageRes, allRes] = await Promise.all([
+        axios.get(`${backendUrl}/api/reports/total-expense/`, { params }),
+        // Fetch all records (no pagination) so drill-down shows everything in range
+        axios.get(`${backendUrl}/api/reports/total-expense/`, {
+          params: { ...params, page: 1, limit: 10000 },
+        }),
+      ]);
+
+      setData(pageRes.data.data || []);
+      setAllRecords(allRes.data.data || []);
       setSummary(
-        response.data.summary || {
-          totalPurchase: 0,
+        pageRes.data.summary || {
           totalExchangeLoss: 0,
           totalRemittance: 0,
           totalExpense: 0,
@@ -151,7 +277,7 @@ const TotalExpense = () => {
         },
       );
       setPagination(
-        response.data.pagination || {
+        pageRes.data.pagination || {
           currentPage: 1,
           totalPages: 1,
           totalRecords: 0,
@@ -181,35 +307,24 @@ const TotalExpense = () => {
       selectedTab === "custom" &&
       customDateRange.startDate &&
       customDateRange.endDate
-    ) {
+    )
       fetchFinancialData(1);
-    }
   }, [customDateRange.startDate, customDateRange.endDate]);
 
-  const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) fetchFinancialData(page);
-  };
+  useEffect(() => {
+    const t = setTimeout(() => fetchFinancialData(1), 500);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
-  const handleSearchChange = (e) => setSearchTerm(e.target.value);
-  const handleClearSearch = () => {
-    setSearchTerm("");
-    fetchFinancialData(1);
+  const handlePageChange = (p) => {
+    if (p >= 1 && p <= pagination.totalPages) fetchFinancialData(p);
   };
-
   const handleCustomDateChange = (name, date) =>
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
 
-  // Debounced search
-  useEffect(() => {
-    const timer = setTimeout(() => fetchFinancialData(1), 500);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  const handleSearchKey = (e) => e.key === "Enter" && fetchFinancialData(1);
-
   const handleApplyCustomFilter = () => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
-      showToast("warning", "Please select both start and end dates");
+      showToast("warning", "Please select both dates");
       return;
     }
     if (customDateRange.startDate > customDateRange.endDate) {
@@ -236,6 +351,15 @@ const TotalExpense = () => {
     fetchFinancialData(1);
   };
 
+  // ── Open detail modal — filter allRecords by type ────────────────────────
+  const openDetail = (type, label) => {
+    const records = allRecords.filter((r) => r.type === type);
+    setDetailModal({ isOpen: true, title: label, records });
+  };
+
+  const closeDetail = () =>
+    setDetailModal({ isOpen: false, title: "", records: [] });
+
   const exportToExcel = async () => {
     try {
       setExportLoading(true);
@@ -244,56 +368,43 @@ const TotalExpense = () => {
         selectedTab === "custom" &&
         (!dateRange.startDate || !dateRange.endDate)
       ) {
-        showToast(
-          "warning",
-          "Please select both start and end dates for export",
-        );
+        showToast("warning", "Please select both dates for export");
         setExportLoading(false);
         return;
       }
-
       const params = new URLSearchParams();
       if (dateRange.startDate) params.append("startDate", dateRange.startDate);
       if (dateRange.endDate) params.append("endDate", dateRange.endDate);
       if (searchTerm) params.append("search", searchTerm);
 
-      const downloadUrl = `${backendUrl}/api/reports/total-expense/export/excel?${params.toString()}`;
-      const response = await axios.get(downloadUrl, { responseType: "blob" });
-
-      const blob = new Blob([response.data], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const url = window.URL.createObjectURL(blob);
+      const response = await axios.get(
+        `${backendUrl}/api/reports/total-expense/export/excel?${params.toString()}`,
+        { responseType: "blob" },
+      );
+      const url = window.URL.createObjectURL(
+        new Blob([response.data], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+      );
       const link = document.createElement("a");
       link.href = url;
-      let fileName = "financial-summary-report";
-      if (dateRange.startDate && dateRange.endDate) {
-        fileName = `financial-summary-${dateRange.startDate.replace(/-/g, "")}-to-${dateRange.endDate.replace(/-/g, "")}`;
-      } else {
-        const today = new Date().toISOString().split("T")[0];
-        fileName = `financial-summary-${today.replace(/-/g, "")}`;
-      }
-      fileName += ".xlsx";
-      link.download = fileName;
+      const today = new Date().toISOString().split("T")[0];
+      link.download =
+        dateRange.startDate && dateRange.endDate
+          ? `financial-summary-${dateRange.startDate.replace(/-/g, "")}-to-${dateRange.endDate.replace(/-/g, "")}.xlsx`
+          : `financial-summary-${today.replace(/-/g, "")}.xlsx`;
       document.body.appendChild(link);
       link.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(link);
       showToast("success", "Excel file downloaded successfully!");
     } catch (error) {
-      console.error("Error exporting to Excel:", error);
-      if (error.response?.status === 400)
-        showToast("error", "Invalid date format for export");
-      else if (error.response?.status === 404)
-        showToast("error", "Export service not available");
-      else showToast("error", "Failed to export to Excel");
+      console.error("Error exporting:", error);
+      showToast("error", "Failed to export to Excel");
     } finally {
       setExportLoading(false);
     }
   };
-
-  const formatDateForDisplay = (date) =>
-    date ? formatDateToReadable(date) : "";
 
   const getActiveFilterDisplay = () => {
     switch (selectedTab) {
@@ -302,43 +413,56 @@ const TotalExpense = () => {
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange().label;
       case "custom":
-        if (customDateRange.startDate && customDateRange.endDate) {
-          return `${formatDateForDisplay(customDateRange.startDate)} to ${formatDateForDisplay(customDateRange.endDate)}`;
-        }
-        return "Select custom dates";
+        return customDateRange.startDate && customDateRange.endDate
+          ? `${formatDateToReadable(customDateRange.startDate)} to ${formatDateToReadable(customDateRange.endDate)}`
+          : "Select custom dates";
       default:
         return "All Records";
     }
   };
 
   const totalAmount =
-    summary.totalPurchase +
     summary.totalExchangeLoss +
     summary.totalRemittance +
     summary.totalExpense +
     summary.totalSalary +
     summary.totalOtherExpense;
 
-  const summaryData = [
-    { type: "purchase", label: "Purchase", amount: summary.totalPurchase },
+  // ── Row definitions (type → label, colour) ────────────────────────────────
+  const ROWS = [
     {
       type: "exchange_loss",
       label: "Exchange Loss",
       amount: summary.totalExchangeLoss,
+      color: "bg-red-500",
     },
     {
       type: "remittance",
       label: "Remittance",
       amount: summary.totalRemittance,
+      color: "bg-green-500",
     },
-    { type: "expense", label: "Expense", amount: summary.totalExpense },
-    { type: "salary", label: "Salary", amount: summary.totalSalary },
+    {
+      type: "expense",
+      label: "Expense",
+      amount: summary.totalExpense,
+      color: "bg-purple-500",
+    },
+    {
+      type: "salary",
+      label: "Salary",
+      amount: summary.totalSalary,
+      color: "bg-orange-500",
+    },
     {
       type: "other_expense",
       label: "Other Expenses",
       amount: summary.totalOtherExpense,
+      color: "bg-pink-500",
     },
-  ].filter((item) => item.amount > 0);
+  ];
+
+  const summaryData = ROWS.filter((r) => r.amount > 0);
 
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
@@ -347,20 +471,15 @@ const TotalExpense = () => {
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
           disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasPrev
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
         >
-          <ChevronLeft size={16} />
-          Prev
+          <ChevronLeft size={16} /> Prev
         </button>
         <div className="flex gap-1">
           {visiblePages.map((page, idx) =>
             page === "..." ? (
               <span
-                key={`ellipsis-${idx}`}
+                key={`e-${idx}`}
                 className="px-3 py-1 text-gray-500 select-none"
               >
                 ...
@@ -369,11 +488,7 @@ const TotalExpense = () => {
               <button
                 key={page}
                 onClick={() => handlePageChange(page)}
-                className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                  page === pagination.currentPage
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                }`}
+                className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${page === pagination.currentPage ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300 text-gray-700"}`}
               >
                 {page}
               </button>
@@ -383,23 +498,17 @@ const TotalExpense = () => {
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasNext
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
         >
-          Next
-          <ChevronRight size={16} />
+          Next <ChevronRight size={16} />
         </button>
       </div>
     );
   };
 
-  const isExportDisabled = exportLoading || false;
-
   return (
     <div className="p-6">
+      {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <PieChart className="w-8 h-8 text-purple-600" />
@@ -407,68 +516,40 @@ const TotalExpense = () => {
             Financial Summary Report
           </h1>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={exportToExcel}
-            disabled={isExportDisabled}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
-              isExportDisabled
-                ? "bg-green-700 text-white opacity-75 cursor-wait"
-                : "bg-green-600 hover:bg-green-700 text-white"
-            }`}
-            title={exportLoading ? "Exporting..." : "Export to Excel"}
-          >
-            <Download size={18} />
-            {exportLoading ? "Exporting..." : "Export Excel"}
-          </button>
-        </div>
+        <button
+          onClick={exportToExcel}
+          disabled={exportLoading}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${exportLoading ? "bg-green-700 text-white opacity-75 cursor-wait" : "bg-green-600 hover:bg-green-700 text-white"}`}
+        >
+          <Download size={18} />
+          {exportLoading ? "Exporting..." : "Export Excel"}
+        </button>
       </div>
 
       {/* Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            onClick={() => handleTabChange("all")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "all"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            All Records
-          </button>
-          <button
-            onClick={() => handleTabChange("currentMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "currentMonth"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Current Month ({getCurrentMonthName()} {getCurrentYear()})
-          </button>
-          <button
-            onClick={() => handleTabChange("janToPreviousMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "janToPreviousMonth"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            {getJanToPreviousMonthRange().label}
-          </button>
-          <button
-            onClick={() => handleTabChange("custom")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "custom"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Custom Filter
-          </button>
+          {[
+            { key: "all", label: "All Records" },
+            {
+              key: "currentMonth",
+              label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
+            },
+            {
+              key: "janToPreviousMonth",
+              label: getJanToPreviousMonthRange().label,
+            },
+            { key: "custom", label: "Custom Filter" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => handleTabChange(key)}
+              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === key ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <Filter size={16} />
@@ -485,7 +566,7 @@ const TotalExpense = () => {
         </div>
       </div>
 
-      {/* Total Overall Expense Card */}
+      {/* Grand Total Card */}
       <div className="bg-white p-6 rounded-xl shadow-md mb-6 border-l-4 border-indigo-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
@@ -501,88 +582,52 @@ const TotalExpense = () => {
         </div>
       </div>
 
-      {/* Financial Breakdown Card */}
+      {/* Breakdown */}
       {showBreakdown && totalAmount > 0 && (
         <div className="bg-white rounded-xl shadow-md mb-6 border border-gray-200">
-          <div className="p-6 border-b">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-800">
-                Financial Breakdown by Type
-              </h3>
-              <button
-                onClick={() => setShowBreakdown(false)}
-                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
-              >
-                <EyeOff size={14} />
-                Hide
-              </button>
-            </div>
+          <div className="p-6 border-b flex justify-between items-center">
+            <h3 className="text-lg font-semibold text-gray-800">
+              Financial Breakdown by Type
+            </h3>
+            <button
+              onClick={() => setShowBreakdown(false)}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
+            >
+              <EyeOff size={14} /> Hide
+            </button>
           </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[
-                {
-                  type: "Purchase",
-                  amount: summary.totalPurchase,
-                  color: "bg-blue-500",
-                },
-                {
-                  type: "Exchange Loss",
-                  amount: summary.totalExchangeLoss,
-                  color: "bg-red-500",
-                },
-                {
-                  type: "Remittance",
-                  amount: summary.totalRemittance,
-                  color: "bg-green-500",
-                },
-                {
-                  type: "Expense",
-                  amount: summary.totalExpense,
-                  color: "bg-purple-500",
-                },
-                {
-                  type: "Salary",
-                  amount: summary.totalSalary,
-                  color: "bg-orange-500",
-                },
-                {
-                  type: "Other Expenses",
-                  amount: summary.totalOtherExpense,
-                  color: "bg-pink-500",
-                },
-              ].map((item) => (
-                <div key={item.type} className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-700">
-                      {item.type}
-                    </span>
-                    <span className="text-lg font-bold text-gray-800">
-                      ${item.amount.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                    <div
-                      className={`${item.color} h-2 rounded-full`}
-                      style={{
-                        width: `${totalAmount > 0 ? (item.amount / totalAmount) * 100 : 0}%`,
-                      }}
-                    />
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {totalAmount > 0
-                      ? ((item.amount / totalAmount) * 100).toFixed(1)
-                      : 0}
-                    % of total
-                  </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {ROWS.map((item) => (
+              <div key={item.type} className="bg-gray-50 p-4 rounded-lg">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium text-gray-700">
+                    {item.label}
+                  </span>
+                  <span className="text-lg font-bold text-gray-800">
+                    ${item.amount.toLocaleString()}
+                  </span>
                 </div>
-              ))}
-            </div>
+                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                  <div
+                    className={`${item.color} h-2 rounded-full`}
+                    style={{
+                      width: `${totalAmount > 0 ? (item.amount / totalAmount) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {totalAmount > 0
+                    ? ((item.amount / totalAmount) * 100).toFixed(1)
+                    : 0}
+                  % of total
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Data Table */}
+      {/* ── Main Summary Table with Actions column ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -590,12 +635,13 @@ const TotalExpense = () => {
               <th className="p-3 text-sm font-medium">Sr. No.</th>
               <th className="p-3 text-sm font-medium">Type</th>
               <th className="p-3 text-sm font-medium">Amount ($)</th>
+              <th className="p-3 text-sm font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="3" className="p-3 text-center">
+                <td colSpan="4" className="p-6 text-center text-gray-400">
                   Loading...
                 </td>
               </tr>
@@ -605,24 +651,33 @@ const TotalExpense = () => {
                   key={item.type}
                   className={`hover:bg-gray-50 ${index === summaryData.length - 1 ? "" : "border-b"}`}
                 >
-                  <td className="p-3">
-                    <div className="text-sm text-gray-600 font-medium">
-                      {index + 1}
-                    </div>
+                  <td className="p-3 text-sm text-gray-600 font-medium">
+                    {index + 1}
                   </td>
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900 capitalize">
-                      {item.label}
-                    </div>
+                  <td className="p-3 text-sm font-medium text-gray-900 capitalize">
+                    {item.label}
                   </td>
                   <td className="p-3 text-sm font-semibold text-red-600">
-                    ${(item.amount || 0).toLocaleString()}
+                    $
+                    {(item.amount || 0).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </td>
+                  <td className="p-3">
+                    <button
+                      onClick={() => openDetail(item.type, item.label)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+                    >
+                      <Eye size={14} />
+                      View All
+                    </button>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="3" className="p-3 text-center text-gray-500">
+                <td colSpan="4" className="p-6 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -634,13 +689,20 @@ const TotalExpense = () => {
         </table>
       </div>
 
-      {/* Pagination (if needed) */}
       {renderPagination()}
+
+      {/* Detail Modal */}
+      <DetailModal
+        isOpen={detailModal.isOpen}
+        onClose={closeDetail}
+        title={detailModal.title}
+        records={detailModal.records}
+      />
 
       {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowCustomFilter(false)}

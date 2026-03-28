@@ -56,24 +56,21 @@ router.get("/", async (req, res) => {
     // Build match conditions
     const matchConditions = {};
 
-    // 1. Payment Status Condition
-    // FIX: When filtering by Cash Sales or Credit Sales, also include Partial Paid records
+    // Payment Status Condition
     if (saleType && saleType !== "Total sales") {
       if (saleType.toLowerCase().includes("cash")) {
-        // Include Cash and Partial Paid (paidAmount goes to cash)
         matchConditions.paymentStatus = { $in: ["Cash", "Partial Paid"] };
       } else if (saleType.toLowerCase().includes("credit")) {
-        // Include Credit and Partial Paid (dueAmount goes to credits)
         matchConditions.paymentStatus = { $in: ["Credit", "Partial Paid"] };
       }
     }
 
-    // 2. Search Condition
+    // Search Condition
     if (search?.trim()) {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // 3. Date Condition
+    // Date Condition
     if (dateFilter && dateFilter !== "all") {
       const today = new Date();
       const todayStr = today.toISOString().split("T")[0];
@@ -139,9 +136,12 @@ router.get("/", async (req, res) => {
       basePipeline.push({ $match: matchConditions });
     }
 
-    // Group by mrName
-    // FIX: Credits = Credit paymentStatus totalAmount + Partial Paid dueAmount
-    //      Cash    = Cash paymentStatus totalAmount   + Partial Paid paidAmount
+    // FIX: Use paidAmount for cash and dueAmount for credits directly.
+    // This ensures cash + credits = totalSalesAmount for ALL payment statuses:
+    // - Cash: paidAmount=totalAmount, dueAmount=0
+    // - Credit: paidAmount=0, dueAmount=totalAmount
+    // - Partial Paid: paidAmount + dueAmount = totalAmount
+    // - Any other status: still correctly split
     basePipeline.push({
       $group: {
         _id: { $toLower: { $trim: { input: "$mrName" } } },
@@ -154,42 +154,10 @@ router.get("/", async (req, res) => {
         totalSalesQty: { $sum: "$salesQty" },
         totalBonusQty: { $sum: "$bonusQty" },
         totalQty: { $sum: "$totalQty" },
-        // Credits: full amount for Credit status + dueAmount for Partial Paid
-        credits: {
-          $sum: {
-            $switch: {
-              branches: [
-                {
-                  case: { $eq: ["$paymentStatus", "Credit"] },
-                  then: "$totalAmount",
-                },
-                {
-                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                  then: "$dueAmount",
-                },
-              ],
-              default: 0,
-            },
-          },
-        },
-        // Cash: full amount for Cash status + paidAmount for Partial Paid
-        cash: {
-          $sum: {
-            $switch: {
-              branches: [
-                {
-                  case: { $eq: ["$paymentStatus", "Cash"] },
-                  then: "$totalAmount",
-                },
-                {
-                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                  then: "$paidAmount",
-                },
-              ],
-              default: 0,
-            },
-          },
-        },
+        // Credits = dueAmount (what's owed across all payment types)
+        credits: { $sum: "$dueAmount" },
+        // Cash = paidAmount (what's been paid across all payment types)
+        cash: { $sum: "$paidAmount" },
         uniqueCustomers: { $addToSet: "$customerCode" },
         latestInvoiceDate: { $max: "$invoiceDate" },
         earliestInvoiceDate: { $min: "$invoiceDate" },
@@ -348,10 +316,7 @@ router.get("/", async (req, res) => {
     ];
 
     // Summary pipeline
-    // FIX: Summary also uses $switch for credits/cash to handle Partial Paid
     const summaryMatchConditions = { ...matchConditions };
-    // For Total sales summary, include all payment statuses including Partial Paid
-    // Remove the paymentStatus filter for summary so we get full picture
     if (saleType === "Total sales" || !saleType) {
       delete summaryMatchConditions.paymentStatus;
     }
@@ -367,42 +332,9 @@ router.get("/", async (req, res) => {
           totalOrders: { $sum: 1 },
           totalPaidAmount: { $sum: "$paidAmount" },
           totalDueAmount: { $sum: "$dueAmount" },
-          // Credits: Credit full amount + Partial Paid dueAmount
-          credits: {
-            $sum: {
-              $switch: {
-                branches: [
-                  {
-                    case: { $eq: ["$paymentStatus", "Credit"] },
-                    then: "$totalAmount",
-                  },
-                  {
-                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                    then: "$dueAmount",
-                  },
-                ],
-                default: 0,
-              },
-            },
-          },
-          // Cash: Cash full amount + Partial Paid paidAmount
-          cash: {
-            $sum: {
-              $switch: {
-                branches: [
-                  {
-                    case: { $eq: ["$paymentStatus", "Cash"] },
-                    then: "$totalAmount",
-                  },
-                  {
-                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                    then: "$paidAmount",
-                  },
-                ],
-                default: 0,
-              },
-            },
-          },
+          // FIX: credits = dueAmount, cash = paidAmount — always sums correctly
+          credits: { $sum: "$dueAmount" },
+          cash: { $sum: "$paidAmount" },
           uniqueCustomers: { $addToSet: "$customerCode" },
           uniqueMRs: { $addToSet: "$mrName" },
           latestInvoiceDate: { $max: "$invoiceDate" },
@@ -622,7 +554,6 @@ router.get("/export", async (req, res) => {
     // Build match conditions
     const matchConditions = {};
 
-    // FIX: When filtering by Cash Sales or Credit Sales, also include Partial Paid records
     if (saleType && saleType !== "Total sales") {
       if (saleType.toLowerCase().includes("cash")) {
         matchConditions.paymentStatus = { $in: ["Cash", "Partial Paid"] };
@@ -692,7 +623,7 @@ router.get("/export", async (req, res) => {
       exportPipeline.push({ $match: matchConditions });
     }
 
-    // FIX: Group with $switch to handle Partial Paid credits/cash correctly
+    // FIX: credits = dueAmount, cash = paidAmount — always sums correctly
     exportPipeline.push({
       $group: {
         _id: { $toLower: { $trim: { input: "$mrName" } } },
@@ -700,42 +631,10 @@ router.get("/export", async (req, res) => {
         mrId: { $first: "$mrId" },
         totalSalesAmount: { $sum: "$totalAmount" },
         totalOrders: { $sum: 1 },
-        // Credits: Credit full amount + Partial Paid dueAmount
-        credits: {
-          $sum: {
-            $switch: {
-              branches: [
-                {
-                  case: { $eq: ["$paymentStatus", "Credit"] },
-                  then: "$totalAmount",
-                },
-                {
-                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                  then: "$dueAmount",
-                },
-              ],
-              default: 0,
-            },
-          },
-        },
-        // Cash: Cash full amount + Partial Paid paidAmount
-        cash: {
-          $sum: {
-            $switch: {
-              branches: [
-                {
-                  case: { $eq: ["$paymentStatus", "Cash"] },
-                  then: "$totalAmount",
-                },
-                {
-                  case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                  then: "$paidAmount",
-                },
-              ],
-              default: 0,
-            },
-          },
-        },
+        // Credits = dueAmount (what's owed)
+        credits: { $sum: "$dueAmount" },
+        // Cash = paidAmount (what's been paid)
+        cash: { $sum: "$paidAmount" },
         latestInvoiceDate: { $max: "$invoiceDate" },
       },
     });
@@ -891,12 +790,12 @@ router.get("/export", async (req, res) => {
     worksheet.mergeCells(2, 1, 2, columnCount);
 
     // Summary pipeline for export
-    // FIX: Also use $switch here for accurate summary in exported file
     const exportSummaryMatchConditions = { ...matchConditions };
     if (saleType === "Total sales" || !saleType) {
       delete exportSummaryMatchConditions.paymentStatus;
     }
 
+    // FIX: credits = dueAmount, cash = paidAmount in summary too
     const summaryPipeline = [
       ...(Object.keys(exportSummaryMatchConditions).length > 0
         ? [{ $match: exportSummaryMatchConditions }]
@@ -906,40 +805,8 @@ router.get("/export", async (req, res) => {
           _id: null,
           totalSalesAmount: { $sum: "$totalAmount" },
           totalOrders: { $sum: 1 },
-          credits: {
-            $sum: {
-              $switch: {
-                branches: [
-                  {
-                    case: { $eq: ["$paymentStatus", "Credit"] },
-                    then: "$totalAmount",
-                  },
-                  {
-                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                    then: "$dueAmount",
-                  },
-                ],
-                default: 0,
-              },
-            },
-          },
-          cash: {
-            $sum: {
-              $switch: {
-                branches: [
-                  {
-                    case: { $eq: ["$paymentStatus", "Cash"] },
-                    then: "$totalAmount",
-                  },
-                  {
-                    case: { $eq: ["$paymentStatus", "Partial Paid"] },
-                    then: "$paidAmount",
-                  },
-                ],
-                default: 0,
-              },
-            },
-          },
+          credits: { $sum: "$dueAmount" },
+          cash: { $sum: "$paidAmount" },
           uniqueCustomers: { $addToSet: "$customerCode" },
           uniqueMRs: { $addToSet: "$mrName" },
         },
