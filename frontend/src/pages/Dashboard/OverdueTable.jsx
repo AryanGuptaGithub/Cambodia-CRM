@@ -1,9 +1,23 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { formatCurrency } from "./DashboardUtil";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import { Eye, ChevronLeft, ChevronRight } from "lucide-react";
 
-export const OverdueTable = ({ overdueData, loading }) => {
+export const OverdueTable = ({ overdueData, loading, isMobile = false }) => {
+  // Auto‑detect if not explicitly provided
+  const [isMobileView, setIsMobileView] = useState(isMobile);
+
+  useEffect(() => {
+    if (!isMobile) {
+      const handleResize = () => {
+        setIsMobileView(window.innerWidth < 768);
+      };
+      handleResize();
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+  }, [isMobile]);
+
   const [activeTab, setActiveTab] = useState("invoice");
   const [selectedMR, setSelectedMR] = useState(null);
   const [showMRDetails, setShowMRDetails] = useState(false);
@@ -44,7 +58,7 @@ export const OverdueTable = ({ overdueData, loading }) => {
     );
   }
 
-  // MR-wise grouping
+  // MR‑wise grouping (unchanged)
   const mrWiseData = overdueData.reduce((acc, inv) => {
     const mrName = inv.mrName || "Unknown MR";
     const overdue =
@@ -105,13 +119,12 @@ export const OverdueTable = ({ overdueData, loading }) => {
     0,
   );
 
-  // Pagination for invoice
+  // Pagination
   const invoiceTotalPages = Math.ceil(overdueData.length / rowsPerPage);
   const invoicePaginated = overdueData.slice(
     (invoiceCurrentPage - 1) * rowsPerPage,
     invoiceCurrentPage * rowsPerPage,
   );
-  // Pagination for MR
   const mrTotalPages = Math.ceil(mrWiseArray.length / rowsPerPage);
   const mrPaginated = mrWiseArray.slice(
     (mrCurrentPage - 1) * rowsPerPage,
@@ -123,6 +136,7 @@ export const OverdueTable = ({ overdueData, loading }) => {
     setShowMRDetails(true);
   };
 
+  // MR Details Modal (unchanged)
   const MRDetailsModal = () => {
     if (!showMRDetails || !selectedMR) return null;
     return (
@@ -130,8 +144,12 @@ export const OverdueTable = ({ overdueData, loading }) => {
         <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-gray-200">
             <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold">
-                MR: {selectedMR.mrName} - Customer Overdue Summary
+              <h3
+                className={`font-semibold ${isMobileView ? "text-sm" : "text-lg"}`}
+              >
+                {isMobileView
+                  ? `${selectedMR.mrName} - Overdue Summary`
+                  : `MR: ${selectedMR.mrName} - Customer Overdue Summary`}
               </h3>
               <button
                 onClick={() => setShowMRDetails(false)}
@@ -189,7 +207,17 @@ export const OverdueTable = ({ overdueData, loading }) => {
                     </td>
                     <td className="px-2 sm:px-4 py-2 text-xs sm:text-sm">
                       <span
-                        className={`px-2 py-1 text-xs font-medium rounded-full ${c.daysOverdue > 90 ? "bg-red-100 text-red-800" : c.daysOverdue > 60 ? "bg-orange-100 text-orange-800" : c.daysOverdue > 30 ? "bg-yellow-100 text-yellow-800" : c.daysOverdue > 0 ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
+                        className={`px-2 py-1 ${isMobileView ? "text-[7px]" : "text-xs"} font-medium rounded-full ${
+                          c.daysOverdue > 90
+                            ? "bg-red-100 text-red-800"
+                            : c.daysOverdue > 60
+                              ? "bg-orange-100 text-orange-800"
+                              : c.daysOverdue > 30
+                                ? "bg-yellow-100 text-yellow-800"
+                                : c.daysOverdue > 0
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-gray-100 text-gray-800"
+                        }`}
                       >
                         {c.daysOverdue} {c.daysOverdue === 1 ? "day" : "days"}
                       </span>
@@ -237,6 +265,7 @@ export const OverdueTable = ({ overdueData, loading }) => {
     );
   };
 
+  // Pagination component with conditional font sizes
   const Pagination = ({
     currentPage,
     totalPages,
@@ -271,7 +300,9 @@ export const OverdueTable = ({ overdueData, loading }) => {
     };
     return (
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-200 bg-gray-50">
-        <div className="text-xs sm:text-sm text-gray-700">
+        <div
+          className={`${isMobileView ? "text-[9px]" : "text-xs sm:text-sm"} text-gray-700`}
+        >
           Showing <span className="font-medium">{start}</span> to{" "}
           <span className="font-medium">{end}</span> of{" "}
           <span className="font-medium">{totalItems}</span>{" "}
@@ -290,7 +321,15 @@ export const OverdueTable = ({ overdueData, loading }) => {
               key={i}
               onClick={() => typeof p === "number" && onPageChange(p)}
               disabled={typeof p !== "number"}
-              className={`min-w-[32px] sm:min-w-[36px] h-8 sm:h-9 px-2 sm:px-3 rounded-md text-xs sm:text-sm font-medium ${p === currentPage ? "bg-blue-600 text-white" : typeof p === "number" ? "bg-white border border-gray-300 hover:bg-gray-100" : "text-gray-500 cursor-default"}`}
+              className={`min-w-[32px] sm:min-w-[36px] h-8 sm:h-9 px-2 sm:px-3 rounded-md ${
+                isMobileView ? "text-[9px]" : "text-xs sm:text-sm"
+              } font-medium ${
+                p === currentPage
+                  ? "bg-blue-600 text-white"
+                  : typeof p === "number"
+                    ? "bg-white border border-gray-300 hover:bg-gray-100"
+                    : "text-gray-500 cursor-default"
+              }`}
             >
               {p}
             </button>
@@ -307,30 +346,52 @@ export const OverdueTable = ({ overdueData, loading }) => {
     );
   };
 
+  // Helper for dynamic text size based on mobile view
+  const cellTextClass = isMobileView ? "text-[9px]" : "text-xs sm:text-sm";
+  const headerTextClass = isMobileView
+    ? "text-[11px] font-medium"
+    : "text-xs font-medium";
+
   return (
     <>
       <div className="bg-white rounded-xl shadow-md border border-gray-200">
         <div className="p-4 sm:p-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-            <h3 className="text-lg font-semibold text-gray-800">
+            <h3
+              className={`${isMobileView ? "text-sm" : "text-lg"} font-semibold text-gray-800`}
+            >
               Overdue Invoices
             </h3>
             <div className="flex items-center gap-4">
               <div className="flex border border-gray-300 rounded-lg overflow-hidden">
                 <button
-                  className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium ${activeTab === "invoice" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}
+                  className={`px-3 py-1.5 sm:px-4 sm:py-2 ${
+                    isMobileView ? "text-[9px]" : "text-xs sm:text-sm"
+                  } font-medium ${
+                    activeTab === "invoice"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white hover:bg-gray-100"
+                  }`}
                   onClick={() => handleTabChange("invoice")}
                 >
                   Invoice Wise
                 </button>
                 <button
-                  className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium ${activeTab === "mr" ? "bg-blue-600 text-white" : "bg-white hover:bg-gray-100"}`}
+                  className={`px-3 py-1.5 sm:px-4 sm:py-2 ${
+                    isMobileView ? "text-[9px]" : "text-xs sm:text-sm"
+                  } font-medium ${
+                    activeTab === "mr"
+                      ? "bg-blue-600 text-white"
+                      : "bg-white hover:bg-gray-100"
+                  }`}
                   onClick={() => handleTabChange("mr")}
                 >
                   MR Wise
                 </button>
               </div>
-              <div className="text-xs sm:text-sm font-medium text-red-600">
+              <div
+                className={`${isMobileView ? "text-[9px]" : "text-xs sm:text-sm"} font-medium text-red-600`}
+              >
                 Total Overdue: ${formatCurrency(totalOverdueAmount)}
               </div>
             </div>
@@ -342,25 +403,39 @@ export const OverdueTable = ({ overdueData, loading }) => {
                 <table className="min-w-full divide-y divide-gray-200 text-center min-w-[800px]">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Invoice No
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Invoice Date
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         MR Name
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Customer
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Due Date
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Days Overdue
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Overdue Amount
                       </th>
                     </tr>
@@ -383,29 +458,53 @@ export const OverdueTable = ({ overdueData, loading }) => {
                             );
                       return (
                         <tr key={inv._id}>
-                          <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium">
+                          <td
+                            className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass} font-medium`}
+                          >
                             {inv.invoiceNumber || "N/A"}
                           </td>
-                          <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm">
+                          <td
+                            className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass}`}
+                          >
                             {formatDateToReadable(inv.invoiceDate)}
                           </td>
-                          <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm">
+                          <td
+                            className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass}`}
+                          >
                             {inv.mrName || "N/A"}
                           </td>
-                          <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm">
+                          <td
+                            className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass}`}
+                          >
                             {inv.customerName || "N/A"}
                           </td>
-                          <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm">
-                            {new Date(inv.dueDate).toLocaleDateString()}
+                          <td
+                            className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass}`}
+                          >
+                            {formatDateToReadable(inv.dueDate)}
                           </td>
-                          <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm">
+                          <td
+                            className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass}`}
+                          >
                             <span
-                              className={`px-2 py-1 text-xs font-medium rounded-full ${days > 90 ? "bg-red-100 text-red-800" : days > 60 ? "bg-orange-100 text-orange-800" : days > 30 ? "bg-yellow-100 text-yellow-800" : "bg-gray-100 text-gray-800"}`}
+                              className={`py-1 ${
+                                isMobileView ? "text-[7px]" : "text-xs"
+                              } font-medium rounded-full ${
+                                days > 90
+                                  ? "bg-red-100 text-red-800"
+                                  : days > 60
+                                    ? "bg-orange-100 text-orange-800"
+                                    : days > 30
+                                      ? "bg-yellow-100 text-yellow-800"
+                                      : "bg-gray-100 text-gray-800"
+                              }`}
                             >
                               {days} days
                             </span>
                           </td>
-                          <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-red-600">
+                          <td
+                            className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass} font-medium text-red-600`}
+                          >
                             ${formatCurrency(amount)}
                           </td>
                         </tr>
@@ -428,19 +527,29 @@ export const OverdueTable = ({ overdueData, loading }) => {
                 <table className="min-w-full divide-y divide-gray-200 text-center min-w-[500px]">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         MR Name
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Customers
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Invoices
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Total Overdue ($)
                       </th>
-                      <th className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs font-medium">
+                      <th
+                        className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${headerTextClass}`}
+                      >
                         Action
                       </th>
                     </tr>
@@ -448,24 +557,34 @@ export const OverdueTable = ({ overdueData, loading }) => {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {mrPaginated.map((mr, idx) => (
                       <tr key={idx}>
-                        <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium">
+                        <td
+                          className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass} font-medium`}
+                        >
                           {mr.mrName}
                         </td>
-                        <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm">
+                        <td
+                          className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass}`}
+                        >
                           {mr.customers}
                         </td>
-                        <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm">
+                        <td
+                          className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass}`}
+                        >
                           {mr.invoiceCount}
                         </td>
-                        <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-red-600">
+                        <td
+                          className={`px-2 sm:px-3 md:px-4 py-2 sm:py-3 ${cellTextClass} font-medium text-red-600`}
+                        >
                           ${formatCurrency(mr.totalOverdue)}
                         </td>
                         <td className="px-2 sm:px-3 md:px-4 py-2 sm:py-3">
                           <button
                             onClick={() => handleViewMRDetails(mr)}
-                            className="inline-flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-xs sm:text-sm font-medium"
+                            className={`inline-flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 ${
+                              isMobileView ? "text-[8px]" : "text-xs sm:text-sm"
+                            } font-medium`}
                           >
-                            <Eye size={14} /> View
+                            <Eye size={isMobileView ? 12 : 14} /> View
                           </button>
                         </td>
                       </tr>

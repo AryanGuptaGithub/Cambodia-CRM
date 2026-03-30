@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -20,6 +20,7 @@ import MrCarryStockLayout from "./pages/MrCarryStock/MrCarryStockLayout";
 
 // Dashboard and Main pages
 import Dashboard from "./pages/Dashboard/Dashbaord";
+import MobileDashboard from "./pages/Dashboard/MobileDashboard"; // ← NEW
 import Login from "./pages/Login";
 import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
@@ -76,8 +77,6 @@ import ProfitLoss from "./pages/Reports/PLReport";
 import SaleSummary from "./pages/Reports/SaleSummary";
 import UserReport from "./pages/Reports/UserReport";
 import PaymentReports from "./pages/Reports/PaymentReports";
-
-// New report components
 import CashSales from "./pages/Reports/CashSales";
 import OutstandingCollection from "./pages/Reports/OutstandingCollection";
 import TotalExpense from "./pages/Reports/TotalExpense";
@@ -102,8 +101,6 @@ import ProvinceWiseCustomer from "./pages/Reports/ProvinceWiseCustomer";
 import ReportsInHand from "./pages/Reports/ReportsInHand";
 import ProductReport from "./pages/Reports/ProductReport";
 import ExpiryStockReport from "./pages/Reports/ExpiryStockReport";
-
-// Report form pages
 import DailyReports from "./pages/Reports/DailyReports";
 import AddDailySampleReport from "./pages/Reports/AddDailySample";
 import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
@@ -113,14 +110,11 @@ import FrontSettings from "./pages/Utility/FrontSettings";
 import ProductCard from "./pages/Utility/ProductCard";
 
 // HRM pages
-import HrmDashboard from "./pages/HRM/Dashboard"; // Renamed to avoid conflict
+import HrmDashboard from "./pages/HRM/Dashboard";
 import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
 import AddPayroll from "./pages/HRM/addPayroll";
-
-// NEW: MR Basic Payroll pages
-
 import AddMrBasicPayroll from "./pages/HRM/AddMrBasicPayroll";
 import MrBasicPayroll from "./pages/HRM/MRBasicPayroll";
 
@@ -130,11 +124,35 @@ import MRCash from "./pages/Account/MRCash";
 
 import CarryStockView from "./pages/MrCarryStock/CarryStockView";
 import StockReturn from "./pages/MrCarryStock/StockReturn";
-
-// Other components
 import StockTransferForm from "./pages/StockTransferForm";
 import AddStaffMember from "./pages/AddStaffMember";
 import LeaveAndAttendance from "./pages/HRM/LeaveAttendance";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hook: detect if the current viewport is mobile (< 1024px)
+// Re-evaluates on window resize so it always stays in sync.
+// ─────────────────────────────────────────────────────────────────────────────
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
+
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 1024);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  return isMobile;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SmartDashboard:
+//   On mobile  → renders MobileDashboard (the app-style UI from the screenshots)
+//   On desktop → renders the normal web Dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+function SmartDashboard() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileDashboard /> : <Dashboard />;
+}
 
 function App() {
   return (
@@ -143,7 +161,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
 
-        {/* Main Dashboard Route */}
+        {/* ── Main protected shell ── */}
         <Route
           path="/"
           element={
@@ -152,24 +170,31 @@ function App() {
             </ProtectedRoute>
           }
         >
-          {/* Dashboard routes */}
-          <Route index element={<Dashboard />} /> {/* Main dashboard page */}
-          <Route path="dashboard" element={<Dashboard />} />{" "}
-          {/* Alternative dashboard route */}
+          {/* ── Dashboard (auto-switches between mobile and desktop) ── */}
+          <Route index element={<SmartDashboard />} />
+          <Route path="dashboard" element={<SmartDashboard />} />
+
+          {/* Dedicated mobile dashboard route (direct link) */}
+          <Route path="mobile-dashboard" element={<MobileDashboard />} />
+
           <Route path="graph" element={<Graph />} />
           <Route path="onlineorder" element={<OnlineOrders />} />
           <Route path="stockadjustment" element={<StockAdjustment />} />
           <Route path="stocktransfer" element={<StockTransfer />} />
           <Route path="createstocktransfer" element={<StockTransferForm />} />
+
           {/* Account routes */}
           <Route path="accountlayout" element={<CashAndBankLayout />}>
             <Route index element={<CashAndBank />} />
             <Route path="mrcash" element={<MRCash />} />
           </Route>
+
+          {/* Staff routes */}
           <Route path="staffmemberLayout" element={<StaffMemberLayout />}>
             <Route path="staffmember" element={<StaffMember />} />
             <Route path="staffmember/add" element={<AddStaffMember />} />
           </Route>
+
           {/* Master routes */}
           <Route path="masterlayout" element={<MasterLayout />}>
             <Route index element={<Customer />} />
@@ -178,12 +203,14 @@ function App() {
             <Route path="supplier" element={<Supplier />} />
             <Route path="supplier/new" element={<AddSupplier />} />
           </Route>
+
           {/* Settings routes */}
           <Route path="settingslayout" element={<SettingsLayout />}>
             <Route index element={<CompanyProfile />} />
             <Route path="company-profile" element={<CompanyProfile />} />
             <Route path="tab-manipulation" element={<HTabsManipulation />} />
           </Route>
+
           {/* Product Manager routes */}
           <Route path="productmanagerlayout" element={<ProductManagerLayout />}>
             <Route index element={<Product />} />
@@ -194,6 +221,7 @@ function App() {
             <Route path="addproduct" element={<AddProductForm />} />
             <Route path="printbarcode" element={<PrintBarCode />} />
           </Route>
+
           {/* Purchase routes */}
           <Route path="purchaselayout" element={<PurchaseLayout />}>
             <Route index element={<Purchase />} />
@@ -203,6 +231,7 @@ function App() {
             <Route path="purchasereturn/new" element={<AddReturnPurchase />} />
             <Route path="purchaseout" element={<PurchaseOut />} />
           </Route>
+
           {/* Sale routes */}
           <Route path="salelayout" element={<SaleLayout />}>
             <Route index element={<Sale />} />
@@ -217,6 +246,7 @@ function App() {
             <Route path="payment" element={<PaymentSale />} />
             <Route path="quotation" element={<Quotation />} />
           </Route>
+
           {/* Expense routes */}
           <Route path="expenselayout" element={<ExpenseLayout />}>
             <Route index element={<Expenses />} />
@@ -229,19 +259,16 @@ function App() {
               <Route path="new" element={<AddExpenseCategory />} />
             </Route>
           </Route>
+
           {/* Report routes */}
           <Route path="reportlayout" element={<ReportsLayout />}>
             <Route index element={<DailyReports />} />
             <Route path="dailyreport" element={<DailyReports />} />
-
-            {/* New Report Routes */}
             <Route path="averageprice" element={<AveragePricePerProduct />} />
             <Route
               path="newcustomeraddition"
               element={<NewCustomerAddition />}
             />
-
-            {/* Master Customer Report Routes */}
             <Route
               path="customerretention"
               element={<CustomerRetentionRate />}
@@ -251,8 +278,6 @@ function App() {
               element={<CustomerProductAcceptanceRate />}
             />
             <Route path="zonewisecustomers" element={<ZoneWiseCustomers />} />
-
-            {/* Repeat Rate Routes */}
             <Route
               path="monthlyrepeatrate"
               element={<MonthlyCustomerRepeatRate />}
@@ -261,15 +286,9 @@ function App() {
               path="annualrepeatrate"
               element={<AnnualCustomerRepeatRate />}
             />
-
-            {/* Product Reports */}
             <Route path="product-report" element={<ProductReport />} />
-
-            {/* MR Wise Reports */}
             <Route path="mrwiseoutstanding" element={<MRWiseOutstanding />} />
             <Route path="mrwisesales" element={<MRWiseSales />} />
-
-            {/* Financial Reports */}
             <Route path="cashsales" element={<CashSales />} />
             <Route
               path="outstandingcollection"
@@ -277,23 +296,14 @@ function App() {
             />
             <Route path="totalexpense" element={<TotalExpense />} />
             <Route path="remittance" element={<Remittance />} />
-
-            {/* Province Wise Reports */}
             <Route path="province-wise-sale" element={<ProvinceWiseSale />} />
             <Route
               path="province-wise-customer"
               element={<ProvinceWiseCustomer />}
             />
-
-            {/* Reports in Hand */}
             <Route path="reports-in-hand" element={<ReportsInHand />} />
-
-            {/* Expiry Stock Report */}
             <Route path="expiry-stock-report" element={<ExpiryStockReport />} />
-
             <Route path="payment" element={<PaymentReports />} />
-
-            {/* Financial Ratio Reports */}
             <Route path="sales-salary-ratio" element={<SalesSalaryRatio />} />
             <Route path="salary-cogs-ratio" element={<SalaryCOGSRatio />} />
             <Route
@@ -309,36 +319,32 @@ function App() {
               element={<TourExpenseSalesRatio />}
             />
             <Route path="pl-report" element={<PLReport />} />
-
-            {/* Other Reports */}
             <Route path="expensereport" element={<ExpenseReport />} />
             <Route
               path="productsalessummary"
               element={<ProductSalesSummary />}
             />
             <Route path="stockalert" element={<StockAlert />} />
-
             <Route path="dailysample">
               <Route index element={<DailySample />} />
               <Route path="new" element={<AddDailySampleReport />} />
             </Route>
-
             <Route path="ratelist" element={<RateList />} />
             <Route path="profitloss" element={<ProfitLoss />} />
-
             <Route path="salesummary">
               <Route index element={<SaleSummary />} />
               <Route path="new" element={<AddDailySummaryReports />} />
             </Route>
-
             <Route path="userreport" element={<UserReport />} />
           </Route>
+
           {/* Utility routes */}
           <Route path="utilitylayout" element={<UtilityLayout />}>
             <Route index element={<ProductCard />} />
             <Route path="companyprofile" element={<CompanyProfile />} />
             <Route path="tabhideview" element={<HTabsManipulation />} />
           </Route>
+
           {/* HRM routes */}
           <Route path="hrmlayout" element={<HrmLayout />}>
             <Route index element={<HrmDashboard />} />
@@ -347,22 +353,18 @@ function App() {
               <Route path="new" element={<AddStaffMember />} />
             </Route>
             <Route path="holidays" element={<Holidays />} />
-            {/* Combined leaves and attendance */}
             <Route path="leaveattendance" element={<LeaveAndAttendance />} />
-            
-            {/* Regular Payroll */}
             <Route path="payroll">
               <Route index element={<Payroll />} />
               <Route path="new" element={<AddPayroll />} />
             </Route>
-            
-            {/* FIXED: MR Basic Payroll route - changed from hyphen to camelCase to match sidebar */}
             <Route path="mrbasicpayroll">
               <Route index element={<MrBasicPayroll />} />
               <Route path="new" element={<AddMrBasicPayroll />} />
             </Route>
           </Route>
-          {/* NEW: MR Carry Stock routes */}
+
+          {/* MR Carry Stock routes */}
           <Route path="mrcarrystocklayout" element={<MrCarryStockLayout />}>
             <Route path="carrystockview" element={<CarryStockView />} />
             <Route path="stockreturn" element={<StockReturn />} />

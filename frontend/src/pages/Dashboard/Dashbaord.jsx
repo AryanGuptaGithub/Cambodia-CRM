@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useOutletContext } from "react-router-dom";
 import { DashboardCards } from "./DashboardCards";
 import { SidePanel } from "./SidePanel";
 import { SubTabs } from "./SubTabs";
@@ -22,12 +22,322 @@ import BatchDetailsModal from "./BatchDetailsModal";
 import { OverdueTable } from "./OverdueTable";
 import { CreditSaleTable } from "./CreditSaleTable";
 import { CompanyBalancePanel } from "./CompanyBalancePanel";
-import { Calendar, X } from "lucide-react";
+import {
+  Calendar,
+  X,
+  Users,
+  Package,
+  ShoppingCart,
+  RotateCcw,
+  DollarSign,
+  CreditCard,
+  AlertTriangle,
+} from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
 
+// ─── SVG Area Chart for mobile ───────────────────────────────────────────────
+const SalesChart = ({ data = [] }) => {
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const W = 300,
+    H = 120;
+  const PAD = { top: 10, right: 8, bottom: 28, left: 48 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+  const values = data.map((d) => d.value || 0);
+  const maxVal = Math.max(...values, 1);
+  const yTicks = [0, 1, 2, 3].map((i) => (maxVal / 3) * i);
+  const xStep = chartW / Math.max(values.length - 1, 1);
+  const points = values.map((v, i) => ({
+    x: PAD.left + i * xStep,
+    y: PAD.top + chartH - (v / maxVal) * chartH,
+  }));
+  const polyline = points.map((p) => `${p.x},${p.y}`).join(" ");
+  const areaPath = `M ${points[0]?.x},${PAD.top + chartH} ${points.map((p) => `L ${p.x},${p.y}`).join(" ")} L ${points[points.length - 1]?.x},${PAD.top + chartH} Z`;
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full"
+      style={{ maxHeight: 130 }}
+    >
+      <defs>
+        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#5EEAD4" stopOpacity="0.5" />
+          <stop offset="100%" stopColor="#5EEAD4" stopOpacity="0.05" />
+        </linearGradient>
+      </defs>
+      {yTicks.map((tick, i) => {
+        const y = PAD.top + chartH - (tick / maxVal) * chartH;
+        return (
+          <g key={i}>
+            <line
+              x1={PAD.left}
+              y1={y}
+              x2={W - PAD.right}
+              y2={y}
+              stroke="#e5e7eb"
+              strokeWidth="1"
+              strokeDasharray="4 4"
+            />
+            <text
+              x={PAD.left - 4}
+              y={y + 4}
+              textAnchor="end"
+              fontSize="8"
+              fill="#9ca3af"
+            >
+              {tick.toFixed(2)}
+            </text>
+          </g>
+        );
+      })}
+      {points.length > 1 && <path d={areaPath} fill="url(#areaGrad)" />}
+      {points.length > 1 && (
+        <polyline
+          points={polyline}
+          fill="none"
+          stroke="#14b8a6"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      )}
+      {points.map((p, i) => (
+        <g key={i}>
+          <circle cx={p.x} cy={p.y} r="4" fill="#14b8a6" />
+          <text
+            x={p.x}
+            y={H - 4}
+            textAnchor="middle"
+            fontSize="9"
+            fill="#6b7280"
+          >
+            {DAYS[i % 7]}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+};
+
+// ─── Mobile Dashboard — same real data as desktop, app-style layout ───────────
+const MobileDashboard = ({
+  salesData,
+  stockData,
+  expenseData,
+  creditSaleTotal,
+  overdueTableData,
+  totalPayroll,
+  companyBalance,
+  loadingSalesData,
+  onNavigate,
+  onTabChange,
+}) => {
+  const userName = localStorage.getItem("username") || "User";
+
+  // Build last-7-days chart — use dailySales if present, else zeros
+  const weeklyData = useMemo(() => {
+    const today = new Date();
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() - (6 - i));
+      const value = salesData?.dailySales?.[i]?.amount || 0;
+      return { day: d.getDay(), value };
+    });
+  }, [salesData]);
+
+  // Real stat values from the same data hooks as desktop
+  const statCards = [
+    {
+      label: "Customers",
+      value: salesData?.totalCustomers ?? 0,
+      icon: Users,
+      color: "#3b82f6",
+      bg: "#eff6ff",
+      subColor: null,
+    },
+    {
+      label: "Stocks",
+      value: stockData?.totalStockQty ?? 0,
+      icon: Package,
+      color: "#3b82f6",
+      bg: "#eff6ff",
+      sub: `Qty: ${(stockData?.totalStockQty ?? 0).toLocaleString()}`,
+      subColor: "#ef4444",
+      dot: true,
+    },
+    {
+      label: "Sales",
+      value: salesData?.totalSalesCount ?? 0,
+      icon: ShoppingCart,
+      color: "#3b82f6",
+      bg: "#eff6ff",
+      sub: `$ ${(salesData?.allSales ?? salesData?.monthlySales ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      subColor: "#3b82f6",
+    },
+    {
+      label: "Returns",
+      value: salesData?.totalReturns ?? 0,
+      icon: RotateCcw,
+      color: "#8b5cf6",
+      bg: "#f5f3ff",
+      sub: `$ ${(salesData?.totalReturnsValue ?? 0).toFixed(2)}`,
+      subColor: "#8b5cf6",
+    },
+  ];
+
+  const quickActions = [
+    { label: "Customers", icon: Users, tab: "Customers", color: "#3b82f6" },
+    { label: "New Sale", icon: ShoppingCart, tab: "Sales", color: "#3b82f6" },
+    {
+      label: "Products",
+      icon: Package,
+      tab: "Stock in Hands",
+      color: "#3b82f6",
+    },
+    { label: "Returns", icon: RotateCcw, tab: "Returns", color: "#3b82f6" },
+    {
+      label: "Payroll",
+      icon: DollarSign,
+      tab: "Total Payroll",
+      color: "#3b82f6",
+    },
+    {
+      label: "Attendance",
+      icon: Calendar,
+      tab: "Attendance",
+      color: "#3b82f6",
+    },
+    { label: "Stocks", icon: Package, tab: "Stock in Hands", color: "#3b82f6" },
+    {
+      label: "Cash & Credit",
+      icon: CreditCard,
+      tab: "Credit Sale Cash Not Receive",
+      color: "#3b82f6",
+    },
+  ];
+
+  const outOfStockCount = stockData?.outOfStockCount ?? 0;
+
+  return (
+    <div className="flex flex-col bg-[#F0F4FF] min-h-full pb-8">
+      {/* Greeting card */}
+      <div className="mx-4 mt-4 mb-4">
+        <div className="bg-white rounded-2xl px-5 py-4 shadow-sm">
+          <p className="text-base font-semibold text-gray-800">
+            Hello 👋 Mr {userName}
+          </p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Here's your overview for today.
+          </p>
+        </div>
+      </div>
+
+      {/* Stat cards 2×2 */}
+      <div className="grid grid-cols-2 gap-3 px-4 mb-4">
+        {statCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div
+              key={card.label}
+              className="bg-white rounded-2xl p-4 shadow-sm relative"
+            >
+              {card.dot && (
+                <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full" />
+              )}
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
+                style={{ background: card.bg }}
+              >
+                <Icon className="w-5 h-5" style={{ color: card.color }} />
+              </div>
+              <p
+                className="text-2xl font-bold text-gray-900"
+                style={{ lineHeight: 1.1 }}
+              >
+                {loadingSalesData ? "…" : (card.value || 0).toLocaleString()}
+              </p>
+              <p className="text-sm text-gray-500 mt-0.5">{card.label}</p>
+              {card.sub && (
+                <p
+                  className="text-xs font-semibold mt-0.5"
+                  style={{ color: card.subColor || card.color }}
+                >
+                  {card.sub}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Stock alert */}
+      {outOfStockCount > 0 && (
+        <div className="mx-4 mb-4">
+          <div className="bg-red-50 border-l-4 border-red-400 rounded-xl px-4 py-3 flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-red-700">
+                ⚠️ Stock Alert
+              </p>
+              <p className="text-xs text-red-600">
+                {outOfStockCount} product(s) out of stock
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+
+      {/* Quick actions */}
+      <div className="mx-4">
+        <p className="text-base font-bold text-gray-800 mb-3">Quick Actions</p>
+        <div className="grid grid-cols-2 gap-3">
+          {quickActions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button
+                key={action.label}
+                onClick={() => onTabChange(action.tab)}
+                className="bg-white rounded-2xl px-5 py-5 flex flex-col items-center gap-3 shadow-sm active:bg-gray-50 transition-colors"
+              >
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center"
+                  style={{ background: "#EEF2FF" }}
+                >
+                  <Icon className="w-6 h-6 text-indigo-600" />
+                </div>
+                <span className="text-sm font-semibold text-gray-800">
+                  {action.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Sync status */}
+      <div className="flex items-center justify-center gap-2 mt-6">
+        <span className="text-sm text-gray-500">Sync Status:</span>
+        <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+        <span className="text-sm text-green-600 font-medium">Synced</span>
+      </div>
+    </div>
+  );
+};
+
+// ─── Main Dashboard ────────────────────────────────────────────────────────────
 const Dashboard = () => {
   const navigate = useNavigate();
+
+  // Get isMobile from layout context
+  let isMobile = false;
+  try {
+    const ctx = useOutletContext();
+    isMobile = ctx?.isMobile ?? false;
+  } catch (_) {}
 
   const {
     loading,
@@ -51,17 +361,14 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("Sales");
   const [previousActiveTab, setPreviousActiveTab] = useState("Sales");
 
-  // SUB-TABS
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
   const [activeStockSubTab, setActiveStockSubTab] = useState("all");
   const [activePendingCollectionSubTab, setActivePendingCollectionSubTab] =
     useState("Month");
-
   const [isSalesMonthOnly, setIsSalesMonthOnly] = useState(false);
 
-  // TABLE DATA
   const [salesTableData, setSalesTableData] = useState([]);
   const [loadingSalesData, setLoadingSalesData] = useState(false);
   const [expenseTableData, setExpenseTableData] = useState([]);
@@ -76,7 +383,6 @@ const Dashboard = () => {
   const [creditSaleTableData, setCreditSaleTableData] = useState([]);
   const [loadingCreditSaleData, setLoadingCreditSaleData] = useState(false);
 
-  // Totals
   const [currentPayrollTotal, setCurrentPayrollTotal] = useState(0);
   const [currentYTDTotal, setCurrentYTDTotal] = useState(0);
   const [expenseSummary, setExpenseSummary] = useState({
@@ -85,34 +391,28 @@ const Dashboard = () => {
     allExpense: 0,
     customExpenseTotal: 0,
   });
-
-  // Company Balance
   const [companyBalance, setCompanyBalance] = useState(0);
   const [companyBalanceAccounts, setCompanyBalanceAccounts] = useState([]);
   const [loadingCompanyBalance, setLoadingCompanyBalance] = useState(false);
-
   const [creditSaleTotal, setCreditSaleTotal] = useState(0);
 
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [selectedProductName, setSelectedProductName] = useState("");
   const [selectedBatches, setSelectedBatches] = useState([]);
-
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedMRProducts, setSelectedMRProducts] = useState([]);
   const [selectedMRName, setSelectedMRName] = useState("");
   const [showAllMRsModal, setShowAllMRsModal] = useState(false);
   const [allMRsWithSalary, setAllMRsWithSalary] = useState([]);
-
   const [showAllMRsInSidePanel, setShowAllMRsInSidePanel] = useState(false);
   const [sidePanelCurrentPage, setSidePanelCurrentPage] = useState(1);
 
   const dateRanges = useMemo(() => getDateRanges(), []);
   const prevMonthRanges = useMemo(() => getPreviousMonthRanges(), []);
-  const stockDateRanges = useMemo(() => getStockDateRanges(), []);
 
   const [user] = useState({ name: "User", role: "User", initials: "U" });
 
-  // =================== CUSTOM DATE FILTER STATES ===================
+  // Custom date filter states
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [selectedCardForFilter, setSelectedCardForFilter] = useState(null);
   const [customStartDate, setCustomStartDate] = useState("");
@@ -134,32 +434,27 @@ const Dashboard = () => {
 
   useEffect(() => {
     const today = new Date();
-    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastDayOfMonth = new Date(
-      today.getFullYear(),
-      today.getMonth() + 1,
-      0,
-    );
-    const defaultStartDate = firstDayOfMonth.toISOString().split("T")[0];
-    const defaultEndDate = lastDayOfMonth.toISOString().split("T")[0];
-    setCustomStartDate(defaultStartDate);
-    setCustomEndDate(defaultEndDate);
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const s = firstDay.toISOString().split("T")[0];
+    const e = lastDay.toISOString().split("T")[0];
+    setCustomStartDate(s);
+    setCustomEndDate(e);
     setCustomDateRanges({
-      "Total Sales": { start: defaultStartDate, end: defaultEndDate },
-      Outstanding: { start: defaultStartDate, end: defaultEndDate },
-      "Total Expense": { start: defaultStartDate, end: defaultEndDate },
-      "Total Payroll": { start: defaultStartDate, end: defaultEndDate },
-      "Pending Collection": { start: defaultStartDate, end: defaultEndDate },
+      "Total Sales": { start: s, end: e },
+      Outstanding: { start: s, end: e },
+      "Total Expense": { start: s, end: e },
+      "Total Payroll": { start: s, end: e },
+      "Pending Collection": { start: s, end: e },
     });
   }, []);
 
-  // =================== CUSTOM DATE FILTER HANDLERS ===================
   const handleDateFilterClick = (cardId) => {
     setSelectedCardForFilter(cardId);
-    const savedRange = customDateRanges[cardId];
-    if (savedRange?.start && savedRange?.end) {
-      setCustomStartDate(savedRange.start);
-      setCustomEndDate(savedRange.end);
+    const saved = customDateRanges[cardId];
+    if (saved?.start && saved?.end) {
+      setCustomStartDate(saved.start);
+      setCustomEndDate(saved.end);
     } else {
       const today = new Date();
       setCustomStartDate(
@@ -203,8 +498,6 @@ const Dashboard = () => {
         setActivePendingCollectionSubTab("Custom");
         fetchCreditSaleTableData("Custom", customStartDate, customEndDate);
         break;
-      default:
-        break;
     }
     setShowDateFilter(false);
   };
@@ -233,12 +526,9 @@ const Dashboard = () => {
         setActivePendingCollectionSubTab("Month");
         fetchCreditSaleTableData("Month");
         break;
-      default:
-        break;
     }
   };
 
-  // =================== SUBTAB CHANGE HANDLERS ===================
   const handleSalesSubTabChange = (subTab) => {
     setActiveSalesSubTab(subTab);
     if (isSalesMonthOnly && subTab !== "Month") setIsSalesMonthOnly(false);
@@ -247,14 +537,12 @@ const Dashboard = () => {
         if (!isCustomDateActive["Total Sales"]) return;
         fetchSalesTableData("Custom");
       } else {
-        setIsCustomDateActive((prev) => ({ ...prev, "Total Sales": false }));
+        setIsCustomDateActive((p) => ({ ...p, "Total Sales": false }));
         fetchSalesTableData(subTab);
       }
     }
   };
-
   const handleStockSubTabChange = (subTab) => setActiveStockSubTab(subTab);
-
   const handleExpenseSubTabChange = (subTab) => {
     setActiveExpenseSubTab(subTab);
     if (activeTab === "Expenses") {
@@ -262,12 +550,11 @@ const Dashboard = () => {
         if (!isCustomDateActive["Total Expense"]) return;
         fetchExpenseTableData("Custom");
       } else {
-        setIsCustomDateActive((prev) => ({ ...prev, "Total Expense": false }));
+        setIsCustomDateActive((p) => ({ ...p, "Total Expense": false }));
         fetchExpenseTableData(subTab);
       }
     }
   };
-
   const handlePayrollSubTabChange = (subTab) => {
     setActivePayrollSubTab(subTab);
     if (activeTab === "Total Payroll") {
@@ -275,12 +562,11 @@ const Dashboard = () => {
         if (!isCustomDateActive["Total Payroll"]) return;
         fetchPayrollTableData("Custom");
       } else {
-        setIsCustomDateActive((prev) => ({ ...prev, "Total Payroll": false }));
+        setIsCustomDateActive((p) => ({ ...p, "Total Payroll": false }));
         fetchPayrollTableData(subTab);
       }
     }
   };
-
   const handlePendingCollectionSubTabChange = (subTab) => {
     setActivePendingCollectionSubTab(subTab);
     if (activeTab === "Credit Sale Cash Not Receive") {
@@ -288,16 +574,12 @@ const Dashboard = () => {
         if (!isCustomDateActive["Pending Collection"]) return;
         fetchCreditSaleTableData("Custom");
       } else {
-        setIsCustomDateActive((prev) => ({
-          ...prev,
-          "Pending Collection": false,
-        }));
+        setIsCustomDateActive((p) => ({ ...p, "Pending Collection": false }));
         fetchCreditSaleTableData(subTab);
       }
     }
   };
 
-  // =================== FETCH FUNCTIONS ===================
   const fetchSalesTableData = async (period, startDateParam, endDateParam) => {
     try {
       setLoadingSalesData(true);
@@ -319,7 +601,7 @@ const Dashboard = () => {
       });
       const data = response.data.success ? response.data.data : [];
       setSalesTableData(data);
-      const total = data.reduce((sum, sale) => sum + (sale.amount || 0), 0);
+      const total = data.reduce((s, sale) => s + (sale.amount || 0), 0);
       setSalesData((prev) => {
         switch (period) {
           case "Today":
@@ -337,43 +619,35 @@ const Dashboard = () => {
         }
       });
     } catch (error) {
-      console.error("Error fetching sales table data:", error);
+      console.error(error);
       setSalesTableData([]);
     } finally {
       setLoadingSalesData(false);
     }
   };
 
-  const fetchExpenseTableData = async (
-    period,
-    startDateParam,
-    endDateParam,
-  ) => {
+  const fetchExpenseTableData = async (period, s, e) => {
     try {
       setLoadingExpenseData(true);
-      const periodMap = {
-        Month: "Month",
-        Year: "Year",
-        All: "All",
-        Custom: "custom",
+      const params = {
+        period:
+          { Month: "Month", Year: "Year", All: "All", Custom: "custom" }[
+            period
+          ] || period,
       };
-      const params = { period: periodMap[period] || period };
       if (period === "Custom") {
-        params.startDate =
-          startDateParam || customDateRanges["Total Expense"]?.start;
-        params.endDate = endDateParam || customDateRanges["Total Expense"]?.end;
+        params.startDate = s || customDateRanges["Total Expense"]?.start;
+        params.endDate = e || customDateRanges["Total Expense"]?.end;
       }
-      const response = await axios.get(`${backendUrl}/api/expenses`, {
-        params,
-      });
-      const rawData = response.data.data || [];
+      const res = await axios.get(`${backendUrl}/api/expenses`, { params });
+      const raw = res.data.data || [];
       setExpenseTableData(
-        rawData.map((expense) => ({
-          ...expense,
-          category: expense.category?.category || expense.category || "Unknown",
+        raw.map((ex) => ({
+          ...ex,
+          category: ex.category?.category || ex.category || "Unknown",
         })),
       );
-      const total = rawData.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+      const total = raw.reduce((sum, ex) => sum + (ex.amount || 0), 0);
       setExpenseSummary((prev) => {
         switch (period) {
           case "Month":
@@ -388,60 +662,46 @@ const Dashboard = () => {
             return prev;
         }
       });
-    } catch (error) {
-      console.error("Error fetching expense table data:", error);
+    } catch (err) {
+      console.error(err);
       setExpenseTableData([]);
     } finally {
       setLoadingExpenseData(false);
     }
   };
 
-  const fetchPayrollTableData = async (
-    period,
-    startDateParam,
-    endDateParam,
-  ) => {
+  const fetchPayrollTableData = async (period, s, e) => {
     try {
       setLoadingPayrollData(true);
       let params = {};
       if (period === "Custom") {
         params.period = "custom";
-        params.startDate =
-          startDateParam || customDateRanges["Total Payroll"]?.start;
-        params.endDate = endDateParam || customDateRanges["Total Payroll"]?.end;
+        params.startDate = s || customDateRanges["Total Payroll"]?.start;
+        params.endDate = e || customDateRanges["Total Payroll"]?.end;
       } else if (period !== "All") {
-        const currentDate = new Date();
+        const cur = new Date();
         if (period === "Prev Month") {
-          let pm = currentDate.getMonth() - 1;
-          let y = currentDate.getFullYear();
+          let pm = cur.getMonth() - 1,
+            y = cur.getFullYear();
           if (pm < 0) {
             pm = 11;
-            y -= 1;
+            y--;
           }
           params.period = `${y}-${String(pm + 1).padStart(2, "0")}`;
-        } else if (period === "YTD") {
-          params.period = `${currentDate.getFullYear()}-YTD`;
-        } else if (period === "Overdue") {
-          params.period = "overdue";
-        } else if (period === "Unreceive_Payment") {
-          params.period = "unreceived";
-        }
+        } else if (period === "YTD") params.period = `${cur.getFullYear()}-YTD`;
+        else if (period === "Overdue") params.period = "overdue";
+        else if (period === "Unreceive_Payment") params.period = "unreceived";
       }
-      const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
-        params,
-      });
-      const payrolls = response.data?.data || [];
-      const totalNetSalary = payrolls.reduce(
-        (sum, item) => sum + (item.netSalary || 0),
-        0,
-      );
+      const res = await axios.get(`${backendUrl}/api/hrm/payroll`, { params });
+      const payrolls = res.data?.data || [];
+      const total = payrolls.reduce((sum, i) => sum + (i.netSalary || 0), 0);
       setPayrollTableData(payrolls);
       if (["Prev Month", "Custom", "Overdue", "All"].includes(period))
-        setCurrentPayrollTotal(totalNetSalary);
+        setCurrentPayrollTotal(total);
       else if (["YTD", "Unreceive_Payment"].includes(period))
-        setCurrentYTDTotal(totalNetSalary);
-    } catch (error) {
-      console.error("Error in fetchPayrollTableData:", error);
+        setCurrentYTDTotal(total);
+    } catch (err) {
+      console.error(err);
       setPayrollTableData([]);
     } finally {
       setLoadingPayrollData(false);
@@ -451,67 +711,58 @@ const Dashboard = () => {
   const fetchOverdueTableData = async () => {
     try {
       setLoadingOverdueData(true);
-      const response = await axios.get(`${backendUrl}/api/overdue`, {
+      const res = await axios.get(`${backendUrl}/api/overdue`, {
         params: { currentDate: new Date().toISOString() },
       });
-      if (response.data.success) {
+      if (res.data.success) {
         setOverdueTableData(
-          response.data.data.map((invoice) => ({
-            ...invoice,
+          res.data.data.map((inv) => ({
+            ...inv,
             overdueAmount:
-              invoice.dueAmount > 0
-                ? invoice.dueAmount
-                : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
+              inv.dueAmount > 0
+                ? inv.dueAmount
+                : Math.max(0, inv.totalAmount - (inv.paidAmount || 0)),
           })),
         );
-        if (salesData) {
+        if (salesData)
           setSalesData((prev) => ({
             ...prev,
-            overdueAmount: response.data.totalOverdueAmount || 0,
+            overdueAmount: res.data.totalOverdueAmount || 0,
           }));
-        }
       }
-    } catch (error) {
-      console.error("Error fetching overdue table data:", error);
+    } catch (err) {
+      console.error(err);
       setOverdueTableData([]);
     } finally {
       setLoadingOverdueData(false);
     }
   };
 
-  const fetchCreditSaleTableData = async (
-    period = "Today",
-    startDateParam,
-    endDateParam,
-  ) => {
+  const fetchCreditSaleTableData = async (period = "Today", s, e) => {
     try {
       setLoadingCreditSaleData(true);
       let params = {};
       if (period === "Custom") {
         params.period = "custom";
-        params.startDate =
-          startDateParam || customDateRanges["Pending Collection"]?.start;
-        params.endDate =
-          endDateParam || customDateRanges["Pending Collection"]?.end;
+        params.startDate = s || customDateRanges["Pending Collection"]?.start;
+        params.endDate = e || customDateRanges["Pending Collection"]?.end;
       } else if (period !== "All") {
-        const backendPeriod = { Today: "today", Month: "month", Year: "year" }[
-          period
-        ];
-        if (backendPeriod) params.period = backendPeriod;
+        const bp = { Today: "today", Month: "month", Year: "year" }[period];
+        if (bp) params.period = bp;
       }
-      const response = await axios.get(
+      const res = await axios.get(
         `${backendUrl}/api/sales/credit-sale-not-received`,
         { params },
       );
-      if (response.data.success) {
-        setCreditSaleTableData(response.data.data || []);
-        setCreditSaleTotal(parseFloat(response.data.totalAmount) || 0);
+      if (res.data.success) {
+        setCreditSaleTableData(res.data.data || []);
+        setCreditSaleTotal(parseFloat(res.data.totalAmount) || 0);
       } else {
         setCreditSaleTableData([]);
         setCreditSaleTotal(0);
       }
-    } catch (error) {
-      console.error("Error fetching credit sale data:", error);
+    } catch (err) {
+      console.error(err);
       setCreditSaleTableData([]);
       setCreditSaleTotal(0);
     } finally {
@@ -522,14 +773,12 @@ const Dashboard = () => {
   const fetchPendingCollectionData = async () => {
     try {
       setLoadingPendingCollectionData(true);
-      const response = await axios.get(
+      const res = await axios.get(
         `${backendUrl}/api/sales/pending-collection-today`,
       );
-      setPendingCollectionData(
-        response.data.success ? response.data.data || [] : [],
-      );
-    } catch (error) {
-      console.error("Error fetching pending collection data:", error);
+      setPendingCollectionData(res.data.success ? res.data.data || [] : []);
+    } catch (err) {
+      console.error(err);
       setPendingCollectionData([]);
     } finally {
       setLoadingPendingCollectionData(false);
@@ -539,26 +788,24 @@ const Dashboard = () => {
   const fetchCompanyBalance = async () => {
     try {
       setLoadingCompanyBalance(true);
-      const response = await axios.get(`${backendUrl}/api/accounts/balance`);
-      if (response.data.success) {
-        setCompanyBalance(response.data.totalBalance || 0);
+      const res = await axios.get(`${backendUrl}/api/accounts/balance`);
+      if (res.data.success) {
+        setCompanyBalance(res.data.totalBalance || 0);
         setCompanyBalanceAccounts(
-          (response.data.accounts || []).map((acc) => ({
-            ...acc,
-            transactions: acc.transactions || [],
+          (res.data.accounts || []).map((a) => ({
+            ...a,
+            transactions: a.transactions || [],
           })),
         );
       }
-    } catch (error) {
-      console.error("Error fetching company balance:", error);
+    } catch (err) {
+      console.error(err);
       try {
-        const res = await axios.get(`${backendUrl}/api/accounts/destinations`);
-        const destinations = res.data?.data || res.data || [];
-        setCompanyBalance(
-          destinations.reduce((sum, acc) => sum + (acc.totalAmount || 0), 0),
-        );
+        const r2 = await axios.get(`${backendUrl}/api/accounts/destinations`);
+        const dst = r2.data?.data || r2.data || [];
+        setCompanyBalance(dst.reduce((s, a) => s + (a.totalAmount || 0), 0));
         setCompanyBalanceAccounts(
-          destinations.map((d) => ({
+          dst.map((d) => ({
             _id: d._id,
             name: d.name,
             code: d.code || "",
@@ -567,8 +814,7 @@ const Dashboard = () => {
             transactions: [],
           })),
         );
-      } catch (err) {
-        console.error("Fallback balance fetch failed:", err);
+      } catch {
         setCompanyBalance(0);
         setCompanyBalanceAccounts([]);
       }
@@ -577,52 +823,36 @@ const Dashboard = () => {
     }
   };
 
-  // =================== HANDLERS ===================
-  const handleViewProducts = (mrName, products) => {
-    setSelectedMRName(mrName);
-    setSelectedMRProducts(products);
+  const handleViewProducts = (n, p) => {
+    setSelectedMRName(n);
+    setSelectedMRProducts(p);
     setShowProductsModal(true);
   };
-  const handleViewInvoices = (mrName, invoices) => {
-    setSelectedMRName(mrName);
-    setSelectedMRProducts(invoices);
+  const handleViewInvoices = (n, i) => {
+    setSelectedMRName(n);
+    setSelectedMRProducts(i);
     setShowProductsModal(true);
   };
-  const handleViewExpenseDetails = (expenseName, details) => {
-    setSelectedMRName(expenseName);
-    setSelectedMRProducts(details);
+  const handleViewExpenseDetails = (n, d) => {
+    setSelectedMRName(n);
+    setSelectedMRProducts(d);
     setShowProductsModal(true);
   };
-  const handleViewStockDetails = (productName, batches) => {
-    setSelectedProductName(productName);
-    setSelectedBatches(batches);
+  const handleViewStockDetails = (n, b) => {
+    setSelectedProductName(n);
+    setSelectedBatches(b);
     setShowBatchModal(true);
   };
 
   const handleViewInvoiceDetails = (invoice) => {
     const details = [
-      `Invoice Number: ${invoice.invoiceNumber || "N/A"}`,
-      `Invoice Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}`,
-      `Due Date: ${new Date(invoice.dueDate).toLocaleDateString()}`,
-      `MR Name: ${invoice.mrName || "N/A"}`,
+      `Invoice: ${invoice.invoiceNumber || "N/A"}`,
+      `Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}`,
       `Customer: ${invoice.customerName || "N/A"}`,
-      `Total Amount: $${formatCurrency(invoice.totalAmount || 0)}`,
-      `Paid Amount: $${formatCurrency(invoice.paidAmount || 0)}`,
-      `Due Amount: $${formatCurrency(invoice.dueAmount || 0)}`,
-      `Overdue Amount: $${formatCurrency(invoice.overdueAmount || 0)}`,
-      `Payment Status: ${invoice.paymentStatus || "N/A"}`,
-      `Credit Days: ${invoice.creditDays || 0}`,
-      `Delivery Date: ${invoice.deliveryDate ? new Date(invoice.deliveryDate).toLocaleDateString() : "N/A"}`,
-      `Remark: ${invoice.remark || "No remark"}`,
+      `Total: $${formatCurrency(invoice.totalAmount || 0)}`,
+      `Paid: $${formatCurrency(invoice.paidAmount || 0)}`,
+      `Due: $${formatCurrency(invoice.dueAmount || 0)}`,
     ];
-    if (invoice.products?.length > 0) {
-      details.push(`\nProducts:`);
-      invoice.products.forEach((p, i) => {
-        details.push(
-          `  ${i + 1}. ${p.productName || "Product"} - Qty: ${p.quantity || 0} - Price: $${p.price || 0}`,
-        );
-      });
-    }
     setSelectedMRName(`Invoice: ${invoice.invoiceNumber || "Details"}`);
     setSelectedMRProducts(details);
     setShowProductsModal(true);
@@ -630,28 +860,13 @@ const Dashboard = () => {
 
   const handleViewCreditSaleDetails = (invoice) => {
     const details = [
-      `Invoice Number: ${invoice.invoiceNumber || "N/A"}`,
-      `Invoice Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}`,
-      `MR Name: ${invoice.mrName || "N/A"}`,
+      `Invoice: ${invoice.invoiceNumber || "N/A"}`,
+      `Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}`,
+      `MR: ${invoice.mrName || "N/A"}`,
       `Customer: ${invoice.customerName || "N/A"}`,
-      `Customer Code: ${invoice.customerCode || "N/A"}`,
-      `Total Amount: $${formatCurrency(invoice.totalAmount || 0)}`,
-      `Paid Amount: $${formatCurrency(invoice.paidAmount || 0)}`,
-      `Due Amount: $${formatCurrency(invoice.dueAmount || 0)}`,
-      `Payment Status: ${invoice.paymentStatus || "N/A"}`,
-      `Credit Days: ${invoice.creditDays || 0}`,
-      `Due Date: ${invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "N/A"}`,
-      `Delivery Date: ${invoice.deliveryDate ? new Date(invoice.deliveryDate).toLocaleDateString() : "N/A"}`,
-      `Remark: ${invoice.remark || "No remark"}`,
+      `Total: $${formatCurrency(invoice.totalAmount || 0)}`,
+      `Due: $${formatCurrency(invoice.dueAmount || 0)}`,
     ];
-    if (invoice.products?.length > 0) {
-      details.push(`\nProducts:`);
-      invoice.products.forEach((p, i) => {
-        details.push(
-          `  ${i + 1}. ${p.productName || "Product"} - Sales Qty: ${p.salesQty || 0} - Bonus Qty: ${p.bonusQty || 0} - Price: $${p.sellingPrice || 0}`,
-        );
-      });
-    }
     setSelectedMRName(`Credit Sale: ${invoice.invoiceNumber || "Details"}`);
     setSelectedMRProducts(details);
     setShowProductsModal(true);
@@ -669,8 +884,6 @@ const Dashboard = () => {
     setActiveTab(newTab);
     if (newTab !== "Sales") setIsSalesMonthOnly(false);
     switch (newTab) {
-      case "Stock in Hands":
-        break;
       case "Sales":
         setIsSalesMonthOnly(false);
         setActiveSalesSubTab(
@@ -712,14 +925,11 @@ const Dashboard = () => {
       case "Company Balance":
         fetchCompanyBalance();
         break;
-      default:
-        break;
     }
   };
 
-  // =================== EFFECTS ===================
   useEffect(() => {
-    const initializeData = async () => {
+    const init = async () => {
       await Promise.all([
         fetchSalesTableData("Today"),
         fetchExpenseTableData("Month"),
@@ -729,7 +939,7 @@ const Dashboard = () => {
       setCurrentPayrollTotal(totalPayroll);
       setCurrentYTDTotal(payrollYTDTotal);
     };
-    initializeData();
+    init();
   }, []);
 
   useEffect(() => {
@@ -737,27 +947,19 @@ const Dashboard = () => {
     setCurrentYTDTotal(payrollYTDTotal);
   }, [totalPayroll, payrollYTDTotal]);
 
-  // =================== RENDER MAIN TABLE ===================
   const renderMainTable = () => {
-    const formatDateRangeSmart = (start, end) => {
-      const s = new Date(start),
-        e = new Date(end);
+    const fmtRange = (s, e) => {
+      const sd = new Date(s),
+        ed = new Date(e);
       const opts = { day: "numeric", month: "short" };
-      if (s.getFullYear() !== e.getFullYear()) opts.year = "numeric";
-      return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}`;
+      if (sd.getFullYear() !== ed.getFullYear()) opts.year = "numeric";
+      return `${sd.toLocaleDateString("en-US", opts)} – ${ed.toLocaleDateString("en-US", opts)}`;
     };
-
-    const getCustomDateRangeText = (cardTitle) => {
-      if (!isCustomDateActive[cardTitle] || !customDateRanges[cardTitle])
-        return null;
-      return formatDateRangeSmart(
-        customDateRanges[cardTitle].start,
-        customDateRanges[cardTitle].end,
-      );
+    const getCustomText = (t) => {
+      if (!isCustomDateActive[t] || !customDateRanges[t]) return null;
+      return fmtRange(customDateRanges[t].start, customDateRanges[t].end);
     };
-
     if (activeTab === "Company Balance") return <CompanyBalancePanel />;
-
     switch (activeTab) {
       case "Sales":
         return (
@@ -768,7 +970,7 @@ const Dashboard = () => {
             dateRanges={dateRanges}
             onViewProducts={handleViewProducts}
             isCustomDateActive={isCustomDateActive["Total Sales"]}
-            customDateRange={getCustomDateRangeText("Total Sales")}
+            customDateRange={getCustomText("Total Sales")}
           />
         );
       case "Total Payroll":
@@ -779,7 +981,7 @@ const Dashboard = () => {
             activePayrollSubTab={activePayrollSubTab}
             prevMonthRanges={prevMonthRanges}
             isCustomDateActive={isCustomDateActive["Total Payroll"]}
-            customDateRange={getCustomDateRangeText("Total Payroll")}
+            customDateRange={getCustomText("Total Payroll")}
           />
         );
       case "Expenses":
@@ -791,7 +993,7 @@ const Dashboard = () => {
             dateRanges={dateRanges}
             onViewExpenseDetails={handleViewExpenseDetails}
             isCustomDateActive={isCustomDateActive["Total Expense"]}
-            customDateRange={getCustomDateRangeText("Total Expense")}
+            customDateRange={getCustomText("Total Expense")}
           />
         );
       case "Stock in Hands":
@@ -826,7 +1028,6 @@ const Dashboard = () => {
     }
   };
 
-  // =================== DATE FILTER MODAL ===================
   const DateFilterModal = () => {
     if (!showDateFilter || !selectedCardForFilter) return null;
     return (
@@ -842,7 +1043,6 @@ const Dashboard = () => {
             <button
               onClick={() => setShowDateFilter(false)}
               className="text-gray-500 hover:text-gray-700 flex-shrink-0 ml-2"
-              aria-label="Close"
             >
               <X size={20} />
             </button>
@@ -872,17 +1072,17 @@ const Dashboard = () => {
                 min={customStartDate || undefined}
               />
             </div>
-            <div className="flex justify-end gap-2 sm:gap-3 pt-4">
+            <div className="flex justify-end gap-2 pt-4">
               <button
                 onClick={() => setShowDateFilter(false)}
-                className="px-3 sm:px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleApplyDateFilter}
                 disabled={!customStartDate || !customEndDate}
-                className={`px-3 sm:px-4 py-2 text-sm font-medium text-white rounded-md cursor-pointer ${!customStartDate || !customEndDate ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
+                className={`px-4 py-2 text-sm font-medium text-white rounded-md cursor-pointer ${!customStartDate || !customEndDate ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
               >
                 Apply Filter
               </button>
@@ -901,12 +1101,44 @@ const Dashboard = () => {
     customExpenseTotal: expenseSummary.customExpenseTotal,
   };
 
+  // ── MOBILE: show app-style layout with real data ───────────────────────────
+  if (isMobile) {
+    return (
+      <>
+        <MobileDashboard
+          salesData={salesData}
+          stockData={stockData}
+          expenseData={mergedExpenseData}
+          creditSaleTotal={creditSaleTotal}
+          overdueTableData={overdueTableData}
+          totalPayroll={currentPayrollTotal}
+          companyBalance={companyBalance}
+          loadingSalesData={loadingSalesData}
+          onNavigate={(route) => navigate(route)}
+          onTabChange={handleParentTabChange}
+        />
+        {/* Shared modals still work on mobile */}
+        <ProductsModal
+          showModal={showProductsModal}
+          onClose={() => setShowProductsModal(false)}
+          selectedMRName={selectedMRName}
+          selectedMRProducts={selectedMRProducts}
+          activeTab={activeTab}
+        />
+        <BatchDetailsModal
+          showModal={showBatchModal}
+          onClose={() => setShowBatchModal(false)}
+          productName={selectedProductName}
+          batches={selectedBatches}
+        />
+      </>
+    );
+  }
+
+  // ── DESKTOP: original layout completely unchanged ──────────────────────────
   return (
     <div className="p-3 sm:p-4 md:p-6">
-      {/* ── Header: no search props needed anymore ── */}
       <DashboardHeader user={user} />
-
-      {/* Dashboard Cards */}
       <div className="w-full overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         <DashboardCards
           activeTab={activeTab}
@@ -942,10 +1174,7 @@ const Dashboard = () => {
           onCurrentMonthSaleClick={handleCurrentMonthSaleClick}
         />
       </div>
-
       <DateFilterModal />
-
-      {/* Sub Tabs */}
       <div className="w-full overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         <SubTabs
           activeTab={activeTab}
@@ -969,8 +1198,6 @@ const Dashboard = () => {
           forceSalesMonthOnly={isSalesMonthOnly}
         />
       </div>
-
-      {/* Main grid: table first on mobile, side panel below */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mt-2">
         <div className="order-1 lg:order-2 lg:col-span-2 min-w-0 overflow-x-auto">
           {renderMainTable()}
@@ -1005,8 +1232,6 @@ const Dashboard = () => {
           />
         </div>
       </div>
-
-      {/* Modals */}
       <ProductsModal
         showModal={showProductsModal}
         onClose={() => setShowProductsModal(false)}

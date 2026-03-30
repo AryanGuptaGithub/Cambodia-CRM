@@ -35,20 +35,22 @@ const TABS = [
 ];
 
 const ROWS_PER_PAGE = 10;
-const MODAL_ROWS_PER_PAGE = 5; // For MR breakdown modal
+const MODAL_ROWS_PER_PAGE = 5;
 
-// Summary Card Component
-const SummaryCard = ({ icon: Icon, label, value, sub, color }) => (
+// Summary Card Component – now accepts hideIcon prop
+const SummaryCard = ({ icon: Icon, label, value, sub, color, hideIcon }) => (
   <div
     className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-4"
     style={{ borderLeft: `4px solid ${color}` }}
   >
-    <div
-      className="rounded-lg p-2.5 flex-shrink-0"
-      style={{ background: color + "18" }}
-    >
-      <Icon size={20} style={{ color }} />
-    </div>
+    {!hideIcon && (
+      <div
+        className="rounded-lg p-2.5 flex-shrink-0"
+        style={{ background: color + "18" }}
+      >
+        <Icon size={20} style={{ color }} />
+      </div>
+    )}
     <div className="min-w-0">
       <div className="text-xs text-gray-500 font-medium uppercase tracking-wide truncate">
         {label}
@@ -60,17 +62,19 @@ const SummaryCard = ({ icon: Icon, label, value, sub, color }) => (
 );
 
 // Status Badge Component
-const StatusBadge = ({ boxes, minStock }) => {
+const StatusBadge = ({ boxes, minStock, isMobileView }) => {
   const isOut = boxes === 0;
   const isLow = !isOut && boxes < (minStock || 0);
   return (
     <span
-      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+      className={`py-1 rounded-full font-semibold ${
+        isMobileView ? "text-[6px]" : "text-xs"
+      } ${
         isOut
           ? "bg-red-100 text-red-700"
           : isLow
-          ? "bg-amber-100 text-amber-700"
-          : "bg-emerald-100 text-emerald-700"
+            ? "bg-amber-100 text-amber-700"
+            : "bg-emerald-100 text-emerald-700"
       }`}
     >
       {isOut ? "Out of Stock" : isLow ? "Low Stock" : "In Stock"}
@@ -78,8 +82,8 @@ const StatusBadge = ({ boxes, minStock }) => {
   );
 };
 
-// Pagination Component (reusable)
-const Pagination = ({ current, total, onChange }) => {
+// Pagination Component (reusable) – uses text arrows on mobile
+const Pagination = ({ current, total, onChange, isMobileView }) => {
   if (total <= 1) return null;
 
   const pages = [];
@@ -108,7 +112,11 @@ const Pagination = ({ current, total, onChange }) => {
         disabled={current === 1}
         className="p-1.5 rounded-md border border-gray-200 text-gray-500 disabled:opacity-40 hover:bg-gray-50 transition-colors"
       >
-        <ChevronLeft size={16} />
+        {isMobileView ? (
+          <span className="text-sm">←</span>
+        ) : (
+          <ChevronLeft size={16} />
+        )}
       </button>
       {pages.map((p, i) =>
         p === "…" ? (
@@ -127,67 +135,121 @@ const Pagination = ({ current, total, onChange }) => {
           >
             {p}
           </button>
-        )
+        ),
       )}
       <button
         onClick={() => onChange(current + 1)}
         disabled={current === total}
         className="p-1.5 rounded-md border border-gray-200 text-gray-500 disabled:opacity-40 hover:bg-gray-50 transition-colors"
       >
-        <ChevronRight size={16} />
+        {isMobileView ? (
+          <span className="text-sm">→</span>
+        ) : (
+          <ChevronRight size={16} />
+        )}
       </button>
     </div>
   );
 };
 
-// MR Breakdown Modal Component
-const MRBreakdownModal = ({ isOpen, onClose, productName, mrBreakdown }) => {
+// MR Breakdown Modal Component – uses text close on mobile
+const MRBreakdownModal = ({
+  isOpen,
+  onClose,
+  productName,
+  mrBreakdown,
+  isMobileView,
+}) => {
   const [modalPage, setModalPage] = useState(1);
-  const totalModalPages = Math.ceil((mrBreakdown?.length || 0) / MODAL_ROWS_PER_PAGE);
-  const paginatedMRs = mrBreakdown?.slice(
-    (modalPage - 1) * MODAL_ROWS_PER_PAGE,
-    modalPage * MODAL_ROWS_PER_PAGE
-  ) || [];
+  const totalModalPages = Math.ceil(
+    (mrBreakdown?.length || 0) / MODAL_ROWS_PER_PAGE,
+  );
+  const paginatedMRs =
+    mrBreakdown?.slice(
+      (modalPage - 1) * MODAL_ROWS_PER_PAGE,
+      modalPage * MODAL_ROWS_PER_PAGE,
+    ) || [];
 
   if (!isOpen) return null;
+
+  const cellTextClass = isMobileView ? "text-[7px]" : "text-xs sm:text-sm";
+  const headerTextClass = isMobileView
+    ? "text-[9px] font-medium"
+    : "text-xs font-semibold";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">
+          <h3
+            className={`font-semibold text-gray-900 ${
+              isMobileView ? "text-xs" : "text-lg"
+            }`}
+          >
             MR Breakdown - {productName}
           </h3>
           <button
             onClick={onClose}
             className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
           >
-            <X size={20} className="text-gray-500" />
+            {isMobileView ? (
+              <span className="text-gray-500 text-lg">✕</span>
+            ) : (
+              <X size={20} className="text-gray-500" />
+            )}
           </button>
         </div>
 
-        {/* Modal Body */}
+        {/* Modal Body (unchanged) */}
         <div className="flex-1 overflow-auto px-6 py-4">
           {paginatedMRs.length === 0 ? (
-            <p className="text-center text-gray-500 py-8">No MR data available</p>
+            <p className="text-center text-gray-500 py-8">
+              No MR data available
+            </p>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">MR Name</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Boxes</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Amount</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Assigned</th>
+                  <th
+                    className={`px-4 py-2 text-left uppercase ${headerTextClass} text-gray-500`}
+                  >
+                    MR Name
+                  </th>
+                  <th
+                    className={`px-4 py-2 text-right uppercase ${headerTextClass} text-gray-500`}
+                  >
+                    Boxes
+                  </th>
+                  <th
+                    className={`px-4 py-2 text-right uppercase ${headerTextClass} text-gray-500`}
+                  >
+                    Amount
+                  </th>
+                  <th
+                    className={`px-4 py-2 text-right uppercase ${headerTextClass} text-gray-500`}
+                  >
+                    Assigned
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {paginatedMRs.map((mr) => (
                   <tr key={mr.mrId} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 font-medium text-gray-800">{mr.mrName}</td>
-                    <td className="px-4 py-2 text-right">{fmt(mr.boxes)}</td>
-                    <td className="px-4 py-2 text-right">{fmtCurrency(mr.amount)}</td>
-                    <td className="px-4 py-2 text-right">{fmt(mr.assignedQuantity)}</td>
+                    <td
+                      className={`px-4 py-2 font-medium text-gray-800 ${cellTextClass}`}
+                    >
+                      {mr.mrName}
+                    </td>
+                    <td className={`px-4 py-2 text-right ${cellTextClass}`}>
+                      {fmt(mr.boxes)}
+                    </td>
+                    <td className={`px-4 py-2 text-right ${cellTextClass}`}>
+                      {fmtCurrency(mr.amount)}
+                    </td>
+                    <td className={`px-4 py-2 text-right ${cellTextClass}`}>
+                      {fmt(mr.assignedQuantity)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -198,13 +260,21 @@ const MRBreakdownModal = ({ isOpen, onClose, productName, mrBreakdown }) => {
         {/* Modal Footer with Pagination */}
         {totalModalPages > 1 && (
           <div className="flex items-center justify-between px-6 py-3 border-t border-gray-200 bg-gray-50">
-            <span className="text-xs text-gray-500">
-              Showing {(modalPage - 1) * MODAL_ROWS_PER_PAGE + 1} – {Math.min(modalPage * MODAL_ROWS_PER_PAGE, mrBreakdown?.length || 0)} of {mrBreakdown?.length || 0}
+            <span
+              className={`text-gray-500 ${isMobileView ? "text-[9px]" : "text-xs"}`}
+            >
+              Showing {(modalPage - 1) * MODAL_ROWS_PER_PAGE + 1} –{" "}
+              {Math.min(
+                modalPage * MODAL_ROWS_PER_PAGE,
+                mrBreakdown?.length || 0,
+              )}{" "}
+              of {mrBreakdown?.length || 0}
             </span>
             <Pagination
               current={modalPage}
               total={totalModalPages}
               onChange={setModalPage}
+              isMobileView={isMobileView}
             />
           </div>
         )}
@@ -213,24 +283,33 @@ const MRBreakdownModal = ({ isOpen, onClose, productName, mrBreakdown }) => {
   );
 };
 
-// Main Component – now accepts activeTab and onTabChange as props
+// Main Component
 export const CombinedStockTable = ({
-  apiBaseUrl = "http://localhost:3001",
-  activeTab,        // from parent: "all", "mr", or "warehouse"
-  onTabChange,      // function to update parent when tab changes
+  apiBaseUrl,
+  activeTab,
+  onTabChange,
 }) => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isMobileView, setIsMobileView] = useState(false);
 
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   // Raw data from API
-  const [allData, setAllData] = useState(null); // combined-stock
-  const [mrData, setMrData] = useState(null);   // mr-stock-summary
+  const [allData, setAllData] = useState(null);
+  const [mrData, setMrData] = useState(null);
+
+  // Mobile detection
+  useEffect(() => {
+    const handleResize = () => setIsMobileView(window.innerWidth < 768);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // Fetch data
   const fetchData = async (searchVal = "") => {
@@ -245,24 +324,31 @@ export const CombinedStockTable = ({
       ]);
 
       if (!combinedRes.ok) {
-        const errorText = await combinedRes.text();
-        throw new Error(`Combined stock fetch failed: ${combinedRes.status} ${combinedRes.statusText}`);
+        throw new Error(
+          `Combined stock fetch failed: ${combinedRes.status} ${combinedRes.statusText}`,
+        );
       }
       if (!mrRes.ok) {
-        const errorText = await mrRes.text();
-        throw new Error(`MR stock summary fetch failed: ${mrRes.status} ${mrRes.statusText}`);
+        throw new Error(
+          `MR stock summary fetch failed: ${mrRes.status} ${mrRes.statusText}`,
+        );
       }
 
-      const contentTypeCombined = combinedRes.headers.get('content-type');
-      const contentTypeMr = mrRes.headers.get('content-type');
-      
-      if (!contentTypeCombined || !contentTypeCombined.includes('application/json')) {
-        const text = await combinedRes.text();
-        throw new Error(`Expected JSON from combined-stock but received ${contentTypeCombined}`);
+      const contentTypeCombined = combinedRes.headers.get("content-type");
+      const contentTypeMr = mrRes.headers.get("content-type");
+
+      if (
+        !contentTypeCombined ||
+        !contentTypeCombined.includes("application/json")
+      ) {
+        throw new Error(
+          `Expected JSON from combined-stock but received ${contentTypeCombined}`,
+        );
       }
-      if (!contentTypeMr || !contentTypeMr.includes('application/json')) {
-        const text = await mrRes.text();
-        throw new Error(`Expected JSON from mr-stock-summary but received ${contentTypeMr}`);
+      if (!contentTypeMr || !contentTypeMr.includes("application/json")) {
+        throw new Error(
+          `Expected JSON from mr-stock-summary but received ${contentTypeMr}`,
+        );
       }
 
       const [combined, mr] = await Promise.all([
@@ -273,31 +359,27 @@ export const CombinedStockTable = ({
       setAllData(combined);
       setMrData(mr);
     } catch (err) {
-      console.error('Fetch error:', err);
+      console.error("Fetch error:", err);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial fetch
   useEffect(() => {
     fetchData();
   }, []);
 
-  // Debounced search
   useEffect(() => {
     const t = setTimeout(() => fetchData(search), 400);
     return () => clearTimeout(t);
   }, [search]);
 
-  // Reset page on tab/data change
   useEffect(() => {
     setPage(1);
   }, [activeTab, allData, mrData]);
 
-  // Derived data per tab
-  const { products, summary } = useMemo(() => {
+  const { products } = useMemo(() => {
     if (activeTab === "all") {
       return {
         products: allData?.products || [],
@@ -310,7 +392,6 @@ export const CombinedStockTable = ({
         summary: mrData?.summary || {},
       };
     }
-    // warehouse tab
     const warehouseProducts = (allData?.products || [])
       .filter((p) => p.warehouseBoxes > 0)
       .map((p) => ({
@@ -330,10 +411,9 @@ export const CombinedStockTable = ({
   const totalPages = Math.ceil(products.length / ROWS_PER_PAGE);
   const pageProducts = products.slice(
     (page - 1) * ROWS_PER_PAGE,
-    page * ROWS_PER_PAGE
+    page * ROWS_PER_PAGE,
   );
 
-  // Summary cards config
   const summaryCards = useMemo(() => {
     if (activeTab === "all") {
       const s = allData?.summary || {};
@@ -389,7 +469,6 @@ export const CombinedStockTable = ({
         },
       ];
     }
-    // warehouse
     const s = allData?.summary || {};
     return [
       {
@@ -413,13 +492,20 @@ export const CombinedStockTable = ({
     ];
   }, [activeTab, allData, mrData, products.length]);
 
-  // Column definitions per tab
+  // Dynamic text classes
+  const cellTextClass = isMobileView ? "text-[7px]" : "text-xs sm:text-sm";
+  const headerTextClass = isMobileView
+    ? "text-[9px] font-medium"
+    : "text-xs font-semibold";
+
   const columns = useMemo(() => {
     const base = [
       {
         header: "#",
         render: (_, idx) => (
-          <span className="text-gray-400 text-xs">
+          <span
+            className={`text-gray-400 ${isMobileView ? "text-[7px]" : "text-xs"}`}
+          >
             {(page - 1) * ROWS_PER_PAGE + idx + 1}
           </span>
         ),
@@ -429,11 +515,17 @@ export const CombinedStockTable = ({
         header: "Product Name",
         render: (p) => (
           <div>
-            <div className="font-semibold text-gray-800 text-sm">
+            <div
+              className={`font-semibold text-gray-800 ${
+                isMobileView ? "text-[7px]" : "text-sm"
+              }`}
+            >
               {p.productName}
             </div>
             {p.lc > 0 && (
-              <div className="text-xs text-gray-400">
+              <div
+                className={`text-gray-400 ${isMobileView ? "text-[7px]" : "text-xs"}`}
+              >
                 LC: {fmtCurrency(p.lc)}
               </div>
             )}
@@ -449,10 +541,12 @@ export const CombinedStockTable = ({
           header: "Warehouse Boxes",
           render: (p) => (
             <div className="text-right">
-              <div className="font-semibold text-gray-800">
+              <div className={`font-semibold text-gray-800 ${cellTextClass}`}>
                 {fmt(p.warehouseBoxes)}
               </div>
-              <div className="text-xs text-gray-400">
+              <div
+                className={`text-gray-400 ${isMobileView ? "text-[7px]" : "text-xs"}`}
+              >
                 {fmtCurrency(p.warehouseAmount)}
               </div>
             </div>
@@ -463,10 +557,12 @@ export const CombinedStockTable = ({
           header: "MR Boxes",
           render: (p) => (
             <div className="text-right">
-              <div className="font-semibold text-blue-700">
+              <div className={`font-semibold text-blue-700 ${cellTextClass}`}>
                 {fmt(p.mrBoxes)}
               </div>
-              <div className="text-xs text-gray-400">
+              <div
+                className={`text-gray-400 ${isMobileView ? "text-[7px]" : "text-xs"}`}
+              >
                 {fmtCurrency(p.mrAmount)}
               </div>
             </div>
@@ -477,10 +573,12 @@ export const CombinedStockTable = ({
           header: "Total Boxes",
           render: (p) => (
             <div className="text-right">
-              <div className="font-bold text-gray-900 text-base">
+              <div className={`font-bold text-gray-900 ${cellTextClass}`}>
                 {fmt(p.totalBoxes)}
               </div>
-              <div className="text-xs text-gray-400">
+              <div
+                className={`text-gray-400 ${isMobileView ? "text-[7px]" : "text-xs"}`}
+              >
                 {fmtCurrency(p.totalAmount)}
               </div>
             </div>
@@ -490,7 +588,11 @@ export const CombinedStockTable = ({
         {
           header: "Status",
           render: (p) => (
-            <StatusBadge boxes={p.warehouseBoxes} minStock={p.minStockLevel} />
+            <StatusBadge
+              boxes={p.warehouseBoxes}
+              minStock={p.minStockLevel}
+              isMobileView={isMobileView}
+            />
           ),
           className: "text-center",
         },
@@ -504,10 +606,12 @@ export const CombinedStockTable = ({
           header: "Total MR Boxes",
           render: (p) => (
             <div className="text-right">
-              <div className="font-bold text-blue-700 text-base">
+              <div className={`font-bold text-blue-700 ${cellTextClass}`}>
                 {fmt(p.totalMrBoxes)}
               </div>
-              <div className="text-xs text-gray-400">
+              <div
+                className={`text-gray-400 ${isMobileView ? "text-[7px]" : "text-xs"}`}
+              >
                 {fmtCurrency(p.totalMrAmount)}
               </div>
             </div>
@@ -523,9 +627,11 @@ export const CombinedStockTable = ({
                   setSelectedProduct(p);
                   setModalOpen(true);
                 }}
-                className="flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium"
+                className={`flex items-center gap-1 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors font-medium ${
+                  isMobileView ? "text-[7px]" : "text-xs"
+                }`}
               >
-                <Eye size={14} />
+                {!isMobileView && <Eye size={14} />}
                 View MRs ({p.mrBreakdown?.length || 0})
               </button>
             </div>
@@ -536,7 +642,11 @@ export const CombinedStockTable = ({
           header: "No. of MRs",
           render: (p) => (
             <div className="text-center">
-              <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
+              <span
+                className={`inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold ${
+                  isMobileView ? "text-[7px]" : "text-sm"
+                }`}
+              >
                 {p.mrBreakdown?.length || 0}
               </span>
             </div>
@@ -554,18 +664,20 @@ export const CombinedStockTable = ({
         render: (p) => (
           <div className="text-right">
             <div
-              className={`font-bold text-base ${
+              className={`font-bold ${cellTextClass} ${
                 p.warehouseBoxes === 0
                   ? "text-red-600"
                   : p.warehouseBoxes < (p.minStockLevel || 0)
-                  ? "text-amber-600"
-                  : "text-gray-900"
+                    ? "text-amber-600"
+                    : "text-gray-900"
               }`}
             >
               {fmt(p.warehouseBoxes)}
             </div>
             {p.minStockLevel > 0 && (
-              <div className="text-xs text-gray-400">
+              <div
+                className={`text-gray-400 ${isMobileView ? "text-[7px]" : "text-xs"}`}
+              >
                 Min: {p.minStockLevel}
               </div>
             )}
@@ -576,7 +688,9 @@ export const CombinedStockTable = ({
       {
         header: "Stock Value",
         render: (p) => (
-          <div className="text-right font-semibold text-emerald-700">
+          <div
+            className={`text-right font-semibold text-emerald-700 ${cellTextClass}`}
+          >
             {fmtCurrency(p.warehouseAmount)}
           </div>
         ),
@@ -585,14 +699,17 @@ export const CombinedStockTable = ({
       {
         header: "Status",
         render: (p) => (
-          <StatusBadge boxes={p.warehouseBoxes} minStock={p.minStockLevel} />
+          <StatusBadge
+            boxes={p.warehouseBoxes}
+            minStock={p.minStockLevel}
+            isMobileView={isMobileView}
+          />
         ),
         className: "text-center",
       },
     ];
-  }, [activeTab, page]);
+  }, [activeTab, page, isMobileView, cellTextClass]);
 
-  // Render
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 font-sans">
       {/* Modal */}
@@ -604,29 +721,42 @@ export const CombinedStockTable = ({
         }}
         productName={selectedProduct?.productName}
         mrBreakdown={selectedProduct?.mrBreakdown}
+        isMobileView={isMobileView}
       />
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Stock Overview</h1>
-        <p className="text-gray-500 text-sm mt-0.5">
+        <h1
+          className={`font-bold text-gray-900 ${
+            isMobileView ? "text-base" : "text-2xl"
+          }`}
+        >
+          Stock Overview
+        </h1>
+        <p
+          className={`text-gray-500 mt-0.5 ${
+            isMobileView ? "text-[9px]" : "text-sm"
+          }`}
+        >
           Combined view of warehouse and MR stock, product-wise
         </p>
       </div>
 
-      {/* Tabs – now using props */}
+      {/* Tabs */}
       <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl p-1 mb-6 w-fit shadow-sm">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
-            onClick={() => onTabChange(key)}   // call parent's onTabChange
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+            onClick={() => onTabChange(key)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${
+              isMobileView ? "text-[9px]" : "text-sm"
+            } ${
               activeTab === key
                 ? "bg-blue-600 text-white shadow"
                 : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
             }`}
           >
-            <Icon size={15} />
+            {!isMobileView && <Icon size={15} />}
             {label}
           </button>
         ))}
@@ -642,30 +772,31 @@ export const CombinedStockTable = ({
           }`}
         >
           {summaryCards.map((card, i) => (
-            <SummaryCard key={i} {...card} />
+            <SummaryCard key={i} {...card} hideIcon={isMobileView} />
           ))}
         </div>
       )}
 
       {/* Table Card */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        {/* Table toolbar */}
+        {/* Toolbar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
-          <div className="font-semibold text-gray-700 text-sm">
-            {/* Removed descriptive labels */}
-          </div>
           <div className="flex items-center gap-2">
             <div className="relative">
-              <Search
-                size={14}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
-              />
+              {!isMobileView && (
+                <Search
+                  size={14}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+              )}
               <input
                 type="text"
                 placeholder="Search product…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 w-48"
+                className={`pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 w-48 ${
+                  isMobileView ? "text-[9px]" : "text-sm"
+                }`}
               />
             </div>
             <button
@@ -673,7 +804,14 @@ export const CombinedStockTable = ({
               className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors"
               title="Refresh"
             >
-              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+              {isMobileView ? (
+                <span className="text-sm">↻</span>
+              ) : (
+                <RefreshCw
+                  size={14}
+                  className={loading ? "animate-spin" : ""}
+                />
+              )}
             </button>
           </div>
         </div>
@@ -681,8 +819,8 @@ export const CombinedStockTable = ({
         {/* Loading */}
         {loading && (
           <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
-            <RefreshCw size={18} className="animate-spin mr-2" /> Loading
-            stock data…
+            <RefreshCw size={18} className="animate-spin mr-2" /> Loading stock
+            data…
           </div>
         )}
 
@@ -703,13 +841,13 @@ export const CombinedStockTable = ({
         {!loading && !error && (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
                     {columns.map((col, i) => (
                       <th
                         key={i}
-                        className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide ${
+                        className={`px-2 sm:px-4 py-2 sm:py-3 uppercase tracking-wide ${headerTextClass} text-gray-500 ${
                           col.className || "text-left"
                         } ${col.width || ""}`}
                       >
@@ -725,8 +863,7 @@ export const CombinedStockTable = ({
                         colSpan={columns.length}
                         className="text-center py-16 text-gray-400"
                       >
-                        No products found
-                        {search ? ` for "${search}"` : ""}
+                        No products found{search ? ` for "${search}"` : ""}
                       </td>
                     </tr>
                   ) : (
@@ -738,7 +875,7 @@ export const CombinedStockTable = ({
                         {columns.map((col, ci) => (
                           <td
                             key={ci}
-                            className={`px-4 py-3 ${col.className || ""}`}
+                            className={`px-2 sm:px-4 py-2 sm:py-3 ${col.className || ""}`}
                           >
                             {col.render(product, idx)}
                           </td>
@@ -753,13 +890,14 @@ export const CombinedStockTable = ({
             {/* Footer / Pagination */}
             {products.length > 0 && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
-                <span className="text-xs text-gray-500">
+                <span
+                  className={`text-gray-500 ${
+                    isMobileView ? "text-[9px]" : "text-xs"
+                  }`}
+                >
                   Showing{" "}
                   <span className="font-medium text-gray-700">
-                    {Math.min(
-                      (page - 1) * ROWS_PER_PAGE + 1,
-                      products.length
-                    )}
+                    {Math.min((page - 1) * ROWS_PER_PAGE + 1, products.length)}
                   </span>{" "}
                   –{" "}
                   <span className="font-medium text-gray-700">
@@ -775,6 +913,7 @@ export const CombinedStockTable = ({
                   current={page}
                   total={totalPages}
                   onChange={setPage}
+                  isMobileView={isMobileView}
                 />
               </div>
             )}
