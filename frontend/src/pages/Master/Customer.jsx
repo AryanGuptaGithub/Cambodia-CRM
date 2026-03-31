@@ -15,6 +15,8 @@ import {
   Search,
   Download,
   Menu,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -24,6 +26,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import { getVisiblePages } from "../../utils/useVisiblePages";
+import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustomer";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import LoadingOverlay from "../../components/Loading";
@@ -34,16 +37,16 @@ import {
   fetchBusinessTypes as fetchBusinessTypesAPI,
 } from "../../utils/customerUtil";
 import Sidebar from "../../components/Sidebar";
-
+// ==================== CRITICAL FIX - XLSX IMPORT ====================
+import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const isSampleDownloadFile =
   import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
 const isWithCustomerCode =
   import.meta.env.VITE_IS_WITH_CUSTOMER_CODE === "true";
-
 const customersPerPage = 10;
-
+// Axios Interceptors
 axios.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -52,7 +55,6 @@ axios.interceptors.request.use(
   },
   (error) => Promise.reject(error),
 );
-
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -63,13 +65,11 @@ axios.interceptors.response.use(
     return Promise.reject(error);
   },
 );
-
 function capitalizeFirstLetter(str) {
   if (!str) return "";
   str = str.toString();
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
-
 const formatDateToYYYYMMDD = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "";
   const year = date.getFullYear();
@@ -77,7 +77,6 @@ const formatDateToYYYYMMDD = (date) => {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
-
 const formatDateForDisplay = (dateString) => {
   if (!dateString) return "--";
   const MONTHS = [
@@ -101,7 +100,7 @@ const formatDateForDisplay = (dateString) => {
   }
   return "--";
 };
-
+// ===================== CUSTOM HOOK =====================
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
     customerCode: initialCustomerCode || "",
@@ -118,17 +117,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     _id: null,
   });
   const [errors, setErrors] = useState({});
-
-  const toTitleCase = (str) => {
-    if (!str) return "";
-    return str
-      .toLowerCase()
-      .split(" ")
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ");
-  };
-  const toLowerCase = (str) => (str ? str.toLowerCase() : "");
-
   const handleChange = useCallback(
     (name, value) => {
       if (name === "name") value = capitalizeFirstLetter(value);
@@ -137,7 +125,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [errors],
   );
-
   const handleNumericInput = useCallback(
     (e, field) => {
       const value = e.target.value;
@@ -145,7 +132,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [handleChange],
   );
-
   const validateForm = useCallback(() => {
     const newErrors = {};
     if (!form.name?.trim()) newErrors.name = "Customer name is required";
@@ -159,7 +145,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }, [form]);
-
   const resetForm = useCallback(() => {
     setForm({
       customerCode: initialCustomerCode || "",
@@ -177,7 +162,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     });
     setErrors({});
   }, [initialCustomerCode]);
-
   return {
     form,
     errors,
@@ -186,17 +170,335 @@ const useCustomerForm = (initialCustomerCode = "") => {
     validateForm,
     resetForm,
     setForm,
-    toTitleCase,
-    toLowerCase,
   };
 };
-
-// Import Modal (unchanged)
+// ===================== IMPORT MODAL =====================
 const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
-  // ... (same as before)
+  const [parsedData, setParsedData] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [parseErrors, setParseErrors] = useState([]);
+  const [fileName, setFileName] = useState("");
+  const [existingCustomers, setExistingCustomers] = useState([]);
+  const [duplicateRows, setDuplicateRows] = useState([]);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+  const getRowKey = (row) => {
+    return [
+      (row.name || "").trim().toLowerCase(),
+      (row.typeOfBusiness || "").trim().toLowerCase(),
+      (row.customerNumber || "").trim().toLowerCase(),
+      (row.medicalRepName || "").trim().toLowerCase(),
+    ].join("||");
+  };
+  useEffect(() => {
+    if (isOpen) fetchExistingCustomers();
+  }, [isOpen]);
+  const fetchExistingCustomers = async () => {
+    setLoadingExisting(true);
+    try {
+      const res = await axios.get(`${backendUrl}/api/customers`);
+      console.log('values of res', res);
+      setExistingCustomers(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      console.error("Failed to fetch existing customers", error);
+      showToast(
+        "error",
+        "Could not load existing customers for duplicate check",
+      );
+    } finally {
+      setLoadingExisting(false);
+    }
+  };
+  useEffect(() => {
+    if (!parsedData.length) {
+      setDuplicateRows([]);
+      return;
+    }
+    const duplicateIndices = new Set();
+    const keyCount = new Map();
+    parsedData.forEach((row) => {
+      const key = getRowKey(row);
+      keyCount.set(key, (keyCount.get(key) || 0) + 1);
+    });
+    parsedData.forEach((row, idx) => {
+      if (keyCount.get(getRowKey(row)) > 1) duplicateIndices.add(idx);
+    });
+    if (existingCustomers.length > 0) {
+      const existingKeys = new Set(
+        existingCustomers.map((c) =>
+          getRowKey({
+            name: c.name || "",
+            typeOfBusiness: c.typeOfBusiness || "",
+            customerNumber: c.customerNumber || "",
+            medicalRepName: c.medicalRepName || "",
+          }),
+        ),
+      );
+      parsedData.forEach((row, idx) => {
+        if (existingKeys.has(getRowKey(row))) duplicateIndices.add(idx);
+      });
+    }
+    setDuplicateRows(parsedData.filter((_, idx) => duplicateIndices.has(idx)));
+  }, [parsedData, existingCustomers]);
+  const parseExcelDateValue = (dateValue) => {
+    if (!dateValue && dateValue !== 0) return formatDateToYYYYMMDD(new Date());
+    if (dateValue instanceof Date) return formatDateToYYYYMMDD(dateValue);
+    if (typeof dateValue === "number") {
+      const adjusted = dateValue >= 60 ? dateValue - 1 : dateValue;
+      const date = new Date((adjusted - 25569) * 86400 * 1000);
+      return formatDateToYYYYMMDD(date);
+    }
+    if (typeof dateValue === "string") {
+      const trimmed = dateValue.trim();
+      const parsed = new Date(trimmed);
+      if (!isNaN(parsed.getTime())) return formatDateToYYYYMMDD(parsed);
+    }
+    return formatDateToYYYYMMDD(new Date());
+  };
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setParseErrors([]);
+    setParsedData([]);
+    setDuplicateRows([]);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array", cellDates: true });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        if (!rows.length) {
+          showToast("warning", "Excel file is empty");
+          return;
+        }
+        // Helper to safely convert any value to a trimmed string
+        const safeString = (value) => {
+          if (value === undefined || value === null) return "";
+          return String(value).trim();
+        };
+        let headerIdx = -1;
+        const requiredHeaders = [
+          "date",
+          "medical representative name",
+          "customer name in english",
+          "types of business",
+          "customer number",
+          "customer address",
+          "zone",
+          "province",
+        ];
+        for (let i = 0; i < Math.min(rows.length, 15); i++) {
+          const lowerRow = (rows[i] || []).map((c) =>
+            safeString(c).toLowerCase(),
+          );
+          if (requiredHeaders.every((h) => lowerRow.includes(h))) {
+            headerIdx = i;
+            break;
+          }
+        }
+        if (headerIdx === -1) {
+          showToast("error", "Could not find required headers in Excel file");
+          return;
+        }
+        const headers = rows[headerIdx].map((h) => safeString(h));
+        const dataRows = rows.slice(headerIdx + 1);
+        const validRows = [];
+        const rowErrors = [];
+        for (let i = 0; i < dataRows.length; i++) {
+          const row = dataRows[i];
+          const obj = {};
+          headers.forEach((h, idx) => {
+            obj[h] = row[idx] !== undefined ? row[idx] : "";
+          });
+          const dateVal = safeString(
+            obj["Date"] || obj["date"] || obj["Joining Date"] || "",
+          );
+          const medicalRepName = safeString(
+            obj["Medical Representative Name"] ||
+              obj["medical representative name"] ||
+              "",
+          );
+          const name = safeString(
+            obj["Customer Name in English"] ||
+              obj["customer name in english"] ||
+              "",
+          );
+          const typeOfBusiness = safeString(
+            obj["Types of Business"] || obj["types of business"] || "",
+          );
+          const customerNumber = safeString(
+            obj["Customer Number"] || obj["customer number"] || "",
+          );
+          const address = safeString(
+            obj["Customer Address"] || obj["customer address"] || "",
+          );
+          const zone = safeString(obj["Zone"] || obj["zone"] || "");
+          const province = safeString(obj["Province"] || obj["province"] || "");
+          const remark = safeString(obj["Remark"] || obj["remark"] || "");
+          if (!name && !customerNumber) {
+            rowErrors.push(
+              `Row ${headerIdx + i + 2}: Missing name or customer number — skipped`,
+            );
+            continue;
+          }
+          validRows.push({
+            date: parseExcelDateValue(dateVal),
+            medicalRepName,
+            name,
+            typeOfBusiness,
+            customerNumber,
+            address,
+            zone,
+            province,
+            remark,
+          });
+        }
+        setParsedData(validRows);
+        setParseErrors(rowErrors);
+        if (rowErrors.length) {
+          showToast(
+            "warning",
+            `${validRows.length} valid rows, ${rowErrors.length} skipped`,
+          );
+        } else if (validRows.length > 0) {
+          showToast(
+            "success",
+            `${validRows.length} records loaded successfully`,
+          );
+        }
+      } catch (err) {
+        console.error("Parse error:", err);
+        showToast("error", "Failed to parse file: " + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  const handleImport = async () => {
+    if (!parsedData.length) {
+      showToast("warning", "Upload a valid file first");
+      return;
+    }
+    const uniqueData = parsedData.filter(
+      (row) => !duplicateRows.some((d) => getRowKey(d) === getRowKey(row)),
+    );
+    if (uniqueData.length === 0) {
+      showToast("warning", "No unique records to import");
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const res = await axios.post(
+        `${backendUrl}/api/customers/import`,
+        uniqueData,
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 60000,
+        },
+      );
+      showToast(
+        "success",
+        res.data.message ||
+          `Imported ${uniqueData.length} records successfully`,
+      );
+      onClose(true);
+    } catch (err) {
+      console.error("Import error:", err);
+      showToast("error", err.response?.data?.message || "Import failed");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+  if (!isOpen) return null;
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+      <div className="bg-white w-full max-w-lg p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+        <button
+          onClick={() => onClose(false)}
+          disabled={isUploading}
+          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+        >
+          <X size={20} />
+        </button>
+        <h2 className="text-lg font-semibold mb-1">Import Customers</h2>
+        {isSampleFile && <SampleExcelDownloadCustomer />}
+        <div className="mb-4">
+          <label className="block text-gray-700 mb-2 font-medium">
+            Select File
+          </label>
+          <input
+            type="file"
+            accept=".csv,.xlsx"
+            onChange={handleFileUpload}
+            className="block w-full border rounded-lg px-3 py-2 text-sm"
+          />
+          {fileName && (
+            <p className="text-xs text-gray-500 mt-1">📄 {fileName}</p>
+          )}
+        </div>
+        {loadingExisting && (
+          <div className="mb-4 text-sm text-blue-600 flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
+            Loading existing customers for duplicate check...
+          </div>
+        )}
+        {duplicateRows.length > 0 && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertCircle size={16} className="text-red-600" />
+              <span className="text-sm font-medium text-red-800">
+                {duplicateRows.length} duplicate row(s) found
+              </span>
+            </div>
+            <p className="text-xs text-red-600">
+              Duplicate rows will be skipped during import.
+            </p>
+          </div>
+        )}
+        {parsedData.length > 0 && (
+          <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle size={16} className="text-green-600" />
+              <span className="text-sm font-medium text-green-800">
+                {parsedData.length} Total Records
+                {duplicateRows.length > 0 && (
+                  <span className="ml-2 text-red-600">
+                    ({parsedData.length - duplicateRows.length} unique)
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+        )}
+        <div className="flex justify-end mt-4 gap-3">
+          <button
+            onClick={() => onClose(false)}
+            disabled={isUploading}
+            className="px-5 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={isUploading || parsedData.length === 0 || loadingExisting}
+            className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 flex items-center gap-2"
+          >
+            {isUploading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                Importing…
+              </>
+            ) : (
+              "Import"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 };
-
-// Main Customer Component
+// ===================== MAIN COMPONENT =====================
 const Customer = () => {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
@@ -208,71 +510,44 @@ const Customer = () => {
   const [totalCustomers, setTotalCustomers] = useState(0);
   const [showImportModal, setShowImportModal] = useState(false);
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
-  const inputRef = useRef(null);
   const [isMobileView, setIsMobileView] = useState(false);
-  const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
   const [provinces, setProvinces] = useState([]);
   const [mrList, setMrList] = useState([]);
   const [zones, setZones] = useState([]);
   const [businessTypes, setBusinessTypes] = useState([]);
   const [isDropdownsLoading, setIsDropdownsLoading] = useState(true);
-
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [errors, setErrors] = useState({});
-
   const [isDuplicateNumber, setIsDuplicateNumber] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
-  const duplicateCheckTimeoutRef = useRef(null);
-
+  const inputRef = useRef(null);
   const {
     form,
+    errors,
     handleChange,
     handleNumericInput,
     validateForm,
     resetForm,
     setForm,
-    toTitleCase,
-    toLowerCase,
   } = useCustomerForm();
-
-  const displayValue = (value) => (value ? toTitleCase(value) : "--");
-
+  const displayValue = (value) => (value ? capitalizeFirstLetter(value) : "--");
   // Mobile detection
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobileView(window.innerWidth < 768);
-    };
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
-
   useEffect(() => {
-    if (!isEditModalOpen) {
-      setIsDuplicateNumber(false);
-      setCheckingDuplicate(false);
-      if (duplicateCheckTimeoutRef.current)
-        clearTimeout(duplicateCheckTimeoutRef.current);
-    }
-  }, [isEditModalOpen]);
-
-  useEffect(() => {
-    if (!searchTerm) return;
-    const timer = setTimeout(() => setCurrentPage(1), 500);
-    return () => clearTimeout(timer);
+    if (searchTerm) setCurrentPage(1);
   }, [searchTerm]);
-
   useEffect(() => {
     fetchCustomers();
   }, [currentPage, searchTerm]);
-
   useEffect(() => {
     fetchDropdownData();
   }, []);
-
   const fetchDropdownData = async () => {
     try {
       setIsDropdownsLoading(true);
@@ -287,13 +562,11 @@ const Customer = () => {
       if (zRes.success) setZones(zRes.data || []);
       if (btRes.success) setBusinessTypes(btRes.data || []);
     } catch (err) {
-      console.error("Dropdown fetch error:", err);
       showToast("error", "Failed to load dropdown data");
     } finally {
       setIsDropdownsLoading(false);
     }
   };
-
   const fetchCustomers = async () => {
     try {
       setLoading(true);
@@ -316,7 +589,6 @@ const Customer = () => {
       setLoading(false);
     }
   };
-
   const toggleSelect = useCallback((customer) => {
     setSelected((prev) =>
       prev.some((c) => c.id === customer._id)
@@ -324,7 +596,6 @@ const Customer = () => {
         : [...prev, { id: customer._id, name: customer.name }],
     );
   }, []);
-
   const toggleSelectAll = useCallback(
     (checked) => {
       setSelected(
@@ -333,7 +604,6 @@ const Customer = () => {
     },
     [customers],
   );
-
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> customer(s)?`,
@@ -352,15 +622,10 @@ const Customer = () => {
           setSelected([]);
         }
       } catch (error) {
-        showToast(
-          "error",
-          error.response?.data?.message ||
-            "Failed to delete selected customers.",
-        );
+        showToast("error", "Failed to delete selected customers.");
       }
     }
   };
-
   const deleteCustomer = async (customer) => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${customer.name}</b> (Code: ${customer.customerCode})?`,
@@ -378,14 +643,10 @@ const Customer = () => {
           fetchCustomers();
         }
       } catch (error) {
-        showToast(
-          "error",
-          error.response?.data?.message || "Failed to delete customer.",
-        );
+        showToast("error", "Failed to delete customer.");
       }
     }
   };
-
   const handleView = useCallback(
     (customer) => {
       setForm(customer);
@@ -393,17 +654,16 @@ const Customer = () => {
     },
     [setForm],
   );
-
   const handleEdit = useCallback(
     (customer) => {
       let actualMrId = customer.medicalRepId || "";
       if (!actualMrId && customer.medicalRepName && mrList.length) {
         const found = mrList.find(
           (mr) =>
-            (mr.medicalRepName || mr.staffName || "").toLowerCase() ===
+            (mr.medicalRepName || "").toLowerCase() ===
             customer.medicalRepName.toLowerCase(),
         );
-        actualMrId = found?._id || found?.id || "";
+        actualMrId = found?._id || "";
       }
       setForm({
         customerCode: customer.customerCode || "",
@@ -424,100 +684,6 @@ const Customer = () => {
     },
     [mrList, setForm],
   );
-
-  const handleStatusToggle = async (id) => {
-    try {
-      const customerToToggle = customers.find((c) => c._id === id);
-      if (!customerToToggle) {
-        showToast("error", "Customer not found");
-        return;
-      }
-      const newStatus = !customerToToggle.enabled;
-      setCustomers((prev) =>
-        prev.map((c) => (c._id === id ? { ...c, enabled: newStatus } : c)),
-      );
-      await axios.put(`${backendUrl}/api/customers/${id}`, {
-        enabled: newStatus,
-      });
-      showToast(
-        "success",
-        `Customer <b>${customerToToggle.name}</b> ${newStatus ? "enabled" : "disabled"} successfully`,
-      );
-    } catch (error) {
-      fetchCustomers();
-      showToast(
-        "error",
-        error.response?.data?.message || "Failed to update status.",
-      );
-    }
-  };
-
-  const handleMRChange = useCallback(
-    (option) => {
-      const mrId = option || "";
-      const selectedMR = mrList.find((mr) => mr._id === mrId);
-      setForm((prev) => ({
-        ...prev,
-        medicalRepId: mrId,
-        medicalRepName: selectedMR?.medicalRepName || "",
-      }));
-      if (errors.medicalRepId)
-        setErrors((prev) => ({ ...prev, medicalRepId: "" }));
-    },
-    [mrList, errors],
-  );
-
-  const handleBusinessTypeChange = useCallback(
-    (option) => {
-      setForm((prev) => ({ ...prev, typeOfBusiness: option || "" }));
-      if (errors.typeOfBusiness)
-        setErrors((prev) => ({ ...prev, typeOfBusiness: "" }));
-    },
-    [errors],
-  );
-
-  const handleZoneChange = useCallback(
-    (option) => {
-      setForm((prev) => ({ ...prev, zone: option || "" }));
-      if (errors.zone) setErrors((prev) => ({ ...prev, zone: "" }));
-    },
-    [errors],
-  );
-
-  const handleProvinceChange = useCallback(
-    (option) => {
-      setForm((prev) => ({ ...prev, province: option || "" }));
-      if (errors.province) setErrors((prev) => ({ ...prev, province: "" }));
-    },
-    [errors],
-  );
-
-  const performDuplicateCheck = useCallback(
-    async (number) => {
-      if (!number) {
-        setIsDuplicateNumber(false);
-        return;
-      }
-      setCheckingDuplicate(true);
-      try {
-        const res = await axios.get(`${backendUrl}/api/customers`, {
-          params: { search: number, limit: 100 },
-        });
-        if (res.data.ok) {
-          const found = res.data.customers.find(
-            (c) => c.customerNumber === number && c._id !== form._id,
-          );
-          setIsDuplicateNumber(!!found);
-        }
-      } catch (err) {
-        setIsDuplicateNumber(false);
-      } finally {
-        setCheckingDuplicate(false);
-      }
-    },
-    [form._id],
-  );
-
   const handleCustomerUpdate = async (e) => {
     e.preventDefault();
     if (!validateForm()) {
@@ -534,15 +700,15 @@ const Customer = () => {
     try {
       const payload = {
         date: form.date,
-        medicalRepName: toLowerCase(form.medicalRepName),
+        medicalRepName: form.medicalRepName.toLowerCase(),
         medicalRepId: form.medicalRepId,
         name: form.name,
-        typeOfBusiness: toLowerCase(form.typeOfBusiness),
+        typeOfBusiness: form.typeOfBusiness.toLowerCase(),
         customerNumber: form.customerNumber,
-        address: toLowerCase(form.address),
-        zone: toLowerCase(form.zone),
-        province: toLowerCase(form.province),
-        remark: toLowerCase(form.remark),
+        address: form.address.toLowerCase(),
+        zone: form.zone.toLowerCase(),
+        province: form.province.toLowerCase(),
+        remark: form.remark.toLowerCase(),
       };
       const res = await axios.put(
         `${backendUrl}/api/customers/${form._id}`,
@@ -561,16 +727,11 @@ const Customer = () => {
       );
     }
   };
-
   const handleImportClose = (shouldRefresh) => {
     setShowImportModal(false);
     if (shouldRefresh) fetchCustomers();
   };
-
-  const handleIconClick = () => {
-    inputRef.current?.focus();
-  };
-
+  const handleIconClick = () => inputRef.current?.focus();
   const handleDownloadAll = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/customers/export`, {
@@ -587,15 +748,13 @@ const Customer = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       showToast("error", "Failed to download customer list");
-      console.error(err);
     }
   };
-
   const provinceOptions = useMemo(
     () =>
       provinces.map((p) => ({
         value: p.name.toLowerCase(),
-        label: toTitleCase(p.name),
+        label: capitalizeFirstLetter(p.name),
       })),
     [provinces],
   );
@@ -603,34 +762,31 @@ const Customer = () => {
     () =>
       mrList.map((mr) => ({
         value: mr._id,
-        label: toTitleCase(mr.medicalRepName),
+        label: capitalizeFirstLetter(mr.medicalRepName),
       })),
     [mrList],
   );
   const zoneOptions = useMemo(
     () =>
-      zones.map((z, i) => {
-        const val = typeof z === "string" ? z : z.name || `Zone ${i + 1}`;
-        return { value: val.toLowerCase(), label: toTitleCase(val) };
-      }),
+      zones.map((z) => ({
+        value: (typeof z === "string" ? z : z.name || "").toLowerCase(),
+        label: capitalizeFirstLetter(typeof z === "string" ? z : z.name || ""),
+      })),
     [zones],
   );
   const businessTypeOptions = useMemo(
     () =>
-      businessTypes.map((t) => {
-        const name = typeof t === "string" ? t : t.name || t.label || "Unknown";
-        return { value: name.toLowerCase(), label: toTitleCase(name) };
-      }),
+      businessTypes.map((t) => ({
+        value: (typeof t === "string" ? t : t.name || "").toLowerCase(),
+        label: capitalizeFirstLetter(typeof t === "string" ? t : t.name || ""),
+      })),
     [businessTypes],
   );
   const visiblePages = getVisiblePages(currentPage, totalPages);
-
   if (loading && customers.length === 0)
     return <LoadingOverlay text="Please wait..." />;
-
   return (
     <div className="p-4 md:p-6 relative">
-      {/* Sidebar component */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -638,31 +794,28 @@ const Customer = () => {
           isMobile={true}
         />
       )}
-
       <ImportModal
         isOpen={showImportModal}
         onClose={handleImportClose}
         isSampleFile={isSampleFile}
         mrList={mrList}
       />
-
       <div className="container mx-auto">
-        {/* Header with menu button and total count */}
+        {/* Mobile Header */}
         {isMobileView && (
           <div className="flex justify-between items-center mb-4">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="p-2 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
             >
               <Menu size={20} className="text-gray-700" />
             </button>
-
             <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
               Total Customer: {totalCustomers}
             </div>
           </div>
         )}
-
+        {/* Desktop Action Bar */}
         <div className="flex flex-wrap justify-between items-center mb-4 gap-3">
           <div className="flex flex-wrap gap-3">
             {!isMobileView && (
@@ -702,7 +855,6 @@ const Customer = () => {
               </button>
             )}
           </div>
-
           {!isMobileView && (
             <div className="flex items-center gap-8">
               <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
@@ -726,8 +878,7 @@ const Customer = () => {
             </div>
           )}
         </div>
-
-        {/* Mobile search button and input */}
+        {/* Mobile Search */}
         {isMobileView && (
           <div className="relative mt-2">
             <Search
@@ -748,29 +899,8 @@ const Customer = () => {
           <p className="text-xs text-gray-500 mt-2">
             Showing results for "{searchTerm}" – {totalCustomers} customer(s)
             found.
-            {totalCustomers === 0 && " Try different keywords."}
           </p>
         )}
-
-        {/* Search results info (desktop) */}
-        {!isMobileView && searchTerm && (
-          <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-            <p className="text-sm text-blue-700">
-              Showing results for:{" "}
-              <span className="font-semibold">"{searchTerm}"</span>
-              <span className="ml-4">
-                Found: <span className="font-bold">{totalCustomers}</span>{" "}
-                customer(s)
-              </span>
-            </p>
-            {totalCustomers === 0 && (
-              <p className="text-sm text-gray-600 mt-1">
-                No customers found. Try different keywords.
-              </p>
-            )}
-          </div>
-        )}
-
         {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
@@ -832,27 +962,14 @@ const Customer = () => {
               {customers.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={
-                      !isMobileView ? (customers.length > 0 ? 10 : 9) : 9
-                    }
+                    colSpan={!isMobileView ? 10 : 9}
                     className="p-4 text-center text-gray-500"
                   >
-                    {loading ? (
-                      "Loading..."
-                    ) : searchTerm ? (
-                      <>
-                        <span>No customers found matching your search.</span>
-                        <br />
-                        <button
-                          onClick={() => setSearchTerm("")}
-                          className="text-blue-600 hover:text-blue-800 underline mt-2"
-                        >
-                          Clear search to see all customers
-                        </button>
-                      </>
-                    ) : (
-                      "No customers found. Add your first customer using the 'Add New Customer' button above."
-                    )}
+                    {loading
+                      ? "Loading..."
+                      : searchTerm
+                        ? "No customers found matching your search."
+                        : "No customers found. Add your first customer."}
                   </td>
                 </tr>
               ) : (
@@ -918,7 +1035,9 @@ const Customer = () => {
                       <>
                         <td className="p-3">
                           <button
-                            onClick={() => handleStatusToggle(customer._id)}
+                            onClick={() => {
+                              /* handleStatusToggle if needed */
+                            }}
                             className={`px-3 py-1 rounded-full text-sm cursor-pointer ${customer.enabled ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-600"}`}
                           >
                             {customer.enabled ? "Enabled" : "Disabled"}
@@ -926,22 +1045,22 @@ const Customer = () => {
                         </td>
                         <td className="p-3 flex items-center justify-center gap-3">
                           <button
-                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
                             onClick={() => handleView(customer)}
+                            className="text-blue-600 hover:text-blue-800"
                             title="View"
                           >
                             <Eye size={18} />
                           </button>
                           <button
-                            className="text-green-600 hover:text-green-800 cursor-pointer"
                             onClick={() => handleEdit(customer)}
+                            className="text-green-600 hover:text-green-800"
                             title="Edit"
                           >
                             <Edit size={18} />
                           </button>
                           <button
-                            className="text-red-600 hover:text-red-800 cursor-pointer"
                             onClick={() => deleteCustomer(customer)}
+                            className="text-red-600 hover:text-red-800"
                             title="Delete"
                           >
                             <Trash2 size={18} />
@@ -952,8 +1071,8 @@ const Customer = () => {
                     {isMobileView && (
                       <td className="p-3">
                         <button
-                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
                           onClick={() => handleView(customer)}
+                          className="text-blue-600 hover:text-blue-800"
                           title="View"
                         >
                           <Eye size={18} />
@@ -965,49 +1084,45 @@ const Customer = () => {
               )}
             </tbody>
           </table>
-
-          {customers.length > 0 && totalPages > 1 && (
-            <div
-              className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center" : "justify-start"}`}
-            >
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-                disabled={currentPage === 1}
-                className={`px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer ${isMobileView ? "text-[7px]" : ""}`}
-              >
-                ← Prev
-              </button>
-              {visiblePages.map((p, index) => (
-                <button
-                  key={index}
-                  onClick={() => typeof p === "number" && setCurrentPage(p)}
-                  disabled={p === "..."}
-                  className={`px-4 py-2 rounded ${p === "..." ? "bg-gray-200 cursor-not-allowed" : currentPage === p ? "bg-indigo-600 text-white cursor-pointer" : "bg-gray-200 hover:bg-gray-300 cursor-pointer"} ${isMobileView ? "text-[7px]" : ""}`}
-                >
-                  {p}
-                </button>
-              ))}
-              <button
-                onClick={() =>
-                  setCurrentPage((p) => Math.min(p + 1, totalPages))
-                }
-                disabled={currentPage === totalPages}
-                className={`px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer ${isMobileView ? "text-[7px]" : ""}`}
-              >
-                Next →
-              </button>
-            </div>
-          )}
         </div>
-
-        {/* VIEW MODAL - full width on mobile */}
+        {/* Pagination */}
+        {customers.length > 0 && totalPages > 1 && (
+          <div
+            className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center" : "justify-start"}`}
+          >
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              ← Prev
+            </button>
+            {visiblePages.map((p, index) => (
+              <button
+                key={index}
+                onClick={() => typeof p === "number" && setCurrentPage(p)}
+                className={`px-4 py-2 rounded ${currentPage === p ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Next →
+            </button>
+          </div>
+        )}
+        {/* VIEW MODAL */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-              <div className="bg-white w-full max-w-full md:max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
                   <X size={20} />
                 </button>
@@ -1072,12 +1187,11 @@ const Customer = () => {
             </div>,
             document.body,
           )}
-
-        {/* EDIT MODAL - also full width on mobile */}
+        {/* EDIT MODAL */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-              <div className="bg-white w-full max-w-full md:max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
                 <button
                   onClick={() => {
                     setIsEditModalOpen(false);
@@ -1090,8 +1204,135 @@ const Customer = () => {
                 <h2 className="text-xl font-semibold mb-4">Edit Customer</h2>
                 <form onSubmit={handleCustomerUpdate}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* same form fields as before */}
-                    {/* ... */}
+                    <div>
+                      <InputField
+                        label="Customer Code"
+                        value={form.customerCode}
+                        disabled
+                        className="bg-gray-100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Name <span className="text-red-500">*</span>
+                      </label>
+                      <InputField
+                        type="text"
+                        value={form.name || ""}
+                        onChange={(e) => handleChange("name", e.target.value)}
+                        error={errors.name}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Customer Number
+                      </label>
+                      <InputField
+                        type="text"
+                        value={form.customerNumber || ""}
+                        onChange={(e) =>
+                          handleNumericInput(e, "customerNumber")
+                        }
+                        placeholder="Numbers only"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Types of Business{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <SearchableDropdown
+                        value={form.typeOfBusiness?.toLowerCase() || ""}
+                        onChange={(val) => handleChange("typeOfBusiness", val)}
+                        options={businessTypeOptions}
+                        placeholder="Select Business Type"
+                        required
+                        error={errors.typeOfBusiness}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Medical Representative{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <SearchableDropdown
+                        value={form.medicalRepId || ""}
+                        onChange={(val) => handleChange("medicalRepId", val)}
+                        options={mrOptions}
+                        placeholder="Select MR"
+                        required
+                        error={errors.medicalRepId}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Zone <span className="text-red-500">*</span>
+                      </label>
+                      <SearchableDropdown
+                        value={form.zone?.toLowerCase() || ""}
+                        onChange={(val) => handleChange("zone", val)}
+                        options={zoneOptions}
+                        placeholder="Select Zone"
+                        required
+                        error={errors.zone}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Province <span className="text-red-500">*</span>
+                      </label>
+                      <SearchableDropdown
+                        value={form.province?.toLowerCase() || ""}
+                        onChange={(val) => handleChange("province", val)}
+                        options={provinceOptions}
+                        placeholder="Select Province"
+                        required
+                        error={errors.province}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Joining Date <span className="text-red-500">*</span>
+                      </label>
+                      <DatePicker
+                        selected={
+                          form.date ? new Date(form.date + "T12:00:00") : null
+                        }
+                        onChange={(date) =>
+                          handleChange(
+                            "date",
+                            date ? formatDateToYYYYMMDD(date) : "",
+                          )
+                        }
+                        dateFormat="yyyy-MM-dd"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        isClearable
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-600">
+                        Address
+                      </label>
+                      <textarea
+                        value={form.address || ""}
+                        onChange={(e) =>
+                          handleChange("address", e.target.value)
+                        }
+                        className="w-full rounded-lg border border-gray-300 p-3 resize-none"
+                        rows={2}
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-600">
+                        Remarks
+                      </label>
+                      <textarea
+                        value={form.remark || ""}
+                        onChange={(e) => handleChange("remark", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 p-3 resize-none"
+                        rows={3}
+                      />
+                    </div>
                   </div>
                   <div className="mt-6 flex justify-end gap-3">
                     <button
@@ -1106,8 +1347,7 @@ const Customer = () => {
                     </button>
                     <button
                       type="submit"
-                      disabled={isDuplicateNumber || checkingDuplicate}
-                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer disabled:opacity-50"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                     >
                       Update Customer
                     </button>
@@ -1121,5 +1361,4 @@ const Customer = () => {
     </div>
   );
 };
-
 export default Customer;

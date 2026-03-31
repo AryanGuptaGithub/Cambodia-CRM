@@ -10,6 +10,7 @@ import {
   CheckCircle,
   AlertCircle,
   Download,
+  Menu,
 } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import axios from "axios";
@@ -23,13 +24,14 @@ import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import LoadingOverlay from "../../components/Loading";
 import { parseExcelDateValue } from "../../utils/dateUtil";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-const isSampleDownloadEnabled = import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
+const isSampleDownloadEnabled =
+  import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
 const SUPPLIERS_PER_PAGE = 10;
 
-// --- Axios Interceptor to automatically attach token ---
 axios.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -40,7 +42,6 @@ axios.interceptors.request.use(
   },
   (error) => Promise.reject(error),
 );
-
 
 const formatDateToYYYYMMDD = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "";
@@ -56,7 +57,6 @@ function capitalizeFirstLetter(str) {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
-// Helper to convert to title case for display
 const toTitleCase = (str) => {
   if (!str) return "";
   return str
@@ -66,16 +66,14 @@ const toTitleCase = (str) => {
     .join(" ");
 };
 
-// Helper to convert to lowercase for storage
 const toLowerCase = (str) => {
   if (!str) return "";
   return str.toLowerCase();
 };
 
-// Helper to display value with title case
 const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
-// Subcomponents
+// ── Top Bar (hidden on mobile) ──────────────────────────────────────────────
 const TopBar = ({
   onAddNew,
   onImport,
@@ -84,99 +82,94 @@ const TopBar = ({
   selectedCount,
   showSampleDownload,
   showExportButton,
-}) => (
-  <div className="flex justify-between items-center mb-4">
-    <div className="flex gap-3">
-      <button
-        onClick={onAddNew}
-        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-      >
-        <UserPlus size={18} /> Add New Supplier
-      </button>
-      <button
-        onClick={onImport}
-        className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-      >
-        <Upload size={18} /> Import CSV
-      </button>
-      {showExportButton && (
-        <button
-          onClick={onDownloadAll}
-          className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-        >
-          <Download size={18} /> Export All
-        </button>
-      )}
-      {selectedCount > 0 && (
-        <button
-          onClick={onDeleteSelected}
-          className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-        >
-          <Trash2 size={18} /> Delete
-        </button>
-      )}
-    </div>
-  </div>
-);
+  isMobileView,
+}) => {
+  // On mobile, hide the entire top bar
+  if (isMobileView) return null;
 
+  return (
+    <div className="flex justify-between items-center mb-4">
+      <div className="flex gap-3 flex-wrap">
+        <button
+          onClick={onAddNew}
+          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+        >
+          <UserPlus size={18} /> Add New Supplier
+        </button>
+        <button
+          onClick={onImport}
+          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+        >
+          <Upload size={18} /> Import CSV
+        </button>
+        {showExportButton && (
+          <button
+            onClick={onDownloadAll}
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+          >
+            <Download size={18} /> Export All
+          </button>
+        )}
+        {selectedCount > 0 && (
+          <button
+            onClick={onDeleteSelected}
+            className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+          >
+            <Trash2 size={18} /> Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── Tabs (hidden on mobile) ─────────────────────────────────────────────────
 const Tabs = ({
   activeTab,
   setActiveTab,
   totalSuppliers,
   hasEnabled,
   hasDisabled,
-}) => (
-  <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-    {totalSuppliers > 0 ? (
-      <div className="flex gap-4">
-        <button
-          onClick={() => setActiveTab("All")}
-          className={`px-4 py-2 rounded-lg cursor-pointer ${
-            activeTab === "All"
-              ? "bg-indigo-600 text-white"
-              : "bg-gray-200 text-gray-700"
-          }`}
-        >
-          All
-        </button>
-        {hasEnabled && (
-          <button
-            onClick={() => setActiveTab("Enabled")}
-            className={`px-4 py-2 rounded-lg cursor-pointer ${
-              activeTab === "Enabled"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700"
-            }`}
-          >
-            Enabled
-          </button>
-        )}
-        {hasDisabled && (
-          <button
-            onClick={() => setActiveTab("Disabled")}
-            className={`px-4 py-2 rounded-lg cursor-pointer ${
-              activeTab === "Disabled"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700"
-            }`}
-          >
-            Disabled
-          </button>
-        )}
-      </div>
-    ) : (
-      <div />
-    )}
-  </div>
-);
+  isMobileView,
+}) => {
+  if (isMobileView) return null;
 
+  return (
+    <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+      {totalSuppliers > 0 ? (
+        <div className="flex gap-2">
+          {[
+            "All",
+            ...(hasEnabled ? ["Enabled"] : []),
+            ...(hasDisabled ? ["Disabled"] : []),
+          ].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-3 py-1.5 rounded-lg cursor-pointer text-sm ${
+                activeTab === tab
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div />
+      )}
+    </div>
+  );
+};
+
+// ── Search Bar (unchanged) ─────────────────────────────────────────────────
 const SearchBar = ({
   search,
-  setSearch,
-  setCurrentPage,
   inputRef,
   handleIconClick,
   handleSearchChange,
+  isMobileView,
 }) => (
   <div className="relative w-full md:w-72">
     <Search
@@ -190,11 +183,16 @@ const SearchBar = ({
       placeholder="Search by name or address..."
       value={search}
       onChange={handleSearchChange}
-      className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+      className={`pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 ${
+        isMobileView ? "text-[10px]" : "text-sm"
+      }`}
     />
   </div>
 );
 
+// ── Supplier Table (mobile shows only Name, Address, Status) ────────────────
+// ── Supplier Table (mobile shows Name, Address, Date columns, Status) ───────
+// ── Supplier Table (mobile: Name, Address, Reg Date, Exp Date) ─────────────
 const SupplierTable = ({
   currentSuppliers,
   selected,
@@ -205,120 +203,140 @@ const SupplierTable = ({
   deleteSupplier,
   handlerEnabledSupplier,
   formatDateToReadable,
-}) => (
-  <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-    <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-      <thead className="bg-gray-100 text-gray-700 border-b">
-        <tr>
-          <th className="p-3 text-sm font-medium">
-            <div className="flex items-center gap-4">
-              {currentSuppliers.length > 0 && (
-                <input
-                  type="checkbox"
-                  checked={
-                    selected.length === currentSuppliers.length &&
-                    currentSuppliers.length > 0
-                  }
-                  onChange={(e) => toggleSelectAll(e.target.checked)}
-                />
-              )}
-              <span>Supplier Name</span>
-            </div>
-          </th>
-          <th className="p-3 text-sm font-medium">Address</th>
-          <th className="p-3 text-sm font-medium">Site Registration Date</th>
-          <th className="p-3 text-sm font-medium">
-            Site Registration Expiry Date
-          </th>
-          <th className="p-3 text-sm font-medium">Status</th>
-          <th className="p-3 text-sm font-medium">Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {currentSuppliers.map((supplier, index) => (
-          <tr
-            key={supplier._id}
-            className={`hover:bg-gray-50 ${
-              (index + 1) % SUPPLIERS_PER_PAGE === 0 ||
-              index + 1 === currentSuppliers.length
-                ? ""
-                : "border-b"
-            }`}
-          >
-            <td className="p-3">
-              <div className="flex items-center gap-4">
-                <input
-                  type="checkbox"
-                  checked={selected.some((s) => s.id === supplier._id)}
-                  onChange={() => toggleSelect(supplier)}
-                />
-                <span className="capitalize">
-                  {displayValue(supplier.name)}
-                </span>
-              </div>
-            </td>
-            <td className="p-3">{displayValue(supplier.address)}</td>
-            <td className="p-3">
-              {formatDateToReadable(supplier.siteRegistrationDate)}
-            </td>
-            <td className="p-3">
-              {formatDateToReadable(supplier.siteRegistrationExpiryDate)}
-            </td>
-            <td className="p-3">
-              <button
-                onClick={() => handlerEnabledSupplier(supplier._id)}
-                className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
-                  supplier.enabled
-                    ? "bg-green-100 text-green-600"
-                    : "bg-gray-200 text-gray-600"
-                }`}
-              >
-                {supplier.enabled ? "Enabled" : "Disabled"}
-              </button>
-            </td>
-            <td className="p-3 flex items-center justify-center gap-3">
-              <button
-                onClick={() => handleView(supplier)}
-                className="text-blue-600 hover:text-blue-800 cursor-pointer"
-              >
-                <Eye size={18} />
-              </button>
-              <button
-                onClick={() => handleEdit(supplier)}
-                className="text-green-600 hover:text-green-800 cursor-pointer"
-              >
-                <Edit size={18} />
-              </button>
-              <button
-                onClick={() => deleteSupplier(supplier)}
-                className="text-red-600 hover:text-red-800 cursor-pointer"
-              >
-                <Trash2 size={18} />
-              </button>
-            </td>
-          </tr>
-        ))}
-        {currentSuppliers.length === 0 && (
-          <tr>
-            <td colSpan={6} className="text-center p-6 text-gray-500">
-              No Supplier found.
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
-  </div>
-);
+  isMobileView,
+}) => {
+  const headerCls = `p-3 font-medium ${isMobileView ? "text-[9px]" : "text-sm"}`;
+  const cellCls = `p-3 ${isMobileView ? "text-[9px]" : "text-sm"}`;
 
-const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
+  // Column counts: mobile = 4, desktop = 6 (including Status and Action)
+  const colSpan = isMobileView ? 4 : 6;
+
+  return (
+    <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+      <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+        <thead className="bg-gray-100 text-gray-700 border-b">
+          <tr>
+            <th className={headerCls}>
+              <div className="flex items-center gap-2">
+                {!isMobileView && currentSuppliers.length > 0 && (
+                  <input
+                    type="checkbox"
+                    checked={
+                      selected.length === currentSuppliers.length &&
+                      currentSuppliers.length > 0
+                    }
+                    onChange={(e) => toggleSelectAll(e.target.checked)}
+                  />
+                )}
+                <span>Supplier Name</span>
+              </div>
+            </th>
+            <th className={headerCls}>Address</th>
+            <th className={headerCls}>Site Registration Date</th>
+            <th className={headerCls}>Site Registration Expiry Date</th>
+            {/* Status column only on desktop */}
+            {!isMobileView && <th className={headerCls}>Status</th>}
+            {/* Action column only on desktop */}
+            {!isMobileView && <th className={headerCls}>Action</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {currentSuppliers.map((supplier, index) => (
+            <tr
+              key={supplier._id}
+              className={`hover:bg-gray-50 ${
+                index + 1 < currentSuppliers.length ? "border-b" : ""
+              }`}
+            >
+              <td className={cellCls}>
+                <div className="flex items-center gap-2">
+                  {!isMobileView && (
+                    <input
+                      type="checkbox"
+                      checked={selected.some((s) => s.id === supplier._id)}
+                      onChange={() => toggleSelect(supplier)}
+                    />
+                  )}
+                  <span className="capitalize">
+                    {displayValue(supplier.name)}
+                  </span>
+                </div>
+              </td>
+              <td className={cellCls}>{displayValue(supplier.address)}</td>
+              <td className={cellCls}>
+                {formatDateToReadable(supplier.siteRegistrationDate)}
+              </td>
+              <td className={cellCls}>
+                {formatDateToReadable(supplier.siteRegistrationExpiryDate)}
+              </td>
+              {/* Status button only on desktop */}
+              {!isMobileView && (
+                <td className={cellCls}>
+                  <button
+                    onClick={() => handlerEnabledSupplier(supplier._id)}
+                    className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
+                      supplier.enabled
+                        ? "bg-green-100 text-green-600"
+                        : "bg-gray-200 text-gray-600"
+                    }`}
+                  >
+                    {supplier.enabled ? "Enabled" : "Disabled"}
+                  </button>
+                </td>
+              )}
+              {/* Action buttons only on desktop */}
+              {!isMobileView && (
+                <td
+                  className={`${cellCls} flex items-center justify-center gap-2`}
+                >
+                  <button
+                    onClick={() => handleView(supplier)}
+                    className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                  >
+                    <Eye size={18} />
+                  </button>
+                  <button
+                    onClick={() => handleEdit(supplier)}
+                    className="text-green-600 hover:text-green-800 cursor-pointer"
+                  >
+                    <Edit size={18} />
+                  </button>
+                  <button
+                    onClick={() => deleteSupplier(supplier)}
+                    className="text-red-600 hover:text-red-800 cursor-pointer"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                </td>
+              )}
+            </tr>
+          ))}
+
+          {currentSuppliers.length === 0 && (
+            <tr>
+              <td colSpan={colSpan} className="text-center p-6 text-gray-500">
+                No Supplier found.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+// ── Pagination (unchanged) ─────────────────────────────────────────────────
+const Pagination = ({
+  currentPage,
+  totalPages,
+  setCurrentPage,
+  isMobileView,
+}) => {
   const getVisiblePages = () => {
     const pages = [];
     const maxVisible = 5;
-
     if (totalPages <= maxVisible) {
-      for (let i = 1; i <= totalPages; i++) {
-        pages.push(i);
-      }
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
       pages.push(1);
       let start = Math.max(2, currentPage - 1);
@@ -331,28 +349,27 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
         start = totalPages - 3;
         end = totalPages - 1;
       }
-      if (start > 2) {
-        pages.push("...");
-      }
-      for (let i = start; i <= end; i++) {
-        pages.push(i);
-      }
-      if (end < totalPages - 1) {
-        pages.push("...");
-      }
+      if (start > 2) pages.push("...");
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (end < totalPages - 1) pages.push("...");
       pages.push(totalPages);
     }
     return pages;
   };
 
   const visiblePages = getVisiblePages();
+  const btnCls = `px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${
+    isMobileView ? "text-[7px] px-2 py-1" : ""
+  }`;
 
   return (
-    <div className="mt-4 p-5 flex gap-2">
+    <div
+      className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center" : ""}`}
+    >
       <button
         onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
         disabled={currentPage === 1}
-        className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        className={btnCls}
       >
         ← Prev
       </button>
@@ -367,7 +384,7 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
               : currentPage === page
                 ? "bg-indigo-600 text-white cursor-pointer"
                 : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-          }`}
+          } ${isMobileView ? "text-[7px] px-2 py-1" : ""}`}
         >
           {page}
         </button>
@@ -375,7 +392,7 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
       <button
         onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
         disabled={currentPage === totalPages}
-        className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        className={btnCls}
       >
         Next →
       </button>
@@ -383,7 +400,7 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
   );
 };
 
-// --- Self-contained Import Modal ---
+// ── Import Modal (unchanged) ────────────────────────────────────────────────
 const ImportModal = ({ show, onClose, isSampleFile }) => {
   const [parsedData, setParsedData] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -394,9 +411,7 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
   const [loadingExisting, setLoadingExisting] = useState(false);
 
   useEffect(() => {
-    if (show) {
-      fetchExistingSuppliers();
-    }
+    if (show) fetchExistingSuppliers();
   }, [show]);
 
   const fetchExistingSuppliers = async () => {
@@ -408,8 +423,10 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
         setExistingSuppliers(suppliers.map((s) => ({ name: s.name })));
       }
     } catch (error) {
-      console.error("Failed to fetch existing suppliers", error);
-      showToast("error", "Could not load existing suppliers for duplicate check");
+      showToast(
+        "error",
+        "Could not load existing suppliers for duplicate check",
+      );
     } finally {
       setLoadingExisting(false);
     }
@@ -430,21 +447,15 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
       setDuplicateRows([]);
       return;
     }
-
     const duplicateIndices = new Set();
-
-    // Intra-file duplicates (full row equality)
     const keyCount = new Map();
     parsedData.forEach((row) => {
       const key = getRowKey(row);
       keyCount.set(key, (keyCount.get(key) || 0) + 1);
     });
     parsedData.forEach((row, idx) => {
-      const key = getRowKey(row);
-      if (keyCount.get(key) > 1) duplicateIndices.add(idx);
+      if (keyCount.get(getRowKey(row)) > 1) duplicateIndices.add(idx);
     });
-
-    // Database duplicates by supplier name (case-insensitive)
     if (existingSuppliers.length > 0) {
       const existingNames = new Set(
         existingSuppliers
@@ -453,20 +464,15 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
       );
       parsedData.forEach((row, idx) => {
         const name = row.supplierName?.trim().toLowerCase();
-        if (name && existingNames.has(name)) {
-          duplicateIndices.add(idx);
-        }
+        if (name && existingNames.has(name)) duplicateIndices.add(idx);
       });
     }
-
-    const dupes = parsedData.filter((_, idx) => duplicateIndices.has(idx));
-    setDuplicateRows(dupes);
+    setDuplicateRows(parsedData.filter((_, idx) => duplicateIndices.has(idx)));
   }, [parsedData, existingSuppliers]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setFileName(file.name);
     setParseErrors([]);
     setParsedData([]);
@@ -476,36 +482,32 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
-        // ✅ FIX: Use cellDates: true so XLSX returns real Date objects
         const workbook = XLSX.read(data, { type: "array", cellDates: true });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-
         const rows = XLSX.utils.sheet_to_json(worksheet, {
           header: 1,
           defval: "",
           blankrows: true,
           raw: true,
         });
-
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
 
-        // Find header row containing "supplier name"
         let headerIdx = -1;
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
           for (let j = 0; j < (rows[i]?.length || 0); j++) {
-            const cell = rows[i]?.[j]?.toString().trim().toLowerCase();
-            if (cell === "supplier name") {
+            if (
+              rows[i]?.[j]?.toString().trim().toLowerCase() === "supplier name"
+            ) {
               headerIdx = i;
               break;
             }
           }
           if (headerIdx !== -1) break;
         }
-
         if (headerIdx === -1) {
           showToast("error", "Header row with 'Supplier Name' not found.");
           return;
@@ -520,9 +522,8 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
               if (
                 k.toLowerCase() === key.toLowerCase() &&
                 obj[k]?.toString().trim() !== ""
-              ) {
+              )
                 return obj[k];
-              }
             }
           }
           return "";
@@ -530,20 +531,17 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
 
         const rowErrors = [];
         const validRows = [];
-
         dataRows.forEach((row, idx) => {
           const obj = {};
           headers.forEach((h, i) => {
             obj[h] = row[i] !== undefined ? row[i] : "";
           });
-
           if (!Object.values(obj).some((v) => v.toString().trim() !== ""))
             return;
 
           const supplierName = capitalizeFirstLetter(
             String(getValue(obj, ["Supplier Name", "Name"]) || "").trim(),
           );
-
           if (!supplierName) {
             rowErrors.push(
               `Row ${headerIdx + idx + 2}: Missing supplier name — skipped`,
@@ -565,14 +563,12 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
             supplierName: supplierName.toLowerCase(),
             address: address.toLowerCase(),
           };
-
-          // ✅ FIX: Pass the raw value directly (Date object or string/number)
           const parsedRegDate = parseExcelDateValue(siteRegistrationDateRaw);
           if (parsedRegDate) dataObj.siteRegistrationDate = parsedRegDate;
-
-          const parsedExpDate = parseExcelDateValue(siteRegistrationExpiryDateRaw);
+          const parsedExpDate = parseExcelDateValue(
+            siteRegistrationExpiryDateRaw,
+          );
           if (parsedExpDate) dataObj.siteRegistrationExpiryDate = parsedExpDate;
-
           validRows.push(dataObj);
         });
 
@@ -580,17 +576,14 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
           showToast("warning", "No valid supplier records found.");
           return;
         }
-
         setParsedData(validRows);
         setParseErrors(rowErrors);
-        if (rowErrors.length) {
+        if (rowErrors.length)
           showToast(
             "warning",
             `${validRows.length} valid rows, ${rowErrors.length} skipped`,
           );
-        }
       } catch (err) {
-        console.error("Parse error:", err);
         showToast("error", "Failed to parse file: " + err.message);
       }
     };
@@ -602,9 +595,7 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
       showToast("warning", "Upload a valid file first");
       return;
     }
-
     const uniqueData = parsedData.filter((row) => !duplicateRows.includes(row));
-
     if (uniqueData.length === 0) {
       showToast("warning", "No unique records to import");
       return;
@@ -629,7 +620,6 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
         onClose(true);
       }
     } catch (err) {
-      console.error("Import error:", err);
       let msg = "Import failed";
       if (err.response?.data?.message) msg = err.response.data.message;
       else if (err.request) msg = "No response from server. Check network.";
@@ -641,7 +631,6 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
   };
 
   if (!show) return null;
-
   const isDuplicateRow = (row) => duplicateRows.includes(row);
 
   return ReactDOM.createPortal(
@@ -654,7 +643,6 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
         >
           <X size={20} />
         </button>
-
         <h2 className="text-lg font-semibold mb-1">Import Suppliers</h2>
         {isSampleFile && <SampleExcelDownloadSupplier />}
 
@@ -675,7 +663,7 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
 
         {loadingExisting && (
           <div className="mb-4 text-sm text-blue-600 flex items-center gap-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
             Loading existing suppliers for duplicate check...
           </div>
         )}
@@ -686,7 +674,6 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
               <AlertCircle size={16} className="text-red-600" />
               <span className="text-sm font-medium text-red-800">
                 {duplicateRows.length} duplicate row(s) found
-                {existingSuppliers.length > 0 && " (by name or full match)"}
               </span>
             </div>
             <div className="max-h-24 overflow-y-auto text-xs text-red-700">
@@ -723,11 +710,17 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
               <table className="w-full text-xs">
                 <thead className="bg-green-100">
                   <tr>
-                    <th className="p-1 text-left">#</th>
-                    <th className="p-1 text-left">Supplier Name</th>
-                    <th className="p-1 text-left">Address</th>
-                    <th className="p-1 text-left">Reg. Date</th>
-                    <th className="p-1 text-left">Expiry Date</th>
+                    {[
+                      "#",
+                      "Supplier Name",
+                      "Address",
+                      "Reg. Date",
+                      "Expiry Date",
+                    ].map((h) => (
+                      <th key={h} className="p-1 text-left">
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -746,10 +739,13 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
                           {displayValue(row.address) || "—"}
                         </td>
                         <td className="p-1">
-                          {formatDateToReadable(row.siteRegistrationDate) || "—"}
+                          {formatDateToReadable(row.siteRegistrationDate) ||
+                            "—"}
                         </td>
                         <td className="p-1">
-                          {formatDateToReadable(row.siteRegistrationExpiryDate) || "—"}
+                          {formatDateToReadable(
+                            row.siteRegistrationExpiryDate,
+                          ) || "—"}
                         </td>
                       </tr>
                     );
@@ -781,30 +777,28 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
           </div>
         )}
 
-        <div className="flex justify-end mt-4">
-          <div className="flex gap-3">
-            <button
-              onClick={() => onClose(false)}
-              disabled={isUploading}
-              className="px-5 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 cursor-pointer disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleImport}
-              disabled={isUploading || parsedData.length === 0 || loadingExisting}
-              className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              {isUploading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                  Importing…
-                </>
-              ) : (
-                `Import`
-              )}
-            </button>
-          </div>
+        <div className="flex justify-end mt-4 gap-3">
+          <button
+            onClick={() => onClose(false)}
+            disabled={isUploading}
+            className="px-5 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={isUploading || parsedData.length === 0 || loadingExisting}
+            className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isUploading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />{" "}
+                Importing…
+              </>
+            ) : (
+              "Import"
+            )}
+          </button>
         </div>
       </div>
     </div>,
@@ -812,63 +806,89 @@ const ImportModal = ({ show, onClose, isSampleFile }) => {
   );
 };
 
-// View Modal
-const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
+// ── View Modal (unchanged) ─────────────────────────────────────────────────
+const ViewModal = ({
+  show,
+  onClose,
+  form,
+  formatDateToReadable,
+  isMobileView,
+}) =>
   show &&
   ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
-      <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+      <div className="bg-white w-full max-w-full md:max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
         <button
           onClick={onClose}
           className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
         >
           <X size={20} />
         </button>
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
+        <h2
+          className={`font-semibold text-gray-800 mb-4 ${isMobileView ? "text-base" : "text-xl"}`}
+        >
           View Supplier
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-600">
+            <label
+              className={`block font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               Supplier Name
             </label>
-            <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+            <p
+              className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               {displayValue(form.name)}
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">
+            <label
+              className={`block font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               Site Registration Date
             </label>
-            <p className="border px-3 py-2 rounded-lg bg-gray-100">
+            <p
+              className={`border px-3 py-2 rounded-lg bg-gray-100 ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               {formatDateToReadable(form.siteRegistrationDate)}
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">
+            <label
+              className={`block font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               Site Registration Expiry Date
             </label>
-            <p className="border px-3 py-2 rounded-lg bg-gray-100">
+            <p
+              className={`border px-3 py-2 rounded-lg bg-gray-100 ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               {formatDateToReadable(form.siteRegistrationExpiryDate)}
             </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-600">
+            <label
+              className={`block font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               Status
             </label>
-            <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+            <p
+              className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
               {form.enabled ? "Enabled" : "Disabled"}
             </p>
           </div>
         </div>
         <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-600">
+          <label
+            className={`block font-medium text-gray-600 ${isMobileView ? "text-xs" : "text-sm"}`}
+          >
             Address
           </label>
           <textarea
             readOnly
             value={displayValue(form.address)}
-            className="w-full border px-3 py-2 rounded-lg bg-gray-100 resize-none"
+            className={`w-full border px-3 py-2 rounded-lg bg-gray-100 resize-none ${isMobileView ? "text-xs" : "text-sm"}`}
             rows={3}
           />
         </div>
@@ -885,7 +905,7 @@ const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
     document.body,
   );
 
-// Edit Modal
+// ── Edit Modal (unchanged) ─────────────────────────────────────────────────
 const EditModal = ({
   show,
   onClose,
@@ -893,34 +913,43 @@ const EditModal = ({
   setForm,
   onSubmit,
   formatDateToReadable,
+  isMobileView,
 }) =>
   show &&
   ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
-      <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+      <div className="bg-white w-full max-w-full md:max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
         >
           <X size={20} />
         </button>
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
+        <h2
+          className={`font-semibold text-gray-800 mb-4 ${isMobileView ? "text-base" : "text-xl"}`}
+        >
           Edit Supplier
         </h2>
         <form onSubmit={onSubmit}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium">Supplier Name</label>
+              <label
+                className={`block font-medium ${isMobileView ? "text-xs" : "text-sm"}`}
+              >
+                Supplier Name
+              </label>
               <input
                 type="text"
                 value={form.name || ""}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                className={`w-full border px-3 py-2 rounded-lg border-gray-300 ${isMobileView ? "text-xs" : "text-sm"}`}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">
+              <label
+                className={`block font-medium ${isMobileView ? "text-xs" : "text-sm"}`}
+              >
                 Site Registration Date
               </label>
               <DatePicker
@@ -937,12 +966,14 @@ const EditModal = ({
                 }
                 dateFormat="yyyy-MM-dd"
                 placeholderText="Select registration date"
-                className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                className={`w-full border px-3 py-2 rounded-lg border-gray-300 ${isMobileView ? "text-xs" : "text-sm"}`}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">
+              <label
+                className={`block font-medium ${isMobileView ? "text-xs" : "text-sm"}`}
+              >
                 Site Registration Expiry Date
               </label>
               <DatePicker
@@ -959,18 +990,22 @@ const EditModal = ({
                 }
                 dateFormat="yyyy-MM-dd"
                 placeholderText="Select expiry date"
-                className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                className={`w-full border px-3 py-2 rounded-lg border-gray-300 ${isMobileView ? "text-xs" : "text-sm"}`}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">Status</label>
+              <label
+                className={`block font-medium ${isMobileView ? "text-xs" : "text-sm"}`}
+              >
+                Status
+              </label>
               <select
                 value={form.enabled}
                 onChange={(e) =>
                   setForm({ ...form, enabled: e.target.value === "true" })
                 }
-                className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
+                className={`w-full border px-3 py-2 rounded-lg capitalize border-gray-300 ${isMobileView ? "text-xs" : "text-sm"}`}
               >
                 <option value="true">Enabled</option>
                 <option value="false">Disabled</option>
@@ -978,11 +1013,15 @@ const EditModal = ({
             </div>
           </div>
           <div className="mt-4">
-            <label className="block text-sm font-medium">Address</label>
+            <label
+              className={`block font-medium ${isMobileView ? "text-xs" : "text-sm"}`}
+            >
+              Address
+            </label>
             <textarea
               value={form.address || ""}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
-              className="w-full border px-3 py-2 rounded-lg border-gray-300 resize-none"
+              className={`w-full border px-3 py-2 rounded-lg border-gray-300 resize-none ${isMobileView ? "text-xs" : "text-sm"}`}
               rows={3}
               required
             />
@@ -1008,7 +1047,7 @@ const EditModal = ({
     document.body,
   );
 
-// Main Supplier Component
+// ── Main Supplier Component ─────────────────────────────────────────────────
 const Supplier = () => {
   const navigate = useNavigate();
   const inputRef = useRef(null);
@@ -1033,21 +1072,27 @@ const Supplier = () => {
   const [searchTimeout, setSearchTimeout] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
   // Fetch suppliers
   useEffect(() => {
     const fetchSuppliers = async () => {
       try {
         setLoading(true);
-        const params = {
-          page: currentPage,
-          limit: SUPPLIERS_PER_PAGE,
-        };
-        if (search && search.trim() !== "") {
-          params.search = search.trim();
-        }
+        const params = { page: currentPage, limit: SUPPLIERS_PER_PAGE };
+        if (search && search.trim() !== "") params.search = search.trim();
 
         const response = await axios.get(`${backendUrl}/api/suppliers`, {
-          params: params,
+          params,
           timeout: 10000,
         });
 
@@ -1055,14 +1100,13 @@ const Supplier = () => {
           if (response.data.success || response.data.ok) {
             const data = response.data.data || response.data.suppliers || [];
             const total = response.data.total || response.data.count || 0;
-            const totalPages =
+            const tp =
               response.data.totalPages ||
               Math.ceil(total / SUPPLIERS_PER_PAGE) ||
               1;
-
             setSuppliers(data);
             setTotalSuppliers(total);
-            setTotalPages(totalPages);
+            setTotalPages(tp);
             setError(null);
           } else if (Array.isArray(response.data)) {
             setSuppliers(response.data);
@@ -1081,10 +1125,11 @@ const Supplier = () => {
       } catch (err) {
         console.error("Error fetching suppliers:", err);
         if (err.response) {
-          setError(
-            `Server error: ${err.response.status} - ${err.response.data?.message || "Unknown error"}`,
+          setError(`Server error: ${err.response.status}`);
+          showToast(
+            "error",
+            `Failed to fetch suppliers: ${err.response.status}`,
           );
-          showToast("error", `Failed to fetch suppliers: ${err.response.status}`);
         } else if (err.request) {
           setError("No response from server. Check backend connection.");
           showToast("error", "Cannot connect to server. Please try again.");
@@ -1099,7 +1144,6 @@ const Supplier = () => {
         setLoading(false);
       }
     };
-
     fetchSuppliers();
   }, [currentPage, search, activeTab, refreshKey]);
 
@@ -1107,15 +1151,13 @@ const Supplier = () => {
   useEffect(() => {
     if (searchTimeout) clearTimeout(searchTimeout);
     const timeout = setTimeout(() => {
-      if (search !== "") {
-        setCurrentPage(1);
-      }
+      if (search !== "") setCurrentPage(1);
     }, 500);
     setSearchTimeout(timeout);
     return () => clearTimeout(timeout);
   }, [search]);
 
-  // Reset page when tab changes
+  // Reset page on tab change
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab]);
@@ -1139,9 +1181,7 @@ const Supplier = () => {
     });
   }, [suppliers, activeTab]);
 
-  const handleSearchChange = (e) => {
-    setSearch(e.target.value);
-  };
+  const handleSearchChange = (e) => setSearch(e.target.value);
 
   const toggleSelect = useCallback((supplier) => {
     setSelected((prev) =>
@@ -1152,11 +1192,8 @@ const Supplier = () => {
   }, []);
 
   const toggleSelectAll = useCallback(
-    (checked) => {
-      setSelected(
-        checked ? filteredSuppliers.map((s) => ({ id: s._id })) : [],
-      );
-    },
+    (checked) =>
+      setSelected(checked ? filteredSuppliers.map((s) => ({ id: s._id })) : []),
     [filteredSuppliers],
   );
 
@@ -1164,7 +1201,6 @@ const Supplier = () => {
     setForm(supplier);
     setIsOpen("view");
   };
-
   const handleEdit = (supplier) => {
     setForm(supplier);
     setIsOpen("edit");
@@ -1172,21 +1208,18 @@ const Supplier = () => {
 
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
-
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> suppliers?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirm.isConfirmed) {
       try {
         const idsToDelete = selected.map((s) => s.id);
         const res = await axios.delete(`${backendUrl}/api/suppliers`, {
           data: { ids: idsToDelete },
         });
-
         if (res.status === 200 || res.status === 204) {
           showToast("success", "Suppliers deleted successfully");
           setSuppliers((prev) =>
@@ -1196,7 +1229,6 @@ const Supplier = () => {
           setSelected([]);
         }
       } catch (err) {
-        console.error("Delete error:", err.response?.data || err.message);
         showToast(
           "error",
           err.response?.data?.message || "Failed to delete suppliers.",
@@ -1212,7 +1244,6 @@ const Supplier = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(
@@ -1238,12 +1269,10 @@ const Supplier = () => {
   const handlerEnabledSupplier = async (id) => {
     const selectedSupplier = suppliers.find((s) => s._id === id);
     if (!selectedSupplier) return;
-
     try {
       const res = await axios.put(`${backendUrl}/api/suppliers/${id}`, {
         enabled: !selectedSupplier.enabled,
       });
-
       if (res.status === 200) {
         showToast(
           "success",
@@ -1263,25 +1292,22 @@ const Supplier = () => {
     if (inputRef.current) {
       inputRef.current.focus();
       inputRef.current.classList.add("highlight");
-      setTimeout(() => inputRef.current.classList.remove("highlight"), 1000);
+      setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
     }
   };
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
-
     try {
       const updateData = {
         ...form,
         name: toLowerCase(form.name),
         address: toLowerCase(form.address),
       };
-
       const res = await axios.put(
         `${backendUrl}/api/suppliers/${form._id}`,
         updateData,
       );
-
       if (res.status === 200) {
         showToast("success", "Supplier updated successfully");
         setIsOpen(null);
@@ -1295,7 +1321,6 @@ const Supplier = () => {
     }
   };
 
-  // Download all suppliers as Excel
   const handleDownloadAll = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/suppliers/export`, {
@@ -1311,7 +1336,6 @@ const Supplier = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       showToast("error", "Failed to download supplier list");
-      console.error(err);
     }
   };
 
@@ -1337,7 +1361,31 @@ const Supplier = () => {
     );
 
   return (
-    <div className="p-6">
+    <div className="p-4 md:p-6 relative">
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* Mobile header row: hamburger + total count */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"
+          >
+            <Menu size={20} className="text-gray-700" />
+          </button>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
+            Total Suppliers: {totalSuppliers}
+          </div>
+        </div>
+      )}
+
       <TopBar
         onAddNew={() => navigate("/masterlayout/supplier/new")}
         onImport={() => setIsOpen("import")}
@@ -1346,6 +1394,7 @@ const Supplier = () => {
         selectedCount={selected.length}
         showSampleDownload={isSampleDownloadEnabled}
         showExportButton={isSampleDownloadEnabled}
+        isMobileView={isMobileView}
       />
 
       <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
@@ -1355,9 +1404,11 @@ const Supplier = () => {
           totalSuppliers={totalSuppliers}
           hasEnabled={hasEnabled}
           hasDisabled={hasDisabled}
+          isMobileView={isMobileView}
         />
 
-        {totalSuppliers > 0 && (
+        {/* Desktop: total count + search */}
+        {!isMobileView && totalSuppliers > 0 && (
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
@@ -1367,19 +1418,38 @@ const Supplier = () => {
             </p>
             <SearchBar
               search={search}
-              setSearch={setSearch}
-              setCurrentPage={setCurrentPage}
               inputRef={inputRef}
               handleIconClick={handleIconClick}
               handleSearchChange={handleSearchChange}
+              isMobileView={isMobileView}
             />
           </div>
         )}
       </div>
 
+      {/* Mobile search bar */}
+      {isMobileView && (
+        <div className="relative mt-2 mb-3">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+            size={16}
+          />
+          <input
+            type="text"
+            placeholder="Search by name or address..."
+            value={search}
+            onChange={handleSearchChange}
+            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-[10px]"
+          />
+        </div>
+      )}
+
+      {/* Search result info */}
       {search && totalSuppliers > 0 && (
         <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-          <p className="text-sm text-blue-700">
+          <p
+            className={`text-blue-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+          >
             Searching for: <span className="font-semibold">"{search}"</span>
             <span className="ml-4">
               Found: <span className="font-bold">{totalSuppliers}</span>{" "}
@@ -1388,10 +1458,11 @@ const Supplier = () => {
           </p>
         </div>
       )}
-
       {search && totalSuppliers === 0 && suppliers.length === 0 && (
         <div className="mb-4 p-3 bg-yellow-50 rounded-lg">
-          <p className="text-sm text-yellow-700">
+          <p
+            className={`text-yellow-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+          >
             No suppliers found for:{" "}
             <span className="font-semibold">"{search}"</span>
             <span className="ml-4">
@@ -1416,6 +1487,7 @@ const Supplier = () => {
         deleteSupplier={deleteSupplier}
         handlerEnabledSupplier={handlerEnabledSupplier}
         formatDateToReadable={formatDateToReadable}
+        isMobileView={isMobileView}
       />
 
       {filteredSuppliers.length > 0 && totalPages > 1 && (
@@ -1423,6 +1495,7 @@ const Supplier = () => {
           currentPage={currentPage}
           totalPages={totalPages}
           setCurrentPage={setCurrentPage}
+          isMobileView={isMobileView}
         />
       )}
 
@@ -1439,6 +1512,7 @@ const Supplier = () => {
         onClose={() => setIsOpen(null)}
         form={form}
         formatDateToReadable={formatDateToReadable}
+        isMobileView={isMobileView}
       />
       <EditModal
         show={isOpen === "edit"}
@@ -1447,6 +1521,7 @@ const Supplier = () => {
         setForm={setForm}
         onSubmit={handleEditSubmit}
         formatDateToReadable={formatDateToReadable}
+        isMobileView={isMobileView}
       />
     </div>
   );

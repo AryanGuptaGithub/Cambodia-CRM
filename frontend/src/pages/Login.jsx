@@ -29,7 +29,6 @@ const Login = () => {
       });
 
       const data = await res.json();
-       
       if (!res.ok) {
         if (res.status === 403) {
           setError(

@@ -1,7 +1,8 @@
 router.post("/login", async (req, res) => {
   try {
     let { username, password } = req.body;
-
+    console.log('values of username--------------->', username);
+    console.log('value of password----------------->', password);
     if (!username || !password) {
       return res.status(400).json({
         success: false,
@@ -11,7 +12,7 @@ router.post("/login", async (req, res) => {
 
     // Normalize input
     username = username.trim().toLowerCase();
-
+     
     // Find user by email OR name
     const user = await User.findOne({
       $or: [

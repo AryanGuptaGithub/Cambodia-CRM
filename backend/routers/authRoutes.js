@@ -15,7 +15,8 @@ const router = express.Router();
 router.post("/login", async (req, res) => {
   try {
     let { username, password } = req.body;
-
+     console.log('values of username------------> 18', username);
+     console.log('value of password ---> 19', password);
     if (!username || !password) {
       return res.status(400).json({
         success: false,
