@@ -374,7 +374,13 @@ function PriceList() {
               <button
                 key={tab}
                 onClick={() => setSelectedTab(tab)}
-                className={`px-3 py-1.5 rounded-lg cursor-pointer text-sm ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                className={`px-3 py-1.5 rounded-lg cursor-pointer ${
+                  isMobileView ? "text-[10px] px-2 py-1" : "text-sm"
+                } ${
+                  selectedTab === tab
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700"
+                }`}
               >
                 {capitalizeFirstLetter(tab)}
               </button>

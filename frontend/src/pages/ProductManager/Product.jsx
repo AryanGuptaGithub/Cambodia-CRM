@@ -1066,7 +1066,7 @@ const Product = () => {
           <div className="flex gap-2 pb-2">
             <button
               onClick={() => handleTabChange("All")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition ${
                 selectedTab === "All"
                   ? "bg-indigo-600 text-white"
                   : "bg-gray-200 text-gray-700"
@@ -1078,7 +1078,7 @@ const Product = () => {
               <button
                 key={tab}
                 onClick={() => handleTabChange(tab)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition ${
                   selectedTab === tab
                     ? "bg-indigo-600 text-white"
                     : "bg-gray-200 text-gray-700"

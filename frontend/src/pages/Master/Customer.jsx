@@ -37,7 +37,7 @@ import {
   fetchZones as fetchZonesAPI,
   fetchBusinessTypes as fetchBusinessTypesAPI,
 } from "../../utils/customerUtil";
-import Sidebar from "../../components/Sidebar"; // added for mobile menu
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -106,7 +106,7 @@ const formatDateForDisplay = (dateString) => {
   return "--";
 };
 
-// ===================== CUSTOM FORM HOOK (unchanged) =====================
+// ===================== CUSTOM FORM HOOK =====================
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
     customerCode: initialCustomerCode || "",
@@ -196,7 +196,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   };
 };
 
-// ===================== IMPORT MODAL (unchanged) =====================
+// ===================== IMPORT MODAL =====================
 const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [parsedData, setParsedData] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -654,7 +654,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                     <th className="p-1 text-left">MR</th>
                     <th className="p-1 text-left">Number</th>
                     <th className="p-1 text-left">Zone</th>
-                   </tr>
+                  </tr>
                 </thead>
                 <tbody>
                   {parsedData.slice(0, 5).map((row, i) => {
@@ -733,7 +733,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   );
 };
 
-// ===================== MAIN CUSTOMER COMPONENT (with mobile view) =====================
+// ===================== MAIN CUSTOMER COMPONENT =====================
 const Customer = () => {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
@@ -1183,7 +1183,7 @@ const Customer = () => {
       <div className="container mx-auto">
         {/* Mobile Header */}
         {isMobileView && (
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center">
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
@@ -1265,7 +1265,7 @@ const Customer = () => {
 
         {/* Mobile Search */}
         {isMobileView && (
-          <div className="relative mt-2">
+          <div className="relative m-3">
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
               size={16}
@@ -1281,14 +1281,7 @@ const Customer = () => {
           </div>
         )}
 
-        {searchTerm && (
-          <p className="text-xs text-gray-500 mt-2">
-            Showing results for "{searchTerm}" – {totalCustomers} customer(s)
-            found.
-          </p>
-        )}
 
-        {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1361,8 +1354,8 @@ const Customer = () => {
                     {loading
                       ? "Loading..."
                       : searchTerm
-                      ? "No customers found matching your search."
-                      : "No customers found. Add your first customer using the 'Add New Customer' button above."}
+                        ? "No customers found matching your search."
+                        : "No customers found. Add your first customer using the 'Add New Customer' button above."}
                   </td>
                 </tr>
               ) : (
@@ -1384,7 +1377,7 @@ const Customer = () => {
                     )}
                     <td
                       className={`p-3 ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       <span className="font-mono font-semibold text-blue-600">
@@ -1393,49 +1386,49 @@ const Customer = () => {
                     </td>
                     <td
                       className={`p-3 ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       {capitalizeFirstLetter(customer.name)}
                     </td>
                     <td
                       className={`p-3 capitalize ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       {displayValue(customer.typeOfBusiness)}
                     </td>
                     <td
                       className={`p-3 capitalize ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       {displayValue(customer.medicalRepName)}
                     </td>
                     <td
                       className={`p-3 capitalize ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       {displayValue(customer.address)}
                     </td>
                     <td
                       className={`p-3 capitalize ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       {displayValue(customer.zone)}
                     </td>
                     <td
                       className={`p-3 capitalize ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       {displayValue(customer.province)}
                     </td>
                     <td
                       className={`p-3 whitespace-nowrap ${
-                        isMobileView ? "text-[9px]" : "text-sm"
+                        isMobileView ? "text-[7px]" : "text-sm"
                       }`}
                     >
                       {customer.date
@@ -1509,7 +1502,7 @@ const Customer = () => {
             <button
               onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
               disabled={currentPage === 1}
-              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              className="px-2 md:px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
               ← Prev
             </button>
@@ -1517,7 +1510,7 @@ const Customer = () => {
               <button
                 key={index}
                 onClick={() => typeof p === "number" && setCurrentPage(p)}
-                className={`px-4 py-2 rounded ${
+                className={`px-2 md:px-4 py-2 rounded ${
                   currentPage === p
                     ? "bg-indigo-600 text-white"
                     : "bg-gray-200 hover:bg-gray-300"
@@ -1527,11 +1520,9 @@ const Customer = () => {
               </button>
             ))}
             <button
-              onClick={() =>
-                setCurrentPage((p) => Math.min(p + 1, totalPages))
-              }
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
               disabled={currentPage === totalPages}
-              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              className="px-2 md:px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
               Next →
             </button>

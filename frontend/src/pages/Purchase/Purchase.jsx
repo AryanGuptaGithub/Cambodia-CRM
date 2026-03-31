@@ -17,6 +17,7 @@ import {
   CheckCircle,
   AlertCircle,
   Download,
+  Menu,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import PurchaseSampleExcelDownload from "../../excels/PurchaseSampleExcelDownload";
@@ -40,6 +41,7 @@ import SearchableDropdown from "../../components/common/SearchableDropdown";
 import LoadingOverlay from "../../components/Loading";
 import InputField from "../../components/common/InputField";
 import SaleExcelDownload from "../../excels/download/ExcelDownload";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -51,9 +53,6 @@ export const parseExcelDateValue = (value) => {
     return "";
   }
 
-  // ────────────────────────────────────────────────
-  // Case 1: Already a valid Date object
-  // ────────────────────────────────────────────────
   if (value instanceof Date) {
     if (isNaN(value.getTime())) {
       return "";
@@ -63,7 +62,6 @@ export const parseExcelDateValue = (value) => {
     let month = value.getMonth();
     let day = value.getDate();
 
-    // Excel near-midnight timezone bug workaround
     if (value.getHours() >= 23) {
       const temp = new Date(year, month, day + 1);
       year = temp.getFullYear();
@@ -74,39 +72,29 @@ export const parseExcelDateValue = (value) => {
     return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
-  // ────────────────────────────────────────────────
-  // Case 2: Number → Excel serial date
-  // ────────────────────────────────────────────────
   if (typeof value === "number") {
-    return excelSerialToDate(value); // ← assuming you have this function
+    return excelSerialToDate(value);
   }
 
-  // ────────────────────────────────────────────────
-  // Case 3: String
-  // ────────────────────────────────────────────────
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return "";
 
-    // ── Most common case in your logs: DD/MM/YYYY ──
     const ddmmyyyy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
     if (ddmmyyyy) {
       const day = parseInt(ddmmyyyy[1], 10);
       const month = parseInt(ddmmyyyy[2], 10);
       let year = parseInt(ddmmyyyy[3], 10);
 
-      // Convert 2-digit year (Excel often uses 19xx/20xx logic)
       if (year < 100) {
-        year += year < 30 ? 2000 : 1900; // adjust threshold as needed
+        year += year < 30 ? 2000 : 1900;
       }
 
-      // Basic validation
       if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
         return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       }
     }
 
-    // ── Your original pattern: "21 February 2025" ──
     const namedMonth = trimmed.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/i);
     if (namedMonth) {
       const monthMap = {
@@ -143,12 +131,8 @@ export const parseExcelDateValue = (value) => {
         return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       }
     }
-
-    // You can add more formats here later if needed, e.g.
-    // MM/DD/YYYY, YYYY-MM-DD, etc.
   }
 
-  // Fallback — unknown format
   console.warn("Unrecognized date format:", value);
   return "";
 };
@@ -172,28 +156,19 @@ const initialFormState = {
   products: [],
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// parseXLSXDate
-//   Converts whatever XLSX gives us (Date object, serial number, or string)
-//   into an ISO date string "YYYY-MM-DD", or "" if unparseable.
-//   This is the ONLY date parser used in the ImportModal.
-// ─────────────────────────────────────────────────────────────────────────────
 const parseXLSXDate = (val) => {
   if (!val && val !== 0) return "";
 
-  // Already a JS Date object (happens when cellDates: true is set in XLSX.read)
   if (val instanceof Date) {
     return isNaN(val.getTime()) ? "" : val.toISOString().split("T")[0];
   }
 
-  // Excel serial number
   if (typeof val === "number") {
     const excelEpoch = new Date(1900, 0, 0);
     const date = new Date(excelEpoch.getTime() + (val - 1) * 86400000);
     return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
   }
 
-  // String — try dayjs
   const d = dayjs(val.toString().trim());
   return d.isValid() ? d.format("YYYY-MM-DD") : "";
 };
@@ -222,12 +197,24 @@ function Purchase() {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
 
+  // Mobile view states
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   // Product edit modal states
   const [currentProduct, setCurrentProduct] = useState(null);
   const [currentProductIndex, setCurrentProductIndex] = useState(null);
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
 
   const PURCHASES_PER_PAGE = 9;
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const tableColumns = useMemo(
     () => [
@@ -283,7 +270,6 @@ function Purchase() {
     setShowImportModal(true);
   };
 
-  // ── Download All Excel ─────────────────────────────────────────────────
   const handleDownloadAllExcel = async () => {
     setIsDownloadingAll(true);
     try {
@@ -831,9 +817,6 @@ function Purchase() {
     const [duplicateRows, setDuplicateRows] = useState([]);
     const [loadingExisting, setLoadingExisting] = useState(false);
 
-    // ── Duplicate detection key: invoice + supplier + delivery number
-    //    (same invoice can legitimately have different delivery numbers
-    //    which represent separate shipments)
     const getRowKey = (group) =>
       `${group.invoiceNumber || ""}||${group.supplierName || ""}||${group.deliveryNumber || ""}`
         .toLowerCase()
@@ -873,8 +856,6 @@ function Purchase() {
         if (keyCount.get(getRowKey(group)) > 1) duplicateIndices.add(idx);
       });
       if (existingInvoices.length > 0) {
-        // Existing invoices from DB — match on invoiceNumber + supplierName
-        // (delivery number may not be stored on the invoice list endpoint)
         const existingKeys = new Set(
           existingInvoices.map((inv) =>
             `${inv.invoiceNumber}||${inv.supplierName || ""}`
@@ -909,7 +890,7 @@ function Purchase() {
           const data = new Uint8Array(evt.target.result);
           const workbook = XLSX.read(data, {
             type: "array",
-            cellDates: true, // deliver Date objects for date cells
+            cellDates: true,
             cellNF: false,
             cellText: false,
           });
@@ -918,7 +899,7 @@ function Purchase() {
             header: 1,
             defval: "",
             blankrows: true,
-            raw: true, // keep raw values (Date objects stay as Date)
+            raw: true,
           });
 
           if (!rows.length) {
@@ -926,7 +907,6 @@ function Purchase() {
             return;
           }
 
-          // Find header row
           let headerRowIndex = -1;
           for (let i = 0; i < Math.min(rows.length, 15); i++) {
             const rowText = (rows[i] || []).join(" ").toLowerCase();
@@ -975,7 +955,6 @@ function Purchase() {
           };
 
           const rowErrors = [];
-          // Use an ordered Map so insertion order = row order
           const validRowsMap = new Map();
 
           dataRows.forEach((row, idx) => {
@@ -983,7 +962,6 @@ function Purchase() {
             headers.forEach((h, i) => {
               if (h) obj[h] = row[i] !== undefined ? row[i] : "";
             });
-            // Skip truly blank rows
             if (
               !Object.values(obj).some((v) => {
                 if (v === "" || v === null || v === undefined) return false;
@@ -1015,7 +993,6 @@ function Purchase() {
             const fob = parseNumber(getValue(obj, ["FOB (USD)", "FOB", "Fob"]));
             const cif = parseNumber(getValue(obj, ["CIF (USD)", "CIF", "Cif"]));
 
-            // ── Date fields: use parseXLSXDate which handles Date objects ──
             const invoiceDate = parseExcelDateValue(
               getValue(obj, ["Invoice Date"]),
             );
@@ -1039,9 +1016,6 @@ function Purchase() {
               return;
             }
 
-            // ── Group key: invoice + supplier + delivery number
-            //    This ensures the same invoice number with different delivery
-            //    numbers (= different shipments) is kept as separate records.
             const groupKey = `${invoiceNumber}||${supplierName}||${deliveryNumber}`;
 
             if (!validRowsMap.has(groupKey)) {
@@ -1307,7 +1281,16 @@ function Purchase() {
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
   return (
-    <div className="p-6">
+    <div className="p-4 md:p-6 relative">
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
       <ImportModal
         isOpen={showImportModal}
         onClose={(shouldRefresh) => {
@@ -1318,98 +1301,136 @@ function Purchase() {
       />
 
       <div className="container">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
-          <div className="flex gap-3 items-center flex-wrap">
+        {/* ── MOBILE header ── */}
+        {isMobileView && (
+          <div className="flex justify-between items-center mb-4">
             <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => {
-                if (validateSuppliersAndProducts())
-                  navigate("/purchaselayout/purchase/new");
-              }}
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
             >
-              <ShoppingCart size={18} /> Add New Purchase
+              <Menu size={20} />
             </button>
-
-            <button
-              onClick={handleImportClick}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-            >
-              <Upload size={18} /> Import Purchase
-            </button>
-
-            {isSampleDownloadFile && (
-              <button
-                onClick={handleDownloadAllExcel}
-                disabled={isDownloadingAll}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
-                title="Download all purchase entries as Excel"
-              >
-                {isDownloadingAll ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                    Downloading…
-                  </>
-                ) : (
-                  <>
-                    <Download size={18} /> Download All Excel
-                  </>
-                )}
-              </button>
-            )}
-
-            {selected.length > 0 && (
-              <button
-                onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              >
-                <Trash2 size={18} /> Delete
-              </button>
-            )}
+            <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
+              Total: {filteredPurchases.length}
+            </div>
           </div>
+        )}
 
-          {purchases && purchases.length > 0 && (
-            <div className="flex items-center gap-6 flex-wrap justify-end">
-              <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredPurchases.length}
-                </span>
-              </p>
+        {/* ── DESKTOP action bar ── */}
+        {!isMobileView && (
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full mb-4">
+            <div className="flex gap-3 items-center flex-wrap">
+              <button
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={() => {
+                  if (validateSuppliersAndProducts())
+                    navigate("/purchaselayout/purchase/new");
+                }}
+              >
+                <ShoppingCart size={18} /> Add New Purchase
+              </button>
 
-              {purchases.length > 0 && (
-                <SaleExcelDownload
-                  type="purchase"
-                  modalTitle="Download Purchase Report"
-                  buttonText="Download Purchase Excel"
-                  successMessage="Purchase Excel downloaded successfully!"
-                  filePrefix="purchase_summary"
-                />
+              <button
+                onClick={handleImportClick}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              >
+                <Upload size={18} /> Import Purchase
+              </button>
+
+              {isSampleDownloadFile && (
+                <button
+                  onClick={handleDownloadAllExcel}
+                  disabled={isDownloadingAll}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+                  title="Download all purchase entries as Excel"
+                >
+                  {isDownloadingAll ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                      Downloading…
+                    </>
+                  ) : (
+                    <>
+                      <Download size={18} /> Download All Excel
+                    </>
+                  )}
+                </button>
               )}
 
-              <div className="relative w-full md:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                  onClick={() => inputRef.current?.focus()}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search invoice, product, supplier..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-                />
-              </div>
+              {selected.length > 0 && (
+                <button
+                  onClick={handleDeleteSelected}
+                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                >
+                  <Trash2 size={18} /> Delete
+                </button>
+              )}
             </div>
-          )}
-        </div>
+
+            {purchases && purchases.length > 0 && (
+              <div className="flex items-center gap-6 flex-wrap justify-end">
+                <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
+                  Total Count:{" "}
+                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                    {filteredPurchases.length}
+                  </span>
+                </p>
+
+                {purchases.length > 0 && (
+                  <SaleExcelDownload
+                    type="purchase"
+                    modalTitle="Download Purchase Report"
+                    buttonText="Download Purchase Excel"
+                    successMessage="Purchase Excel downloaded successfully!"
+                    filePrefix="purchase_summary"
+                  />
+                )}
+
+                <div className="relative w-full md:w-72">
+                  <Search
+                    className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                    size={16}
+                    onClick={() => inputRef.current?.focus()}
+                  />
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Search invoice, product, supplier..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── MOBILE search ── */}
+        {isMobileView && (
+          <div className="relative mb-3">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+              size={16}
+            />
+            <input
+              type="text"
+              placeholder="Search invoice, product, supplier..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm text-sm"
+            />
+          </div>
+        )}
 
         {/* Table */}
-        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200 mt-5">
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200 mt-2">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
@@ -1418,11 +1439,13 @@ function Purchase() {
                   .map((item, index) => (
                     <th
                       key={`header-${item.id}-${index}`}
-                      className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
+                      className={`p-3 whitespace-nowrap min-w-[120px] font-medium ${
+                        isMobileView ? "text-[10px]" : "text-sm"
+                      }`}
                     >
                       {item.id === "invoiceNumber" ? (
                         <div className="flex items-center gap-4">
-                          {currentPurchases.length > 0 && (
+                          {!isMobileView && currentPurchases.length > 0 && (
                             <input
                               type="checkbox"
                               aria-label="Select all purchases"
@@ -1458,24 +1481,30 @@ function Purchase() {
                 currentPurchases.map((purchase, index) => (
                   <tr
                     key={purchase._id || `row-${index}`}
-                    className={`hover:bg-gray-50 ${index < currentPurchases.length - 1 ? "border-b" : ""}`}
+                    className={`hover:bg-gray-50 ${
+                      index < currentPurchases.length - 1 ? "border-b" : ""
+                    }`}
                   >
                     {allFields
                       .filter((item) => tableColumns.includes(item.id))
                       .map((item, cellIndex) => (
                         <td
                           key={`${purchase._id}-${item.id}-${cellIndex}`}
-                          className="p-3 whitespace-nowrap min-w-[120px]"
+                          className={`p-3 whitespace-nowrap min-w-[120px] ${
+                            isMobileView ? "text-[9px]" : "text-sm"
+                          }`}
                         >
                           {item.id === "invoiceNumber" ? (
                             <div className="flex items-center gap-4">
-                              <input
-                                type="checkbox"
-                                checked={selected.some(
-                                  (s) => s.id === purchase._id,
-                                )}
-                                onChange={() => toggleSelect(purchase)}
-                              />
+                              {!isMobileView && (
+                                <input
+                                  type="checkbox"
+                                  checked={selected.some(
+                                    (s) => s.id === purchase._id,
+                                  )}
+                                  onChange={() => toggleSelect(purchase)}
+                                />
+                              )}
                               <span>{purchase.invoiceNumber || "--"}</span>
                             </div>
                           ) : item.id === "productCount" ? (
@@ -1492,27 +1521,34 @@ function Purchase() {
                               {purchase.supplierName || "--"}
                             </span>
                           ) : item.id === "actions" ? (
-                            <div className="flex items-center justify-center gap-3 min-w-[150px]">
-                              <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
-                                <Eye
-                                  onClick={() => handleView(purchase)}
-                                  size={18}
-                                />
-                              </button>
+                            <div className="flex items-center justify-center gap-3 min-w-[80px]">
+                              {/* View — always visible */}
                               <button
-                                className="text-green-600 hover:text-green-800 cursor-pointer"
-                                onClick={() => editPurchase(purchase)}
-                                title="Edit"
+                                className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                                onClick={() => handleView(purchase)}
+                                title="View"
                               >
-                                <Edit size={18} />
+                                <Eye size={isMobileView ? 16 : 18} />
                               </button>
-                              <button
-                                className="text-red-600 hover:text-red-800 cursor-pointer"
-                                onClick={() => deletePurchase(purchase)}
-                                title="Delete"
-                              >
-                                <Trash2 size={18} />
-                              </button>
+                              {/* Edit & Delete — desktop only */}
+                              {!isMobileView && (
+                                <>
+                                  <button
+                                    className="text-green-600 hover:text-green-800 cursor-pointer"
+                                    onClick={() => editPurchase(purchase)}
+                                    title="Edit"
+                                  >
+                                    <Edit size={18} />
+                                  </button>
+                                  <button
+                                    className="text-red-600 hover:text-red-800 cursor-pointer"
+                                    onClick={() => deletePurchase(purchase)}
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </>
+                              )}
                             </div>
                           ) : (
                             getFieldValue(purchase, item.dbName)
@@ -1537,30 +1573,40 @@ function Purchase() {
                     })
                   }
                   disabled={currentPage === 1}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                  className="px-2 md:px-4 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
                 >
                   ← Prev
                 </button>
-                {visiblePages.map((page, idx) =>
-                  page === "..." ? (
-                    <span
-                      key={`ellipsis-${idx}`}
-                      className="px-3 py-1 text-gray-500 select-none"
-                    >
-                      ...
-                    </span>
-                  ) : (
-                    <button
-                      key={`page-${page}-${idx}`}
-                      onClick={() => {
-                        setCurrentPage(page);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-                    >
-                      {page}
-                    </button>
-                  ),
+                {!isMobileView ? (
+                  visiblePages.map((page, idx) =>
+                    page === "..." ? (
+                      <span
+                        key={`ellipsis-${idx}`}
+                        className="px-3 py-1 text-gray-500 select-none"
+                      >
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={`page-${page}-${idx}`}
+                        onClick={() => {
+                          setCurrentPage(page);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                        className={`px-2 md:px-4 py-1 rounded w-10 text-center transition cursor-pointer ${
+                          currentPage === page
+                            ? "bg-indigo-600 text-white"
+                            : "bg-gray-200 hover:bg-gray-300"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ),
+                  )
+                ) : (
+                  <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                    Page {currentPage} of {totalPages}
+                  </span>
                 )}
                 <button
                   onClick={() =>
@@ -1571,7 +1617,7 @@ function Purchase() {
                     })
                   }
                   disabled={currentPage === totalPages}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                  className="px-2 md:px-4 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
                 >
                   Next →
                 </button>
@@ -1916,14 +1962,20 @@ function Purchase() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsProductModalOpen(false)}
               />
-              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+              <div
+                className={`bg-white w-full max-w-6xl ${
+                  isMobileView ? "mx-4 p-4" : "p-6"
+                } rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto`}
+              >
                 <button
                   onClick={() => setIsProductModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                <h2
+                  className={`${isMobileView ? "text-sm" : "text-xl"} font-semibold text-gray-800 mb-4`}
+                >
                   Product Details -{" "}
                   {selectedPurchaseProduct?.invoiceNumber || "Purchase"}
                 </h2>
@@ -1945,7 +1997,15 @@ function Purchase() {
                             <button
                               key={`filter-${type}-${typeIndex}`}
                               onClick={() => handleClick(type)}
-                              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm font-medium ${selectedTab === type ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                              className={`${
+                                isMobileView
+                                  ? "px-2 py-1 text-[10px]"
+                                  : "px-4 py-2 text-sm"
+                              } rounded-lg cursor-pointer transition-colors font-medium ${
+                                selectedTab === type
+                                  ? "bg-indigo-600 text-white shadow-md"
+                                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                              }`}
                             >
                               {capitalizeFirstLetter(type)}
                             </button>
@@ -1972,7 +2032,9 @@ function Purchase() {
                           ].map((h) => (
                             <th
                               key={h}
-                              className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
+                              className={`p-3 whitespace-nowrap min-w-[120px] font-medium ${
+                                isMobileView ? "text-[10px]" : "text-sm"
+                              }`}
                             >
                               {h}
                             </th>
@@ -1984,14 +2046,34 @@ function Purchase() {
                           filteredProductsInModal.map((product, index) => (
                             <tr
                               key={product._id || `product-${index}`}
-                              className={`hover:bg-gray-50 ${index < filteredProductsInModal.length - 1 ? "border-b" : ""}`}
+                              className={`hover:bg-gray-50 ${
+                                index < filteredProductsInModal.length - 1
+                                  ? "border-b"
+                                  : ""
+                              }`}
                             >
-                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] capitalize ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 {product.productName || "--"}
                               </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 <span
-                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${product.productType === "physical" || product.type === "physical" ? "bg-blue-100 text-blue-800" : product.productType === "digital" || product.type === "digital" ? "bg-purple-100 text-purple-800" : "bg-green-100 text-green-800"}`}
+                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    product.productType === "physical" ||
+                                    product.type === "physical"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : product.productType === "digital" ||
+                                          product.type === "digital"
+                                        ? "bg-purple-100 text-purple-800"
+                                        : "bg-green-100 text-green-800"
+                                  }`}
                                 >
                                   {capitalizeFirstLetter(
                                     product.productType ||
@@ -2000,22 +2082,46 @@ function Purchase() {
                                   )}
                                 </span>
                               </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 {product.quantityPerBoxStrip || 0}
                               </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 {formatNumber(product.lc || product.lcNumber)}
                               </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px] font-semibold">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] font-semibold ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 {formatNumber(product.amount)}
                               </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 {formatNumber(product.fob)}
                               </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 {formatNumber(product.cif)}
                               </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] capitalize ${
+                                  isMobileView ? "text-[7px]" : "text-sm"
+                                }`}
+                              >
                                 {selectedPurchaseProduct.supplierName || "--"}
                               </td>
                             </tr>
