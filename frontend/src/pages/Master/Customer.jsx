@@ -13,12 +13,13 @@ import {
   X,
   Edit,
   Search,
+  CheckCircle,
+  AlertCircle,
   Download,
   Menu,
-  AlertCircle,
-  CheckCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import * as XLSX from "xlsx";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
@@ -36,17 +37,17 @@ import {
   fetchZones as fetchZonesAPI,
   fetchBusinessTypes as fetchBusinessTypesAPI,
 } from "../../utils/customerUtil";
-import Sidebar from "../../components/Sidebar";
-// ==================== CRITICAL FIX - XLSX IMPORT ====================
-import * as XLSX from "xlsx";
+import Sidebar from "../../components/Sidebar"; // added for mobile menu
+
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const isSampleDownloadFile =
   import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
 const isWithCustomerCode =
   import.meta.env.VITE_IS_WITH_CUSTOMER_CODE === "true";
+
 const customersPerPage = 10;
-// Axios Interceptors
+
 axios.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -55,6 +56,7 @@ axios.interceptors.request.use(
   },
   (error) => Promise.reject(error),
 );
+
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -65,11 +67,13 @@ axios.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
 function capitalizeFirstLetter(str) {
   if (!str) return "";
   str = str.toString();
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
+
 const formatDateToYYYYMMDD = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "";
   const year = date.getFullYear();
@@ -77,6 +81,7 @@ const formatDateToYYYYMMDD = (date) => {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+
 const formatDateForDisplay = (dateString) => {
   if (!dateString) return "--";
   const MONTHS = [
@@ -100,7 +105,8 @@ const formatDateForDisplay = (dateString) => {
   }
   return "--";
 };
-// ===================== CUSTOM HOOK =====================
+
+// ===================== CUSTOM FORM HOOK (unchanged) =====================
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
     customerCode: initialCustomerCode || "",
@@ -117,6 +123,17 @@ const useCustomerForm = (initialCustomerCode = "") => {
     _id: null,
   });
   const [errors, setErrors] = useState({});
+
+  const toTitleCase = (str) => {
+    if (!str) return "";
+    return str
+      .toLowerCase()
+      .split(" ")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  };
+  const toLowerCase = (str) => (str ? str.toLowerCase() : "");
+
   const handleChange = useCallback(
     (name, value) => {
       if (name === "name") value = capitalizeFirstLetter(value);
@@ -125,6 +142,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [errors],
   );
+
   const handleNumericInput = useCallback(
     (e, field) => {
       const value = e.target.value;
@@ -132,6 +150,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [handleChange],
   );
+
   const validateForm = useCallback(() => {
     const newErrors = {};
     if (!form.name?.trim()) newErrors.name = "Customer name is required";
@@ -145,6 +164,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }, [form]);
+
   const resetForm = useCallback(() => {
     setForm({
       customerCode: initialCustomerCode || "",
@@ -162,6 +182,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     });
     setErrors({});
   }, [initialCustomerCode]);
+
   return {
     form,
     errors,
@@ -170,9 +191,12 @@ const useCustomerForm = (initialCustomerCode = "") => {
     validateForm,
     resetForm,
     setForm,
+    toTitleCase,
+    toLowerCase,
   };
 };
-// ===================== IMPORT MODAL =====================
+
+// ===================== IMPORT MODAL (unchanged) =====================
 const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [parsedData, setParsedData] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -181,23 +205,82 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [existingCustomers, setExistingCustomers] = useState([]);
   const [duplicateRows, setDuplicateRows] = useState([]);
   const [loadingExisting, setLoadingExisting] = useState(false);
-  const getRowKey = (row) => {
-    return [
-      (row.name || "").trim().toLowerCase(),
-      (row.typeOfBusiness || "").trim().toLowerCase(),
-      (row.customerNumber || "").trim().toLowerCase(),
-      (row.medicalRepName || "").trim().toLowerCase(),
-    ].join("||");
+  const [importWithCode, setImportWithCode] = useState(false);
+
+  // Helper: convert Excel serial number to YYYY-MM-DD (local date)
+  const excelSerialToDateStr = (serial) => {
+    const excelEpoch = new Date(1899, 11, 30);
+    const date = new Date(excelEpoch.getTime() + (serial - 1) * 86400000);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   };
+
+  const parseDateValue = (val) => {
+    if (!val) return "";
+    if (typeof val === "number") {
+      return excelSerialToDateStr(val);
+    }
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        return trimmed;
+      }
+      const d = new Date(trimmed);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      }
+    }
+    return "";
+  };
+
+  const getRowKey = (row) => {
+    const fields = [
+      row.date || "",
+      row.medicalRepName || "",
+      row.name || "",
+      row.typeOfBusiness || "",
+      row.customerNumber || "",
+      row.customerAddress || "",
+      row.zone || "",
+      row.province || "",
+      row.remark || "",
+    ];
+    return fields.map((f) => f.toString().trim().toLowerCase()).join("||");
+  };
+
   useEffect(() => {
     if (isOpen) fetchExistingCustomers();
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setParsedData([]);
+      setParseErrors([]);
+      setFileName("");
+      setDuplicateRows([]);
+      setImportWithCode(false);
+    }
+  }, [isOpen]);
+
   const fetchExistingCustomers = async () => {
     setLoadingExisting(true);
     try {
-      const res = await axios.get(`${backendUrl}/api/customers`);
-      console.log('values of res', res);
-      setExistingCustomers(Array.isArray(res.data) ? res.data : []);
+      const res = await axios.get(`${backendUrl}/api/customers?limit=10000`);
+      if (res.data.ok) {
+        const customers = res.data.customers || [];
+        setExistingCustomers(
+          customers.map((c) => ({
+            customerNumber: c.customerNumber,
+            name: c.name,
+            customerCode: c.customerCode,
+          })),
+        );
+      }
     } catch (error) {
       console.error("Failed to fetch existing customers", error);
       showToast(
@@ -208,11 +291,13 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
       setLoadingExisting(false);
     }
   };
+
   useEffect(() => {
     if (!parsedData.length) {
       setDuplicateRows([]);
       return;
     }
+
     const duplicateIndices = new Set();
     const keyCount = new Map();
     parsedData.forEach((row) => {
@@ -222,38 +307,32 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     parsedData.forEach((row, idx) => {
       if (keyCount.get(getRowKey(row)) > 1) duplicateIndices.add(idx);
     });
+
     if (existingCustomers.length > 0) {
-      const existingKeys = new Set(
-        existingCustomers.map((c) =>
-          getRowKey({
-            name: c.name || "",
-            typeOfBusiness: c.typeOfBusiness || "",
-            customerNumber: c.customerNumber || "",
-            medicalRepName: c.medicalRepName || "",
-          }),
-        ),
+      const existingNumbers = new Set(
+        existingCustomers
+          .map((c) => c.customerNumber?.trim().toLowerCase())
+          .filter(Boolean),
       );
+      const existingCodes = new Set(
+        existingCustomers
+          .map((c) => c.customerCode?.trim().toLowerCase())
+          .filter(Boolean),
+      );
+
       parsedData.forEach((row, idx) => {
-        if (existingKeys.has(getRowKey(row))) duplicateIndices.add(idx);
+        const num = row.customerNumber?.trim().toLowerCase();
+        if (num && existingNumbers.has(num)) duplicateIndices.add(idx);
+        if (importWithCode && row.customerCode) {
+          const code = row.customerCode?.trim().toLowerCase();
+          if (code && existingCodes.has(code)) duplicateIndices.add(idx);
+        }
       });
     }
+
     setDuplicateRows(parsedData.filter((_, idx) => duplicateIndices.has(idx)));
-  }, [parsedData, existingCustomers]);
-  const parseExcelDateValue = (dateValue) => {
-    if (!dateValue && dateValue !== 0) return formatDateToYYYYMMDD(new Date());
-    if (dateValue instanceof Date) return formatDateToYYYYMMDD(dateValue);
-    if (typeof dateValue === "number") {
-      const adjusted = dateValue >= 60 ? dateValue - 1 : dateValue;
-      const date = new Date((adjusted - 25569) * 86400 * 1000);
-      return formatDateToYYYYMMDD(date);
-    }
-    if (typeof dateValue === "string") {
-      const trimmed = dateValue.trim();
-      const parsed = new Date(trimmed);
-      if (!isNaN(parsed.getTime())) return formatDateToYYYYMMDD(parsed);
-    }
-    return formatDateToYYYYMMDD(new Date());
-  };
+  }, [parsedData, existingCustomers, importWithCode]);
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -261,112 +340,152 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     setParseErrors([]);
     setParsedData([]);
     setDuplicateRows([]);
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array", cellDates: true });
+        const workbook = XLSX.read(data, {
+          type: "array",
+          cellDates: true,
+          cellNF: false,
+          cellText: false,
+        });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: "",
+          blankrows: true,
+          raw: true,
+        });
+
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
-        // Helper to safely convert any value to a trimmed string
-        const safeString = (value) => {
-          if (value === undefined || value === null) return "";
-          return String(value).trim();
-        };
+
         let headerIdx = -1;
-        const requiredHeaders = [
-          "date",
-          "medical representative name",
-          "customer name in english",
-          "types of business",
-          "customer number",
-          "customer address",
-          "zone",
-          "province",
-        ];
-        for (let i = 0; i < Math.min(rows.length, 15); i++) {
-          const lowerRow = (rows[i] || []).map((c) =>
-            safeString(c).toLowerCase(),
-          );
-          if (requiredHeaders.every((h) => lowerRow.includes(h))) {
-            headerIdx = i;
-            break;
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          for (let j = 0; j < (rows[i]?.length || 0); j++) {
+            const cell = rows[i]?.[j]?.toString().trim().toLowerCase();
+            if (cell === "date" || cell === "joining date") {
+              headerIdx = i;
+              break;
+            }
           }
+          if (headerIdx !== -1) break;
         }
+
         if (headerIdx === -1) {
-          showToast("error", "Could not find required headers in Excel file");
+          showToast("error", "Header row not found.");
           return;
         }
-        const headers = rows[headerIdx].map((h) => safeString(h));
+
+        const headers = rows[headerIdx].map((h) => h.toString().trim());
         const dataRows = rows.slice(headerIdx + 1);
-        const validRows = [];
+
+        const getValue = (obj, keys) => {
+          for (const key of keys) {
+            for (const k in obj) {
+              if (
+                k.toLowerCase() === key.toLowerCase() &&
+                obj[k] !== undefined &&
+                obj[k] !== null &&
+                obj[k].toString().trim() !== ""
+              ) {
+                return obj[k];
+              }
+            }
+          }
+          return "";
+        };
+
         const rowErrors = [];
-        for (let i = 0; i < dataRows.length; i++) {
-          const row = dataRows[i];
+        const validRows = [];
+
+        dataRows.forEach((row, idx) => {
           const obj = {};
-          headers.forEach((h, idx) => {
-            obj[h] = row[idx] !== undefined ? row[idx] : "";
+          headers.forEach((h, i) => {
+            obj[h] = row[i] !== undefined ? row[i] : "";
           });
-          const dateVal = safeString(
-            obj["Date"] || obj["date"] || obj["Joining Date"] || "",
+          if (!Object.values(obj).some((v) => v.toString().trim() !== ""))
+            return;
+
+          const name = capitalizeFirstLetter(
+            String(
+              getValue(obj, [
+                "Customer Name in English",
+                "Customer Name",
+                "Name",
+              ]) || "",
+            ).trim(),
           );
-          const medicalRepName = safeString(
-            obj["Medical Representative Name"] ||
-              obj["medical representative name"] ||
-              "",
-          );
-          const name = safeString(
-            obj["Customer Name in English"] ||
-              obj["customer name in english"] ||
-              "",
-          );
-          const typeOfBusiness = safeString(
-            obj["Types of Business"] || obj["types of business"] || "",
-          );
-          const customerNumber = safeString(
-            obj["Customer Number"] || obj["customer number"] || "",
-          );
-          const address = safeString(
-            obj["Customer Address"] || obj["customer address"] || "",
-          );
-          const zone = safeString(obj["Zone"] || obj["zone"] || "");
-          const province = safeString(obj["Province"] || obj["province"] || "");
-          const remark = safeString(obj["Remark"] || obj["remark"] || "");
+          const customerNumber = String(
+            getValue(obj, [
+              "Customer Number",
+              "Customer Phone Number",
+              "Phone",
+              "Contact",
+            ]) || "",
+          ).trim();
+
           if (!name && !customerNumber) {
             rowErrors.push(
-              `Row ${headerIdx + i + 2}: Missing name or customer number — skipped`,
+              `Row ${headerIdx + idx + 2}: Missing name and number — skipped`,
             );
-            continue;
+            return;
           }
-          validRows.push({
-            date: parseExcelDateValue(dateVal),
-            medicalRepName,
+
+          const rawDate = getValue(obj, ["Date", "Joining Date"]);
+          const dateStr = parseDateValue(rawDate);
+
+          const rowData = {
+            date: dateStr,
+            medicalRepName: String(
+              getValue(obj, [
+                "Medical Representative Name",
+                "Medical Rep Name",
+                "MR Name",
+              ]) || "",
+            ).trim(),
             name,
-            typeOfBusiness,
+            typeOfBusiness: String(
+              getValue(obj, ["Types of Business", "Business Type", "Type"]) ||
+                "",
+            ).trim(),
             customerNumber,
-            address,
-            zone,
-            province,
-            remark,
-          });
+            customerAddress: String(
+              getValue(obj, ["Customer Address", "Address"]) || "",
+            ).trim(),
+            zone: String(getValue(obj, ["Zone"]) || "").trim(),
+            province: String(getValue(obj, ["Province"]) || "").trim(),
+            remark: String(
+              getValue(obj, ["Remark", "Notes", "Comments"]) || "",
+            ).trim(),
+          };
+
+          if (isWithCustomerCode && importWithCode) {
+            const code = String(
+              getValue(obj, ["Customer Code", "Code"]) || "",
+            ).trim();
+            if (code) rowData.customerCode = code;
+          }
+
+          validRows.push(rowData);
+        });
+
+        if (validRows.length === 0) {
+          showToast("warning", "No valid customer records found.");
+          return;
         }
+
         setParsedData(validRows);
         setParseErrors(rowErrors);
-        if (rowErrors.length) {
+        if (rowErrors.length)
           showToast(
             "warning",
             `${validRows.length} valid rows, ${rowErrors.length} skipped`,
           );
-        } else if (validRows.length > 0) {
-          showToast(
-            "success",
-            `${validRows.length} records loaded successfully`,
-          );
-        }
       } catch (err) {
         console.error("Parse error:", err);
         showToast("error", "Failed to parse file: " + err.message);
@@ -374,44 +493,53 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     };
     reader.readAsArrayBuffer(file);
   };
+
   const handleImport = async () => {
     if (!parsedData.length) {
       showToast("warning", "Upload a valid file first");
       return;
     }
-    const uniqueData = parsedData.filter(
-      (row) => !duplicateRows.some((d) => getRowKey(d) === getRowKey(row)),
-    );
+    const uniqueData = parsedData.filter((row) => !duplicateRows.includes(row));
     if (uniqueData.length === 0) {
       showToast("warning", "No unique records to import");
       return;
     }
+
     setIsUploading(true);
     try {
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
-        uniqueData,
         {
-          headers: { "Content-Type": "application/json" },
-          timeout: 60000,
+          customers: uniqueData,
+          importWithCode: isWithCustomerCode && importWithCode,
         },
+        { headers: { "Content-Type": "application/json" }, timeout: 60000 },
       );
-      showToast(
-        "success",
-        res.data.message ||
-          `Imported ${uniqueData.length} records successfully`,
-      );
-      onClose(true);
+      if (res.status === 200) {
+        showToast(
+          "success",
+          res.data.message ||
+            `Imported ${uniqueData.length} records successfully`,
+        );
+        onClose(true);
+      }
     } catch (err) {
       console.error("Import error:", err);
-      showToast("error", err.response?.data?.message || "Import failed");
+      let msg = "Import failed";
+      if (err.response?.data?.message) msg = err.response.data.message;
+      else if (err.request) msg = "No response from server. Check network.";
+      else msg = err.message || "Unknown error";
+      showToast("error", msg);
     } finally {
       setIsUploading(false);
     }
   };
+
   if (!isOpen) return null;
+  const isDuplicateRow = (row) => duplicateRows.includes(row);
+
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
       <div className="bg-white w-full max-w-lg p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
         <button
           onClick={() => onClose(false)}
@@ -420,8 +548,38 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
         >
           <X size={20} />
         </button>
+
         <h2 className="text-lg font-semibold mb-1">Import Customers</h2>
         {isSampleFile && <SampleExcelDownloadCustomer />}
+
+        {isWithCustomerCode && (
+          <div className="mb-3 flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <input
+              type="checkbox"
+              id="importWithCode"
+              checked={importWithCode}
+              onChange={(e) => {
+                setImportWithCode(e.target.checked);
+                setParsedData([]);
+                setParseErrors([]);
+                setFileName("");
+                setDuplicateRows([]);
+              }}
+              className="w-4 h-4 text-blue-600 cursor-pointer"
+            />
+            <label
+              htmlFor="importWithCode"
+              className="text-sm font-medium text-blue-800 cursor-pointer select-none"
+            >
+              Import with Customer Code
+              <span className="block text-xs text-blue-600 font-normal mt-0.5">
+                If checked, the "Customer Code" column from your file will be
+                used instead of auto-generating codes.
+              </span>
+            </label>
+          </div>
+        )}
+
         <div className="mb-4">
           <label className="block text-gray-700 mb-2 font-medium">
             Select File
@@ -436,25 +594,41 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             <p className="text-xs text-gray-500 mt-1">📄 {fileName}</p>
           )}
         </div>
+
         {loadingExisting && (
           <div className="mb-4 text-sm text-blue-600 flex items-center gap-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
             Loading existing customers for duplicate check...
           </div>
         )}
+
         {duplicateRows.length > 0 && (
           <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
               <AlertCircle size={16} className="text-red-600" />
               <span className="text-sm font-medium text-red-800">
                 {duplicateRows.length} duplicate row(s) found
+                {existingCustomers.length > 0 && " (by number or full match)"}
               </span>
             </div>
-            <p className="text-xs text-red-600">
-              Duplicate rows will be skipped during import.
+            <div className="max-h-24 overflow-y-auto text-xs text-red-700">
+              {duplicateRows.slice(0, 5).map((row, i) => (
+                <div key={i} className="mb-1">
+                  • {row.name} ({row.customerNumber})
+                  {row.customerCode ? ` [${row.customerCode}]` : ""}
+                </div>
+              ))}
+              {duplicateRows.length > 5 && (
+                <div>...and {duplicateRows.length - 5} more</div>
+              )}
+            </div>
+            <p className="text-xs text-red-600 mt-2">
+              Duplicate rows are highlighted in red below. They will be skipped
+              during import.
             </p>
           </div>
         )}
+
         {parsedData.length > 0 && (
           <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
@@ -468,8 +642,68 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                 )}
               </span>
             </div>
+            <div className="max-h-36 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-green-100">
+                  <tr>
+                    <th className="p-1 text-left">#</th>
+                    {isWithCustomerCode && importWithCode && (
+                      <th className="p-1 text-left">Code</th>
+                    )}
+                    <th className="p-1 text-left">Name</th>
+                    <th className="p-1 text-left">MR</th>
+                    <th className="p-1 text-left">Number</th>
+                    <th className="p-1 text-left">Zone</th>
+                   </tr>
+                </thead>
+                <tbody>
+                  {parsedData.slice(0, 5).map((row, i) => {
+                    const duplicate = isDuplicateRow(row);
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-t ${duplicate ? "bg-red-100 text-red-800 font-medium" : ""}`}
+                      >
+                        <td className="p-1 text-gray-500">{i + 1}</td>
+                        {isWithCustomerCode && importWithCode && (
+                          <td className="p-1 font-mono">
+                            {row.customerCode || "—"}
+                          </td>
+                        )}
+                        <td className="p-1">{row.name || "—"}</td>
+                        <td className="p-1">{row.medicalRepName || "—"}</td>
+                        <td className="p-1">{row.customerNumber || "—"}</td>
+                        <td className="p-1">{row.zone || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {parsedData.length > 5 && (
+                <p className="text-xs text-gray-500 text-center mt-1">
+                  ...and {parsedData.length - 5} more rows
+                </p>
+              )}
+            </div>
           </div>
         )}
+
+        {parseErrors.length > 0 && (
+          <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-h-28 overflow-y-auto">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle size={14} className="text-yellow-600" />
+              <span className="text-xs font-medium text-yellow-800">
+                {parseErrors.length} rows skipped
+              </span>
+            </div>
+            {parseErrors.slice(0, 5).map((err, i) => (
+              <p key={i} className="text-xs text-yellow-700">
+                {err}
+              </p>
+            ))}
+          </div>
+        )}
+
         <div className="flex justify-end mt-4 gap-3">
           <button
             onClick={() => onClose(false)}
@@ -481,7 +715,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           <button
             onClick={handleImport}
             disabled={isUploading || parsedData.length === 0 || loadingExisting}
-            className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 flex items-center gap-2"
+            className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {isUploading ? (
               <>
@@ -498,7 +732,8 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     document.body,
   );
 };
-// ===================== MAIN COMPONENT =====================
+
+// ===================== MAIN CUSTOMER COMPONENT (with mobile view) =====================
 const Customer = () => {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
@@ -510,28 +745,39 @@ const Customer = () => {
   const [totalCustomers, setTotalCustomers] = useState(0);
   const [showImportModal, setShowImportModal] = useState(false);
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
-  const [isMobileView, setIsMobileView] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const inputRef = useRef(null);
+
   const [provinces, setProvinces] = useState([]);
   const [mrList, setMrList] = useState([]);
   const [zones, setZones] = useState([]);
   const [businessTypes, setBusinessTypes] = useState([]);
   const [isDropdownsLoading, setIsDropdownsLoading] = useState(true);
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [errors, setErrors] = useState({});
+
   const [isDuplicateNumber, setIsDuplicateNumber] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
-  const inputRef = useRef(null);
+  const duplicateCheckTimeoutRef = useRef(null);
+
+  // Mobile view states
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const {
     form,
-    errors,
     handleChange,
     handleNumericInput,
     validateForm,
     resetForm,
     setForm,
+    toTitleCase,
+    toLowerCase,
   } = useCustomerForm();
-  const displayValue = (value) => (value ? capitalizeFirstLetter(value) : "--");
+
+  const displayValue = (value) => (value ? toTitleCase(value) : "--");
+
   // Mobile detection
   useEffect(() => {
     const checkMobile = () => setIsMobileView(window.innerWidth < 768);
@@ -539,15 +785,30 @@ const Customer = () => {
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+
   useEffect(() => {
-    if (searchTerm) setCurrentPage(1);
+    if (!isEditModalOpen) {
+      setIsDuplicateNumber(false);
+      setCheckingDuplicate(false);
+      if (duplicateCheckTimeoutRef.current)
+        clearTimeout(duplicateCheckTimeoutRef.current);
+    }
+  }, [isEditModalOpen]);
+
+  useEffect(() => {
+    if (!searchTerm) return;
+    const timer = setTimeout(() => setCurrentPage(1), 500);
+    return () => clearTimeout(timer);
   }, [searchTerm]);
+
   useEffect(() => {
     fetchCustomers();
   }, [currentPage, searchTerm]);
+
   useEffect(() => {
     fetchDropdownData();
   }, []);
+
   const fetchDropdownData = async () => {
     try {
       setIsDropdownsLoading(true);
@@ -562,11 +823,13 @@ const Customer = () => {
       if (zRes.success) setZones(zRes.data || []);
       if (btRes.success) setBusinessTypes(btRes.data || []);
     } catch (err) {
+      console.error("Dropdown fetch error:", err);
       showToast("error", "Failed to load dropdown data");
     } finally {
       setIsDropdownsLoading(false);
     }
   };
+
   const fetchCustomers = async () => {
     try {
       setLoading(true);
@@ -589,6 +852,7 @@ const Customer = () => {
       setLoading(false);
     }
   };
+
   const toggleSelect = useCallback((customer) => {
     setSelected((prev) =>
       prev.some((c) => c.id === customer._id)
@@ -596,6 +860,7 @@ const Customer = () => {
         : [...prev, { id: customer._id, name: customer.name }],
     );
   }, []);
+
   const toggleSelectAll = useCallback(
     (checked) => {
       setSelected(
@@ -604,6 +869,7 @@ const Customer = () => {
     },
     [customers],
   );
+
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> customer(s)?`,
@@ -622,10 +888,15 @@ const Customer = () => {
           setSelected([]);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected customers.");
+        showToast(
+          "error",
+          error.response?.data?.message ||
+            "Failed to delete selected customers.",
+        );
       }
     }
   };
+
   const deleteCustomer = async (customer) => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${customer.name}</b> (Code: ${customer.customerCode})?`,
@@ -643,10 +914,14 @@ const Customer = () => {
           fetchCustomers();
         }
       } catch (error) {
-        showToast("error", "Failed to delete customer.");
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to delete customer.",
+        );
       }
     }
   };
+
   const handleView = useCallback(
     (customer) => {
       setForm(customer);
@@ -654,16 +929,17 @@ const Customer = () => {
     },
     [setForm],
   );
+
   const handleEdit = useCallback(
     (customer) => {
       let actualMrId = customer.medicalRepId || "";
       if (!actualMrId && customer.medicalRepName && mrList.length) {
         const found = mrList.find(
           (mr) =>
-            (mr.medicalRepName || "").toLowerCase() ===
+            (mr.medicalRepName || mr.staffName || "").toLowerCase() ===
             customer.medicalRepName.toLowerCase(),
         );
-        actualMrId = found?._id || "";
+        actualMrId = found?._id || found?.id || "";
       }
       setForm({
         customerCode: customer.customerCode || "",
@@ -684,6 +960,100 @@ const Customer = () => {
     },
     [mrList, setForm],
   );
+
+  const handleStatusToggle = async (id) => {
+    try {
+      const customerToToggle = customers.find((c) => c._id === id);
+      if (!customerToToggle) {
+        showToast("error", "Customer not found");
+        return;
+      }
+      const newStatus = !customerToToggle.enabled;
+      setCustomers((prev) =>
+        prev.map((c) => (c._id === id ? { ...c, enabled: newStatus } : c)),
+      );
+      await axios.put(`${backendUrl}/api/customers/${id}`, {
+        enabled: newStatus,
+      });
+      showToast(
+        "success",
+        `Customer <b>${customerToToggle.name}</b> ${newStatus ? "enabled" : "disabled"} successfully`,
+      );
+    } catch (error) {
+      fetchCustomers();
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to update status.",
+      );
+    }
+  };
+
+  const handleMRChange = useCallback(
+    (option) => {
+      const mrId = option || "";
+      const selectedMR = mrList.find((mr) => mr._id === mrId);
+      setForm((prev) => ({
+        ...prev,
+        medicalRepId: mrId,
+        medicalRepName: selectedMR?.medicalRepName || "",
+      }));
+      if (errors.medicalRepId)
+        setErrors((prev) => ({ ...prev, medicalRepId: "" }));
+    },
+    [mrList, errors],
+  );
+
+  const handleBusinessTypeChange = useCallback(
+    (option) => {
+      setForm((prev) => ({ ...prev, typeOfBusiness: option || "" }));
+      if (errors.typeOfBusiness)
+        setErrors((prev) => ({ ...prev, typeOfBusiness: "" }));
+    },
+    [errors],
+  );
+
+  const handleZoneChange = useCallback(
+    (option) => {
+      setForm((prev) => ({ ...prev, zone: option || "" }));
+      if (errors.zone) setErrors((prev) => ({ ...prev, zone: "" }));
+    },
+    [errors],
+  );
+
+  const handleProvinceChange = useCallback(
+    (option) => {
+      setForm((prev) => ({ ...prev, province: option || "" }));
+      if (errors.province) setErrors((prev) => ({ ...prev, province: "" }));
+    },
+    [errors],
+  );
+
+  const performDuplicateCheck = useCallback(
+    async (number) => {
+      if (!number) {
+        setIsDuplicateNumber(false);
+        return;
+      }
+      setCheckingDuplicate(true);
+      try {
+        const res = await axios.get(`${backendUrl}/api/customers`, {
+          params: { search: number, limit: 100 },
+        });
+        if (res.data.ok) {
+          const found = res.data.customers.find(
+            (c) => c.customerNumber === number && c._id !== form._id,
+          );
+          setIsDuplicateNumber(!!found);
+        }
+      } catch (err) {
+        setIsDuplicateNumber(false);
+      } finally {
+        setCheckingDuplicate(false);
+      }
+    },
+    [form._id],
+  );
+
   const handleCustomerUpdate = async (e) => {
     e.preventDefault();
     if (!validateForm()) {
@@ -700,15 +1070,15 @@ const Customer = () => {
     try {
       const payload = {
         date: form.date,
-        medicalRepName: form.medicalRepName.toLowerCase(),
+        medicalRepName: toLowerCase(form.medicalRepName),
         medicalRepId: form.medicalRepId,
         name: form.name,
-        typeOfBusiness: form.typeOfBusiness.toLowerCase(),
+        typeOfBusiness: toLowerCase(form.typeOfBusiness),
         customerNumber: form.customerNumber,
-        address: form.address.toLowerCase(),
-        zone: form.zone.toLowerCase(),
-        province: form.province.toLowerCase(),
-        remark: form.remark.toLowerCase(),
+        address: toLowerCase(form.address),
+        zone: toLowerCase(form.zone),
+        province: toLowerCase(form.province),
+        remark: toLowerCase(form.remark),
       };
       const res = await axios.put(
         `${backendUrl}/api/customers/${form._id}`,
@@ -727,11 +1097,16 @@ const Customer = () => {
       );
     }
   };
+
   const handleImportClose = (shouldRefresh) => {
     setShowImportModal(false);
     if (shouldRefresh) fetchCustomers();
   };
-  const handleIconClick = () => inputRef.current?.focus();
+
+  const handleIconClick = () => {
+    inputRef.current?.focus();
+  };
+
   const handleDownloadAll = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/customers/export`, {
@@ -748,13 +1123,15 @@ const Customer = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       showToast("error", "Failed to download customer list");
+      console.error(err);
     }
   };
+
   const provinceOptions = useMemo(
     () =>
       provinces.map((p) => ({
         value: p.name.toLowerCase(),
-        label: capitalizeFirstLetter(p.name),
+        label: toTitleCase(p.name),
       })),
     [provinces],
   );
@@ -762,29 +1139,31 @@ const Customer = () => {
     () =>
       mrList.map((mr) => ({
         value: mr._id,
-        label: capitalizeFirstLetter(mr.medicalRepName),
+        label: toTitleCase(mr.medicalRepName),
       })),
     [mrList],
   );
   const zoneOptions = useMemo(
     () =>
-      zones.map((z) => ({
-        value: (typeof z === "string" ? z : z.name || "").toLowerCase(),
-        label: capitalizeFirstLetter(typeof z === "string" ? z : z.name || ""),
-      })),
+      zones.map((z, i) => {
+        const val = typeof z === "string" ? z : z.name || `Zone ${i + 1}`;
+        return { value: val.toLowerCase(), label: toTitleCase(val) };
+      }),
     [zones],
   );
   const businessTypeOptions = useMemo(
     () =>
-      businessTypes.map((t) => ({
-        value: (typeof t === "string" ? t : t.name || "").toLowerCase(),
-        label: capitalizeFirstLetter(typeof t === "string" ? t : t.name || ""),
-      })),
+      businessTypes.map((t) => {
+        const name = typeof t === "string" ? t : t.name || t.label || "Unknown";
+        return { value: name.toLowerCase(), label: toTitleCase(name) };
+      }),
     [businessTypes],
   );
   const visiblePages = getVisiblePages(currentPage, totalPages);
+
   if (loading && customers.length === 0)
     return <LoadingOverlay text="Please wait..." />;
+
   return (
     <div className="p-4 md:p-6 relative">
       {isMobileView && (
@@ -800,6 +1179,7 @@ const Customer = () => {
         isSampleFile={isSampleFile}
         mrList={mrList}
       />
+
       <div className="container mx-auto">
         {/* Mobile Header */}
         {isMobileView && (
@@ -815,6 +1195,7 @@ const Customer = () => {
             </div>
           </div>
         )}
+
         {/* Desktop Action Bar */}
         <div className="flex flex-wrap justify-between items-center mb-4 gap-3">
           <div className="flex flex-wrap gap-3">
@@ -857,9 +1238,12 @@ const Customer = () => {
           </div>
           {!isMobileView && (
             <div className="flex items-center gap-8">
-              <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
-                Total Customer: {totalCustomers}
-              </div>
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {totalCustomers}
+                </span>
+              </p>
               <div className="relative w-full md:w-72">
                 <Search
                   className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -878,6 +1262,7 @@ const Customer = () => {
             </div>
           )}
         </div>
+
         {/* Mobile Search */}
         {isMobileView && (
           <div className="relative mt-2">
@@ -895,12 +1280,14 @@ const Customer = () => {
             />
           </div>
         )}
+
         {searchTerm && (
           <p className="text-xs text-gray-500 mt-2">
             Showing results for "{searchTerm}" – {totalCustomers} customer(s)
             found.
           </p>
         )}
+
         {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
@@ -919,7 +1306,9 @@ const Customer = () => {
                   </th>
                 )}
                 <th
-                  className={`p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
+                  className={`p-3 whitespace-nowrap ${
+                    isMobileView ? "text-[10px]" : "text-sm"
+                  } font-medium`}
                 >
                   Customer Code
                 </th>
@@ -934,7 +1323,9 @@ const Customer = () => {
                 ].map((h) => (
                   <th
                     key={h}
-                    className={`p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
+                    className={`p-3 whitespace-nowrap ${
+                      isMobileView ? "text-[10px]" : "text-sm"
+                    } font-medium`}
                   >
                     {h}
                   </th>
@@ -951,7 +1342,9 @@ const Customer = () => {
                 )}
                 {isMobileView && (
                   <th
-                    className={`p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
+                    className={`p-3 whitespace-nowrap ${
+                      isMobileView ? "text-[10px]" : "text-sm"
+                    } font-medium`}
                   >
                     Action
                   </th>
@@ -968,15 +1361,17 @@ const Customer = () => {
                     {loading
                       ? "Loading..."
                       : searchTerm
-                        ? "No customers found matching your search."
-                        : "No customers found. Add your first customer."}
+                      ? "No customers found matching your search."
+                      : "No customers found. Add your first customer using the 'Add New Customer' button above."}
                   </td>
                 </tr>
               ) : (
                 customers.map((customer, idx) => (
                   <tr
                     key={customer._id}
-                    className={`hover:bg-gray-50 ${idx < customers.length - 1 ? "border-b" : ""}`}
+                    className={`hover:bg-gray-50 ${
+                      idx < customers.length - 1 ? "border-b" : ""
+                    }`}
                   >
                     {!isMobileView && (
                       <td className="p-3">
@@ -988,44 +1383,60 @@ const Customer = () => {
                       </td>
                     )}
                     <td
-                      className={`p-3 ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       <span className="font-mono font-semibold text-blue-600">
                         {customer.customerCode}
                       </span>
                     </td>
                     <td
-                      className={`p-3 ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       {capitalizeFirstLetter(customer.name)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 capitalize ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       {displayValue(customer.typeOfBusiness)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 capitalize ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       {displayValue(customer.medicalRepName)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 capitalize ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       {displayValue(customer.address)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 capitalize ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       {displayValue(customer.zone)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 capitalize ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       {displayValue(customer.province)}
                     </td>
                     <td
-                      className={`p-3 whitespace-nowrap ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      className={`p-3 whitespace-nowrap ${
+                        isMobileView ? "text-[9px]" : "text-sm"
+                      }`}
                     >
                       {customer.date
                         ? formatDateForDisplay(customer.date)
@@ -1035,32 +1446,34 @@ const Customer = () => {
                       <>
                         <td className="p-3">
                           <button
-                            onClick={() => {
-                              /* handleStatusToggle if needed */
-                            }}
-                            className={`px-3 py-1 rounded-full text-sm cursor-pointer ${customer.enabled ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-600"}`}
+                            onClick={() => handleStatusToggle(customer._id)}
+                            className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
+                              customer.enabled
+                                ? "bg-green-100 text-green-600"
+                                : "bg-gray-200 text-gray-600"
+                            }`}
                           >
                             {customer.enabled ? "Enabled" : "Disabled"}
                           </button>
                         </td>
                         <td className="p-3 flex items-center justify-center gap-3">
                           <button
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
                             onClick={() => handleView(customer)}
-                            className="text-blue-600 hover:text-blue-800"
                             title="View"
                           >
                             <Eye size={18} />
                           </button>
                           <button
+                            className="text-green-600 hover:text-green-800 cursor-pointer"
                             onClick={() => handleEdit(customer)}
-                            className="text-green-600 hover:text-green-800"
                             title="Edit"
                           >
                             <Edit size={18} />
                           </button>
                           <button
+                            className="text-red-600 hover:text-red-800 cursor-pointer"
                             onClick={() => deleteCustomer(customer)}
-                            className="text-red-600 hover:text-red-800"
                             title="Delete"
                           >
                             <Trash2 size={18} />
@@ -1085,10 +1498,13 @@ const Customer = () => {
             </tbody>
           </table>
         </div>
+
         {/* Pagination */}
         {customers.length > 0 && totalPages > 1 && (
           <div
-            className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center" : "justify-start"}`}
+            className={`mt-4 p-5 flex gap-2 ${
+              isMobileView ? "justify-center" : "justify-start"
+            }`}
           >
             <button
               onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
@@ -1101,13 +1517,19 @@ const Customer = () => {
               <button
                 key={index}
                 onClick={() => typeof p === "number" && setCurrentPage(p)}
-                className={`px-4 py-2 rounded ${currentPage === p ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                className={`px-4 py-2 rounded ${
+                  currentPage === p
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+                }`}
               >
                 {p}
               </button>
             ))}
             <button
-              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              onClick={() =>
+                setCurrentPage((p) => Math.min(p + 1, totalPages))
+              }
               disabled={currentPage === totalPages}
               className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
@@ -1115,6 +1537,7 @@ const Customer = () => {
             </button>
           </div>
         )}
+
         {/* VIEW MODAL */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
@@ -1187,6 +1610,7 @@ const Customer = () => {
             </div>,
             document.body,
           )}
+
         {/* EDIT MODAL */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
@@ -1205,12 +1629,15 @@ const Customer = () => {
                 <form onSubmit={handleCustomerUpdate}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <InputField
-                        label="Customer Code"
-                        value={form.customerCode}
-                        disabled
-                        className="bg-gray-100"
-                      />
+                      <label className="block text-sm font-medium text-gray-600">
+                        Customer Code
+                      </label>
+                      <div className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300 font-mono font-semibold">
+                        {form.customerCode}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Customer code cannot be changed
+                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
@@ -1221,7 +1648,14 @@ const Customer = () => {
                         value={form.name || ""}
                         onChange={(e) => handleChange("name", e.target.value)}
                         error={errors.name}
+                        className="px-3 py-2 border-gray-300 border rounded-lg w-full"
+                        placeholder="Enter customer name"
                       />
+                      {errors.name && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.name}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
@@ -1230,11 +1664,29 @@ const Customer = () => {
                       <InputField
                         type="text"
                         value={form.customerNumber || ""}
-                        onChange={(e) =>
-                          handleNumericInput(e, "customerNumber")
-                        }
+                        onChange={(e) => {
+                          handleNumericInput(e, "customerNumber");
+                          if (duplicateCheckTimeoutRef.current)
+                            clearTimeout(duplicateCheckTimeoutRef.current);
+                          duplicateCheckTimeoutRef.current = setTimeout(
+                            () => performDuplicateCheck(e.target.value),
+                            500,
+                          );
+                        }}
                         placeholder="Numbers only"
+                        className="px-3 py-2 border-gray-300 border rounded-lg w-full"
                       />
+                      {checkingDuplicate && (
+                        <p className="text-gray-500 text-sm mt-1">
+                          Checking uniqueness...
+                        </p>
+                      )}
+                      {isDuplicateNumber && (
+                        <p className="text-red-500 text-sm mt-1">
+                          This customer number is already used by another
+                          customer.
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
@@ -1242,11 +1694,16 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.typeOfBusiness?.toLowerCase() || ""}
-                        onChange={(val) => handleChange("typeOfBusiness", val)}
+                        value={
+                          form.typeOfBusiness
+                            ? form.typeOfBusiness.toLowerCase()
+                            : ""
+                        }
+                        onChange={handleBusinessTypeChange}
                         options={businessTypeOptions}
                         placeholder="Select Business Type"
                         required
+                        loading={isDropdownsLoading}
                         error={errors.typeOfBusiness}
                       />
                     </div>
@@ -1257,10 +1714,11 @@ const Customer = () => {
                       </label>
                       <SearchableDropdown
                         value={form.medicalRepId || ""}
-                        onChange={(val) => handleChange("medicalRepId", val)}
+                        onChange={handleMRChange}
                         options={mrOptions}
                         placeholder="Select MR"
                         required
+                        loading={isDropdownsLoading}
                         error={errors.medicalRepId}
                       />
                     </div>
@@ -1269,11 +1727,12 @@ const Customer = () => {
                         Zone <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.zone?.toLowerCase() || ""}
-                        onChange={(val) => handleChange("zone", val)}
+                        value={form.zone ? form.zone.toLowerCase() : ""}
+                        onChange={handleZoneChange}
                         options={zoneOptions}
                         placeholder="Select Zone"
                         required
+                        loading={isDropdownsLoading}
                         error={errors.zone}
                       />
                     </div>
@@ -1282,11 +1741,12 @@ const Customer = () => {
                         Province <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.province?.toLowerCase() || ""}
-                        onChange={(val) => handleChange("province", val)}
+                        value={form.province ? form.province.toLowerCase() : ""}
+                        onChange={handleProvinceChange}
                         options={provinceOptions}
                         placeholder="Select Province"
                         required
+                        loading={isDropdownsLoading}
                         error={errors.province}
                       />
                     </div>
@@ -1305,9 +1765,15 @@ const Customer = () => {
                           )
                         }
                         dateFormat="yyyy-MM-dd"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        placeholderText="Select date"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200"
                         isClearable
                       />
+                      {errors.date && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.date}
+                        </p>
+                      )}
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-600">
@@ -1318,8 +1784,9 @@ const Customer = () => {
                         onChange={(e) =>
                           handleChange("address", e.target.value)
                         }
-                        className="w-full rounded-lg border border-gray-300 p-3 resize-none"
+                        className="w-full rounded-lg border border-gray-300 p-3 focus:ring-2 focus:ring-indigo-200 resize-none"
                         rows={2}
+                        placeholder="Enter address"
                       />
                     </div>
                     <div className="md:col-span-2">
@@ -1329,8 +1796,9 @@ const Customer = () => {
                       <textarea
                         value={form.remark || ""}
                         onChange={(e) => handleChange("remark", e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 p-3 resize-none"
+                        className="w-full rounded-lg border border-gray-300 p-3 focus:ring-2 focus:ring-indigo-200 resize-none"
                         rows={3}
+                        placeholder="Enter any remarks"
                       />
                     </div>
                   </div>
@@ -1347,7 +1815,8 @@ const Customer = () => {
                     </button>
                     <button
                       type="submit"
-                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                      disabled={isDuplicateNumber || checkingDuplicate}
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer disabled:opacity-50"
                     >
                       Update Customer
                     </button>
@@ -1361,4 +1830,5 @@ const Customer = () => {
     </div>
   );
 };
+
 export default Customer;

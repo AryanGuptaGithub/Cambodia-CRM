@@ -40,79 +40,53 @@ const toTitleCase = (str) => {
     .join(" ");
 };
 
-/**
- * Parse any date input into a Date object set to UTC noon.
- * Handles:
- * - null/undefined → today
- * - Date object → extracts UTC year/month/day
- * - string in YYYY-MM-DD → parses as UTC
- * - number (Excel serial) → converts using Excel epoch (1899-12-30)
- * - any other string → attempts to parse with `new Date()` (fallback)
- */
 const parseCustomerDate = (dateInput) => {
   let year, month, day;
 
-  // If no input, use today's date (UTC)
   if (!dateInput) {
     const now = new Date();
     year = now.getUTCFullYear();
     month = now.getUTCMonth();
     day = now.getUTCDate();
-  }
-  // If it's already a Date object, extract UTC components
-  else if (dateInput instanceof Date) {
+  } else if (dateInput instanceof Date) {
     year = dateInput.getUTCFullYear();
     month = dateInput.getUTCMonth();
     day = dateInput.getUTCDate();
-  }
-  // If it's a number, treat as Excel serial date
-  else if (typeof dateInput === "number") {
-    // Excel serial date: days since 1899-12-30
-    // (Excel incorrectly treats 1900 as leap year, but for dates after 1900 it's fine)
-    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // 1899-12-30 UTC
+  } else if (typeof dateInput === "number") {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
     const date = new Date(excelEpoch.getTime() + (dateInput - 1) * 86400000);
     year = date.getUTCFullYear();
     month = date.getUTCMonth();
     day = date.getUTCDate();
-  }
-  // If it's a string, try to parse YYYY-MM-DD first
-  else if (typeof dateInput === "string") {
+  } else if (typeof dateInput === "string") {
     const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (match) {
       year = parseInt(match[1], 10);
       month = parseInt(match[2], 10) - 1;
       day = parseInt(match[3], 10);
     } else {
-      // Fallback to general parsing
       const parsed = new Date(dateInput);
       if (!isNaN(parsed.getTime())) {
         year = parsed.getUTCFullYear();
         month = parsed.getUTCMonth();
         day = parsed.getUTCDate();
       } else {
-        // Invalid string → use today
         const now = new Date();
         year = now.getUTCFullYear();
         month = now.getUTCMonth();
         day = now.getUTCDate();
       }
     }
-  }
-  // Any other type → use today
-  else {
+  } else {
     const now = new Date();
     year = now.getUTCFullYear();
     month = now.getUTCMonth();
     day = now.getUTCDate();
   }
 
-  // Return a Date object set to UTC noon of that day
   return new Date(Date.UTC(year, month, day, 12, 0, 0));
 };
 
-/**
- * Format a Date object to YYYY-MM-DD using UTC components.
- */
 const formatDateForResponse = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "";
   const year = date.getUTCFullYear();
@@ -140,11 +114,9 @@ const formatCustomerResponse = (customer) => {
 const generateNextCustomerCode = async () => {
   try {
     const last = await Customer.findOne({})
-      .collation({ locale: "en", numericOrdering: true }) // ← ADD THIS
       .sort({ customerCode: -1 })
       .select("customerCode");
 
-      console.log("last", last);
     let nextCode = 1;
     if (last?.customerCode) {
       const match = last.customerCode.match(/\d+/);
@@ -153,12 +125,13 @@ const generateNextCustomerCode = async () => {
         if (!isNaN(parsed)) nextCode = parsed + 1;
       }
     }
-    console.log('values of nextCode.toString().padStart(5, "0")', nextCode.toString().padStart(5, "0"));
+
     return nextCode.toString().padStart(5, "0");
   } catch {
     return "00001";
   }
 };
+
 const generateCustomerKey = (customer) => {
   const {
     name = "",
@@ -186,9 +159,7 @@ const generateCustomerKey = (customer) => {
   });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Routes
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Routes ────────────────────────────────────────────────────────────────────
 
 router.get("/dropdown", async (req, res) => {
   try {
@@ -224,9 +195,7 @@ router.get("/provinces", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 // POST / – Create single customer
-// ─────────────────────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   try {
     const { customerNumber, date, ...data } = req.body;
@@ -302,26 +271,48 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /import – Bulk import with optional customer codes
-// ─────────────────────────────────────────────────────────────────────────────
+// POST /import – Bulk import customers from parsed Excel/JSON data
 router.post("/import", async (req, res) => {
   try {
-    let customers, importWithCode;
+    console.log("Import request received");
+    console.log("Request body structure:", Object.keys(req.body));
+
+    let customers,
+      importWithCode = false;
+
+    // Handle different request formats
     if (Array.isArray(req.body)) {
       customers = req.body;
       importWithCode = false;
-    } else {
+    } else if (
+      req.body &&
+      req.body.customers &&
+      Array.isArray(req.body.customers)
+    ) {
       customers = req.body.customers;
       importWithCode = req.body.importWithCode === true;
+    } else if (req.body && Array.isArray(req.body)) {
+      customers = req.body;
+    } else {
+      console.error("Invalid request format:", req.body);
+      return res.status(400).json({
+        message:
+          "Invalid request format. Expected array of customers or { customers: [], importWithCode: boolean }",
+        ok: false,
+      });
     }
 
-    if (!Array.isArray(customers) || customers.length === 0) {
+    if (!customers || customers.length === 0) {
       return res.status(400).json({
         message: "No customers found in the uploaded file.",
         ok: false,
       });
     }
+
+    console.log(
+      `Processing ${customers.length} customers, importWithCode: ${importWithCode}`,
+    );
+    console.log("Sample customer data:", customers[0]);
 
     // Fetch all MRs for mapping
     const mrList = await MedicalRep.find().select(
@@ -335,22 +326,20 @@ router.post("/import", async (req, res) => {
       if (staff) mrMap.set(staff, mr.userId?.toString());
     });
 
-    // Get the highest existing customer code for auto‑generation
+    // Always compute nextCode — needed as fallback even when importWithCode=true
+    // (rows that have no customerCode in the file will get an auto-generated one)
+    const highest = await Customer.findOne({})
+      .sort({ customerCode: -1 })
+      .select("customerCode");
     let nextCode = 1;
-    if (!importWithCode) {
-      const highest = await Customer.findOne({})
-        .sort({ customerCode: -1 })
-        .select("customerCode");
-      if (highest?.customerCode) {
-        const match = highest.customerCode.match(/\d+/);
-        if (match) {
-          const parsed = parseInt(match[0], 10);
-          if (!isNaN(parsed)) nextCode = parsed + 1;
-        }
+    if (highest?.customerCode) {
+      const match = highest.customerCode.match(/\d+/);
+      if (match) {
+        const parsed = parseInt(match[0], 10);
+        if (!isNaN(parsed)) nextCode = parsed + 1;
       }
     }
 
-    // Load existing customers for duplicate checks
     const allExistingCustomers = await Customer.find(
       {},
       {
@@ -375,10 +364,10 @@ router.post("/import", async (req, res) => {
         existingCodeSet.add(cust.customerCode.toLowerCase());
     });
 
-    // Intra‑batch duplicate detection (full row)
     const rowKeyMap = new Map();
     const batchDuplicateIndices = new Set();
     customers.forEach((item, idx) => {
+      if (!item) return;
       const key = generateCustomerKey(item);
       if (rowKeyMap.has(key)) {
         batchDuplicateIndices.add(idx);
@@ -388,7 +377,7 @@ router.post("/import", async (req, res) => {
       }
     });
 
-    // Intra‑batch duplicate code detection (when importWithCode)
+    // Check for duplicate customerCodes within the batch (only for rows that actually have a code)
     const batchCodeMap = new Map();
     if (importWithCode) {
       customers.forEach((item, idx) => {
@@ -413,75 +402,112 @@ router.post("/import", async (req, res) => {
       const rowNumber = i + 1;
 
       try {
-        const name = safeStr(item.name).toLowerCase();
+        // Validate required fields
+        const name = safeStr(
+          item.name ||
+            item["Customer Name in English"] ||
+            item["Customer Name"] ||
+            "",
+        );
         if (!name) {
           errors.push(`Row ${rowNumber}: Customer name is required`);
           continue;
         }
 
-        const customerNumber = safeStr(item.customerNumber);
+        const customerNumber = safeStr(
+          item.customerNumber || item["Customer Number"] || "",
+        );
 
-        // Full-row duplicate check against DB
-        const rowKey = generateCustomerKey(item);
+        // Handle address field (could be customerAddress or address)
+        const address = safeStr(item.address || item.customerAddress || "");
+
+        // Handle other fields
+        const medicalRepName = safeStr(
+          item.medicalRepName || item["Medical Representative Name"] || "",
+        );
+        const typeOfBusiness = safeStr(
+          item.typeOfBusiness || item["Types of Business"] || "",
+        );
+        const zone = safeStr(item.zone || "");
+        const province = safeStr(item.province || "");
+        const remark = safeStr(item.remark || "");
+
+        // Handle date
+        let dateValue = item.date;
+        if (!dateValue && item["Joining Date"])
+          dateValue = item["Joining Date"];
+        if (!dateValue && item.Date) dateValue = item.Date;
+
+        const rowKey = generateCustomerKey({
+          name,
+          date: dateValue,
+          medicalRepName,
+          typeOfBusiness,
+          customerNumber,
+          address,
+          zone,
+          province,
+          remark,
+        });
+
         if (existingCustomerKeys.has(rowKey)) {
           duplicates.push({
             row: rowNumber,
-            name: item.name,
-            customerNumber,
+            name: name,
+            customerNumber: customerNumber,
             reason:
               "Exactly the same customer already exists in database (all fields match)",
           });
           continue;
         }
 
-        // Intra-batch duplicate check
         if (batchDuplicateIndices.has(i)) {
           duplicates.push({
             row: rowNumber,
-            name: item.name,
-            customerNumber,
+            name: name,
+            customerNumber: customerNumber,
             reason: "Duplicate row within the uploaded file",
           });
           continue;
         }
 
-        // Customer code handling
+        // ── FIX: Determine customer code ──────────────────────────────────────
+        // When importWithCode=true, use the provided code if present.
+        // If the row has no customerCode (or importWithCode=false), auto-generate.
+        // Previously, a missing code when importWithCode=true caused an error and
+        // skipped the row — now we gracefully fall back to auto-generation.
         let customerCode;
-        if (importWithCode) {
-          customerCode = safeStr(item.customerCode);
-          if (!customerCode) {
-            errors.push(
-              `Row ${rowNumber}: Customer code is required when importing with code`,
-            );
-            continue;
-          }
+        const providedCode = importWithCode ? safeStr(item.customerCode) : "";
+
+        if (providedCode) {
+          // Use provided code but guard against DB duplicates
+          customerCode = providedCode;
           if (existingCodeSet.has(customerCode.toLowerCase())) {
             duplicates.push({
               row: rowNumber,
-              name: item.name,
-              customerNumber,
+              name: name,
+              customerNumber: customerNumber,
               reason: `Customer code "${customerCode}" already exists in database`,
             });
             continue;
           }
-          // Reserve this code for this batch
           existingCodeSet.add(customerCode.toLowerCase());
         } else {
-          // Auto-generate code, ensuring it doesn't clash with DB or previously assigned codes in this batch
+          // Auto-generate, skipping any codes already taken
           let candidate = nextCode.toString().padStart(5, "0");
           while (existingCodeSet.has(candidate.toLowerCase())) {
             nextCode++;
             candidate = nextCode.toString().padStart(5, "0");
           }
           customerCode = candidate;
-          // Reserve this code for this batch
           existingCodeSet.add(customerCode.toLowerCase());
-          nextCode++; // prepare for next auto-generated code
+          nextCode++;
         }
+        // ── END FIX ───────────────────────────────────────────────────────────
 
         // MR lookup
         let medicalRepId = null;
-        let mrName = safeStr(item.medicalRepName).toLowerCase();
+        let mrName = medicalRepName.toLowerCase();
         if (!mrName) {
           mrName = "not provided";
         } else {
@@ -498,22 +524,20 @@ router.post("/import", async (req, res) => {
 
         docsToInsert.push({
           customerCode,
-          date: parseCustomerDate(item.date), // ✅ Uses improved date parser
+          date: parseCustomerDate(dateValue),
           medicalRepName: mrName,
           medicalRepId,
-          name,
-          typeOfBusiness:
-            safeStr(item.typeOfBusiness).toLowerCase() || "not provided",
+          name: name.toLowerCase(),
+          typeOfBusiness: typeOfBusiness.toLowerCase() || "not provided",
           customerNumber: customerNumber || "",
-          address:
-            safeStr(item.customerAddress || item.address).toLowerCase() ||
-            "not provided",
-          zone: safeStr(item.zone).toLowerCase() || "not provided",
-          province: safeStr(item.province).toLowerCase() || "not provided",
-          remark: safeStr(item.remark).toLowerCase() || "not provided",
+          address: address.toLowerCase() || "not provided",
+          zone: zone.toLowerCase() || "not provided",
+          province: province.toLowerCase() || "not provided",
+          remark: remark.toLowerCase() || "not provided",
           enabled: true,
         });
       } catch (error) {
+        console.error(`Error processing row ${rowNumber}:`, error);
         errors.push(`Row ${rowNumber}: ${error.message}`);
       }
     }
@@ -521,59 +545,58 @@ router.post("/import", async (req, res) => {
     if (docsToInsert.length === 0) {
       return res.status(400).json({
         message: "No valid customers to import.",
-        errors,
+        errors: errors.slice(0, 20),
         duplicates: duplicates.slice(0, 20),
         ok: false,
       });
     }
 
-    // Prepare bulk operations
-    const bulkOps = docsToInsert.map((doc) => ({
-      insertOne: { document: doc },
-    }));
-
     let insertedCount = 0;
-    let duplicateErrors = [];
+    let dbErrors = [];
 
     try {
-      const result = await Customer.bulkWrite(bulkOps, { ordered: false });
-      insertedCount = result.insertedCount;
+      const result = await Customer.insertMany(docsToInsert, {
+        ordered: false,
+      });
+      insertedCount = result.length;
+      console.log(`Successfully inserted ${insertedCount} customers`);
     } catch (err) {
-      if (err.name === "BulkWriteError" && err.writeErrors) {
-        // Partial success – some documents were inserted, others failed
-        insertedCount = bulkOps.length - err.writeErrors.length;
-        duplicateErrors = err.writeErrors.map((we) => ({
-          row: we.index + 1, // approximate row in the batch (not original file)
-          message: we.errmsg,
-        }));
+      console.error("Bulk insert error:", err);
+      if (err.name === "MongoBulkWriteError" && err.insertedDocs) {
+        insertedCount = err.insertedDocs.length;
+        if (err.writeErrors) {
+          dbErrors = err.writeErrors.map((we) => ({
+            message: we.errmsg,
+            index: we.index,
+          }));
+        }
       } else {
-        // Unexpected error – rethrow to be caught by outer catch
         throw err;
       }
     }
 
-    // Combine all error reports
     let message = `Successfully imported ${insertedCount} customer(s).`;
     if (errors.length)
       message += ` ${errors.length} validation error(s) encountered.`;
     if (duplicates.length)
       message += ` ${duplicates.length} duplicate(s) skipped.`;
-    if (duplicateErrors.length)
-      message += ` ${duplicateErrors.length} database error(s) (e.g., duplicate customer numbers).`;
+    if (dbErrors.length)
+      message += ` ${dbErrors.length} database error(s) encountered.`;
 
     res.status(200).json({
       message,
       importedCount: insertedCount,
       errorCount: errors.length,
       duplicateCount: duplicates.length,
-      dbErrorCount: duplicateErrors.length,
+      dbErrorCount: dbErrors.length,
       errors: errors.slice(0, 10),
       duplicates: duplicates.slice(0, 20),
-      dbErrors: duplicateErrors.slice(0, 10),
+      dbErrors: dbErrors.slice(0, 10),
       ok: true,
     });
   } catch (err) {
     console.error("Import error:", err);
+
     if (err.code === 11000) {
       if (err.keyPattern?.customerNumber) {
         return res.status(400).json({
@@ -584,6 +607,7 @@ router.post("/import", async (req, res) => {
       }
       return handleDuplicateError(res, err);
     }
+
     if (err.name === "ValidationError") {
       const field = Object.keys(err.errors)[0];
       return res.status(400).json({
@@ -591,25 +615,12 @@ router.post("/import", async (req, res) => {
         ok: false,
       });
     }
+
     handleServerError(res, err, "Failed to import customers");
   }
 });
 
-router.get("/province/:province", async (req, res) => {
-  try {
-    const customers = await Customer.find({
-      province: new RegExp(req.params.province, "i"),
-    });
-    res.json({
-      success: true,
-      data: customers.map(formatCustomerResponse),
-      count: customers.length,
-    });
-  } catch (err) {
-    handleServerError(res, err, "Failed to fetch customers by province");
-  }
-});
-
+// GET all customers with pagination
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "" } = req.query;
@@ -620,8 +631,7 @@ router.get("/", async (req, res) => {
 
     const searchQuery = {};
 
-    // 🔎 Search Filter
-    if (search.trim()) {
+    if (search && search.trim()) {
       const s = search.trim();
       searchQuery.$or = [
         { name: { $regex: s, $options: "i" } },
@@ -638,14 +648,11 @@ router.get("/", async (req, res) => {
 
     const [total, customers, nextCustomerCode] = await Promise.all([
       Customer.countDocuments(searchQuery),
-
-      // 🔥 Highest Customer Code First
       Customer.find(searchQuery)
-        .collation({ locale: "en", numericOrdering: true }) // Treat string numbers as numbers
-        .sort({ customerCode: -1 }) // Descending (highest first)
+        .collation({ locale: "en", numericOrdering: true })
+        .sort({ customerCode: -1 })
         .skip(skip)
         .limit(limitNum),
-
       generateNextCustomerCode(),
     ]);
 
@@ -662,11 +669,260 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /export
-// ✅ NEW: ?withCode=true includes Customer Code as the FIRST column
-//         so the exported file can be re-imported with customer codes intact
-// ─────────────────────────────────────────────────────────────────────────────
+// GET single customer
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || id === "undefined" || id === "null") {
+      return res.status(400).json({
+        message: "Invalid customer ID format",
+        ok: false,
+      });
+    }
+
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
+    if (!isValidObjectId) {
+      return res.status(400).json({
+        message: "Invalid customer ID format",
+        ok: false,
+      });
+    }
+
+    const customer = await Customer.findById(id);
+
+    if (!customer) {
+      return res.status(404).json({
+        message: "Customer not found",
+        ok: false,
+      });
+    }
+
+    res.json({
+      customer: formatCustomerResponse(customer),
+      ok: true,
+    });
+  } catch (err) {
+    console.error("Error fetching customer:", err);
+
+    if (err.name === "CastError") {
+      return res.status(400).json({
+        message: "Invalid customer ID",
+        ok: false,
+      });
+    }
+
+    handleServerError(res, err);
+  }
+});
+
+// PUT /:id – Update customer
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || id === "undefined" || id === "null") {
+      return res.status(400).json({
+        message: "Invalid customer ID format",
+        ok: false,
+      });
+    }
+
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
+    if (!isValidObjectId) {
+      return res.status(400).json({
+        message: "Invalid customer ID format",
+        ok: false,
+      });
+    }
+
+    const { customerNumber, date, customerCode, ...updateData } = req.body;
+
+    if (customerCode) {
+      return res.status(400).json({
+        message: "Customer code cannot be updated.",
+        ok: false,
+      });
+    }
+
+    const cleanUpdateData = {};
+    Object.keys(updateData).forEach((key) => {
+      cleanUpdateData[key] =
+        typeof updateData[key] === "string" && key !== "customerNumber"
+          ? updateData[key].toLowerCase()
+          : updateData[key];
+    });
+
+    if (date) {
+      cleanUpdateData.date = parseCustomerDate(date);
+    }
+
+    const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
+    if (cleanNumber) {
+      const exists = await Customer.findOne({
+        customerNumber: cleanNumber,
+        _id: { $ne: id },
+      });
+      if (exists) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b>${cleanNumber}</b> already exists.`,
+          duplicateNumber: cleanNumber,
+          existingCustomer: exists.name,
+          ok: false,
+        });
+      }
+      cleanUpdateData.customerNumber = cleanNumber;
+    }
+
+    const updated = await Customer.findByIdAndUpdate(id, cleanUpdateData, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updated) {
+      return res.status(404).json({
+        message: "Customer not found",
+        ok: false,
+      });
+    }
+
+    res.json({
+      customer: formatCustomerResponse(updated),
+      ok: true,
+    });
+  } catch (err) {
+    console.error("Update error:", err);
+
+    if (err.code === 11000) {
+      if (err.keyPattern?.customerNumber) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
+          ok: false,
+        });
+      }
+      return handleDuplicateError(res, err);
+    }
+
+    if (err.name === "CastError") {
+      return res.status(400).json({
+        message: "Invalid customer ID",
+        ok: false,
+      });
+    }
+
+    res.status(400).json({
+      message: "Invalid data",
+      error: err.message,
+      ok: false,
+    });
+  }
+});
+
+// DELETE /:id – Delete single customer
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id || id === "undefined" || id === "null") {
+      return res.status(400).json({
+        message: "Invalid customer ID format",
+        ok: false,
+      });
+    }
+
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
+    if (!isValidObjectId) {
+      return res.status(400).json({
+        message: "Invalid customer ID format",
+        ok: false,
+      });
+    }
+
+    const deleted = await Customer.findByIdAndDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({
+        message: "Customer not found",
+        ok: false,
+      });
+    }
+
+    res.json({
+      message: "Customer deleted successfully",
+      ok: true,
+    });
+  } catch (err) {
+    console.error("Delete error:", err);
+
+    if (err.name === "CastError") {
+      return res.status(400).json({
+        message: "Invalid customer ID",
+        ok: false,
+      });
+    }
+
+    handleServerError(res, err);
+  }
+});
+
+// DELETE / – Delete multiple customers
+router.delete("/", protect, allowAdminOnly, async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        message: "No IDs provided",
+        ok: false,
+      });
+    }
+
+    const validIds = ids.filter((id) => {
+      return (
+        id &&
+        id !== "undefined" &&
+        id !== "null" &&
+        /^[0-9a-fA-F]{24}$/.test(id)
+      );
+    });
+
+    if (validIds.length === 0) {
+      return res.status(400).json({
+        message: "No valid customer IDs provided",
+        ok: false,
+      });
+    }
+
+    const result = await Customer.deleteMany({ _id: { $in: validIds } });
+
+    res.json({
+      message: `${result.deletedCount} customer(s) deleted`,
+      deletedCount: result.deletedCount,
+      ok: true,
+    });
+  } catch (err) {
+    console.error("Bulk delete error:", err);
+    handleServerError(res, err);
+  }
+});
+
+// GET /province/:province – Get customers by province
+router.get("/province/:province", async (req, res) => {
+  try {
+    const customers = await Customer.find({
+      province: new RegExp(req.params.province, "i"),
+    });
+    res.json({
+      success: true,
+      data: customers.map(formatCustomerResponse),
+      count: customers.length,
+    });
+  } catch (err) {
+    handleServerError(res, err, "Failed to fetch customers by province");
+  }
+});
+
+// GET /export – Export customers as XLSX
 router.get("/export", async (req, res) => {
   try {
     const withCode = req.query.withCode === "true";
@@ -675,7 +931,6 @@ router.get("/export", async (req, res) => {
     const data = customers.map((cust) => {
       const row = {};
 
-      // ✅ Customer Code as first column when withCode=true
       if (withCode) {
         row["Customer Code"] = cust.customerCode || "";
       }
@@ -716,104 +971,6 @@ router.get("/export", async (req, res) => {
   } catch (err) {
     console.error("Export error:", err);
     res.status(500).json({ message: "Failed to export customers", ok: false });
-  }
-});
-
-router.get("/:id", async (req, res) => {
-  try {
-    const customer = await Customer.findById(req.params.id);
-    if (!customer)
-      return res.status(404).json({ message: "Customer not found", ok: false });
-    res.json({ customer: formatCustomerResponse(customer), ok: true });
-  } catch (err) {
-    if (err.name === "CastError")
-      return res
-        .status(400)
-        .json({ message: "Invalid customer ID", ok: false });
-    handleServerError(res, err);
-  }
-});
-
-router.put("/:id", protect, allowAdminOnly, async (req, res) => {
-  try {
-    const { customerNumber, date, customerCode, ...updateData } = req.body;
-    if (customerCode)
-      return res
-        .status(400)
-        .json({ message: "Customer code cannot be updated.", ok: false });
-
-    const cleanUpdateData = {};
-    Object.keys(updateData).forEach((key) => {
-      cleanUpdateData[key] =
-        typeof updateData[key] === "string" && key !== "customerNumber"
-          ? updateData[key].toLowerCase()
-          : updateData[key];
-    });
-    if (date) cleanUpdateData.date = parseCustomerDate(date);
-
-    const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
-    if (cleanNumber) {
-      const exists = await Customer.findOne({
-        customerNumber: cleanNumber,
-        _id: { $ne: req.params.id },
-      });
-      if (exists)
-        return res.status(400).json({
-          message: `Customer with mobile number <b>${cleanNumber}</b> already exists.`,
-          duplicateNumber: cleanNumber,
-          existingCustomer: exists.name,
-          ok: false,
-        });
-      cleanUpdateData.customerNumber = cleanNumber;
-    }
-
-    const updated = await Customer.findByIdAndUpdate(
-      req.params.id,
-      cleanUpdateData,
-      { new: true, runValidators: true },
-    );
-    if (!updated)
-      return res.status(404).json({ message: "Customer not found", ok: false });
-    res.json({ customer: formatCustomerResponse(updated), ok: true });
-  } catch (err) {
-    if (err.code === 11000) {
-      if (err.keyPattern?.customerNumber)
-        return res.status(400).json({
-          message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
-          ok: false,
-        });
-      return handleDuplicateError(res, err);
-    }
-    res
-      .status(400)
-      .json({ message: "Invalid data", error: err.message, ok: false });
-  }
-});
-
-router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
-  try {
-    const deleted = await Customer.findByIdAndDelete(req.params.id);
-    if (!deleted)
-      return res.status(404).json({ message: "Customer not found", ok: false });
-    res.json({ message: "Customer deleted successfully", ok: true });
-  } catch (err) {
-    handleServerError(res, err);
-  }
-});
-
-router.delete("/", protect, allowAdminOnly, async (req, res) => {
-  try {
-    const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0)
-      return res.status(400).json({ message: "No IDs provided", ok: false });
-    const result = await Customer.deleteMany({ _id: { $in: ids } });
-    res.json({
-      message: `${result.deletedCount} customer(s) deleted`,
-      deletedCount: result.deletedCount,
-      ok: true,
-    });
-  } catch (err) {
-    handleServerError(res, err);
   }
 });
 
