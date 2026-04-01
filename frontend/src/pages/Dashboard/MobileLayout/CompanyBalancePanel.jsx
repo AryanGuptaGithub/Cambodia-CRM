@@ -51,7 +51,7 @@ const TransactionCard = ({ tx }) => {
     { label: "Date", value: formatDate(tx.date) },
     { label: "Amount", value: `$${formatCurrency(tx.amount)}` },
     tx.exchangeLoss > 0
-      ? { label: "Exchange Loss", value: `$${formatCurrency(tx.exchangeLoss)}` }
+      ? { label: "Bank Charges", value: `$${formatCurrency(tx.exchangeLoss)}` }
       : null,
     { label: "Customer Name", value: tx.customerName },
     tx.customerAddress

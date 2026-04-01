@@ -1045,6 +1045,30 @@ router.get("/extra-hours/:userId", async (req, res) => {
   }
 });
 
+router.get("/attendance/yesterday", async (req, res) => {
+  try {
+    // Get Yesterday's date range (instead of Today)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const { start, end } = getDayRange(yesterday);
+    console.log('valueso f start', start);
+    console.log('values of end', end);
+    const attendanceRecords = await Attendance.find({
+      loginTime: { $gte: start, $lte: end },
+    });
+    const data = attendanceRecords.map((record) => ({
+      userId: record.userId,
+      isPresent: !record.isLeaveDay,
+    }));
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error("Error fetching today's attendance:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error: " + error.message });
+  }
+});
 // GET /user/:userId – attendance records for one user
 router.get("/user/:userId", async (req, res) => {
   try {

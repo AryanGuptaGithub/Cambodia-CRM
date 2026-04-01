@@ -10,9 +10,6 @@ const PurchaseLayout = () => {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Breadcrumbs */}
-
-      {/* Nested page (Order/Invoice/etc.) */}
       <Outlet />
     </div>
   );

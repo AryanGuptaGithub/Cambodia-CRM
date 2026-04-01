@@ -663,7 +663,7 @@ const Remittance = () => {
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
-              <p className="text-sm text-gray-600">Total Exchange Loss</p>
+              <p className="text-sm text-gray-600">Total Bank Charges</p>
               <p className="text-2xl font-bold text-gray-800">
                 ${(data.summary.totalExchangeLoss || 0).toLocaleString()}
               </p>

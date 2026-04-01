@@ -432,7 +432,7 @@ const TotalExpense = () => {
   const ROWS = [
     {
       type: "exchange_loss",
-      label: "Exchange Loss",
+      label: "Bank Charges",
       amount: summary.totalExchangeLoss,
       color: "bg-red-500",
     },

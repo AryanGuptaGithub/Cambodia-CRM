@@ -21,6 +21,8 @@ import {
   User,
   Users,
   X,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -33,7 +35,7 @@ const ConfirmationModal = ({
   onConfirm,
   title,
   message,
-  records = [], // ← NEW: array of { displayDate, timeInfo, isLeaveDay, totalTime, extraHoursInMinutes }
+  records = [],
   confirmLabel = "Confirm",
   confirmColor = "bg-red-600 hover:bg-red-700",
   loading = false,
@@ -42,18 +44,13 @@ const ConfirmationModal = ({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
       <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl">
-        {/* Header */}
         <div className="flex items-center gap-3 mb-4">
           <div className="bg-red-100 p-2 rounded-full flex-shrink-0">
             <AlertCircle size={22} className="text-red-600" />
           </div>
           <h3 className="text-lg font-bold text-gray-800">{title}</h3>
         </div>
-
-        {/* Message */}
         <p className="text-gray-600 mb-4 text-sm leading-relaxed">{message}</p>
-
-        {/* ── Record detail list (shown only for bulk delete) ── */}
         {records.length > 0 && (
           <div className="mb-5 border border-red-200 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
             <div className="bg-red-50 px-3 py-2 border-b border-red-200">
@@ -107,14 +104,10 @@ const ConfirmationModal = ({
             </ul>
           </div>
         )}
-
-        {/* Warning note */}
         <p className="text-xs text-red-500 mb-5 flex items-center gap-1.5">
           <AlertCircle size={12} className="flex-shrink-0" />
           This action cannot be undone.
         </p>
-
-        {/* Buttons */}
         <div className="flex gap-3 justify-end">
           <button
             onClick={onClose}
@@ -219,9 +212,6 @@ const CustomDropdown = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Component
-// ─────────────────────────────────────────────────────────────────────────────
 const LeaveAttendance = () => {
   const [mrList, setMrList] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -230,7 +220,6 @@ const LeaveAttendance = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
 
-  // Calendar view states
   const [selectedMr, setSelectedMr] = useState(null);
   const [showCalendarView, setShowCalendarView] = useState(false);
   const [calendarViewType, setCalendarViewType] = useState("monthly");
@@ -239,7 +228,6 @@ const LeaveAttendance = () => {
   const [currentMonth, setCurrentMonth] = useState(currentDate.getMonth());
   const [currentYear, setCurrentYear] = useState(currentDate.getFullYear());
 
-  // Attendance data
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [selectedAttendanceMr, setSelectedAttendanceMr] = useState(null);
@@ -250,14 +238,12 @@ const LeaveAttendance = () => {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
 
-  // Leave state
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveDate, setLeaveDate] = useState("");
   const [leaveReason, setLeaveReason] = useState("");
   const [leaveType, setLeaveType] = useState("unpaid");
   const [leaveLoading, setLeaveLoading] = useState(false);
 
-  // Extra Hours state
   const [showExtraHoursModal, setShowExtraHoursModal] = useState(false);
   const [extraHoursDate, setExtraHoursDate] = useState("");
   const [extraHoursDays, setExtraHoursDays] = useState(1);
@@ -282,10 +268,8 @@ const LeaveAttendance = () => {
   const [loadingDeletableDates, setLoadingDeletableDates] = useState(false);
   const [confirmDeleteModal, setConfirmDeleteModal] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-
   const [hideMrSelector, setHideMrSelector] = useState(false);
 
-  // ─── Calendar Delete State ────────────────────────────────────────────────
   const [showCalendarDeleteModal, setShowCalendarDeleteModal] = useState(false);
   const [calendarDeleteData, setCalendarDeleteData] = useState({
     userId: null,
@@ -293,11 +277,10 @@ const LeaveAttendance = () => {
   });
   const [calendarDeleteLoading, setCalendarDeleteLoading] = useState(false);
 
-  // Holiday & Leave data
   const [holidays, setHolidays] = useState([]);
   const [mrLeaves, setMrLeaves] = useState({});
 
-  // ─── Helpers (unchanged) ──────────────────────────────────────────────────
+  // Helper functions
   const calculateRemainingTime = (totalMinutes) => {
     const totalHours = totalMinutes / 60;
     const fullDays = Math.floor(totalMinutes / 480);
@@ -343,31 +326,34 @@ const LeaveAttendance = () => {
     });
   };
 
-  // ─── Fetch functions (unchanged) ─────────────────────────────────────────
-  useEffect(() => {
-    fetchMRList();
-    fetchAttendanceRecords();
-    fetchHolidays();
-    fetchLeaves();
-  }, []);
+  // Navigation functions for MRs
+  const getCurrentMRIndex = () => {
+    if (!selectedMr) return -1;
+    return mrList.findIndex((mr) => mr._id === selectedMr._id);
+  };
 
-  useEffect(() => {
-    if (selectedAttendanceMr && showExtraHoursModal) {
-      fetchExtraHoursData(selectedAttendanceMr);
-    } else {
-      resetExtraHoursData();
+  const handleNextMR = () => {
+    const currentIndex = getCurrentMRIndex();
+    if (currentIndex < mrList.length - 1) {
+      const nextMR = mrList[currentIndex + 1];
+      setSelectedMr(nextMR);
+      // Reset calendar to current date when changing MR
+      const today = new Date();
+      setCurrentMonth(today.getMonth());
+      setCurrentYear(today.getFullYear());
     }
-  }, [selectedAttendanceMr, showExtraHoursModal]);
+  };
 
-  // ✅ MODIFICATION 1: Added attendanceRecords to dependency array
-  useEffect(() => {
-    if (deleteSelectedMr && showDeleteAttendanceModal) {
-      fetchDeletableDates(deleteSelectedMr);
-    } else {
-      setDeletableDates([]);
-      setSelectedDeleteIds([]);
+  const handlePreviousMR = () => {
+    const currentIndex = getCurrentMRIndex();
+    if (currentIndex > 0) {
+      const prevMR = mrList[currentIndex - 1];
+      setSelectedMr(prevMR);
+      const today = new Date();
+      setCurrentMonth(today.getMonth());
+      setCurrentYear(today.getFullYear());
     }
-  }, [deleteSelectedMr, showDeleteAttendanceModal, attendanceRecords]);
+  };
 
   const fetchMRList = async () => {
     try {
@@ -496,15 +482,14 @@ const LeaveAttendance = () => {
     }
   };
 
-  // ✅ MODIFICATION 2: Bulk delete with date collection and improved messaging
   const handleBulkDelete = () => {
     if (selectedDeleteIds.length === 0) {
       showToast("warning", "Please select at least one record to delete");
       return;
     }
-    // Open modal — record details are already in `deletableDates`
     setConfirmDeleteModal(true);
   };
+
   const handleConfirmDelete = async () => {
     setDeleteLoading(true);
     let successCount = 0;
@@ -519,14 +504,10 @@ const LeaveAttendance = () => {
 
         if (response.data.success) {
           successCount++;
-
-          // ── Warning FIRST (e.g. "1 swap leave(s) deleted…") ──────────────
           if (response.data.warning) {
             showToast("warning", response.data.warning);
-            // Short pause so the warning toast is visible before success fires
             await new Promise((resolve) => setTimeout(resolve, 600));
           }
-
           if (response.data.deletedDate) {
             deletedDates.push(response.data.deletedDate);
           }
@@ -543,7 +524,6 @@ const LeaveAttendance = () => {
       }
     }
 
-    // ── Success message AFTER all warnings ───────────────────────────────────
     if (successCount > 0) {
       const datesPart =
         deletedDates.length > 0 && deletedDates.length <= 3
@@ -562,7 +542,6 @@ const LeaveAttendance = () => {
     setDeleteLoading(false);
   };
 
-  // ─── Calendar Delete Handler (single delete from calendar) ─────────────────
   const handleDeleteFromCalendar = async () => {
     const { userId, date } = calendarDeleteData;
     if (!userId || !date) return;
@@ -607,7 +586,6 @@ const LeaveAttendance = () => {
     }
   };
 
-  // ─── Extra Hours (unchanged) ──────────────────────────────────────────────
   const resetExtraHoursData = () => {
     setExtraHoursData({
       totalExtraHours: 0,
@@ -677,7 +655,6 @@ const LeaveAttendance = () => {
     };
   };
 
-  // ─── Leave / Paid Calculations (unchanged) ────────────────────────────────
   const getMonthsOfService = (joinDate) => {
     if (!joinDate) return 0;
     const join = new Date(joinDate);
@@ -1017,7 +994,6 @@ const LeaveAttendance = () => {
     return workingDays;
   };
 
-  // ─── Action Handlers (unchanged) ─────────────────────────────────────────
   const handleRecordAttendance = async () => {
     if (!selectedAttendanceMr || !startDate || !startTime || !endTime) {
       showToast("error", "Please fill all fields");
@@ -1262,7 +1238,6 @@ const LeaveAttendance = () => {
     return totalExtraMinutes / 60;
   };
 
-  // ====================== MODIFIED ======================
   const handleOpenDeleteAttendanceModal = (mrId = null) => {
     setShowDeleteAttendanceModal(true);
     setDeleteSelectedMr(mrId);
@@ -1311,12 +1286,35 @@ const LeaveAttendance = () => {
     setCurrentYear(today.getFullYear());
   };
 
+  useEffect(() => {
+    fetchMRList();
+    fetchAttendanceRecords();
+    fetchHolidays();
+    fetchLeaves();
+  }, []);
+
+  useEffect(() => {
+    if (selectedAttendanceMr && showExtraHoursModal) {
+      fetchExtraHoursData(selectedAttendanceMr);
+    } else {
+      resetExtraHoursData();
+    }
+  }, [selectedAttendanceMr, showExtraHoursModal]);
+
+  useEffect(() => {
+    if (deleteSelectedMr && showDeleteAttendanceModal) {
+      fetchDeletableDates(deleteSelectedMr);
+    } else {
+      setDeletableDates([]);
+      setSelectedDeleteIds([]);
+    }
+  }, [deleteSelectedMr, showDeleteAttendanceModal, attendanceRecords]);
+
   if (loading) return <div className="p-6 text-center">Loading MR List...</div>;
   if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
 
   return (
     <div className="p-6">
-      {/* Confirmation Modal for bulk delete */}
       <ConfirmationModal
         isOpen={confirmDeleteModal}
         onClose={() => setConfirmDeleteModal(false)}
@@ -1328,7 +1326,6 @@ const LeaveAttendance = () => {
         confirmColor="bg-red-600 hover:bg-red-700"
       />
 
-      {/* Calendar Delete Confirmation Modal (unchanged) */}
       <ConfirmationModal
         isOpen={showCalendarDeleteModal}
         onClose={() => setShowCalendarDeleteModal(false)}
@@ -1340,7 +1337,6 @@ const LeaveAttendance = () => {
         confirmColor="bg-red-600 hover:bg-red-700"
       />
 
-      {/* ── Delete Attendance Modal (with checkboxes) ────────────────────────── */}
       {showDeleteAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] flex flex-col">
@@ -1541,7 +1537,6 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Record Attendance Modal (unchanged) */}
       {showAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1685,7 +1680,6 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Leave Modal (unchanged) */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1851,7 +1845,6 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Extra Hours Modal (unchanged) */}
       {showExtraHoursModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
@@ -2093,7 +2086,6 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* ── Main Content ───────────────────────────────────────────────────── */}
       {!showCalendarView && (
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-800">
@@ -2130,11 +2122,21 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* ── Calendar View ──────────────────────────────────────────────────── */}
       {showCalendarView ? (
         <div>
           <div className="flex justify-between items-center mb-4 bg-white rounded-2xl shadow border border-gray-200 p-4">
             <div className="flex gap-2">
+              <button
+                onClick={handlePreviousMR}
+                disabled={getCurrentMRIndex() <= 0}
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
+                  getCurrentMRIndex() <= 0
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
+                }`}
+              >
+                <ChevronsLeft size={16} />
+              </button>
               <button
                 onClick={() => setShowCalendarView(false)}
                 className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer"
@@ -2162,6 +2164,17 @@ const LeaveAttendance = () => {
                 className={`px-4 py-2 rounded-lg font-medium cursor-pointer ${calendarViewType === "annual" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
               >
                 Annual View
+              </button>
+              <button
+                onClick={handleNextMR}
+                disabled={getCurrentMRIndex() >= mrList.length - 1}
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
+                  getCurrentMRIndex() >= mrList.length - 1
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
+                }`}
+              >
+                <ChevronsRight size={16} />
               </button>
             </div>
           </div>
@@ -2462,7 +2475,6 @@ const LeaveAttendance = () => {
           )}
         </div>
       ) : (
-        /* ── MR Table ─────────────────────────────────────────────────────── */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           {mrList.length > 0 && (
             <div className="flex justify-between items-center p-4 bg-gray-50 border-b">

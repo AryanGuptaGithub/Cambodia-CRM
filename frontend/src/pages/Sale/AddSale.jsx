@@ -20,6 +20,42 @@ import {
   fetchProducts,
 } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
+// Helper function to format date to YYYY-MM-DD without timezone issues
+const formatDateToYYYYMMDD = (date) => {
+  if (!date) return "";
+  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "";
+
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+// Helper to parse YYYY-MM-DD to Date object without timezone issues
+const parseDateFromYYYYMMDD = (dateString) => {
+  if (!dateString) return null;
+  const [year, month, day] = dateString.split("-");
+  // Create date using UTC to avoid timezone shifts
+  return new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day)));
+};
+
+// Helper to get today's date in YYYY-MM-DD format
+const getTodayDate = () => {
+  const today = new Date();
+  return formatDateToYYYYMMDD(today);
+};
+
+// Helper to compute due date from current date + N days
+const computeDueDate = (days) => {
+  const today = new Date();
+  const due = new Date(today);
+  due.setDate(today.getDate() + days);
+  return formatDateToYYYYMMDD(due);
+};
+
 // ------------------------------------------------
 // CONFIG & INITIAL STATES
 // ------------------------------------------------
@@ -43,9 +79,9 @@ const INITIAL_PRODUCT_STATE = {
 
 const INITIAL_FORM_STATE = {
   _id: null,
-  recordingDate: "",
+  recordingDate: getTodayDate(),
   invoiceNumber: "",
-  invoiceDate: "",
+  invoiceDate: getTodayDate(),
   mrName: "",
   mrId: "",
   customerCode: "",
@@ -55,7 +91,7 @@ const INITIAL_FORM_STATE = {
   remark: "",
   creditDays: "",
   dueDate: "",
-  deliveryDate: "",
+  deliveryDate: getTodayDate(),
   paidAmount: "",
   dueAmount: "",
   totalAmount: "0.00",
@@ -131,15 +167,6 @@ const getMRNearestExpiry = (mrStockData) => {
     (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate),
   );
   return sorted[0].expiryDate;
-};
-
-// ------------------------------------------------
-// HELPER: compute due date from today + N days
-// ------------------------------------------------
-const computeDueDate = (days) => {
-  const due = new Date();
-  due.setDate(due.getDate() + days);
-  return due.toISOString().split("T")[0];
 };
 
 // ------------------------------------------------
@@ -458,9 +485,9 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
           try {
             const currentDate = new Date();
             const due = new Date(currentDate);
-            due.setDate(due.getDate() + creditDays);
+            due.setDate(currentDate.getDate() + creditDays);
             if (!isNaN(due.getTime())) {
-              updatedForm.dueDate = due.toISOString().split("T")[0];
+              updatedForm.dueDate = formatDateToYYYYMMDD(due);
             } else {
               updatedForm.dueDate = "";
             }
@@ -1156,13 +1183,16 @@ const DatePickerField = React.memo(
     minDate = null,
   }) => {
     const today = useMemo(() => new Date(), []);
+
     const handleDateChange = useCallback(
       (date) => {
         if (!disabled && date && !isNaN(date.getTime())) {
+          // Format date without timezone issues
+          const formattedDate = formatDateToYYYYMMDD(date);
           const event = {
             target: {
               name: name,
-              value: date.toISOString().split("T")[0],
+              value: formattedDate,
             },
           };
           onChange(event);
@@ -1170,15 +1200,13 @@ const DatePickerField = React.memo(
       },
       [name, onChange, disabled],
     );
+
+    // Parse the stored date string to a Date object for the picker
     const selectedDate = useMemo(() => {
       if (!value) return null;
-      try {
-        const date = new Date(value);
-        return isNaN(date.getTime()) ? null : date;
-      } catch {
-        return null;
-      }
+      return parseDateFromYYYYMMDD(value);
     }, [value]);
+
     return (
       <div className="flex flex-col">
         <label className="text-sm font-medium text-gray-700 mb-1">

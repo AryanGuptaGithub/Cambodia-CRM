@@ -59,7 +59,7 @@ const TransactionExcelDownload = ({
       "Source Account",
       "Destination Account",
       "Supplier Name",
-      "Exchange Loss",
+      "Bank charges",
       "Final Amount (Auto)",
       "Invoice Date (YYYY-MM-DD)",
       "Customer Name",
@@ -126,7 +126,6 @@ const TransactionExcelDownload = ({
         error: "Amount must be greater than 0",
       };
 
-      // Exchange Loss optional
       ws.getCell(`H${i}`).dataValidation = {
         type: "decimal",
         operator: "greaterThanOrEqual",
@@ -134,7 +133,7 @@ const TransactionExcelDownload = ({
         formulae: [0],
         showErrorMessage: true,
         errorTitle: "Invalid Value",
-        error: "Exchange Loss cannot be negative",
+        error: "Bank charges cannot be negative",
       };
 
       // Invoice Date optional

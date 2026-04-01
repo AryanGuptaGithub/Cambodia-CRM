@@ -23,6 +23,7 @@ import {
   ChevronRight,
   User,
   AlertTriangle,
+  Menu,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import { showToast } from "../../utils/toast";
@@ -44,13 +45,13 @@ import LoadingOverlay from "../../components/Loading";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import * as XLSX from "xlsx";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale.jsx";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const isSampleDownloadFile =
   import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
 
-// ─── Default credit days applied throughout ───────────────────────────────────
 const DEFAULT_CREDIT_DAYS = 30;
 
 const getAuthHeaders = () => {
@@ -1256,7 +1257,7 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
 };
 
 // ==========================================
-// ImportSalesModal — unchanged from original
+// ImportSalesModal
 // ==========================================
 const ImportSalesModal = ({
   isOpen,
@@ -1658,7 +1659,6 @@ const ImportSalesModal = ({
               const rawCreditDays = parseExcelAmount(
                 getVal(row, col.creditDays),
               );
-              // ✅ FIX: Default credit days to DEFAULT_CREDIT_DAYS when not provided
               const creditDays =
                 rawCreditDays > 0 ? rawCreditDays : DEFAULT_CREDIT_DAYS;
               const paidAmount = parseExcelAmount(getVal(row, col.paidAmount));
@@ -2953,13 +2953,16 @@ const Sales = () => {
   const { statuses, loading } = useInitialSaleData();
   const [saleTypeTab, setSaleTypeTab] = useState("all");
 
+  // ── Mobile states ──────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const [provincesList, setProvincesList] = useState([]);
   const [zonesList, setZonesList] = useState([]);
   const [provincesLoading, setProvincesLoading] = useState(false);
   const [zonesLoading, setZonesLoading] = useState(false);
   const lastFetchedProvinceRef = useRef("");
 
-  // ✅ FIX 1: form initial state — creditDays defaults to DEFAULT_CREDIT_DAYS (30)
   const [form, setForm] = useState({
     _id: null,
     recordingDate: "",
@@ -2971,7 +2974,7 @@ const Sales = () => {
     customerCode: "",
     customerId: "",
     products: [],
-    creditDays: DEFAULT_CREDIT_DAYS, // ← was 0, now 30
+    creditDays: DEFAULT_CREDIT_DAYS,
     dueDate: "",
     deliveryDate: "",
     paidAmount: 0,
@@ -2983,6 +2986,14 @@ const Sales = () => {
     customerZone: "",
     customerProvince: "",
   });
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const handleMRChange = (selectedMr) => {
     setForm((prev) => ({
@@ -3275,6 +3286,14 @@ const Sales = () => {
     [],
   );
 
+  // Mobile shows fewer columns
+  const mobileColumns = [
+    "invoiceNumber",
+    "customerName",
+    "totalAmount",
+    "actions",
+  ];
+
   const paymentStatusTabs = useMemo(() => {
     if (!Array.isArray(sales) || sales.length === 0)
       return ["All", "Cash", "Credit"];
@@ -3331,8 +3350,6 @@ const Sales = () => {
       );
     });
   }, [sales, searchTerm, selectedTab, saleTypeTab]);
-
-  useEffect(() => {}, [filteredSales]);
 
   const downloadData = useMemo(() => {
     if (isSampleDownloadFile) {
@@ -3393,17 +3410,14 @@ const Sales = () => {
     setIsViewModalOpen(true);
   }, []);
 
-  // ✅ FIX 2: editSale — default creditDays to DEFAULT_CREDIT_DAYS (30) when 0/missing
   const editSale = useCallback(
     (sale) => {
       setSelectedSale(sale);
-
       const matchedMr = mrFullList.find(
         (mr) =>
           mr.mrName?.toLowerCase().trim() ===
           (sale.mrName || "").toLowerCase().trim(),
       );
-
       setForm({
         ...sale,
         products: sale.products || [],
@@ -3415,7 +3429,6 @@ const Sales = () => {
         mrName: matchedMr ? matchedMr.mrName : sale.mrName || "",
         customerZone: sale.customerZone || "",
         customerProvince: sale.customerProvince || "",
-        // ✅ Default to DEFAULT_CREDIT_DAYS (30) when the sale has 0 or no credit days
         creditDays:
           sale.creditDays && sale.creditDays > 0
             ? sale.creditDays
@@ -3538,7 +3551,6 @@ const Sales = () => {
     });
   };
 
-  // ✅ FIX 3: handleCreditDaysChange — if user clears field, default back to DEFAULT_CREDIT_DAYS
   const handleCreditDaysChange = (e) => {
     const rawValue = e.target.value;
     const filtered = filterNumericInput(rawValue, false);
@@ -3707,7 +3719,6 @@ const Sales = () => {
             form.paidAmount,
             totals.netAmount,
           ),
-          // ✅ Ensure creditDays is never saved as 0 — use DEFAULT_CREDIT_DAYS as minimum
           creditDays:
             form.creditDays && Number(form.creditDays) > 0
               ? Number(form.creditDays)
@@ -3849,10 +3860,26 @@ const Sales = () => {
     }, 500);
   }, [sales, downloadExcel]);
 
+  // Determine which fields to show based on viewport
+  const visibleFields = allFields.filter((item) =>
+    isMobileView
+      ? mobileColumns.includes(item.id)
+      : tableColumns.includes(item.id),
+  );
+
   if (loading) return <LoadingOverlay />;
 
   return (
-    <div>
+    <div className="p-4 md:p-6 relative">
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
       <ImportSalesModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
@@ -4361,7 +4388,6 @@ const Sales = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 {[
-                  // ✅ FIX 4: View modal shows DEFAULT_CREDIT_DAYS when stored value is 0
                   [
                     "Credit Days",
                     `${form.creditDays && form.creditDays > 0 ? form.creditDays : DEFAULT_CREDIT_DAYS} days`,
@@ -4425,51 +4451,101 @@ const Sales = () => {
 
       {/* ── Main Content ── */}
       <div className="container">
-        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-          <div className="flex gap-3 items-center">
+        {/* ── MOBILE header: hamburger + total ── */}
+        {isMobileView && (
+          <div className="flex justify-between items-center mb-4">
             <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              onClick={() => navigate("/salelayout/sale/new")}
-              disabled={shouldDisableButtons}
-              title={getButtonTitle()}
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
             >
-              <UserPlus size={18} /> Add New Sales
+              <Menu size={20} />
             </button>
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              disabled={shouldDisableButtons}
-              title={getButtonTitle()}
-            >
-              <Upload size={18} /> Import Sales
-            </button>
+            {sales.length > 0 && (
+              <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
+                Total: {filteredSales.length}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── DESKTOP action bar (buttons + download) ── */}
+        {!isMobileView && (
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
+            <div className="flex gap-3 items-center">
+              <button
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                onClick={() => navigate("/salelayout/sale/new")}
+                disabled={shouldDisableButtons}
+                title={getButtonTitle()}
+              >
+                <UserPlus size={18} /> Add New Sales
+              </button>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                disabled={shouldDisableButtons}
+                title={getButtonTitle()}
+              >
+                <Upload size={18} /> Import Sales
+              </button>
+              {selected.length > 0 && (
+                <button
+                  onClick={handleDeleteSelected}
+                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+                >
+                  <Trash2 size={18} /> Delete Selected
+                </button>
+              )}
+            </div>
+
+            {isSampleDownloadFile ? (
+              <button
+                onClick={handleSampleDownload}
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+                disabled={sales.length === 0}
+              >
+                <Download size={18} /> Download Sample (Normal + MR)
+              </button>
+            ) : (
+              <SaleExcelDownload
+                data={downloadData}
+                fileName={`sale_summary_${saleTypeTab}_${selectedTab}`}
+                buttonText="Download Sales Excel"
+              />
+            )}
+          </div>
+        )}
+
+        {isMobileView && sales.length > 0 && (
+          <div className="flex flex-col gap-3 mb-3">
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+                className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer w-full"
               >
-                <Trash2 size={18} /> Delete Selected
+                <Trash2 size={18} /> Delete ({selected.length})
               </button>
             )}
+            <div className="relative">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+                size={16}
+              />
+              <input
+                type="text"
+                placeholder="Search invoice, MR, customer..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm text-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
           </div>
+        )}
 
-          {isSampleDownloadFile ? (
-            <button
-              onClick={handleSampleDownload}
-              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
-              disabled={sales.length === 0}
-            >
-              <Download size={18} /> Download Sample (Normal + MR)
-            </button>
-          ) : (
-            <SaleExcelDownload
-              data={downloadData}
-              fileName={`sale_summary_${saleTypeTab}_${selectedTab}`}
-              buttonText="Download Sales Excel"
-            />
-          )}
-        </div>
-
+        {/* Warnings */}
         {!checkingPurchaseInventories && !hasPurchaseInventories && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start gap-3">
@@ -4521,11 +4597,21 @@ const Sales = () => {
             </div>
           )}
 
+        {/* ── Filter tabs (ALWAYS visible, but styled differently on mobile) ── */}
         {sales.length > 0 && (
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <div className="flex gap-2 flex-wrap items-center">
-              <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
-                <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
+          <div
+            className={`flex ${
+              !isMobileView ? "flex-row items-center justify-between" : ""
+            } mb-4`}
+          >
+            <div className="flex flex-wrap gap-2 items-center">
+              {/* Payment Status Tabs */}
+              <div
+                className={`flex items-center gap-1 bg-gray-100 border border-gray-300 rounded-xl ${isMobileView ? "px-1 py-0.5" : "px-2 py-1"} flex-wrap`}
+              >
+                <span
+                  className={`${isMobileView ? "text-[6px] font-bold" : "text-xs"} text-gray-500 font-semibold uppercase tracking-wide ${isMobileView ? "pr-0.5" : "pr-1"}`}
+                >
                   Payment
                 </span>
                 {paymentStatusTabs.map((tab) => (
@@ -4536,17 +4622,25 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`px-4 py-1.5 rounded-lg cursor-pointer transition-colors text-sm font-medium ${selectedTab === tab ? "bg-indigo-600 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
+                    className={`${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"}
+                     rounded-lg cursor-pointer transition-colors font-medium ${
+                      selectedTab === tab
+                        ? "bg-indigo-600 text-white shadow"
+                        : "text-gray-600 hover:bg-gray-200"
+                    }`}
                   >
                     {tab}
                   </button>
                 ))}
               </div>
 
-              <div className="w-px h-8 bg-gray-300 mx-1" />
-
-              <div className="flex items-center gap-2 bg-gray-100 border border-gray-300 rounded-xl px-2 py-1">
-                <span className="text-xs text-gray-400 font-semibold uppercase tracking-wide pr-1">
+              {/* Sale Type Tabs */}
+              <div
+                className={`flex items-center gap-1 bg-gray-100 border border-gray-300 rounded-xl ${isMobileView ? "px-1 py-0.5" : "px-2 py-1"} flex-wrap`}
+              >
+                <span
+                  className={`${isMobileView ? "text-[6px] font-bold" : "text-xs"} text-gray-500 font-semibold uppercase tracking-wide ${isMobileView ? "pr-0.5" : "pr-1"}`}
+                >
                   Sale Type
                 </span>
                 {saleTypeTabs.map((tab) => (
@@ -4557,7 +4651,7 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded-full cursor-pointer transition-colors text-sm font-medium ${
+                    className={`flex items-center gap-1 ${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${
                       saleTypeTab === tab.id
                         ? tab.id === "normal"
                           ? "bg-indigo-600 text-white shadow"
@@ -4570,7 +4664,7 @@ const Sales = () => {
                     {tab.id === "normal" ? (
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        className="w-4 h-4"
+                        className={`${isMobileView ? "w-2 h-2" : "w-3 h-3"}`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -4591,7 +4685,7 @@ const Sales = () => {
                     ) : tab.id === "mr" ? (
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        className="w-4 h-4"
+                        className={`${isMobileView ? "w-2 h-2" : "w-3 h-3"}`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -4606,7 +4700,7 @@ const Sales = () => {
                     ) : (
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        className="w-4 h-4"
+                        className={`${isMobileView ? "w-2 h-2" : "w-3 h-3"}`}
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -4625,75 +4719,75 @@ const Sales = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-4 flex-wrap">
-              <p className="text-lg font-semibold text-gray-700">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredSales.length}
-                </span>
-              </p>
-              <div className="relative w-full md:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
-                  size={16}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search invoice, MR name, Customer name..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition"
-                />
+            {/* Desktop search & total count */}
+            {!isMobileView && (
+              <div className="flex items-center justify-end gap-4 flex-wrap">
+                <p className="text-lg font-semibold text-gray-700">
+                  Total Count:{" "}
+                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                    {filteredSales.length}
+                  </span>
+                </p>
+                <div className="relative w-full md:w-72">
+                  <Search
+                    className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 pointer-events-none"
+                    size={16}
+                  />
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Search invoice, MR name, Customer name..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition"
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
-
+        {/* Table */}
         <div className="overflow-x-auto shadow-lg rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                {allFields
-                  .filter((item) => tableColumns.includes(item.id))
-                  .map((item) => (
-                    <th
-                      key={`header-${item.id}`}
-                      className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
-                    >
-                      {item.name === "Invoice No" ? (
-                        <div className="flex items-center gap-4">
-                          {currentSales.length > 0 && (
-                            <input
-                              type="checkbox"
-                              aria-label="Select all sales"
-                              checked={
-                                selected.length === currentSales.length &&
-                                currentSales.length > 0
-                              }
-                              onChange={(e) =>
-                                toggleSelectAll(e.target.checked)
-                              }
-                              className="cursor-pointer"
-                            />
-                          )}
-                          <span>{item.name}</span>
-                        </div>
-                      ) : (
-                        item.name
-                      )}
-                    </th>
-                  ))}
+                {/* Checkbox header — desktop only */}
+                {!isMobileView && (
+                  <th className="p-3 whitespace-nowrap min-w-[40px] text-sm font-medium">
+                    {currentSales.length > 0 && (
+                      <input
+                        type="checkbox"
+                        aria-label="Select all sales"
+                        checked={
+                          selected.length === currentSales.length &&
+                          currentSales.length > 0
+                        }
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
+                        className="cursor-pointer"
+                      />
+                    )}
+                  </th>
+                )}
+                {visibleFields.map((item) => (
+                  <th
+                    key={`header-${item.id}`}
+                    className={`p-3 whitespace-nowrap min-w-[80px] font-medium ${
+                      isMobileView ? "text-[10px]" : "text-sm"
+                    }`}
+                  >
+                    {item.name}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {currentSales.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={tableColumns.length}
+                    colSpan={visibleFields.length + (isMobileView ? 0 : 1)}
                     className="p-4 text-center text-gray-500"
                   >
                     {loadingData ? (
@@ -4720,88 +4814,104 @@ const Sales = () => {
                   return (
                     <tr
                       key={`sale-${sale._id || index}`}
-                      className={`hover:bg-gray-50 transition-colors ${index < currentSales.length - 1 ? "border-b" : ""}`}
+                      className={`hover:bg-gray-50 transition-colors ${
+                        index < currentSales.length - 1 ? "border-b" : ""
+                      }`}
                     >
-                      {allFields
-                        .filter((item) => tableColumns.includes(item.id))
-                        .map((item) => (
-                          <td
-                            key={`cell-${sale._id}-${item.id}`}
-                            className="p-3 whitespace-nowrap min-w-[120px]"
-                          >
-                            {item.id === "invoiceNumber" ? (
-                              <div className="flex items-center gap-4">
-                                <input
-                                  type="checkbox"
-                                  checked={selected.some(
-                                    (s) => s.id === sale._id,
-                                  )}
-                                  onChange={() => toggleSelect(sale)}
-                                  className="cursor-pointer"
-                                />
-                                <span className="font-medium">
-                                  {sale.invoiceNumber}
-                                  {isMRSale && (
-                                    <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
-                                      MR
-                                    </span>
-                                  )}
+                      {/* Checkbox — desktop only */}
+                      {!isMobileView && (
+                        <td className="p-3">
+                          <input
+                            type="checkbox"
+                            checked={selected.some((s) => s.id === sale._id)}
+                            onChange={() => toggleSelect(sale)}
+                            className="cursor-pointer"
+                          />
+                        </td>
+                      )}
+
+                      {visibleFields.map((item) => (
+                        <td
+                          key={`cell-${sale._id}-${item.id}`}
+                          className={`p-3 whitespace-nowrap min-w-[80px] ${
+                            isMobileView ? "text-[9px]" : "text-sm"
+                          }`}
+                        >
+                          {item.id === "invoiceNumber" ? (
+                            <span className="font-medium">
+                              {sale.invoiceNumber}
+                              {isMRSale && (
+                                <span
+                                  className={`ml-1 bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full ${
+                                    isMobileView ? "text-[8px]" : "text-xs"
+                                  }`}
+                                >
+                                  MR
                                 </span>
-                              </div>
-                            ) : item.id === "productCount" ? (
-                              <button
-                                onClick={() => handleProductCountClick(sale)}
-                                className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
-                                title="View Products"
-                              >
-                                <Package size={14} />
-                                <span className="font-medium">
-                                  {getFieldValue(sale, item.dbName)}
-                                </span>
-                              </button>
-                            ) : item.id === "actions" ? (
-                              <div className="flex items-center justify-center gap-3 min-w-[150px]">
-                                <button
-                                  className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1"
-                                  onClick={() => handleView(sale)}
-                                  title="View"
-                                >
-                                  <Eye size={18} />
-                                </button>
-                                <button
-                                  className="text-green-600 hover:text-green-800 cursor-pointer transition-colors p-1"
-                                  onClick={() => editSale(sale)}
-                                  title="Edit"
-                                >
-                                  <Edit size={18} />
-                                </button>
-                                <button
-                                  className="text-red-600 hover:text-red-800 cursor-pointer transition-colors p-1"
-                                  onClick={() => deleteSale(sale)}
-                                  title="Delete"
-                                >
-                                  <Trash2 size={18} />
-                                </button>
-                              </div>
-                            ) : item.id === "paymentStatus" ? (
-                              <span
-                                className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  sale.paymentStatus === "Cash"
-                                    ? "bg-green-100 text-green-800"
-                                    : sale.paymentStatus === "Credit"
-                                      ? "bg-yellow-100 text-yellow-800"
-                                      : sale.paymentStatus === "Partial Paid"
-                                        ? "bg-blue-100 text-blue-800"
-                                        : "bg-gray-100 text-gray-800"
-                                }`}
-                              >
+                              )}
+                            </span>
+                          ) : item.id === "productCount" ? (
+                            <button
+                              onClick={() => handleProductCountClick(sale)}
+                              className="flex items-center justify-center gap-1 bg-blue-100 text-blue-700 px-2 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
+                              title="View Products"
+                            >
+                              <Package size={isMobileView ? 10 : 14} />
+                              <span className="font-medium">
                                 {getFieldValue(sale, item.dbName)}
                               </span>
-                            ) : (
-                              getFieldValue(sale, item.dbName)
-                            )}
-                          </td>
-                        ))}
+                            </button>
+                          ) : item.id === "actions" ? (
+                            <div className="flex items-center justify-center gap-2 min-w-[60px]">
+                              {/* View always shown */}
+                              <button
+                                className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1"
+                                onClick={() => handleView(sale)}
+                                title="View"
+                              >
+                                <Eye size={isMobileView ? 14 : 18} />
+                              </button>
+                              {/* Edit & Delete — desktop only */}
+                              {!isMobileView && (
+                                <>
+                                  <button
+                                    className="text-green-600 hover:text-green-800 cursor-pointer transition-colors p-1"
+                                    onClick={() => editSale(sale)}
+                                    title="Edit"
+                                  >
+                                    <Edit size={18} />
+                                  </button>
+                                  <button
+                                    className="text-red-600 hover:text-red-800 cursor-pointer transition-colors p-1"
+                                    onClick={() => deleteSale(sale)}
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          ) : item.id === "paymentStatus" ? (
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-medium ${
+                                isMobileView ? "text-[8px]" : "text-xs"
+                              } ${
+                                sale.paymentStatus === "Cash"
+                                  ? "bg-green-100 text-green-800"
+                                  : sale.paymentStatus === "Credit"
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : sale.paymentStatus === "Partial Paid"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : "bg-gray-100 text-gray-800"
+                              }`}
+                            >
+                              {getFieldValue(sale, item.dbName)}
+                            </span>
+                          ) : (
+                            getFieldValue(sale, item.dbName)
+                          )}
+                        </td>
+                      ))}
                     </tr>
                   );
                 })
@@ -4825,27 +4935,40 @@ const Sales = () => {
                 >
                   ← Prev
                 </button>
-                {visiblePages.map((page, idx) =>
-                  page === "..." ? (
-                    <span
-                      key={`ellipsis-${idx}`}
-                      className="px-3 py-1 text-gray-500 select-none"
-                    >
-                      ...
-                    </span>
-                  ) : (
-                    <button
-                      key={`page-${page}`}
-                      onClick={() => {
-                        setCurrentPage(page);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-                    >
-                      {page}
-                    </button>
-                  ),
+
+                {/* Desktop: page numbers | Mobile: "Page X of Y" */}
+                {!isMobileView ? (
+                  visiblePages.map((page, idx) =>
+                    page === "..." ? (
+                      <span
+                        key={`ellipsis-${idx}`}
+                        className="px-3 py-1 text-gray-500 select-none"
+                      >
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={`page-${page}`}
+                        onClick={() => {
+                          setCurrentPage(page);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                        className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                          currentPage === page
+                            ? "bg-indigo-600 text-white"
+                            : "bg-gray-200 hover:bg-gray-300"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ),
+                  )
+                ) : (
+                  <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                    Page {currentPage} of {totalPages}
+                  </span>
                 )}
+
                 <button
                   onClick={() =>
                     setCurrentPage((prev) => {
@@ -4860,11 +4983,15 @@ const Sales = () => {
                   Next →
                 </button>
               </div>
-              <div className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
-                {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)}{" "}
-                of {filteredSales.length} sales
-              </div>
+
+              {/* Show count summary on desktop only */}
+              {!isMobileView && (
+                <div className="text-sm text-gray-600">
+                  Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
+                  {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)}{" "}
+                  of {filteredSales.length} sales
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -754,7 +754,7 @@ const AddTransactionModal = ({
         });
         baseFields.push({
           key: "exchangeLoss",
-          label: "Exchange Loss",
+          label: "Bank Charges",
           type: "number",
           required: false,
           layout: "half",
@@ -2175,7 +2175,7 @@ const CashAndBank = () => {
         dbName: "customerAddress",
       },
       { id: "amount", name: "Amount", dbName: "amount" },
-      { id: "exchangeLoss", name: "Exchange Loss", dbName: "exchangeLoss" },
+      { id: "exchangeLoss", name: "Bank Charges", dbName: "exchangeLoss" },
       { id: "finalAmount", name: "Final Amount", dbName: "finalAmount" },
       { id: "date", name: "Date", dbName: "date" },
       { id: "description", name: "Description", dbName: "description" },
