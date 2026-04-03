@@ -21,6 +21,15 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// Helper: format date to YYYY-MM-DD in LOCAL timezone (no UTC shift)
+const formatLocalDate = (date) => {
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const MRWiseOutstanding = () => {
   const [data, setData] = useState({
     summary: {
@@ -32,6 +41,7 @@ const MRWiseOutstanding = () => {
   });
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingModal, setExportingModal] = useState(false);
   const [selectedTab, setSelectedTab] = useState("currentMonth");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
@@ -59,19 +69,15 @@ const MRWiseOutstanding = () => {
     pagination.totalPages,
   );
 
-  // Calculate serial number based on current page and items per page
   const getSerialNumber = (index) => {
     const itemsPerPage = 7;
     return (pagination.currentPage - 1) * itemsPerPage + index + 1;
   };
 
-  const getCurrentMonthName = () => {
-    return new Date().toLocaleString("default", { month: "long" });
-  };
+  const getCurrentMonthName = () =>
+    new Date().toLocaleString("default", { month: "long" });
 
-  const getCurrentYear = () => {
-    return new Date().getFullYear();
-  };
+  const getCurrentYear = () => new Date().getFullYear();
 
   const getPreviousMonthName = () => {
     const previousMonth = new Date();
@@ -82,7 +88,6 @@ const MRWiseOutstanding = () => {
   const getJanToPreviousMonthRange = () => {
     const currentYear = getCurrentYear();
     const currentMonth = new Date().getMonth();
-
     if (currentMonth === 0) {
       const previousYear = currentYear - 1;
       return {
@@ -91,11 +96,10 @@ const MRWiseOutstanding = () => {
         label: `Jan - Dec ${previousYear}`,
       };
     }
-
     const endDate = new Date(currentYear, currentMonth, 0);
     return {
       startDate: `${currentYear}-01-01`,
-      endDate: endDate.toISOString().split("T")[0],
+      endDate: formatLocalDate(endDate),
       label: `Jan - ${getPreviousMonthName()} ${currentYear}`,
     };
   };
@@ -104,33 +108,23 @@ const MRWiseOutstanding = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
-
     switch (selectedTab) {
       case "currentMonth":
-        const firstDay = new Date(currentYear, currentMonth, 1);
-        const lastDay = new Date(currentYear, currentMonth + 1, 0);
         return {
-          startDate: firstDay.toISOString().split("T")[0],
-          endDate: lastDay.toISOString().split("T")[0],
+          startDate: formatLocalDate(new Date(currentYear, currentMonth, 1)),
+          endDate: formatLocalDate(new Date(currentYear, currentMonth + 1, 0)),
         };
-
       case "janToPreviousMonth":
-        const janToPrevRange = getJanToPreviousMonthRange();
-        return {
-          startDate: janToPrevRange.startDate,
-          endDate: janToPrevRange.endDate,
-        };
-
+        return getJanToPreviousMonthRange();
       case "custom":
         return {
           startDate: customDateRange.startDate
-            ? customDateRange.startDate.toISOString().split("T")[0]
+            ? formatLocalDate(customDateRange.startDate)
             : "",
           endDate: customDateRange.endDate
-            ? customDateRange.endDate.toISOString().split("T")[0]
+            ? formatLocalDate(customDateRange.endDate)
             : "",
         };
-
       default:
         return {};
     }
@@ -140,12 +134,7 @@ const MRWiseOutstanding = () => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
-
-      let params = {
-        page: page,
-        limit: 7,
-      };
-
+      let params = { page, limit: 7 };
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -158,23 +147,17 @@ const MRWiseOutstanding = () => {
           );
           return;
         }
-
         params = {
           ...params,
           startDate: dateRange.startDate,
           endDate: dateRange.endDate,
         };
       }
-
-      if (search && search.trim() !== "") {
-        params.search = search.trim();
-      }
+      if (search && search.trim() !== "") params.search = search.trim();
 
       const response = await axios.get(
         `${backendUrl}/api/reports/mr-wise-outstanding`,
-        {
-          params,
-        },
+        { params },
       );
 
       setData(response.data.data || { summary: {}, records: [] });
@@ -190,13 +173,8 @@ const MRWiseOutstanding = () => {
     } catch (error) {
       console.error("Error fetching MR wise outstanding:", error);
       showToast("error", "Failed to fetch MR wise outstanding data");
-
       setData({
-        summary: {
-          totalOutstandingAmount: 0,
-          totalCustomers: 0,
-          totalMRs: 0,
-        },
+        summary: { totalOutstandingAmount: 0, totalCustomers: 0, totalMRs: 0 },
         records: [],
       });
       setPagination({
@@ -211,7 +189,7 @@ const MRWiseOutstanding = () => {
     }
   };
 
-  // Fetch customer details for a specific MR
+  // Fetch invoice-level details for a specific MR
   const fetchCustomerDetails = async (mrName) => {
     setLoadingCustomers(true);
     try {
@@ -228,24 +206,66 @@ const MRWiseOutstanding = () => {
       if (response.data.success) {
         setCustomerDetails(response.data.data);
       } else {
-        showToast("error", "Failed to load customer details");
+        showToast("error", "Failed to load invoice details");
       }
     } catch (error) {
-      console.error("Error fetching customer details:", error);
-      showToast("error", "Failed to load customer details");
+      console.error("Error fetching invoice details:", error);
+      showToast("error", "Failed to load invoice details");
     } finally {
       setLoadingCustomers(false);
     }
   };
 
-  // Handle row click to open customer modal
+  // Export modal data to Excel
+  const exportModalToExcel = async () => {
+    if (!selectedMR || customerDetails.length === 0) {
+      showToast("warning", "No data to export");
+      return;
+    }
+
+    setExportingModal(true);
+    try {
+      const dateRange = getDateRange();
+      const params = new URLSearchParams();
+      params.append("mrName", selectedMR.mrName);
+      if (selectedTab !== "all") {
+        if (dateRange.startDate)
+          params.append("startDate", dateRange.startDate);
+        if (dateRange.endDate) params.append("endDate", dateRange.endDate);
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/reports/mr-wise-outstanding/export/mr-excel`,
+        { params, responseType: "blob" },
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      const fileName = `${selectedMR.mrName.replace(/\s/g, "_")}_outstanding_invoices.xlsx`;
+      link.setAttribute("download", fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      showToast("success", "MR invoice details exported successfully!");
+    } catch (error) {
+      console.error("Export error:", error);
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to export MR invoice details.",
+      );
+    } finally {
+      setExportingModal(false);
+    }
+  };
+
   const handleRowClick = (mr) => {
     setSelectedMR(mr);
     setCustomerModalOpen(true);
     fetchCustomerDetails(mr.mrName);
   };
 
-  // Fetch data when tab changes
   useEffect(() => {
     if (selectedTab === "custom") {
       if (customDateRange.startDate && customDateRange.endDate) {
@@ -265,7 +285,6 @@ const MRWiseOutstanding = () => {
     }
   }, [selectedTab]);
 
-  // Fetch data when custom dates change (only for custom tab)
   useEffect(() => {
     if (
       selectedTab === "custom" &&
@@ -276,38 +295,27 @@ const MRWiseOutstanding = () => {
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
 
-  const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) {
-      fetchMRWiseOutstanding(page);
-    }
-  };
-
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-  };
-
-  const handleClearSearch = () => {
-    setSearchTerm("");
-    fetchMRWiseOutstanding(1);
-  };
-
-  const handleCustomDateChange = (name, date) => {
-    setCustomDateRange((prev) => ({ ...prev, [name]: date }));
-  };
-
-  // Debounced search effect
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       fetchMRWiseOutstanding(1);
     }, 500);
-
     return () => clearTimeout(delayDebounce);
   }, [searchTerm]);
 
+  const handlePageChange = (page) => {
+    if (page >= 1 && page <= pagination.totalPages)
+      fetchMRWiseOutstanding(page);
+  };
+
+  const handleSearchChange = (e) => setSearchTerm(e.target.value);
+  const handleClearSearch = () => {
+    setSearchTerm("");
+    fetchMRWiseOutstanding(1);
+  };
+  const handleCustomDateChange = (name, date) =>
+    setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   const handleSearch = (e) => {
-    if (e.key === "Enter") {
-      fetchMRWiseOutstanding(1);
-    }
+    if (e.key === "Enter") fetchMRWiseOutstanding(1);
   };
 
   const handleApplyCustomFilter = () => {
@@ -315,12 +323,10 @@ const MRWiseOutstanding = () => {
       showToast("warning", "Please select both start and end dates");
       return;
     }
-
     if (customDateRange.startDate > customDateRange.endDate) {
       showToast("warning", "Start date cannot be after end date");
       return;
     }
-
     setSelectedTab("custom");
     setShowCustomFilter(false);
   };
@@ -330,18 +336,12 @@ const MRWiseOutstanding = () => {
     if (tab === "custom") {
       setShowCustomFilter(true);
     } else {
-      setCustomDateRange({
-        startDate: null,
-        endDate: null,
-      });
+      setCustomDateRange({ startDate: null, endDate: null });
     }
   };
 
   const handleClearFilters = () => {
-    setCustomDateRange({
-      startDate: null,
-      endDate: null,
-    });
+    setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
     setSelectedTab("all");
   };
@@ -351,105 +351,80 @@ const MRWiseOutstanding = () => {
     try {
       const dateRange = getDateRange();
       const params = new URLSearchParams();
-
-      if (searchTerm) {
-        params.append("search", searchTerm);
-      }
-
+      if (searchTerm) params.append("search", searchTerm);
       if (selectedTab !== "all") {
-        if (dateRange.startDate) {
+        if (dateRange.startDate)
           params.append("startDate", dateRange.startDate);
-        }
-        if (dateRange.endDate) {
-          params.append("endDate", dateRange.endDate);
-        }
+        if (dateRange.endDate) params.append("endDate", dateRange.endDate);
       }
-
       const response = await axios.get(
         `${backendUrl}/api/reports/mr-wise-outstanding/export/excel`,
-        {
-          params: params,
-          responseType: "blob",
-        },
+        { params, responseType: "blob" },
       );
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
-
       let fileName = "mr-wise-outstanding.xlsx";
       const contentDisposition = response.headers["content-disposition"];
       if (contentDisposition) {
-        const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
-        if (fileNameMatch && fileNameMatch.length > 1) {
-          fileName = fileNameMatch[1];
-        }
-      } else {
-        const currentDate = new Date();
-        const formattedDate = currentDate.toISOString().split("T")[0];
-
-        if (selectedTab === "currentMonth") {
-          fileName = `mr-wise-outstanding-${getCurrentMonthName().toLowerCase()}-${getCurrentYear()}.xlsx`;
-        } else if (selectedTab === "janToPreviousMonth") {
-          fileName = `mr-wise-outstanding-${getJanToPreviousMonthRange().label.replace(/ /g, "-")}.xlsx`;
-        } else if (
-          selectedTab === "custom" &&
-          dateRange.startDate &&
-          dateRange.endDate
-        ) {
-          fileName = `mr-wise-outstanding-${dateRange.startDate}-to-${dateRange.endDate}.xlsx`;
-        } else {
-          fileName = `mr-wise-outstanding-${formattedDate}.xlsx`;
-        }
+        const m = contentDisposition.match(/filename="?(.+)"?/);
+        if (m?.[1]) fileName = m[1];
       }
-
       link.setAttribute("download", fileName);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-
       showToast("success", "Excel file downloaded successfully!");
     } catch (error) {
       console.error("Export error:", error);
       showToast(
         "error",
-        error.response?.data?.message ||
-          "Failed to export to Excel. Please try again.",
+        error.response?.data?.message || "Failed to export to Excel.",
       );
     } finally {
       setExporting(false);
     }
   };
 
-  const formatDateForDisplay = (date) => {
-    return date ? formatDateToReadable(date) : "";
-  };
+  const formatDateForDisplay = (date) =>
+    date ? formatDateToReadable(date) : "";
 
   const getActiveFilterDisplay = () => {
     switch (selectedTab) {
       case "currentMonth":
         return `${getCurrentMonthName()} ${getCurrentYear()}`;
-
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange().label;
-
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
-          return `${formatDateForDisplay(
-            customDateRange.startDate,
-          )} to ${formatDateForDisplay(customDateRange.endDate)}`;
+          return `${formatDateForDisplay(customDateRange.startDate)} to ${formatDateForDisplay(customDateRange.endDate)}`;
         }
         return "Select custom dates";
-
       default:
         return "All Records";
     }
   };
 
+  // Totals for modal footer
+  const modalTotals = customerDetails.reduce(
+    (acc, row) => {
+      acc.totalAmount += row.totalAmount || 0;
+      acc.collectedAmount += row.collectedAmount || 0;
+      acc.pendingAmount += row.pendingAmount || 0;
+      return acc;
+    },
+    { totalAmount: 0, collectedAmount: 0, pendingAmount: 0 },
+  );
+
+  const fmt = (num) =>
+    (num || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
-
     return (
       <div className="flex items-center justify-start gap-2 mt-6">
         <button
@@ -461,10 +436,8 @@ const MRWiseOutstanding = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          <ChevronLeft size={16} />
-          Prev
+          <ChevronLeft size={16} /> Prev
         </button>
-
         <div className="flex gap-1">
           {visiblePages.map((page, index) => (
             <button
@@ -485,7 +458,6 @@ const MRWiseOutstanding = () => {
             </button>
           ))}
         </div>
-
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
@@ -495,8 +467,7 @@ const MRWiseOutstanding = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          Next
-          <ChevronRight size={16} />
+          Next <ChevronRight size={16} />
         </button>
       </div>
     );
@@ -504,6 +475,7 @@ const MRWiseOutstanding = () => {
 
   return (
     <div className="p-6">
+      {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <Users className="w-8 h-8 text-blue-600" />
@@ -536,7 +508,6 @@ const MRWiseOutstanding = () => {
               </button>
             )}
           </div>
-
           <button
             onClick={exportToExcel}
             disabled={
@@ -561,48 +532,31 @@ const MRWiseOutstanding = () => {
       {/* Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            onClick={() => handleTabChange("currentMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "currentMonth"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Current Month ({getCurrentMonthName()} {getCurrentYear()})
-          </button>
-          <button
-            onClick={() => handleTabChange("janToPreviousMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "janToPreviousMonth"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            {getJanToPreviousMonthRange().label}
-          </button>
-          <button
-            onClick={() => handleTabChange("custom")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "custom"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Custom Filter
-          </button>
-          <button
-            onClick={() => handleTabChange("all")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-              selectedTab === "all"
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            All Records
-          </button>
+          {[
+            {
+              key: "currentMonth",
+              label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
+            },
+            {
+              key: "janToPreviousMonth",
+              label: getJanToPreviousMonthRange().label,
+            },
+            { key: "custom", label: "Custom Filter" },
+            { key: "all", label: "All Records" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => handleTabChange(key)}
+              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+                selectedTab === key
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <Filter size={16} />
           <span>Active Filter: </span>
@@ -617,11 +571,7 @@ const MRWiseOutstanding = () => {
             <div>
               <p className="text-sm text-gray-600">Total Outstanding</p>
               <p className="text-2xl font-bold text-gray-800">
-                $
-                {data.summary.totalOutstandingAmount?.toLocaleString(
-                  undefined,
-                  { minimumFractionDigits: 2, maximumFractionDigits: 2 },
-                ) || "0.00"}
+                ${fmt(data.summary.totalOutstandingAmount)}
               </p>
             </div>
             <FileText className="w-8 h-8 text-blue-500" />
@@ -651,7 +601,7 @@ const MRWiseOutstanding = () => {
         </div>
       </div>
 
-      {/* Data Table */}
+      {/* Main Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -668,10 +618,10 @@ const MRWiseOutstanding = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" className="p-3 text-center">
-                  <div className="flex justify-center items-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                    <span className="ml-2">Loading...</span>
+                <td colSpan="7" className="p-8 text-center">
+                  <div className="flex justify-center items-center gap-2">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+                    <span>Loading...</span>
                   </div>
                 </td>
               </tr>
@@ -684,40 +634,28 @@ const MRWiseOutstanding = () => {
                   }`}
                   onClick={() => handleRowClick(mr)}
                 >
-                  <td className="p-3">
-                    <div className="text-sm text-gray-600 font-medium">
-                      {getSerialNumber(index)}
-                    </div>
+                  <td className="p-3 text-sm text-gray-600 font-medium">
+                    {getSerialNumber(index)}
+                  </td>
+                  <td className="p-3 text-sm text-gray-600 font-medium">
+                    {mr.mrId || "N/A"}
                   </td>
                   <td className="p-3">
-                    <div className="text-sm text-gray-600 font-medium">
-                      {mr.mrId || "N/A"}
+                    <div className="text-sm font-medium text-gray-900 capitalize">
+                      {mr.mrName}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {mr.staff?.email || "No email"}
                     </div>
                   </td>
-                  <td className="p-3">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900 capitalize">
-                        {mr.mrName}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {mr.staff?.email || "No email"}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm text-gray-900">
-                      {mr.staff?.contactNo || "Not Available"}
-                    </div>
+                  <td className="p-3 text-sm text-gray-900">
+                    {mr.staff?.contactNo || "Not Available"}
                   </td>
                   <td className="p-3 text-sm font-semibold text-green-600">
                     {mr.totalCustomers || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-blue-600">
-                    $
-                    {mr.totalOutstandingAmount?.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }) || "0.00"}
+                    ${fmt(mr.totalOutstandingAmount)}
                   </td>
                   <td className="p-3">
                     <button
@@ -726,7 +664,7 @@ const MRWiseOutstanding = () => {
                         handleRowClick(mr);
                       }}
                       className="text-blue-600 hover:text-blue-800"
-                      title="View Customer Details"
+                      title="View Invoice Details"
                     >
                       <Eye size={18} />
                     </button>
@@ -735,7 +673,7 @@ const MRWiseOutstanding = () => {
               ))
             ) : (
               <tr>
-                <td colSpan="7" className="p-3 text-center text-gray-500">
+                <td colSpan="7" className="p-8 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -749,97 +687,131 @@ const MRWiseOutstanding = () => {
 
       {renderPagination()}
 
-      {/* Customer Details Modal */}
       {customerModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
+            <div className="bg-white w-full max-w-5xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
+              {/* Modal Header */}
               <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-800">
-                  Customer Details - {selectedMR?.mrName}
-                </h2>
-                <button
-                  onClick={() => setCustomerModalOpen(false)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <X size={24} />
-                </button>
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-800">
+                    Invoice Details — {selectedMR?.mrName}
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    All outstanding invoices for this MR
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={exportModalToExcel}
+                    disabled={exportingModal || customerDetails.length === 0}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer ${
+                      exportingModal || customerDetails.length === 0
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-green-600 hover:bg-green-700 text-white"
+                    }`}
+                    title="Export to Excel"
+                  >
+                    <Download size={16} />
+                    {exportingModal ? "Exporting..." : "Export"}
+                  </button>
+                  <button
+                    onClick={() => setCustomerModalOpen(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
               </div>
+
+              {/* Modal Body */}
               <div className="flex-1 overflow-y-auto p-6">
                 {loadingCustomers ? (
-                  <div className="flex justify-center items-center h-40">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                    <span className="ml-2">Loading customer details...</span>
+                  <div className="flex justify-center items-center h-40 gap-2">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+                    <span>Loading invoice details...</span>
                   </div>
                 ) : customerDetails.length === 0 ? (
-                  <div className="text-center py-8">
+                  <div className="text-center py-12">
                     <p className="text-gray-500">
-                      No customers found with outstanding amounts for this MR.
+                      No outstanding invoices found for this MR.
                     </p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse">
-                      <thead className="bg-gray-50">
+                    <table className="w-full border-collapse text-sm">
+                      <thead className="bg-gray-50 sticky top-0">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Sr.No
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Invoice
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
                             Customer Name
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Contact
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Customer Address
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Address
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Total Amount ($)
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Province
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Collected Amount ($)
                           </th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">
-                            Unpaid Amount ($)
+                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Pending Amount ($)
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {customerDetails.map((customer, idx) => (
+                      <tbody className="divide-y divide-gray-100">
+                        {customerDetails.map((row, idx) => (
                           <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                              {customer.customerName || "N/A"}
+                            <td className="px-4 py-3 text-gray-500">
+                              {idx + 1}
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">
-                              {customer.contact || "N/A"}
+                            <td className="px-4 py-3 font-mono font-semibold text-indigo-700">
+                              {row.invoiceNumber || "N/A"}
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">
-                              {customer.address || "N/A"}
+                            <td className="px-4 py-3 font-medium text-gray-900">
+                              {row.customerName || "N/A"}
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">
-                              {customer.province || "N/A"}
+                            <td
+                              className="px-4 py-3 text-gray-600 max-w-[200px] truncate"
+                              title={row.customerAddress}
+                            >
+                              {row.customerAddress || "N/A"}
                             </td>
-                            <td className="px-4 py-3 text-sm font-semibold text-right text-red-600">
-                              $
-                              {customer.totalDue?.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              }) || "0.00"}
+                            <td className="px-4 py-3 text-right font-medium text-gray-800">
+                              ${fmt(row.totalAmount)}
+                            </td>
+                            <td className="px-4 py-3 text-right font-medium text-green-600">
+                              ${fmt(row.collectedAmount)}
+                            </td>
+                            <td className="px-4 py-3 text-right font-semibold text-red-600">
+                              ${fmt(row.pendingAmount)}
                             </td>
                           </tr>
                         ))}
                       </tbody>
-                      <tfoot className="bg-gray-50">
+                      {/* Footer totals row */}
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-300">
                         <tr>
                           <td
                             colSpan="4"
-                            className="px-4 py-3 text-sm font-semibold text-gray-900 text-right"
+                            className="px-4 py-3 text-sm font-bold text-gray-800 text-right"
                           >
-                            Total Unpaid:
+                            Grand Total:
                           </td>
-                          <td className="px-4 py-3 text-sm font-bold text-right text-red-600">
-                            $
-                            {customerDetails
-                              .reduce((sum, c) => sum + (c.totalDue || 0), 0)
-                              .toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
+                          <td className="px-4 py-3 text-right font-bold text-gray-800">
+                            ${fmt(modalTotals.totalAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-green-600">
+                            ${fmt(modalTotals.collectedAmount)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-red-600">
+                            ${fmt(modalTotals.pendingAmount)}
                           </td>
                         </tr>
                       </tfoot>
@@ -847,7 +819,13 @@ const MRWiseOutstanding = () => {
                   </div>
                 )}
               </div>
-              <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
+                <p className="text-sm text-gray-500">
+                  {customerDetails.length} invoice
+                  {customerDetails.length !== 1 ? "s" : ""} found
+                </p>
                 <button
                   onClick={() => setCustomerModalOpen(false)}
                   className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg transition-colors"
@@ -860,6 +838,7 @@ const MRWiseOutstanding = () => {
           document.body,
         )}
 
+      {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -874,54 +853,46 @@ const MRWiseOutstanding = () => {
               >
                 <X size={20} />
               </button>
-
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
                 MR Wise Outstanding Filter
               </h2>
-
               <div className="space-y-4 mb-6">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Start Date
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.startDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("startDate", date)
-                      }
-                      selectsStart
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholderText="Select start date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      End Date
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.endDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("endDate", date)
-                      }
-                      selectsEnd
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      minDate={customDateRange.startDate}
-                      className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholderText="Select end date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Start Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.startDate}
+                    onChange={(date) =>
+                      handleCustomDateChange("startDate", date)
+                    }
+                    selectsStart
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholderText="Select start date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.endDate}
+                    onChange={(date) => handleCustomDateChange("endDate", date)}
+                    selectsEnd
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    minDate={customDateRange.startDate}
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholderText="Select end date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
                 </div>
               </div>
-
               <div className="flex justify-between gap-3">
                 <button
                   onClick={handleClearFilters}

@@ -81,10 +81,9 @@ const Leaves = () => {
     return Math.max(0, adjustedMonths);
   };
 
-  // Calculate paid leaves based on months of service (1.25 days per month)
   const calculatePaidLeaves = (joinDate) => {
     const monthsOfService = getMonthsOfService(joinDate);
-    return (monthsOfService * 1.25).toFixed(2);
+    return (monthsOfService * 1).toFixed(2);
   };
 
   // Filter MR list based on search
@@ -220,7 +219,6 @@ const Leaves = () => {
       return date >= yearStart && date <= yearEnd;
     }).length;
 
-    // Calculate paid leaves based on months of service (1.25 days per month)
     const paidLeaves = calculatePaidLeaves(joinDate);
 
     return {

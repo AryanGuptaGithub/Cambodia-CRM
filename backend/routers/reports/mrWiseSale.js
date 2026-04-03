@@ -1,5 +1,5 @@
 import express from "express";
-import ExcelJS from 'exceljs';
+import ExcelJS from "exceljs";
 import mongoose from "mongoose";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import MRStockInHand from "../../models/sale/mrStockHand.js";
@@ -21,7 +21,7 @@ const generateMRId = (index) => {
 };
 
 /**
- * ✅ FIXED: /sales endpoint - MUST come before all other routes
+ * ✅ FIXED: /sales endpoint - uses $totalAmount consistently (same as Daily Reports)
  */
 router.get("/sales", async (req, res) => {
   try {
@@ -36,6 +36,7 @@ router.get("/sales", async (req, res) => {
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999); // ✅ include full end day
 
       if (isNaN(start.getTime()) || isNaN(end.getTime())) {
         return res.status(400).json({
@@ -53,26 +54,20 @@ router.get("/sales", async (req, res) => {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // Base aggregation pipeline for all sales
+    // Base aggregation pipeline — mirrors Daily Reports logic exactly
     const basePipeline = [
       { $match: matchConditions },
 
-      // Group by MR to get sales summary
+      // Group by MR name (normalised to lowercase like Daily Reports)
       {
         $group: {
-          _id: "$mrName",
-          totalSalesAmount: {
-            $sum: {
-              $ifNull: [
-                "$netSellingAmount",
-                "$totalAmount",
-                "$amount",
-                "$salesAmount",
-                0
-              ]
-            }
-          },
+          _id: { $toLower: { $trim: { input: "$mrName" } } },
+          mrName: { $first: "$mrName" },
+          // ✅ FIX: use $totalAmount, not $netSellingAmount/$ifNull chain
+          totalSalesAmount: { $sum: "$totalAmount" },
           totalOrders: { $sum: 1 },
+          totalPaidAmount: { $sum: "$paidAmount" },
+          totalDueAmount: { $sum: "$dueAmount" },
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
       },
@@ -86,26 +81,31 @@ router.get("/sales", async (req, res) => {
                 $cond: [
                   { $gt: ["$totalOrders", 0] },
                   { $divide: ["$totalSalesAmount", "$totalOrders"] },
-                  0
-                ]
+                  0,
+                ],
               },
-              2
-            ]
-          }
-        }
+              2,
+            ],
+          },
+        },
       },
 
       // Lookup staff details
       {
         $lookup: {
           from: "staffs",
-          let: { mrName: "$_id" },
+          let: { mrName: "$mrName" },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$medicalRepName", "$$mrName"] },
+                    {
+                      $eq: [
+                        { $toLower: { $trim: { input: "$medicalRepName" } } },
+                        { $toLower: { $trim: { input: "$$mrName" } } },
+                      ],
+                    },
                     { $eq: ["$enabled", true] },
                   ],
                 },
@@ -127,28 +127,29 @@ router.get("/sales", async (req, res) => {
       // Format output
       {
         $project: {
-          mrName: { $ifNull: ["$_id", "Unknown"] },
+          mrName: { $ifNull: ["$mrName", "Unknown"] },
           totalSalesAmount: {
-            $round: [
-              { $ifNull: ["$totalSalesAmount", 0] },
-              2
-            ]
+            $round: [{ $ifNull: ["$totalSalesAmount", 0] }, 2],
           },
           totalOrders: { $ifNull: ["$totalOrders", 0] },
           averageOrderValue: { $ifNull: ["$averageOrderValue", 0] },
+          totalPaidAmount: {
+            $round: [{ $ifNull: ["$totalPaidAmount", 0] }, 2],
+          },
+          totalDueAmount: { $round: [{ $ifNull: ["$totalDueAmount", 0] }, 2] },
           totalCustomers: {
             $cond: {
               if: { $isArray: "$uniqueCustomers" },
               then: { $size: "$uniqueCustomers" },
-              else: 0
-            }
+              else: 0,
+            },
           },
           staff: {
             $cond: {
               if: { $gt: [{ $size: "$staffDetails" }, 0] },
               then: { $arrayElemAt: ["$staffDetails", 0] },
               else: {
-                medicalRepName: "$_id",
+                medicalRepName: "$mrName",
                 contactNo: "Not Available",
                 email: "Not Available",
                 teamName: "Not Available",
@@ -171,49 +172,19 @@ router.get("/sales", async (req, res) => {
         { $limit: limitNum },
       ]),
 
-      // Summary aggregation
+      // Summary aggregation — also uses $totalAmount
       SaleSummary.aggregate([
         { $match: matchConditions },
         {
           $group: {
-            _id: "$mrName",
-            totalSalesAmount: {
-              $sum: {
-                $ifNull: [
-                  "$netSellingAmount",
-                  "$totalAmount",
-                  "$amount",
-                  "$salesAmount",
-                  0
-                ]
-              }
-            },
-            totalOrders: { $sum: 1 },
-            uniqueCustomers: { $addToSet: "$customerCode" },
-          },
-        },
-        {
-          $group: {
             _id: null,
-            totalSalesAmount: {
-              $sum: {
-                $round: [
-                  { $ifNull: ["$totalSalesAmount", 0] },
-                  2
-                ]
-              }
-            },
-            totalOrders: { $sum: "$totalOrders" },
-            totalCustomers: {
-              $sum: {
-                $cond: {
-                  if: { $isArray: "$uniqueCustomers" },
-                  then: { $size: "$uniqueCustomers" },
-                  else: 0
-                }
-              }
-            },
-            totalMRs: { $sum: 1 },
+            // ✅ FIX: use $totalAmount
+            totalSalesAmount: { $sum: "$totalAmount" },
+            totalOrders: { $sum: 1 },
+            totalPaidAmount: { $sum: "$paidAmount" },
+            totalDueAmount: { $sum: "$dueAmount" },
+            uniqueCustomers: { $addToSet: "$customerCode" },
+            uniqueMRs: { $addToSet: "$mrName" },
           },
         },
         {
@@ -224,14 +195,26 @@ router.get("/sales", async (req, res) => {
                   $cond: [
                     { $gt: ["$totalOrders", 0] },
                     { $divide: ["$totalSalesAmount", "$totalOrders"] },
-                    0
-                  ]
+                    0,
+                  ],
                 },
-                2
-              ]
-            }
-          }
-        }
+                2,
+              ],
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
+            totalOrders: 1,
+            totalPaidAmount: { $round: ["$totalPaidAmount", 2] },
+            totalDueAmount: { $round: ["$totalDueAmount", 2] },
+            averageOrderValue: 1,
+            totalCustomers: { $size: "$uniqueCustomers" },
+            totalMRs: { $size: "$uniqueMRs" },
+          },
+        },
       ]),
     ]);
 
@@ -245,6 +228,8 @@ router.get("/sales", async (req, res) => {
       totalOrders: parseInt(mr.totalOrders || 0),
       averageOrderValue: parseFloat(mr.averageOrderValue || 0),
       totalCustomers: parseInt(mr.totalCustomers || 0),
+      totalPaidAmount: parseFloat(mr.totalPaidAmount || 0),
+      totalDueAmount: parseFloat(mr.totalDueAmount || 0),
       staff: mr.staff || {},
       region: mr.staff?.teamName || "Not Available",
       email: mr.staff?.email || "Not Available",
@@ -254,22 +239,16 @@ router.get("/sales", async (req, res) => {
     const summary = summaryResult[0] || {
       totalSalesAmount: 0,
       totalOrders: 0,
+      totalPaidAmount: 0,
+      totalDueAmount: 0,
       totalCustomers: 0,
       totalMRs: 0,
       averageOrderValue: 0,
     };
 
-    const formattedSummary = {
-      totalSalesAmount: parseFloat(summary.totalSalesAmount),
-      totalOrders: parseInt(summary.totalOrders),
-      totalCustomers: parseInt(summary.totalCustomers),
-      totalMRs: parseInt(summary.totalMRs),
-      averageOrderValue: parseFloat(summary.averageOrderValue),
-    };
-
     res.json({
       data: {
-        summary: formattedSummary,
+        summary,
         records,
       },
       pagination: {
@@ -290,7 +269,7 @@ router.get("/sales", async (req, res) => {
 });
 
 /**
- * ✅ FIXED: /export/excel endpoint - MUST come before /:mrId
+ * ✅ FIXED: /export/excel endpoint — also uses $totalAmount
  */
 router.get("/export/excel", async (req, res) => {
   try {
@@ -300,6 +279,7 @@ router.get("/export/excel", async (req, res) => {
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
 
       if (isNaN(start.getTime()) || isNaN(end.getTime())) {
         return res.status(400).json({
@@ -317,24 +297,15 @@ router.get("/export/excel", async (req, res) => {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // Get all MR sales data without pagination for export
     const mrData = await SaleSummary.aggregate([
       { $match: matchConditions },
 
       {
         $group: {
-          _id: "$mrName",
-          totalSalesAmount: {
-            $sum: {
-              $ifNull: [
-                "$netSellingAmount",
-                "$totalAmount",
-                "$amount",
-                "$salesAmount",
-                0
-              ]
-            }
-          },
+          _id: { $toLower: { $trim: { input: "$mrName" } } },
+          mrName: { $first: "$mrName" },
+          // ✅ FIX: use $totalAmount
+          totalSalesAmount: { $sum: "$totalAmount" },
           totalOrders: { $sum: 1 },
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
@@ -348,25 +319,30 @@ router.get("/export/excel", async (req, res) => {
                 $cond: [
                   { $gt: ["$totalOrders", 0] },
                   { $divide: ["$totalSalesAmount", "$totalOrders"] },
-                  0
-                ]
+                  0,
+                ],
               },
-              2
-            ]
-          }
-        }
+              2,
+            ],
+          },
+        },
       },
 
       {
         $lookup: {
           from: "staffs",
-          let: { mrName: "$_id" },
+          let: { mrName: "$mrName" },
           pipeline: [
             {
               $match: {
                 $expr: {
                   $and: [
-                    { $eq: ["$medicalRepName", "$$mrName"] },
+                    {
+                      $eq: [
+                        { $toLower: { $trim: { input: "$medicalRepName" } } },
+                        { $toLower: { $trim: { input: "$$mrName" } } },
+                      ],
+                    },
                     { $eq: ["$enabled", true] },
                   ],
                 },
@@ -387,12 +363,9 @@ router.get("/export/excel", async (req, res) => {
 
       {
         $project: {
-          mrName: { $ifNull: ["$_id", "Unknown"] },
+          mrName: { $ifNull: ["$mrName", "Unknown"] },
           totalSalesAmount: {
-            $round: [
-              { $ifNull: ["$totalSalesAmount", 0] },
-              2
-            ]
+            $round: [{ $ifNull: ["$totalSalesAmount", 0] }, 2],
           },
           totalOrders: { $ifNull: ["$totalOrders", 0] },
           averageOrderValue: { $ifNull: ["$averageOrderValue", 0] },
@@ -400,15 +373,15 @@ router.get("/export/excel", async (req, res) => {
             $cond: {
               if: { $isArray: "$uniqueCustomers" },
               then: { $size: "$uniqueCustomers" },
-              else: 0
-            }
+              else: 0,
+            },
           },
           staff: {
             $cond: {
               if: { $gt: [{ $size: "$staffDetails" }, 0] },
               then: { $arrayElemAt: ["$staffDetails", 0] },
               else: {
-                medicalRepName: "$_id",
+                medicalRepName: "$mrName",
                 contactNo: "Not Available",
                 email: "Not Available",
                 teamName: "Not Available",
@@ -421,64 +394,63 @@ router.get("/export/excel", async (req, res) => {
       { $sort: { totalSalesAmount: -1 } },
     ]);
 
-    const totalSales = mrData.reduce((sum, mr) => {
-      return sum + parseFloat(mr.totalSalesAmount || 0);
-    }, 0);
-
-    const totalOrders = mrData.reduce((sum, mr) => {
-      return sum + (mr.totalOrders || 0);
-    }, 0);
-
+    const totalSales = mrData.reduce(
+      (sum, mr) => sum + parseFloat(mr.totalSalesAmount || 0),
+      0,
+    );
+    const totalOrders = mrData.reduce(
+      (sum, mr) => sum + (mr.totalOrders || 0),
+      0,
+    );
     const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
 
     // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'MR Wise Sales System';
+    workbook.creator = "MR Wise Sales System";
     workbook.created = new Date();
 
-    const worksheet = workbook.addWorksheet('MR Wise Sales');
+    const worksheet = workbook.addWorksheet("MR Wise Sales");
 
-    worksheet.mergeCells('A1:G1');
+    worksheet.mergeCells("A1:G1");
     const titleRow = worksheet.getRow(1);
-    titleRow.getCell(1).value = 'MR Wise Sales Report';
+    titleRow.getCell(1).value = "MR Wise Sales Report";
     titleRow.getCell(1).font = { bold: true, size: 16 };
-    titleRow.getCell(1).alignment = { horizontal: 'center' };
+    titleRow.getCell(1).alignment = { horizontal: "center" };
 
-    worksheet.mergeCells('A3:C3');
-    worksheet.getCell('A3').value = `Total Sales: $${parseFloat(totalSales).toFixed(2)}`;
-    worksheet.getCell('A3').font = { bold: true, size: 12 };
+    worksheet.mergeCells("A3:C3");
+    worksheet.getCell("A3").value =
+      `Total Sales: $${parseFloat(totalSales).toFixed(2)}`;
+    worksheet.getCell("A3").font = { bold: true, size: 12 };
 
-    worksheet.mergeCells('A4:C4');
-    worksheet.getCell('A4').value = `Total Orders: ${totalOrders}`;
-    worksheet.getCell('A4').font = { bold: true, size: 12 };
+    worksheet.mergeCells("A4:C4");
+    worksheet.getCell("A4").value = `Total Orders: ${totalOrders}`;
+    worksheet.getCell("A4").font = { bold: true, size: 12 };
 
-    worksheet.mergeCells('A5:C5');
-    worksheet.getCell('A5').value = `Avg Order Value: $${parseFloat(avgOrderValue).toFixed(2)}`;
-    worksheet.getCell('A5').font = { bold: true, size: 12 };
+    worksheet.mergeCells("A5:C5");
+    worksheet.getCell("A5").value =
+      `Avg Order Value: $${parseFloat(avgOrderValue).toFixed(2)}`;
+    worksheet.getCell("A5").font = { bold: true, size: 12 };
 
     worksheet.addRow({});
 
     const headerRowNum = 7;
-    worksheet.getCell(`A${headerRowNum}`).value = 'Sr.No';
-    worksheet.getCell(`B${headerRowNum}`).value = 'MR Name';
-    worksheet.getCell(`C${headerRowNum}`).value = 'Region';
-    worksheet.getCell(`D${headerRowNum}`).value = 'Total Orders';
-    worksheet.getCell(`E${headerRowNum}`).value = 'Total Sales';
-    worksheet.getCell(`F${headerRowNum}`).value = 'Avg Order Value';
+    worksheet.getCell(`A${headerRowNum}`).value = "Sr.No";
+    worksheet.getCell(`B${headerRowNum}`).value = "MR Name";
+    worksheet.getCell(`C${headerRowNum}`).value = "Region";
+    worksheet.getCell(`D${headerRowNum}`).value = "Total Orders";
+    worksheet.getCell(`E${headerRowNum}`).value = "Total Sales";
+    worksheet.getCell(`F${headerRowNum}`).value = "Avg Order Value";
 
     const headerRow = worksheet.getRow(headerRowNum);
     headerRow.font = { bold: true, size: 12 };
-    headerRow.alignment = {
-      horizontal: 'center',
-      vertical: 'middle'
-    };
+    headerRow.alignment = { horizontal: "center", vertical: "middle" };
     headerRow.height = 25;
 
     headerRow.eachCell((cell) => {
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
       };
     });
 
@@ -487,25 +459,25 @@ router.get("/export/excel", async (req, res) => {
       const row = worksheet.getRow(rowNum);
 
       row.getCell(1).value = index + 1;
-      row.getCell(2).value = mr.mrName || 'N/A';
-      row.getCell(3).value = mr.staff?.teamName || 'Not Available';
+      row.getCell(2).value = mr.mrName || "N/A";
+      row.getCell(3).value = mr.staff?.teamName || "Not Available";
       row.getCell(4).value = mr.totalOrders || 0;
       row.getCell(5).value = parseFloat(mr.totalSalesAmount || 0);
-      row.getCell(5).numFmt = '$#,##0.00';
+      row.getCell(5).numFmt = "$#,##0.00";
       row.getCell(6).value = parseFloat(mr.averageOrderValue || 0);
-      row.getCell(6).numFmt = '$#,##0.00';
+      row.getCell(6).numFmt = "$#,##0.00";
 
-      row.getCell(1).alignment = { horizontal: 'center' };
-      row.getCell(4).alignment = { horizontal: 'center' };
+      row.getCell(1).alignment = { horizontal: "center" };
+      row.getCell(4).alignment = { horizontal: "center" };
     });
 
     worksheet.columns = [
-      { key: 'serialNo', width: 10 },
-      { key: 'mrName', width: 25 },
-      { key: 'region', width: 20 },
-      { key: 'totalOrders', width: 15 },
-      { key: 'totalSales', width: 20 },
-      { key: 'avgOrderValue', width: 18 },
+      { key: "serialNo", width: 10 },
+      { key: "mrName", width: 25 },
+      { key: "region", width: 20 },
+      { key: "totalOrders", width: 15 },
+      { key: "totalSales", width: 20 },
+      { key: "avgOrderValue", width: 18 },
     ];
 
     const dataEndRow = headerRowNum + mrData.length;
@@ -513,37 +485,33 @@ router.get("/export/excel", async (req, res) => {
       const row = worksheet.getRow(i);
       row.eachCell((cell) => {
         cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
         };
       });
     }
 
     const currentDate = new Date();
-    const formattedDate = currentDate.toISOString().split('T')[0];
+    const formattedDate = currentDate.toISOString().split("T")[0];
 
-    let fileName = 'mr-wise-sales';
+    let fileName = "mr-wise-sales";
     if (startDate && endDate) {
-      fileName = `mr-wise-sales-${startDate.replace(/-/g, '')}-to-${endDate.replace(/-/g, '')}`;
+      fileName = `mr-wise-sales-${startDate.replace(/-/g, "")}-to-${endDate.replace(/-/g, "")}`;
     } else {
-      fileName = `mr-wise-sales-${formattedDate.replace(/-/g, '')}`;
+      fileName = `mr-wise-sales-${formattedDate.replace(/-/g, "")}`;
     }
-    fileName += '.xlsx';
+    fileName += ".xlsx";
 
     res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${fileName}"`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     const buffer = await workbook.xlsx.writeBuffer();
     res.send(buffer);
-
   } catch (err) {
     console.error("Error in /export/excel:", err);
     res.status(500).json({
@@ -554,26 +522,29 @@ router.get("/export/excel", async (req, res) => {
 });
 
 /**
- * ✅ FIXED: /debug-sales-data endpoint - MUST come before /:mrId
+ * ✅ /debug-sales-data endpoint
  */
 router.get("/debug-sales-data", async (req, res) => {
   try {
     const sampleDocs = await SaleSummary.find({}).limit(5);
 
-    const fieldAnalysis = sampleDocs.map(doc => {
+    const fieldAnalysis = sampleDocs.map((doc) => {
       const docObj = doc.toObject();
       return {
         _id: doc._id,
         mrName: doc.mrName,
-        fields: Object.keys(docObj).filter(key =>
-          key.toLowerCase().includes('amount') ||
-          key.toLowerCase().includes('total') ||
-          key.toLowerCase().includes('price')
-        ).map(key => ({
-          field: key,
-          value: docObj[key],
-          type: typeof docObj[key]
-        }))
+        fields: Object.keys(docObj)
+          .filter(
+            (key) =>
+              key.toLowerCase().includes("amount") ||
+              key.toLowerCase().includes("total") ||
+              key.toLowerCase().includes("price"),
+          )
+          .map((key) => ({
+            field: key,
+            value: docObj[key],
+            type: typeof docObj[key],
+          })),
       };
     });
 
@@ -581,13 +552,14 @@ router.get("/debug-sales-data", async (req, res) => {
       success: true,
       sampleCount: sampleDocs.length,
       fieldAnalysis,
-      allFields: sampleDocs.length > 0 ? Object.keys(sampleDocs[0].toObject()) : []
+      allFields:
+        sampleDocs.length > 0 ? Object.keys(sampleDocs[0].toObject()) : [],
     });
   } catch (error) {
     console.error("Debug error:", error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -599,30 +571,34 @@ router.get("/debug-sales-data", async (req, res) => {
 router.get("/mrs-with-stock", async (req, res) => {
   try {
     const mrStocks = await MRStockInHand.find()
-      .populate('mrId', 'medicalRepName MRId')
+      .populate("mrId", "medicalRepName MRId")
       .lean();
 
     const mrsWithStock = mrStocks
-      .filter(mrStock => mrStock.productsInHand?.some(p => p.quantity > 0))
-      .map(mrStock => ({
+      .filter((mrStock) => mrStock.productsInHand?.some((p) => p.quantity > 0))
+      .map((mrStock) => ({
         _id: mrStock.mrId?._id || mrStock.mrId,
         mrName: mrStock.mrName,
         medicalRepName: mrStock.mrName,
-        totalProducts: mrStock.productsInHand.filter(p => p.quantity > 0).length,
-        totalQuantity: mrStock.productsInHand.reduce((sum, p) => sum + (p.quantity || 0), 0)
+        totalProducts: mrStock.productsInHand.filter((p) => p.quantity > 0)
+          .length,
+        totalQuantity: mrStock.productsInHand.reduce(
+          (sum, p) => sum + (p.quantity || 0),
+          0,
+        ),
       }));
 
     res.json({
       success: true,
       data: mrsWithStock,
-      count: mrsWithStock.length
+      count: mrsWithStock.length,
     });
   } catch (error) {
     console.error("Error fetching MRs with stock:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch MRs with stock",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -634,7 +610,7 @@ router.get("/products/:mrId", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(mrId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid MR ID format"
+        message: "Invalid MR ID format",
       });
     }
 
@@ -644,30 +620,30 @@ router.get("/products/:mrId", async (req, res) => {
       return res.json({
         success: true,
         products: [],
-        mrName: null
+        mrName: null,
       });
     }
 
     const availableProducts = (mrStock.productsInHand || [])
-      .filter(p => p.quantity > 0)
-      .map(p => ({
+      .filter((p) => p.quantity > 0)
+      .map((p) => ({
         productName: p.productName,
         quantity: p.quantity,
-        lc: p.lc || 0
+        lc: p.lc || 0,
       }));
 
     res.json({
       success: true,
       products: availableProducts,
       mrName: mrStock.mrName,
-      count: availableProducts.length
+      count: availableProducts.length,
     });
   } catch (error) {
     console.error("Error fetching MR products:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch MR products",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -687,7 +663,9 @@ router.post("/deduct", async (req, res) => {
       throw new Error("Invalid MR ID format");
     }
 
-    const totalQty = fixPrecision((parseFloat(salesQty) || 0) + (parseFloat(bonusQty) || 0));
+    const totalQty = fixPrecision(
+      (parseFloat(salesQty) || 0) + (parseFloat(bonusQty) || 0),
+    );
 
     if (totalQty <= 0) {
       throw new Error("Total quantity must be greater than 0");
@@ -700,11 +678,14 @@ router.post("/deduct", async (req, res) => {
     }
 
     const productIndex = mrStock.productsInHand.findIndex(
-      p => p.productName.toLowerCase().trim() === productName.toLowerCase().trim()
+      (p) =>
+        p.productName.toLowerCase().trim() === productName.toLowerCase().trim(),
     );
 
     if (productIndex === -1) {
-      throw new Error(`Product "${productName}" not found in ${mrStock.mrName}'s stock`);
+      throw new Error(
+        `Product "${productName}" not found in ${mrStock.mrName}'s stock`,
+      );
     }
 
     const product = mrStock.productsInHand[productIndex];
@@ -712,12 +693,14 @@ router.post("/deduct", async (req, res) => {
     if (product.quantity < totalQty) {
       throw new Error(
         `Insufficient stock for ${productName}. ` +
-        `Available: ${product.quantity}, Required: ${totalQty}, ` +
-        `Short by: ${fixPrecision(totalQty - product.quantity)}`
+          `Available: ${product.quantity}, Required: ${totalQty}, ` +
+          `Short by: ${fixPrecision(totalQty - product.quantity)}`,
       );
     }
 
-    mrStock.productsInHand[productIndex].quantity = fixPrecision(product.quantity - totalQty);
+    mrStock.productsInHand[productIndex].quantity = fixPrecision(
+      product.quantity - totalQty,
+    );
     mrStock.productsInHand[productIndex].lastUpdated = new Date();
 
     if (mrStock.productsInHand[productIndex].quantity === 0) {
@@ -736,7 +719,7 @@ router.post("/deduct", async (req, res) => {
       deductedQty: totalQty,
       remainingQty: mrStock.productsInHand[productIndex]?.quantity || 0,
       mrName: mrStock.mrName,
-      productName: productName
+      productName: productName,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -746,7 +729,7 @@ router.post("/deduct", async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to deduct stock",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -783,16 +766,20 @@ router.post("/restore", async (req, res) => {
       mrStock = new MRStockInHand({
         mrId: mrId,
         mrName: mr.medicalRepName,
-        productsInHand: [{
-          productName: productName,
-          quantity: restoreQty,
-          lc: lc || 0,
-          lastUpdated: new Date()
-        }]
+        productsInHand: [
+          {
+            productName: productName,
+            quantity: restoreQty,
+            lc: lc || 0,
+            lastUpdated: new Date(),
+          },
+        ],
       });
     } else {
       const productIndex = mrStock.productsInHand.findIndex(
-        p => p.productName.toLowerCase().trim() === productName.toLowerCase().trim()
+        (p) =>
+          p.productName.toLowerCase().trim() ===
+          productName.toLowerCase().trim(),
       );
 
       if (productIndex === -1) {
@@ -800,11 +787,11 @@ router.post("/restore", async (req, res) => {
           productName: productName,
           quantity: restoreQty,
           lc: lc || 0,
-          lastUpdated: new Date()
+          lastUpdated: new Date(),
         });
       } else {
         mrStock.productsInHand[productIndex].quantity = fixPrecision(
-          mrStock.productsInHand[productIndex].quantity + restoreQty
+          mrStock.productsInHand[productIndex].quantity + restoreQty,
         );
         mrStock.productsInHand[productIndex].lastUpdated = new Date();
       }
@@ -821,7 +808,7 @@ router.post("/restore", async (req, res) => {
       message: "Stock restored successfully",
       restoredQty: restoreQty,
       mrName: mrStock.mrName,
-      productName: productName
+      productName: productName,
     });
   } catch (error) {
     await session.abortTransaction();
@@ -831,7 +818,7 @@ router.post("/restore", async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Failed to restore stock",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -839,21 +826,21 @@ router.post("/restore", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const mrStocks = await MRStockInHand.find()
-      .populate('mrId', 'medicalRepName MRId')
+      .populate("mrId", "medicalRepName MRId")
       .sort({ mrName: 1 })
       .lean();
 
     res.json({
       success: true,
       data: mrStocks,
-      count: mrStocks.length
+      count: mrStocks.length,
     });
   } catch (error) {
     console.error("Error fetching MR stock:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch MR stock",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -870,7 +857,7 @@ router.get("/:mrId/:productName", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(mrId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid MR ID format"
+        message: "Invalid MR ID format",
       });
     }
 
@@ -879,18 +866,20 @@ router.get("/:mrId/:productName", async (req, res) => {
     if (!mrStock) {
       return res.status(404).json({
         success: false,
-        message: "MR stock not found"
+        message: "MR stock not found",
       });
     }
 
     const product = mrStock.productsInHand.find(
-      p => p.productName.toLowerCase().trim() === decodedProductName.toLowerCase().trim()
+      (p) =>
+        p.productName.toLowerCase().trim() ===
+        decodedProductName.toLowerCase().trim(),
     );
 
     if (!product) {
       return res.status(404).json({
         success: false,
-        message: `Product "${decodedProductName}" not found in ${mrStock.mrName}'s stock`
+        message: `Product "${decodedProductName}" not found in ${mrStock.mrName}'s stock`,
       });
     }
 
@@ -900,16 +889,16 @@ router.get("/:mrId/:productName", async (req, res) => {
         productName: product.productName,
         quantity: product.quantity,
         lc: product.lc || 0,
-        lastUpdated: product.lastUpdated
+        lastUpdated: product.lastUpdated,
       },
-      mrName: mrStock.mrName
+      mrName: mrStock.mrName,
     });
   } catch (error) {
     console.error("Error fetching MR product stock:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch MR product stock",
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -921,31 +910,31 @@ router.get("/:mrId", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(mrId)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid MR ID format"
+        message: "Invalid MR ID format",
       });
     }
 
     const mrStock = await MRStockInHand.findOne({ mrId })
-      .populate('mrId', 'medicalRepName MRId')
+      .populate("mrId", "medicalRepName MRId")
       .lean();
 
     if (!mrStock) {
       return res.status(404).json({
         success: false,
-        message: "MR stock not found"
+        message: "MR stock not found",
       });
     }
 
     res.json({
       success: true,
-      data: mrStock
+      data: mrStock,
     });
   } catch (error) {
     console.error("Error fetching MR stock:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch MR stock",
-      error: error.message
+      error: error.message,
     });
   }
 });

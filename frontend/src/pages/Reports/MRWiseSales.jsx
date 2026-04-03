@@ -21,6 +21,19 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TIMEZONE-SAFE: build "YYYY-MM-DD" from local year/month/day values.
+// Never use .toISOString() on local Date objects — it shifts by UTC offset.
+// e.g. in UTC+7: new Date(2026, 2, 1).toISOString() → "2026-02-28T17:00:00Z"
+// ─────────────────────────────────────────────────────────────────────────────
+const toLocalDateStr = (date) => {
+  if (!date) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const MRWiseSales = () => {
   const [data, setData] = useState({
     summary: {
@@ -51,7 +64,7 @@ const MRWiseSales = () => {
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
 
   const getSerialNumber = (index) => {
@@ -59,23 +72,21 @@ const MRWiseSales = () => {
     return (pagination.currentPage - 1) * itemsPerPage + index + 1;
   };
 
-  const getCurrentMonthName = () => {
-    return new Date().toLocaleString("default", { month: "long" });
-  };
+  const getCurrentMonthName = () =>
+    new Date().toLocaleString("default", { month: "long" });
 
-  const getCurrentYear = () => {
-    return new Date().getFullYear();
-  };
+  const getCurrentYear = () => new Date().getFullYear();
 
   const getPreviousMonthName = () => {
-    const previousMonth = new Date();
-    previousMonth.setMonth(previousMonth.getMonth() - 1);
-    return previousMonth.toLocaleString("default", { month: "long" });
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toLocaleString("default", { month: "long" });
   };
 
   const getJanToPreviousMonthRange = () => {
-    const currentYear = getCurrentYear();
-    const currentMonth = new Date().getMonth();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0-indexed
 
     if (currentMonth === 0) {
       const previousYear = currentYear - 1;
@@ -86,43 +97,50 @@ const MRWiseSales = () => {
       };
     }
 
-    const endDate = new Date(Date.UTC(currentYear, currentMonth, 0));
+    // Last day of previous month using local date arithmetic
+    const lastDayOfPrevMonth = new Date(currentYear, currentMonth, 0);
     return {
       startDate: `${currentYear}-01-01`,
-      endDate: endDate.toISOString().split("T")[0],
+      endDate: toLocalDateStr(lastDayOfPrevMonth),
       label: `Jan - ${getPreviousMonthName()} ${currentYear}`,
     };
   };
 
+  // ── TIMEZONE-SAFE getDateRange ─────────────────────────────────────────────
+  // Always use local year/month/day — never .toISOString() on a local Date
   const getDateRange = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
+    const currentMonth = now.getMonth(); // 0-indexed
 
     switch (selectedTab) {
-      case "currentMonth":
-        // Use UTC to avoid timezone shifts
-        const firstDay = new Date(Date.UTC(currentYear, currentMonth, 1));
-        const lastDay = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
+      case "currentMonth": {
+        // First day of current month (local)
+        const firstDay = new Date(currentYear, currentMonth, 1);
+        // Last day of current month (local)
+        const lastDay = new Date(currentYear, currentMonth + 1, 0);
         return {
-          startDate: firstDay.toISOString().split("T")[0],
-          endDate: lastDay.toISOString().split("T")[0],
+          startDate: toLocalDateStr(firstDay),
+          endDate: toLocalDateStr(lastDay),
         };
+      }
 
-      case "janToPreviousMonth":
-        const janToPrevRange = getJanToPreviousMonthRange();
+      case "janToPreviousMonth": {
+        const range = getJanToPreviousMonthRange();
         return {
-          startDate: janToPrevRange.startDate,
-          endDate: janToPrevRange.endDate,
+          startDate: range.startDate,
+          endDate: range.endDate,
         };
+      }
 
       case "custom":
         return {
+          // DatePicker gives a local Date — extract local parts
           startDate: customDateRange.startDate
-            ? customDateRange.startDate.toISOString().split("T")[0]
+            ? toLocalDateStr(customDateRange.startDate)
             : "",
           endDate: customDateRange.endDate
-            ? customDateRange.endDate.toISOString().split("T")[0]
+            ? toLocalDateStr(customDateRange.endDate)
             : "",
         };
 
@@ -137,7 +155,7 @@ const MRWiseSales = () => {
       const dateRange = getDateRange();
 
       let params = {
-        page: page,
+        page,
         limit: 7,
       };
 
@@ -147,15 +165,17 @@ const MRWiseSales = () => {
           (!dateRange.startDate || !dateRange.endDate)
         ) {
           setLoading(false);
-          showToast("warning", "Please select both start and end dates for custom filter");
+          showToast(
+            "warning",
+            "Please select both start and end dates for custom filter",
+          );
           return;
         }
 
-        params = {
-          ...params,
-          startDate: dateRange.startDate,
-          endDate: dateRange.endDate,
-        };
+        if (dateRange.startDate && dateRange.endDate) {
+          params.startDate = dateRange.startDate;
+          params.endDate = dateRange.endDate;
+        }
       }
 
       if (search && search.trim() !== "") {
@@ -164,16 +184,19 @@ const MRWiseSales = () => {
 
       const response = await axios.get(
         `${backendUrl}/api/reports/mr-wise-sales/sales`,
-        { params }
+        { params },
       );
 
       setData({
         summary: {
-          totalSalesAmount: parseFloat(response.data.data?.summary?.totalSalesAmount) || 0,
+          totalSalesAmount:
+            parseFloat(response.data.data?.summary?.totalSalesAmount) || 0,
           totalOrders: parseInt(response.data.data?.summary?.totalOrders) || 0,
           totalMRs: parseInt(response.data.data?.summary?.totalMRs) || 0,
-          averageOrderValue: parseFloat(response.data.data?.summary?.averageOrderValue) || 0,
-          totalCustomers: parseInt(response.data.data?.summary?.totalCustomers) || 0,
+          averageOrderValue:
+            parseFloat(response.data.data?.summary?.averageOrderValue) || 0,
+          totalCustomers:
+            parseInt(response.data.data?.summary?.totalCustomers) || 0,
         },
         records: response.data.data?.records || [],
       });
@@ -185,15 +208,13 @@ const MRWiseSales = () => {
           totalRecords: 0,
           hasNext: false,
           hasPrev: false,
-        }
+        },
       );
     } catch (error) {
       console.error("Error fetching MR wise sales:", error);
-      // Log detailed error response for debugging
       if (error.response) {
         console.error("Response data:", error.response.data);
         console.error("Response status:", error.response.status);
-        console.error("Response headers:", error.response.headers);
       }
       showToast("error", "Failed to fetch MR wise sales data");
 
@@ -252,7 +273,11 @@ const MRWiseSales = () => {
   }, [selectedTab]);
 
   useEffect(() => {
-    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
+    if (
+      selectedTab === "custom" &&
+      customDateRange.startDate &&
+      customDateRange.endDate
+    ) {
       fetchMRWiseSales(1);
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
@@ -276,9 +301,10 @@ const MRWiseSales = () => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   };
 
+  // Debounced search
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
-      fetchMRWiseSales(1);
+      fetchMRWiseSales(1, searchTerm);
     }, 500);
     return () => clearTimeout(delayDebounce);
   }, [searchTerm]);
@@ -307,21 +333,14 @@ const MRWiseSales = () => {
     if (tab === "custom") {
       setShowCustomFilter(true);
     } else {
-      setCustomDateRange({
-        startDate: null,
-        endDate: null,
-      });
+      setCustomDateRange({ startDate: null, endDate: null });
     }
   };
 
   const handleClearFilters = () => {
-    setCustomDateRange({
-      startDate: null,
-      endDate: null,
-    });
+    setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
-    setSelectedTab("all");
-    fetchMRWiseSales(1);
+    setSelectedTab("currentMonth");
   };
 
   const exportToExcel = async () => {
@@ -334,18 +353,27 @@ const MRWiseSales = () => {
       }
 
       if (selectedTab !== "all") {
-        if (selectedTab === "custom" && (!dateRange.startDate || !dateRange.endDate)) {
-          showToast("warning", "Please select both start and end dates for export");
+        if (
+          selectedTab === "custom" &&
+          (!dateRange.startDate || !dateRange.endDate)
+        ) {
+          showToast(
+            "warning",
+            "Please select both start and end dates for export",
+          );
           return;
         }
-        if (dateRange.startDate) params.append("startDate", dateRange.startDate);
+        if (dateRange.startDate)
+          params.append("startDate", dateRange.startDate);
         if (dateRange.endDate) params.append("endDate", dateRange.endDate);
       }
 
-      const downloadUrl = `${backendUrl}/api/reports/mr-wise-sales/export/excel${params.toString() ? `?${params.toString()}` : ''}`;
-      const link = document.createElement('a');
+      const downloadUrl = `${backendUrl}/api/reports/mr-wise-sales/export/excel${
+        params.toString() ? `?${params.toString()}` : ""
+      }`;
+      const link = document.createElement("a");
       link.href = downloadUrl;
-      link.setAttribute('download', '');
+      link.setAttribute("download", "");
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -357,10 +385,6 @@ const MRWiseSales = () => {
     }
   };
 
-  const formatDateForDisplay = (date) => {
-    return date ? formatDateToReadable(date) : "";
-  };
-
   const getActiveFilterDisplay = () => {
     switch (selectedTab) {
       case "currentMonth":
@@ -369,7 +393,9 @@ const MRWiseSales = () => {
         return getJanToPreviousMonthRange().label;
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
-          return `${formatDateForDisplay(customDateRange.startDate)} to ${formatDateForDisplay(customDateRange.endDate)}`;
+          return `${toLocalDateStr(customDateRange.startDate)} to ${toLocalDateStr(
+            customDateRange.endDate,
+          )}`;
         }
         return "Select custom dates";
       default:
@@ -405,8 +431,8 @@ const MRWiseSales = () => {
                 page === pagination.currentPage
                   ? "bg-indigo-600 text-white"
                   : typeof page === "number"
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
+                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                    : "bg-transparent text-gray-500 cursor-default"
               }`}
               disabled={typeof page !== "number"}
             >
@@ -433,6 +459,7 @@ const MRWiseSales = () => {
 
   return (
     <div className="p-6">
+      {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <TrendingUp className="w-8 h-8 text-green-600" />
@@ -475,6 +502,7 @@ const MRWiseSales = () => {
         </div>
       </div>
 
+      {/* Filter Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           <button
@@ -507,7 +535,7 @@ const MRWiseSales = () => {
           >
             MR Wise Sales Filter
           </button>
-               <button
+          <button
             onClick={() => handleTabChange("all")}
             className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
               selectedTab === "all"
@@ -526,13 +554,18 @@ const MRWiseSales = () => {
         </div>
       </div>
 
+      {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-sm text-gray-600">Total Sales</p>
               <p className="text-2xl font-bold text-gray-800">
-                {data.summary.totalSalesAmount?.toLocaleString() || 0}
+                $
+                {data.summary.totalSalesAmount?.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }) || "0.00"}
               </p>
             </div>
             <DollarSign className="w-8 h-8 text-green-500" />
@@ -565,7 +598,11 @@ const MRWiseSales = () => {
             <div>
               <p className="text-sm text-gray-600">Avg Order Value</p>
               <p className="text-2xl font-bold text-gray-800">
-                {data.summary.averageOrderValue?.toLocaleString() || 0}
+                $
+                {data.summary.averageOrderValue?.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }) || "0.00"}
               </p>
             </div>
             <User className="w-8 h-8 text-orange-500" />
@@ -573,23 +610,28 @@ const MRWiseSales = () => {
         </div>
       </div>
 
+      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3 text-sm font-medium">Sr.No</th>
               <th className="p-3 text-sm font-medium">MR Name</th>
+              <th className="p-3 text-sm font-medium">Contact</th>
               <th className="p-3 text-sm font-medium">Region</th>
               <th className="p-3 text-sm font-medium">Total Orders</th>
-              <th className="p-3 text-sm font-medium">Total Sales</th>
-              <th className="p-3 text-sm font-medium">Avg Order Value</th>
+              <th className="p-3 text-sm font-medium">Total Sales ($)</th>
+              <th className="p-3 text-sm font-medium">Avg Order Value ($)</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="6" className="p-3 text-center">
-                  Loading...
+                <td colSpan="7" className="p-8 text-center">
+                  <div className="flex justify-center items-center gap-2">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
+                    <span>Loading...</span>
+                  </div>
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
@@ -606,32 +648,39 @@ const MRWiseSales = () => {
                     </div>
                   </td>
                   <td className="p-3">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900 capitalize">
-                        {mr.mrName}
-                      </div>
-                      <div className="text-xs text-gray-500">{mr.email}</div>
+                    <div className="text-sm font-medium text-gray-900 capitalize">
+                      {mr.mrName}
                     </div>
+                    <div className="text-xs text-gray-500">{mr.email}</div>
                   </td>
-                  <td className="p-3">
-                    <div className="text-sm text-gray-900">
-                      {mr.region || "N/A"}
-                    </div>
+                  <td className="p-3 text-sm text-gray-900">
+                    {mr.contactNumber || "Not Available"}
+                  </td>
+                  <td className="p-3 text-sm text-gray-900">
+                    {mr.region || "N/A"}
                   </td>
                   <td className="p-3 text-sm font-semibold text-blue-600">
                     {mr.totalOrders || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-green-600">
-                    {mr.totalSalesAmount?.toLocaleString() || 0}
+                    $
+                    {mr.totalSalesAmount?.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }) || "0.00"}
                   </td>
                   <td className="p-3 text-sm font-semibold text-orange-600">
-                    {mr.averageOrderValue?.toLocaleString() || 0}
+                    $
+                    {mr.averageOrderValue?.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }) || "0.00"}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="6" className="p-3 text-center text-gray-500">
+                <td colSpan="7" className="p-8 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -645,6 +694,7 @@ const MRWiseSales = () => {
 
       {renderPagination()}
 
+      {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -665,45 +715,41 @@ const MRWiseSales = () => {
               </h2>
 
               <div className="space-y-4 mb-6">
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Start Date
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.startDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("startDate", date)
-                      }
-                      selectsStart
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholderText="Start date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Start Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.startDate}
+                    onChange={(date) =>
+                      handleCustomDateChange("startDate", date)
+                    }
+                    selectsStart
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholderText="Select start date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
+                </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      End Date
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.endDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("endDate", date)
-                      }
-                      selectsEnd
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      minDate={customDateRange.startDate}
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholderText="End date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.endDate}
+                    onChange={(date) => handleCustomDateChange("endDate", date)}
+                    selectsEnd
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    minDate={customDateRange.startDate}
+                    className="w-full border rounded-lg px-3 py-2"
+                    placeholderText="Select end date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
                 </div>
               </div>
 
@@ -731,7 +777,7 @@ const MRWiseSales = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

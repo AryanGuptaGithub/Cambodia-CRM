@@ -310,12 +310,10 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
   const loadData = async () => {
     setInvoicesLoading(true);
     try {
-      // Only fetch sales – no transaction subtraction needed
       const salesRes = await axios.get(`${backendUrl}/api/sales/all`);
       const allSalesData = salesRes.data?.summaries || [];
       setAllSales(allSalesData);
 
-      // Filter invoices where dueAmount > 0
       const invoiceOpts = allSalesData
         .filter((s) => {
           const ps = (s.paymentStatus || "").toLowerCase();
@@ -346,7 +344,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
       setInvoicesLoading(false);
     }
 
-    // Rest of the static data loading (destinations, categories, customers) remains unchanged
     const now = Date.now();
     const cacheValid = _cache.ts && now - _cache.ts < CACHE_TTL;
 
@@ -725,7 +722,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
 
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* ① Category Type */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Category Type <span className="text-red-500">*</span>
@@ -735,7 +731,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               </div>
             </div>
 
-            {/* ② Invoice Number */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Invoice Number <span className="text-red-500">*</span>
@@ -757,7 +752,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               )}
             </div>
 
-            {/* ③ Customer Name */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Customer Name <span className="text-red-500">*</span>
@@ -779,7 +773,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               )}
             </div>
 
-            {/* ④ Destination Account OR MR Cash balance */}
             <div className="space-y-1">
               {mrCashLoading ? (
                 <>
@@ -859,7 +852,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               )}
             </div>
 
-            {/* ⑤ Date */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Date <span className="text-red-500">*</span>
@@ -877,7 +869,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               )}
             </div>
 
-            {/* ⑥ Amount */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Amount ($) <span className="text-red-500">*</span>
@@ -904,7 +895,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               )}
             </div>
 
-            {/* ⑦ Invoice Date */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Invoice Date
@@ -918,7 +908,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               />
             </div>
 
-            {/* ⑧ Customer Address */}
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
                 Customer Address
@@ -936,7 +925,6 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
               />
             </div>
 
-            {/* ⑨ Remarks */}
             <div className="space-y-1 md:col-span-2">
               <label className="block text-sm font-medium text-gray-700">
                 Remarks
@@ -974,9 +962,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
     document.body,
   );
 };
-// ─────────────────────────────────────────────────────────────────────────────
-// OutstandingCollection — main component
-// ─────────────────────────────────────────────────────────────────────────────
+
 const OutstandingCollection = () => {
   const [data, setData] = useState({
     summary: {
@@ -1012,6 +998,7 @@ const OutstandingCollection = () => {
   const [customerOptions, setCustomerOptions] = useState([]);
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [showAddTxModal, setShowAddTxModal] = useState(false);
+  const [forceRefresh, setForceRefresh] = useState(0); // Add this for forcing refresh
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
@@ -1019,6 +1006,15 @@ const OutstandingCollection = () => {
   );
   const getSerialNumber = (index) =>
     (pagination.currentPage - 1) * 7 + index + 1;
+
+  // ✅ Helper: format date to YYYY-MM-DD in LOCAL timezone (no UTC shift)
+  const formatLocalDate = (date) => {
+    if (!date) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
 
   const fetchCustomerOptions = async () => {
     setLoadingCustomers(true);
@@ -1070,11 +1066,12 @@ const OutstandingCollection = () => {
     const endDate = new Date(currentYear, currentMonth, 0);
     return {
       startDate: `${currentYear}-01-01`,
-      endDate: endDate.toISOString().split("T")[0],
+      endDate: formatLocalDate(endDate),
       label: `Jan - ${getPreviousMonthName()} ${currentYear}`,
     };
   };
 
+  // ✅ CORRECTED date range generation using local date formatting
   const getDateRange = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -1082,22 +1079,18 @@ const OutstandingCollection = () => {
     switch (selectedTab) {
       case "currentMonth":
         return {
-          startDate: new Date(currentYear, currentMonth, 1)
-            .toISOString()
-            .split("T")[0],
-          endDate: new Date(currentYear, currentMonth + 1, 0)
-            .toISOString()
-            .split("T")[0],
+          startDate: formatLocalDate(new Date(currentYear, currentMonth, 1)),
+          endDate: formatLocalDate(new Date(currentYear, currentMonth + 1, 0)),
         };
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange();
       case "custom":
         return {
           startDate: customDateRange.startDate
-            ? customDateRange.startDate.toISOString().split("T")[0]
+            ? formatLocalDate(customDateRange.startDate)
             : "",
           endDate: customDateRange.endDate
-            ? customDateRange.endDate.toISOString().split("T")[0]
+            ? formatLocalDate(customDateRange.endDate)
             : "",
         };
       default:
@@ -1110,6 +1103,7 @@ const OutstandingCollection = () => {
     try {
       const dateRange = getDateRange();
       let params = { page, limit: 7 };
+      
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -1129,6 +1123,7 @@ const OutstandingCollection = () => {
         if (filter.customerName) params.customerCode = filter.customerName;
         if (filter.status !== "all") params.status = filter.status;
       }
+      
       const response = await axios.get(
         `${backendUrl}/api/reports/outstanding-collections`,
         { params },
@@ -1151,24 +1146,22 @@ const OutstandingCollection = () => {
     }
   };
 
+  // FIXED: useEffect for tab changes - now properly handles all tabs
   useEffect(() => {
-    if (
-      selectedTab === "custom" &&
-      (!customDateRange.startDate || !customDateRange.endDate)
-    )
-      return;
+    // Reset to page 1 when tab changes
+    setPagination(prev => ({ ...prev, currentPage: 1 }));
+    // Fetch data when tab changes
     fetchOutstandingCollections(1);
-  }, [selectedTab]);
+  }, [selectedTab]); // Added forceRefresh as dependency
 
+  // Handle custom date range changes
   useEffect(() => {
-    if (
-      selectedTab === "custom" &&
-      customDateRange.startDate &&
-      customDateRange.endDate
-    )
+    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
       fetchOutstandingCollections(1);
-  }, [customDateRange.startDate, customDateRange.endDate]);
+    }
+  }, [customDateRange.startDate, customDateRange.endDate, selectedTab]);
 
+  // Handle search with debounce
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       fetchOutstandingCollections(1, searchTerm);
@@ -1180,15 +1173,20 @@ const OutstandingCollection = () => {
     if (page >= 1 && page <= pagination.totalPages)
       fetchOutstandingCollections(page);
   };
+  
   const handleSearchChange = (e) => setSearchTerm(e.target.value);
+  
   const handleClearSearch = () => {
     setSearchTerm("");
     fetchOutstandingCollections(1, "");
   };
+  
   const handleCustomDateChange = (name, date) =>
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
+  
   const handleCustomerNameChange = (value) =>
     setFilter((prev) => ({ ...prev, customerName: value }));
+  
   const handleSearch = (e) => {
     if (e.key === "Enter") fetchOutstandingCollections(1);
   };
@@ -1204,17 +1202,26 @@ const OutstandingCollection = () => {
     }
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    fetchOutstandingCollections(1);
+    // Fetch will be triggered by the selectedTab useEffect
   };
 
+  // FIXED: handleTabChange - properly reset state when changing tabs
   const handleTabChange = (tab) => {
+    if (tab === selectedTab) return; // Don't do anything if same tab
+    
     setSelectedTab(tab);
+    setPagination({ ...pagination, currentPage: 1 });
+    
     if (tab === "custom") {
       setShowCustomFilter(true);
-    } else {
+    } else if (tab === "all") {
+      // Reset filters for all records tab
       setFilter({ customerName: "", status: "all" });
       setCustomDateRange({ startDate: null, endDate: null });
-      fetchOutstandingCollections(1);
+    } else {
+      // For currentMonth and janToPreviousMonth, just reset the filter state
+      setFilter({ customerName: "", status: "all" });
+      setCustomDateRange({ startDate: null, endDate: null });
     }
   };
 
@@ -1223,7 +1230,7 @@ const OutstandingCollection = () => {
     setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
     setSelectedTab("all");
-    fetchOutstandingCollections(1);
+    // Fetch will be triggered by the selectedTab useEffect
   };
 
   const handleTxSuccess = () => {
@@ -1886,3 +1893,4 @@ const OutstandingCollection = () => {
 };
 
 export default OutstandingCollection;
+

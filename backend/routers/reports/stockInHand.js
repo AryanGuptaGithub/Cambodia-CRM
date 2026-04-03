@@ -365,7 +365,7 @@ router.get("/", async (req, res) => {
       reports: allProducts,
     });
   } catch (error) {
-    console.error("Error fetching combined reports in hand:", error);
+    console.error("Error fetching combined stock in hands:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch reports",

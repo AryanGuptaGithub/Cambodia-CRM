@@ -1191,7 +1191,7 @@ const Dashboard = () => {
                   <div className="w-2 h-2 rounded-full bg-red-500"></div>
                   <span className="text-xs text-gray-600">
                     <span className="font-semibold text-red-500">
-                      {notMarkedCount}
+                      {absentCount}
                     </span>{" "}
                     Absent
                   </span>

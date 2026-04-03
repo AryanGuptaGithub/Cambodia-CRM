@@ -27,7 +27,7 @@ import SampleExcelDownloadMRBasicPayroll from "../../excels/SampleExcelDownloadM
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-const payrollsPerPage = 7;
+const payrollsPerPage = 11;
 
 const MrBasicPayroll = () => {
   const navigate = useNavigate();

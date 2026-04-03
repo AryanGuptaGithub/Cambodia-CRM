@@ -1566,7 +1566,7 @@ router.get("/reports-in-hand", async (req, res) => {
       reports: filteredReports,
     });
   } catch (error) {
-    console.error("Error fetching reports in hand:", error);
+    console.error("Error fetching stock in hands:", error);
     res
       .status(500)
       .json({
@@ -1885,7 +1885,7 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
     }
 
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Reports in Hand");
+    const worksheet = workbook.addWorksheet("stock in hands");
     const headers = [
       "Product Name",
       "Supplier Name",
@@ -2017,7 +2017,7 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
     await workbook.xlsx.write(res);
     res.end();
   } catch (error) {
-    console.error("Error generating reports in hand Excel:", error);
+    console.error("Error generating stock in hands Excel:", error);
     res
       .status(500)
       .json({

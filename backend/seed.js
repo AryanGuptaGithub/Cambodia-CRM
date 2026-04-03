@@ -1592,190 +1592,494 @@
 // listInvoicesCreditDaysAndDueAmount().catch(console.error);
 
 
+// import { MongoClient } from 'mongodb';
+
+// const client = new MongoClient(
+//   'mongodb+srv://admin:ni6tP5N63U0Yxvdr@cluster0.2qjjhh8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+// );
+
+// const COLLECTION_INVOICES = [
+//   { invoiceNumber: '997491', collectedAmount: 100.00 },
+//   { invoiceNumber: '995376', collectedAmount: 50.00  },
+//   { invoiceNumber: '994711', collectedAmount: 50.00  },
+//   { invoiceNumber: '996253', collectedAmount: 240.00 },
+//   { invoiceNumber: '996315', collectedAmount: 210.00 },
+//   { invoiceNumber: '997474', collectedAmount: 47.50  },
+//   { invoiceNumber: '997960', collectedAmount: 186.00 },
+//   { invoiceNumber: '997961', collectedAmount: 76.00  },
+//   { invoiceNumber: '997250', collectedAmount: 40.00  },
+//   { invoiceNumber: '997354', collectedAmount: 300.00 },
+//   { invoiceNumber: '996270', collectedAmount: 280.00 },
+//   { invoiceNumber: '996628', collectedAmount: 50.00  },
+//   { invoiceNumber: '995886', collectedAmount: 200.00 },
+//   { invoiceNumber: '997365', collectedAmount: 50.00  },
+//   { invoiceNumber: '995548', collectedAmount: 61.00  },
+//   { invoiceNumber: '997453', collectedAmount: 75.00  },
+//   { invoiceNumber: '996991', collectedAmount: 65.00  },
+//   { invoiceNumber: '993406', collectedAmount: 40.00  },
+//   { invoiceNumber: '997455', collectedAmount: 160.00 },
+//   { invoiceNumber: '997373', collectedAmount: 100.00 },
+//   { invoiceNumber: '994584', collectedAmount: 30.00  },
+//   { invoiceNumber: '996291', collectedAmount: 58.00  },
+//   { invoiceNumber: '995505', collectedAmount: 150.00 },
+//   { invoiceNumber: '996987', collectedAmount: 250.00 },
+//   { invoiceNumber: '997459', collectedAmount: 250.00 },
+//   { invoiceNumber: '996983', collectedAmount: 117.00 },
+//   { invoiceNumber: '997456', collectedAmount: 50.00  },
+//   { invoiceNumber: '997224', collectedAmount: 122.50 },
+//   { invoiceNumber: '997490', collectedAmount: 120.00 },
+//   { invoiceNumber: '996966', collectedAmount: 50.00  },
+//   { invoiceNumber: '997485', collectedAmount: 50.00  },
+//   { invoiceNumber: '996959', collectedAmount: 200.00 },
+//   { invoiceNumber: '996972', collectedAmount: 50.00  },
+//   { invoiceNumber: '994726', collectedAmount: 30.00  },
+//   { invoiceNumber: '997463', collectedAmount: 100.00 },
+//   { invoiceNumber: '996981', collectedAmount: 40.00  },
+//   { invoiceNumber: '996957', collectedAmount: 300.00 },
+// ];
+
+// async function checkMismatch() {
+//   await client.connect();
+//   const db      = client.db('test');
+//   const salesCol = db.collection('salesummaries');
+//   const txnCol   = db.collection('transactions');
+
+//   const invoiceNumbers = COLLECTION_INVOICES.map(i => i.invoiceNumber);
+
+//   // 1. Fetch saleSummary docs for all invoices
+//   const sales = await salesCol.find(
+//     { invoiceNumber: { $in: invoiceNumbers } },
+//     {
+//       projection: {
+//         invoiceNumber: 1,
+//         paidAmount: 1,
+//         dueAmount: 1,
+//         totalAmount: 1,
+//         paymentStatus: 1,
+//         customerName: 1,
+//       },
+//     }
+//   ).toArray();
+//   const saleMap = new Map(sales.map(s => [String(s.invoiceNumber), s]));
+
+//   // 2. Fetch all credit collection transactions for these invoices
+//   const txns = await txnCol.find(
+//     {
+//       transactionType: 'credit collection',
+//       invoiceNo: { $in: invoiceNumbers },
+//     },
+//     { projection: { invoiceNo: 1, amount: 1, destination: 1, date: 1 } }
+//   ).toArray();
+
+//   // Sum per invoice (there could be multiple transactions per invoice)
+//   const txnMap = new Map();
+//   for (const t of txns) {
+//     const key = String(t.invoiceNo);
+//     txnMap.set(key, (txnMap.get(key) || 0) + (parseFloat(t.amount) || 0));
+//   }
+
+//   // ── Report ────────────────────────────────────────────────────────────────
+//   console.log('\n=======================================================================');
+//   console.log('   MISMATCH REPORT — Mr Chror Vanny  |  Credit Collection vs SaleSummary');
+//   console.log('=======================================================================\n');
+
+//   const COL = {
+//     inv:    12,
+//     ui:     14,
+//     txn:    14,
+//     paid:   14,
+//     due:    12,
+//     total:  12,
+//     status: 16,
+//   };
+
+//   const header =
+//     'Invoice #'.padEnd(COL.inv) +
+//     'UI Amount'.padEnd(COL.ui) +
+//     'DB Txn Sum'.padEnd(COL.txn) +
+//     'Sale Paid'.padEnd(COL.paid) +
+//     'Sale Due'.padEnd(COL.due) +
+//     'Sale Total'.padEnd(COL.total) +
+//     'PayStatus'.padEnd(COL.status) +
+//     'Result';
+
+//   console.log(header);
+//   console.log('─'.repeat(100));
+
+//   let totUI = 0, totTxn = 0, totSalePaid = 0;
+//   let mismatches = [], noSale = [], noTxn = [];
+
+//   for (const inv of COLLECTION_INVOICES) {
+//     const uiAmt    = inv.collectedAmount;
+//     const dbTxn    = txnMap.get(inv.invoiceNumber) ?? null;
+//     const sale     = saleMap.get(inv.invoiceNumber) ?? null;
+//     const salePaid  = sale ? parseFloat(sale.paidAmount)  : null;
+//     const saleDue   = sale ? parseFloat(sale.dueAmount)   : null;
+//     const saleTotal = sale ? parseFloat(sale.totalAmount) : null;
+//     const saleStatus = sale?.paymentStatus ?? 'NOT FOUND';
+
+//     totUI += uiAmt;
+//     if (dbTxn   !== null) totTxn     += dbTxn;
+//     if (salePaid !== null) totSalePaid += salePaid;
+
+//     const txnMatchUI  = dbTxn   !== null && Math.abs(dbTxn - uiAmt) < 0.01;
+//     const paidMatchTxn = salePaid !== null && dbTxn !== null && Math.abs(salePaid - dbTxn) < 0.01;
+//     const allOk = txnMatchUI && paidMatchTxn;
+
+//     let result;
+//     if (!sale)          { result = '❌ NO SALE IN DB'; noSale.push(inv.invoiceNumber); }
+//     else if (!dbTxn)    { result = '❌ NO TXN IN DB';  noTxn.push(inv.invoiceNumber); }
+//     else if (!txnMatchUI)  { result = `⚠️  TXN($${dbTxn?.toFixed(2)}) ≠ UI($${uiAmt.toFixed(2)})`; mismatches.push(inv.invoiceNumber); }
+//     else if (!paidMatchTxn){ result = `⚠️  PAID($${salePaid?.toFixed(2)}) ≠ TXN($${dbTxn?.toFixed(2)})`; mismatches.push(inv.invoiceNumber); }
+//     else                   { result = '✅ OK'; }
+
+//     console.log(
+//       inv.invoiceNumber.padEnd(COL.inv) +
+//       ('$' + uiAmt.toFixed(2)).padEnd(COL.ui) +
+//       (dbTxn   !== null ? '$' + dbTxn.toFixed(2)    : '—').padEnd(COL.txn) +
+//       (salePaid !== null ? '$' + salePaid.toFixed(2) : '—').padEnd(COL.paid) +
+//       (saleDue  !== null ? '$' + saleDue.toFixed(2)  : '—').padEnd(COL.due) +
+//       (saleTotal !== null ? '$' + saleTotal.toFixed(2): '—').padEnd(COL.total) +
+//       saleStatus.padEnd(COL.status) +
+//       result
+//     );
+//   }
+
+//   console.log('─'.repeat(100));
+//   console.log('\n📊 TOTALS');
+//   console.log('─────────────────────────────────────────────────');
+//   console.log(`UI Collection Total     : $${totUI.toFixed(2)}`);
+//   console.log(`DB Transaction Total    : $${totTxn.toFixed(2)}`);
+//   console.log(`Sale paidAmount Total   : $${totSalePaid.toFixed(2)}`);
+//   console.log(`Invoices checked        : ${COLLECTION_INVOICES.length}`);
+//   console.log(`Mismatched invoices     : ${[...new Set(mismatches)].length}`);
+//   console.log(`No sale found           : ${noSale.length}`);
+//   console.log(`No transaction found    : ${noTxn.length}`);
+
+//   console.log('\n📋 DIFFERENCE ANALYSIS');
+//   console.log('─────────────────────────────────────────────────');
+//   const uiVsTxn   = Math.abs(totUI - totTxn);
+//   const txnVsPaid = Math.abs(totTxn - totSalePaid);
+//   const uiVsPaid  = Math.abs(totUI - totSalePaid);
+
+//   console.log(`UI vs DB Txn diff       : $${uiVsTxn.toFixed(2)}   ${uiVsTxn < 0.01 ? '✅ Match' : '❌ Mismatch'}`);
+//   console.log(`DB Txn vs Sale Paid diff: $${txnVsPaid.toFixed(2)}  ${txnVsPaid < 0.01 ? '✅ Match' : '❌ Mismatch'}`);
+//   console.log(`UI vs Sale Paid diff    : $${uiVsPaid.toFixed(2)}   ${uiVsPaid < 0.01 ? '✅ Match' : '❌ Mismatch'}`);
+
+//   if (noSale.length > 0)    console.log(`\n❌ Invoices with NO saleSummary: ${noSale.join(', ')}`);
+//   if (noTxn.length > 0)     console.log(`❌ Invoices with NO transaction : ${noTxn.join(', ')}`);
+//   if (mismatches.length > 0) console.log(`⚠️  Invoices with amount mismatch: ${[...new Set(mismatches)].join(', ')}`);
+
+//   await client.close();
+// }
+
+// checkMismatch().catch(console.error);
+
+
+// import { MongoClient } from 'mongodb';
+
+// const client = new MongoClient(
+//   'mongodb+srv://admin:ni6tP5N63U0Yxvdr@cluster0.2qjjhh8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+// );
+
+// async function findExact60Invoices() {
+//   try {
+//     await client.connect();
+//     console.log('✅ Connected to MongoDB');
+
+//     const db = client.db('test');
+//     const salesCol = db.collection('salesummaries');
+
+//     // Date range
+//     const startDate = new Date('2026-01-01T00:00:00.000Z');
+//     const endDate   = new Date('2026-03-31T23:59:59.999Z');
+
+//     // Query for exact 60 in paid, due, and total
+//     const invoices = await salesCol.find(
+//       {
+//         paidAmount: 60,
+//         dueAmount: 60,
+//         totalAmount: 60,
+//         invoiceDate: {
+//           $gte: startDate,
+//           $lte: endDate
+//         }
+//       },
+//       {
+//         projection: {
+//           _id: 1,
+//           invoiceNumber: 1,
+//           invoiceDate: 1,
+//           customerName: 1,
+//           mrName: 1,
+//           paidAmount: 1,
+//           dueAmount: 1,
+//           totalAmount: 1,
+//           paymentStatus: 1,
+//           // Add any other fields you want to see
+//         }
+//       }
+//     ).sort({ invoiceDate: 1 }).toArray();
+
+//     console.log('\n=======================================================================');
+//     console.log('   INVOICES WHERE PAID = DUE = TOTAL = 60');
+//     console.log('   (1 Jan 2026 — 31 Mar 2026)');
+//     console.log('=======================================================================\n');
+
+//     console.log(`Total matching invoices: ${invoices.length}\n`);
+
+//     if (invoices.length === 0) {
+//       console.log('❌ No invoices found matching the exact criteria (paid=60, due=60, total=60).');
+//     } else {
+//       console.log('ID'.padEnd(26) +
+//                   'Invoice #'.padEnd(14) +
+//                   'Date'.padEnd(12) +
+//                   'Customer / MR Name'.padEnd(35) +
+//                   'Paid'.padStart(8) +
+//                   'Due'.padStart(8) +
+//                   'Total'.padStart(8) +
+//                   ' Status');
+
+//       console.log('─'.repeat(120));
+
+//       invoices.forEach(inv => {
+//         const customer = (inv.customerName || inv.mrName || 'Unknown').trim();
+//         const dateStr = inv.invoiceDate 
+//           ? new Date(inv.invoiceDate).toISOString().split('T')[0] 
+//           : 'N/A';
+
+//         console.log(
+//           String(inv._id).padEnd(26) +
+//           (inv.invoiceNumber || 'N/A').padEnd(14) +
+//           dateStr.padEnd(12) +
+//           customer.slice(0, 34).padEnd(35) +
+//           '60'.padStart(8) +
+//           '60'.padStart(8) +
+//           '60'.padStart(8) +
+//           ` ${inv.paymentStatus || 'N/A'}`
+//         );
+//       });
+//     }
+
+//     console.log('\n─'.repeat(120));
+
+//   } catch (error) {
+//     console.error('❌ Error:', error);
+//   } finally {
+//     await client.close();
+//     console.log('\n🔌 MongoDB connection closed.');
+//   }
+// }
+
+// findExact60Invoices();
 import { MongoClient } from 'mongodb';
 
 const client = new MongoClient(
   'mongodb+srv://admin:ni6tP5N63U0Yxvdr@cluster0.2qjjhh8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
 );
 
-const COLLECTION_INVOICES = [
-  { invoiceNumber: '997491', collectedAmount: 100.00 },
-  { invoiceNumber: '995376', collectedAmount: 50.00  },
-  { invoiceNumber: '994711', collectedAmount: 50.00  },
-  { invoiceNumber: '996253', collectedAmount: 240.00 },
-  { invoiceNumber: '996315', collectedAmount: 210.00 },
-  { invoiceNumber: '997474', collectedAmount: 47.50  },
-  { invoiceNumber: '997960', collectedAmount: 186.00 },
-  { invoiceNumber: '997961', collectedAmount: 76.00  },
-  { invoiceNumber: '997250', collectedAmount: 40.00  },
-  { invoiceNumber: '997354', collectedAmount: 300.00 },
-  { invoiceNumber: '996270', collectedAmount: 280.00 },
-  { invoiceNumber: '996628', collectedAmount: 50.00  },
-  { invoiceNumber: '995886', collectedAmount: 200.00 },
-  { invoiceNumber: '997365', collectedAmount: 50.00  },
-  { invoiceNumber: '995548', collectedAmount: 61.00  },
-  { invoiceNumber: '997453', collectedAmount: 75.00  },
-  { invoiceNumber: '996991', collectedAmount: 65.00  },
-  { invoiceNumber: '993406', collectedAmount: 40.00  },
-  { invoiceNumber: '997455', collectedAmount: 160.00 },
-  { invoiceNumber: '997373', collectedAmount: 100.00 },
-  { invoiceNumber: '994584', collectedAmount: 30.00  },
-  { invoiceNumber: '996291', collectedAmount: 58.00  },
-  { invoiceNumber: '995505', collectedAmount: 150.00 },
-  { invoiceNumber: '996987', collectedAmount: 250.00 },
-  { invoiceNumber: '997459', collectedAmount: 250.00 },
-  { invoiceNumber: '996983', collectedAmount: 117.00 },
-  { invoiceNumber: '997456', collectedAmount: 50.00  },
-  { invoiceNumber: '997224', collectedAmount: 122.50 },
-  { invoiceNumber: '997490', collectedAmount: 120.00 },
-  { invoiceNumber: '996966', collectedAmount: 50.00  },
-  { invoiceNumber: '997485', collectedAmount: 50.00  },
-  { invoiceNumber: '996959', collectedAmount: 200.00 },
-  { invoiceNumber: '996972', collectedAmount: 50.00  },
-  { invoiceNumber: '994726', collectedAmount: 30.00  },
-  { invoiceNumber: '997463', collectedAmount: 100.00 },
-  { invoiceNumber: '996981', collectedAmount: 40.00  },
-  { invoiceNumber: '996957', collectedAmount: 300.00 },
-];
+async function getMarchTotalSales() {
+  try {
+    await client.connect();
+    console.log('✅ Connected to MongoDB');
 
-async function checkMismatch() {
-  await client.connect();
-  const db      = client.db('test');
-  const salesCol = db.collection('salesummaries');
-  const txnCol   = db.collection('transactions');
+    const db = client.db('test');
+    const salesCol = db.collection('salesummaries');
 
-  const invoiceNumbers = COLLECTION_INVOICES.map(i => i.invoiceNumber);
+    // Date range: Only March 2026
+    const startDate = new Date('2026-03-01T00:00:00.000Z');
+    const endDate   = new Date('2026-03-31T23:59:59.999Z');
 
-  // 1. Fetch saleSummary docs for all invoices
-  const sales = await salesCol.find(
-    { invoiceNumber: { $in: invoiceNumbers } },
-    {
-      projection: {
-        invoiceNumber: 1,
-        paidAmount: 1,
-        dueAmount: 1,
-        totalAmount: 1,
-        paymentStatus: 1,
-        customerName: 1,
+    const invoices = await salesCol.find(
+      {
+        invoiceDate: {
+          $gte: startDate,
+          $lte: endDate
+        }
       },
+      {
+        projection: {
+          invoiceNumber: 1,
+          invoiceDate: 1,
+          customerName: 1,
+          mrName: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
+        }
+      }
+    ).toArray();
+
+    let totalSales = 0;     // Sum of totalAmount
+    let totalPaid = 0;      // Sum of paidAmount
+    let totalDue = 0;       // Sum of dueAmount
+
+    invoices.forEach(inv => {
+      const total = parseFloat(inv.totalAmount) || 0;
+      const paid  = parseFloat(inv.paidAmount)  || 0;
+      const due   = parseFloat(inv.dueAmount)   || 0;
+
+      totalSales += total;
+      totalPaid  += paid;
+      totalDue   += due;
+    });
+
+    const difference = totalSales - totalPaid;   // This might explain your 50 difference
+
+    console.log('\n=======================================================================');
+    console.log('   MARCH 2026 SALES SUMMARY (1 Mar – 31 Mar 2026)');
+    console.log('=======================================================================\n');
+
+    console.log(`Total Invoices in March     : ${invoices.length}`);
+    console.log(`Sum of Total Amount         : $${totalSales.toFixed(2)}`);
+    console.log(`Sum of Paid Amount          : $${totalPaid.toFixed(2)}`);
+    console.log(`Sum of Due Amount (Credit)  : $${totalDue.toFixed(2)}`);
+    console.log(`Difference (Total - Paid)   : $${difference.toFixed(2)}\n`);
+
+    // Explanation of your two totals
+    console.log('Your Reported Totals:');
+    console.log(`→ First report  : $26,118`);
+    console.log(`→ Second report : $26,168`);
+    console.log(`→ Difference    : $50.00\n`);
+
+    if (Math.abs(difference - 50) < 1) {
+      console.log('✅ The $50 difference is likely because one report is using **totalAmount** and the other is using **paidAmount** only.');
+    } else {
+      console.log('⚠️  The $50 difference may be due to rounding, missing invoices, or different filters.');
     }
-  ).toArray();
-  const saleMap = new Map(sales.map(s => [String(s.invoiceNumber), s]));
 
-  // 2. Fetch all credit collection transactions for these invoices
-  const txns = await txnCol.find(
-    {
-      transactionType: 'credit collection',
-      invoiceNo: { $in: invoiceNumbers },
-    },
-    { projection: { invoiceNo: 1, amount: 1, destination: 1, date: 1 } }
-  ).toArray();
-
-  // Sum per invoice (there could be multiple transactions per invoice)
-  const txnMap = new Map();
-  for (const t of txns) {
-    const key = String(t.invoiceNo);
-    txnMap.set(key, (txnMap.get(key) || 0) + (parseFloat(t.amount) || 0));
+  } catch (error) {
+    console.error('❌ Error:', error);
+  } finally {
+    await client.close();
+    console.log('\n🔌 MongoDB connection closed.');
   }
-
-  // ── Report ────────────────────────────────────────────────────────────────
-  console.log('\n=======================================================================');
-  console.log('   MISMATCH REPORT — Mr Chror Vanny  |  Credit Collection vs SaleSummary');
-  console.log('=======================================================================\n');
-
-  const COL = {
-    inv:    12,
-    ui:     14,
-    txn:    14,
-    paid:   14,
-    due:    12,
-    total:  12,
-    status: 16,
-  };
-
-  const header =
-    'Invoice #'.padEnd(COL.inv) +
-    'UI Amount'.padEnd(COL.ui) +
-    'DB Txn Sum'.padEnd(COL.txn) +
-    'Sale Paid'.padEnd(COL.paid) +
-    'Sale Due'.padEnd(COL.due) +
-    'Sale Total'.padEnd(COL.total) +
-    'PayStatus'.padEnd(COL.status) +
-    'Result';
-
-  console.log(header);
-  console.log('─'.repeat(100));
-
-  let totUI = 0, totTxn = 0, totSalePaid = 0;
-  let mismatches = [], noSale = [], noTxn = [];
-
-  for (const inv of COLLECTION_INVOICES) {
-    const uiAmt    = inv.collectedAmount;
-    const dbTxn    = txnMap.get(inv.invoiceNumber) ?? null;
-    const sale     = saleMap.get(inv.invoiceNumber) ?? null;
-    const salePaid  = sale ? parseFloat(sale.paidAmount)  : null;
-    const saleDue   = sale ? parseFloat(sale.dueAmount)   : null;
-    const saleTotal = sale ? parseFloat(sale.totalAmount) : null;
-    const saleStatus = sale?.paymentStatus ?? 'NOT FOUND';
-
-    totUI += uiAmt;
-    if (dbTxn   !== null) totTxn     += dbTxn;
-    if (salePaid !== null) totSalePaid += salePaid;
-
-    const txnMatchUI  = dbTxn   !== null && Math.abs(dbTxn - uiAmt) < 0.01;
-    const paidMatchTxn = salePaid !== null && dbTxn !== null && Math.abs(salePaid - dbTxn) < 0.01;
-    const allOk = txnMatchUI && paidMatchTxn;
-
-    let result;
-    if (!sale)          { result = '❌ NO SALE IN DB'; noSale.push(inv.invoiceNumber); }
-    else if (!dbTxn)    { result = '❌ NO TXN IN DB';  noTxn.push(inv.invoiceNumber); }
-    else if (!txnMatchUI)  { result = `⚠️  TXN($${dbTxn?.toFixed(2)}) ≠ UI($${uiAmt.toFixed(2)})`; mismatches.push(inv.invoiceNumber); }
-    else if (!paidMatchTxn){ result = `⚠️  PAID($${salePaid?.toFixed(2)}) ≠ TXN($${dbTxn?.toFixed(2)})`; mismatches.push(inv.invoiceNumber); }
-    else                   { result = '✅ OK'; }
-
-    console.log(
-      inv.invoiceNumber.padEnd(COL.inv) +
-      ('$' + uiAmt.toFixed(2)).padEnd(COL.ui) +
-      (dbTxn   !== null ? '$' + dbTxn.toFixed(2)    : '—').padEnd(COL.txn) +
-      (salePaid !== null ? '$' + salePaid.toFixed(2) : '—').padEnd(COL.paid) +
-      (saleDue  !== null ? '$' + saleDue.toFixed(2)  : '—').padEnd(COL.due) +
-      (saleTotal !== null ? '$' + saleTotal.toFixed(2): '—').padEnd(COL.total) +
-      saleStatus.padEnd(COL.status) +
-      result
-    );
-  }
-
-  console.log('─'.repeat(100));
-  console.log('\n📊 TOTALS');
-  console.log('─────────────────────────────────────────────────');
-  console.log(`UI Collection Total     : $${totUI.toFixed(2)}`);
-  console.log(`DB Transaction Total    : $${totTxn.toFixed(2)}`);
-  console.log(`Sale paidAmount Total   : $${totSalePaid.toFixed(2)}`);
-  console.log(`Invoices checked        : ${COLLECTION_INVOICES.length}`);
-  console.log(`Mismatched invoices     : ${[...new Set(mismatches)].length}`);
-  console.log(`No sale found           : ${noSale.length}`);
-  console.log(`No transaction found    : ${noTxn.length}`);
-
-  console.log('\n📋 DIFFERENCE ANALYSIS');
-  console.log('─────────────────────────────────────────────────');
-  const uiVsTxn   = Math.abs(totUI - totTxn);
-  const txnVsPaid = Math.abs(totTxn - totSalePaid);
-  const uiVsPaid  = Math.abs(totUI - totSalePaid);
-
-  console.log(`UI vs DB Txn diff       : $${uiVsTxn.toFixed(2)}   ${uiVsTxn < 0.01 ? '✅ Match' : '❌ Mismatch'}`);
-  console.log(`DB Txn vs Sale Paid diff: $${txnVsPaid.toFixed(2)}  ${txnVsPaid < 0.01 ? '✅ Match' : '❌ Mismatch'}`);
-  console.log(`UI vs Sale Paid diff    : $${uiVsPaid.toFixed(2)}   ${uiVsPaid < 0.01 ? '✅ Match' : '❌ Mismatch'}`);
-
-  if (noSale.length > 0)    console.log(`\n❌ Invoices with NO saleSummary: ${noSale.join(', ')}`);
-  if (noTxn.length > 0)     console.log(`❌ Invoices with NO transaction : ${noTxn.join(', ')}`);
-  if (mismatches.length > 0) console.log(`⚠️  Invoices with amount mismatch: ${[...new Set(mismatches)].join(', ')}`);
-
-  await client.close();
 }
 
-checkMismatch().catch(console.error);
+getMarchTotalSales();
 
+// import { MongoClient } from 'mongodb';
 
+// const client = new MongoClient(
+//   'mongodb+srv://admin:ni6tP5N63U0Yxvdr@cluster0.2qjjhh8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'
+// );
 
+// async function getInvoiceSummary() {
+//   try {
+//     await client.connect();
+//     console.log('✅ Connected to MongoDB');
+
+//     const db = client.db('test');
+//     const salesCol = db.collection('salesummaries');
+
+//     const startDate = new Date('2026-01-01T00:00:00.000Z');
+//     const endDate   = new Date('2026-03-31T23:59:59.999Z');
+
+//     const invoices = await salesCol.find(
+//       {
+//         invoiceDate: { 
+//           $gte: startDate,
+//           $lte: endDate 
+//         }
+//       },
+//       {
+//         projection: {
+//           invoiceNumber: 1,
+//           invoiceDate: 1,
+//           customerName: 1,
+//           mrName: 1,
+//           paidAmount: 1,
+//           dueAmount: 1,
+//           totalAmount: 1,
+//           paymentStatus: 1,
+//         }
+//       }
+//     ).sort({ invoiceDate: 1 }).toArray();
+
+//     if (invoices.length === 0) {
+//       console.log('No invoices found in the date range.');
+//       return;
+//     }
+
+//     let totalCash = 0;
+//     let totalCredits = 0;
+
+//     const exact70Invoices = [];
+
+//     invoices.forEach(inv => {
+//       const paid = parseFloat(inv.paidAmount) || 0;
+//       const due  = parseFloat(inv.dueAmount)  || 0;
+//       const total = parseFloat(inv.totalAmount) || (paid + due);
+
+//       totalCash += paid;
+//       totalCredits += due;
+
+//       const difference = paid - due;
+
+//       // Check for exact or very close to 70 (handles floating point issues)
+//       if (Math.abs(difference - 70) < 0.51) {   // tolerance ±0.5
+//         exact70Invoices.push({
+//           invoiceNumber: inv.invoiceNumber,
+//           invoiceDate: inv.invoiceDate ? inv.invoiceDate.toISOString().split('T')[0] : 'N/A',
+//           customer: (inv.customerName || inv.mrName || 'Unknown').trim(),
+//           paidAmount: paid,
+//           dueAmount: due,
+//           totalAmount: total,
+//           difference: difference,
+//           paymentStatus: inv.paymentStatus || 'N/A'
+//         });
+//       }
+//     });
+
+//     // ====================== REPORT ======================
+//     console.log('\n=======================================================================');
+//     console.log('   INVOICES WITH EXACT DIFFERENCE ≈ 70 (Paid - Due)');
+//     console.log('   Period: 1 Jan 2026 — 31 Mar 2026');
+//     console.log('=======================================================================\n');
+
+//     console.log(`Total Invoices Scanned : ${invoices.length}`);
+//     console.log(`Total Cash (Paid)      : $${totalCash.toFixed(2)}`);
+//     console.log(`Total Credits (Due)    : $${totalCredits.toFixed(2)}`);
+//     console.log(`Invoices with Diff ≈70 : ${exact70Invoices.length}\n`);
+
+//     if (exact70Invoices.length === 0) {
+//       console.log('❌ No invoices found with difference exactly 70.');
+//     } else {
+//       console.log('Invoice #'.padEnd(14) +
+//                   'Date'.padEnd(12) +
+//                   'Customer'.padEnd(32) +
+//                   'Paid'.padStart(12) +
+//                   'Due'.padStart(12) +
+//                   'Total'.padStart(12) +
+//                   'Difference'.padStart(12) +
+//                   ' Status');
+
+//       console.log('─'.repeat(110));
+
+//       exact70Invoices.forEach(inv => {
+//         console.log(
+//           inv.invoiceNumber.padEnd(14) +
+//           inv.invoiceDate.padEnd(12) +
+//           inv.customer.slice(0, 31).padEnd(32) +
+//           `$${inv.paidAmount.toFixed(2)}`.padStart(12) +
+//           `$${inv.dueAmount.toFixed(2)}`.padStart(12) +
+//           `$${inv.totalAmount.toFixed(2)}`.padStart(12) +
+//           `${inv.difference.toFixed(2)}`.padStart(12) +
+//           ` ${inv.paymentStatus}`
+//         );
+//       });
+//     }
+
+//     console.log('\n─'.repeat(110));
+
+//   } catch (error) {
+//     console.error('❌ Error:', error);
+//   } finally {
+//     await client.close();
+//     console.log('\n🔌 MongoDB connection closed.');
+//   }
+// }
+
+// getInvoiceSummary();
 
 

@@ -7,7 +7,6 @@ import Staff from "../../models/staffMember/staff.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
-//suraj 
 
 // Helper function to fix precision
 const fixPrecision = (num) => {
@@ -28,18 +27,30 @@ const normalizeCustomerCode = (code) => {
   return code.toString().replace(/^0+/, "");
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TIMEZONE FIX: Parse a "YYYY-MM-DD" string as LOCAL midnight, not UTC midnight
+// e.g. "2026-04-01" → 2026-04-01T00:00:00 local  (NOT 2026-03-31T17:00:00 UTC)
+// ─────────────────────────────────────────────────────────────────────────────
+const parseLocalDate = (dateStr) => {
+  if (!dateStr) return null;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+};
+
+const parseLocalDateEnd = (dateStr) => {
+  if (!dateStr) return null;
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 const buildMatchStage = ({ startDate, endDate, customerCode } = {}) => {
   const matchStage = {
-    // Match credit OR partial paid (case-insensitive) — including "Cash" is optional
     paymentStatus: {
       $in: [/^credit$/i, /^partial paid$/i, /^unpaid$/i, /^due$/i, /^cash$/i],
     },
-    // REMOVED: dueAmount: { $gt: 0 },   <-- this line is removed
-    // Exclude records that have been fully collected (if you want to keep them, you can comment this out)
-    // pendingAmountPaid: { $ne: "paid" }, // optionally remove this too if you want all
-    // Only show non-returned, non-exchanged sales
     $or: [
       { isReturn: { $exists: false } },
       { isReturn: false },
@@ -47,19 +58,15 @@ const buildMatchStage = ({ startDate, endDate, customerCode } = {}) => {
     ],
   };
 
-  // FIX: filter by invoiceDate — deliveryDate is null on many records and breaks date queries
   if (startDate || endDate) {
     matchStage.invoiceDate = {};
     if (startDate) {
-      const start = new Date(startDate);
-      if (!isNaN(start.getTime())) matchStage.invoiceDate.$gte = start;
+      const start = parseLocalDate(startDate);
+      if (start) matchStage.invoiceDate.$gte = start;
     }
     if (endDate) {
-      const end = new Date(endDate);
-      if (!isNaN(end.getTime())) {
-        end.setHours(23, 59, 59, 999);
-        matchStage.invoiceDate.$lte = end;
-      }
+      const end = parseLocalDateEnd(endDate);
+      if (end) matchStage.invoiceDate.$lte = end;
     }
   }
 
@@ -69,7 +76,6 @@ const buildMatchStage = ({ startDate, endDate, customerCode } = {}) => {
 
   return matchStage;
 };
-
 
 // Helper function to update MR Cash
 const updateMRCash = async (
@@ -211,7 +217,6 @@ router.post("/bulk-update", async (req, res) => {
           continue;
         }
 
-        // FIX: fall back to existing totalAmount when upload value is 0/blank
         const resolvedTotalAmount =
           totalAmount > 0 ? totalAmount : sale.totalAmount || 0;
 
@@ -255,7 +260,6 @@ router.post("/bulk-update", async (req, res) => {
         const dueAmountChange = fixPrecision(newDueAmount - oldDueAmount);
         const paidAmountChange = fixPrecision(newPaidAmount - oldPaidAmount);
 
-        // FIX: default creditDays to 30 when 0/blank
         const resolvedCreditDays = creditDays > 0 ? creditDays : 30;
 
         const updateData = {
@@ -271,14 +275,12 @@ router.post("/bulk-update", async (req, res) => {
           creditDays: resolvedCreditDays,
         };
 
-        // Mark pendingAmountPaid as "paid" only when fully paid (optional, you can remove this line)
         if (newDueAmount === 0) {
           updateData.pendingAmountPaid = "paid";
         }
 
         if (remarks) updateData.remark = remarks;
 
-        // Always calculate dueDate from invoiceDate + creditDays
         if (newDueAmount > 0 && resolvedCreditDays > 0) {
           const invoiceDate = new Date(sale.invoiceDate);
           const dueDate = new Date(invoiceDate);
@@ -387,12 +389,7 @@ router.post("/bulk-update", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Outstanding Collections Report — GET /
-// FIX: group by invoiceNumber (one row per invoice, not per customer)
-// ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-// Outstanding Collections Report — GET /
-// Optimized with aggregation, dueAmount filter, and single customer lookup
+// Outstanding Collections Report — GET /  (with robust date filtering)
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
@@ -403,15 +400,18 @@ router.get("/", async (req, res) => {
       limit = 7,
       search,
       customerCode,
-      status,
     } = req.query;
 
     // Validate dates
-    if (startDate && isNaN(new Date(startDate).getTime())) {
-      return res.status(400).json({ success: false, message: "Invalid startDate format" });
+    if (startDate && !parseLocalDate(startDate)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid startDate format" });
     }
-    if (endDate && isNaN(new Date(endDate).getTime())) {
-      return res.status(400).json({ success: false, message: "Invalid endDate format" });
+    if (endDate && !parseLocalDateEnd(endDate)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid endDate format" });
     }
 
     const pageNum = parseInt(page);
@@ -419,9 +419,9 @@ router.get("/", async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
     const now = new Date();
 
-    // Build match stage – include dueAmount > 0!
+    // ── Build match stage with robust date filtering ─────────────────────
     const matchStage = {
-      dueAmount: { $gt: 0 },                       // ← ONLY invoices with outstanding balance
+      dueAmount: { $gt: 0 },
       paymentStatus: {
         $in: [/^credit$/i, /^partial paid$/i, /^unpaid$/i, /^due$/i, /^cash$/i],
       },
@@ -432,29 +432,56 @@ router.get("/", async (req, res) => {
       ],
     };
 
-    // Date filter
+    // 🔧 FIX: Handle date filtering robustly – convert string dates to Date objects
     if (startDate || endDate) {
-      matchStage.invoiceDate = {};
-      if (startDate) {
-        const start = new Date(startDate);
-        if (!isNaN(start.getTime())) matchStage.invoiceDate.$gte = start;
+      const start = startDate ? parseLocalDate(startDate) : null;
+      const end = endDate ? parseLocalDateEnd(endDate) : null;
+
+      // Use $expr to safely compare both string and Date fields
+      const dateConditions = [];
+      if (start) {
+        dateConditions.push({
+          $expr: { $gte: [{ $toDate: "$invoiceDate" }, start] },
+        });
       }
-      if (endDate) {
-        const end = new Date(endDate);
-        if (!isNaN(end.getTime())) {
-          end.setHours(23, 59, 59, 999);
-          matchStage.invoiceDate.$lte = end;
-        }
+      if (end) {
+        dateConditions.push({
+          $expr: { $lte: [{ $toDate: "$invoiceDate" }, end] },
+        });
+      }
+      if (dateConditions.length > 0) {
+        matchStage.$and = dateConditions;
       }
     }
 
-    // Customer code filter
     if (customerCode) {
       matchStage.customerCode = formatCustomerCode(customerCode);
     }
 
-    // Aggregation pipeline
-    const pipeline = [
+    // ── Search filter (applied after lookup) ────────────────────────────
+    const searchMatchStage =
+      search && search.trim()
+        ? {
+            $match: {
+              $or: [
+                { invoiceNumber: { $regex: search.trim(), $options: "i" } },
+                {
+                  customerNameFromMaster: {
+                    $regex: search.trim(),
+                    $options: "i",
+                  },
+                },
+                { customerCode: { $regex: search.trim(), $options: "i" } },
+                { customerPhone: { $regex: search.trim(), $options: "i" } },
+                { customerEmail: { $regex: search.trim(), $options: "i" } },
+                { customerAddress: { $regex: search.trim(), $options: "i" } },
+              ],
+            },
+          }
+        : null;
+
+    // ── Base pipeline ───────────────────────────────────────────────────
+    const basePipeline = [
       { $match: matchStage },
       {
         $project: {
@@ -469,7 +496,6 @@ router.get("/", async (req, res) => {
           dueDate: 1,
           deliveryDate: 1,
           mrName: 1,
-          formattedCustomerCode: { $concat: [{ $toString: "$customerCode" }] }, // simple, but you may need padding
         },
       },
       {
@@ -482,8 +508,9 @@ router.get("/", async (req, res) => {
                 $expr: {
                   $or: [
                     { $eq: ["$customerCode", "$$custCode"] },
-                    { $eq: ["$customerCode", { $concat: ["0", "$$custCode"] }] },
-                    // Add more patterns if needed
+                    {
+                      $eq: ["$customerCode", { $concat: ["0", "$$custCode"] }],
+                    },
                   ],
                 },
               },
@@ -496,30 +523,15 @@ router.get("/", async (req, res) => {
       { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
       {
         $addFields: {
-          customerNameFromMaster: { $ifNull: ["$customer.name", "$customerName"] },
+          customerNameFromMaster: {
+            $ifNull: ["$customer.name", "$customerName"],
+          },
           customerPhone: "$customer.customerNumber",
           customerEmail: "$customer.email",
           customerAddress: "$customer.address",
         },
       },
-      // Optional: apply search filter on invoiceNumber, customerName, etc.
-      ...(search && search.trim()
-        ? [
-            {
-              $match: {
-                $or: [
-                  { invoiceNumber: { $regex: search.trim(), $options: "i" } },
-                  { customerNameFromMaster: { $regex: search.trim(), $options: "i" } },
-                  { customerCode: { $regex: search.trim(), $options: "i" } },
-                  { customerPhone: { $regex: search.trim(), $options: "i" } },
-                  { customerEmail: { $regex: search.trim(), $options: "i" } },
-                  { customerAddress: { $regex: search.trim(), $options: "i" } },
-                ],
-              },
-            },
-          ]
-        : []),
-      // Add computed fields
+      ...(searchMatchStage ? [searchMatchStage] : []),
       {
         $addFields: {
           overdueDate: {
@@ -539,10 +551,7 @@ router.get("/", async (req, res) => {
       {
         $addFields: {
           isOverdue: {
-            $and: [
-              { $lt: ["$overdueDate", now] },
-              { $gt: ["$dueAmount", 0] },
-            ],
+            $and: [{ $lt: ["$overdueDate", now] }, { $gt: ["$dueAmount", 0] }],
           },
         },
       },
@@ -563,20 +572,50 @@ router.get("/", async (req, res) => {
       },
     ];
 
-    // Count total matching records (for pagination)
-    const countPipeline = [...pipeline];
-    countPipeline.push({ $count: "total" });
-    const countResult = await Sale.aggregate(countPipeline);
+    // ── Grand totals across ALL matching records ────────────────────────
+    const grandTotalPipeline = [
+      ...basePipeline,
+      {
+        $group: {
+          _id: null,
+          totalOutstandingAmount: { $sum: "$totalDueAmount" },
+          totalOverdueAmount: { $sum: "$overdueAmount" },
+          totalInvoices: { $sum: 1 },
+          totalRecords: { $sum: 1 },
+        },
+      },
+    ];
+
+    const countPipeline = [...basePipeline, { $count: "total" }];
+
+    const [grandTotalResult, countResult] = await Promise.all([
+      Sale.aggregate(grandTotalPipeline),
+      Sale.aggregate(countPipeline),
+    ]);
+
     const totalCount = countResult.length > 0 ? countResult[0].total : 0;
     const totalPages = Math.ceil(totalCount / limitNum);
 
-    // Paginate
-    pipeline.push({ $skip: skip }, { $limit: limitNum });
-    // Sort by overdueAmount descending (can't sort computed field directly in aggregation easily)
-    // We'll fetch and sort in memory
-    let results = await Sale.aggregate(pipeline);
+    const grandTotals =
+      grandTotalResult.length > 0
+        ? grandTotalResult[0]
+        : {
+            totalOutstandingAmount: 0,
+            totalOverdueAmount: 0,
+            totalInvoices: 0,
+            totalRecords: 0,
+          };
 
-    // Add computed fields: outstandingAmount = totalDueAmount, overdueDays
+    // ── Paginated data ──────────────────────────────────────────────────
+    const paginatedPipeline = [
+      ...basePipeline,
+      { $sort: { overdueAmount: -1 } },
+      { $skip: skip },
+      { $limit: limitNum },
+    ];
+
+    let results = await Sale.aggregate(paginatedPipeline);
+
     results = results.map((r) => ({
       ...r,
       outstandingAmount: r.totalDueAmount,
@@ -585,38 +624,24 @@ router.get("/", async (req, res) => {
           ? Math.max(
               0,
               Math.floor(
-                (now - new Date(r.latestDeliveryDate)) / (1000 * 60 * 60 * 24)
-              )
+                (now - new Date(r.latestDeliveryDate)) / (1000 * 60 * 60 * 24),
+              ),
             )
           : 0,
     }));
 
-    // Sort by overdueAmount descending
-    results.sort((a, b) => b.overdueAmount - a.overdueAmount);
+    const summary = {
+      totalOutstandingAmount: fixPrecision(
+        grandTotals.totalOutstandingAmount || 0,
+      ),
+      totalDueAmount: fixPrecision(grandTotals.totalOutstandingAmount || 0),
+      totalOverdueAmount: fixPrecision(grandTotals.totalOverdueAmount || 0),
+      totalCustomers: grandTotals.totalRecords || 0,
+      totalInvoices: grandTotals.totalInvoices || 0,
+      totalOverdueInvoices: 0,
+      totalRecords: totalCount,
+    };
 
-    // Aggregate totals
-    const totals = results.reduce(
-      (acc, curr) => {
-        acc.totalOutstandingAmount += curr.outstandingAmount || 0;
-        acc.totalDueAmount += curr.totalDueAmount || 0;
-        acc.totalOverdueAmount += curr.overdueAmount || 0;
-        acc.totalCustomers += 1;
-        acc.totalInvoices += 1;
-        acc.totalOverdueInvoices += curr.overdueAmount > 0 ? 1 : 0;
-        return acc;
-      },
-      {
-        totalOutstandingAmount: 0,
-        totalDueAmount: 0,
-        totalOverdueAmount: 0,
-        totalCustomers: 0,
-        totalInvoices: 0,
-        totalOverdueInvoices: 0,
-        totalRecords: totalCount,
-      }
-    );
-
-    // Build response records
     const records = results.map((inv) => ({
       invoiceNumber: inv.invoiceNumber,
       invoiceDate: inv.invoiceDate,
@@ -636,7 +661,7 @@ router.get("/", async (req, res) => {
 
     return res.json({
       success: true,
-      data: { summary: totals, records },
+      data: { summary, records },
       pagination: {
         currentPage: pageNum,
         totalPages,
@@ -658,18 +683,17 @@ router.get("/", async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Excel Export — GET /export/excel
-// FIX: same invoiceDate + invoice-level grouping fixes applied here too
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, customerCode } = req.query;
 
-    if (startDate && isNaN(new Date(startDate).getTime())) {
+    if (startDate && !parseLocalDate(startDate)) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid startDate format" });
     }
-    if (endDate && isNaN(new Date(endDate).getTime())) {
+    if (endDate && !parseLocalDateEnd(endDate)) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid endDate format" });
@@ -714,7 +738,6 @@ router.get("/export/excel", async (req, res) => {
       customerMap[saleCode] = customer;
     });
 
-    // ── FIX: invoice-level grouping (same logic as GET /) ──
     const invoiceGroups = {};
 
     formattedSales.forEach((sale) => {

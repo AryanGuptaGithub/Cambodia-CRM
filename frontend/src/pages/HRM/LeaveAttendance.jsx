@@ -29,6 +29,24 @@ import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ─── Shared half-day helper (mirrors backend logic) ───────────────────────────
+// 4 h ≤ worked < 7 h → half day
+// worked ≥ 7 h        → full day
+const getAttendanceTypeClient = (totalMinutesWorked) => {
+  if (totalMinutesWorked >= 7 * 60)
+    return { type: "full", expectedMinutes: 8 * 60 };
+  if (totalMinutesWorked >= 4 * 60)
+    return { type: "half", expectedMinutes: 4 * 60 };
+  return { type: "short", expectedMinutes: 8 * 60 };
+};
+
+// Parse "HH:MM:SS" → total minutes
+const parseTimeToMinutes = (timeStr) => {
+  if (!timeStr) return 0;
+  const [h = 0, m = 0] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+};
+
 const ConfirmationModal = ({
   isOpen,
   onClose,
@@ -85,6 +103,11 @@ const ConfirmationModal = ({
                       </span>
                     ) : (
                       <>
+                        {rec.isHalfDay && (
+                          <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium">
+                            Half Day
+                          </span>
+                        )}
                         {rec.totalTime && (
                           <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
                             {rec.totalTime}
@@ -144,10 +167,9 @@ const CustomDropdown = ({
   const dropdownRef = React.useRef(null);
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target))
         setIsOpen(false);
-      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -161,12 +183,7 @@ const CustomDropdown = ({
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full border border-gray-300 rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2
-           focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center ${
-             disabled
-               ? "cursor-not-allowed opacity-60"
-               : "cursor-pointer hover:border-gray-400"
-           } ${!value ? "text-gray-500" : "text-gray-900"}`}
+        className={`w-full border border-gray-300 rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-gray-400"} ${!value ? "text-gray-500" : "text-gray-900"}`}
       >
         <span className="truncate">
           {selectedOption ? selectedOption.label : placeholder}
@@ -177,7 +194,6 @@ const CustomDropdown = ({
           </span>
         )}
       </button>
-
       {isOpen && !disabled && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
           {options.length === 0 ? (
@@ -195,11 +211,7 @@ const CustomDropdown = ({
                     setIsOpen(false);
                   }
                 }}
-                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 ${
-                  value === option.value
-                    ? "bg-indigo-100 text-indigo-900 font-medium"
-                    : "text-gray-900"
-                } ${option.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 ${value === option.value ? "bg-indigo-100 text-indigo-900 font-medium" : "text-gray-900"} ${option.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
                 disabled={option.disabled}
               >
                 {option.label}
@@ -237,6 +249,9 @@ const LeaveAttendance = () => {
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+
+  // Live duration preview for attendance modal
+  const [durationPreview, setDurationPreview] = useState(null);
 
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveDate, setLeaveDate] = useState("");
@@ -280,18 +295,17 @@ const LeaveAttendance = () => {
   const [holidays, setHolidays] = useState([]);
   const [mrLeaves, setMrLeaves] = useState({});
 
-  // Helper functions
+  // ─── Helpers ────────────────────────────────────────────────────────────────
   const calculateRemainingTime = (totalMinutes) => {
-    const totalHours = totalMinutes / 60;
     const fullDays = Math.floor(totalMinutes / 480);
-    const remainingMinutes = totalMinutes % 480;
-    const remainingHours = Math.floor(remainingMinutes / 60);
-    const remainingMins = remainingMinutes % 60;
+    const remaining = totalMinutes % 480;
+    const remainingHours = Math.floor(remaining / 60);
+    const remainingMins = remaining % 60;
     return {
       days: fullDays,
       hours: remainingHours,
       minutes: remainingMins,
-      totalHours: parseFloat(totalHours.toFixed(2)),
+      totalHours: parseFloat((totalMinutes / 60).toFixed(2)),
       totalMinutes,
     };
   };
@@ -301,24 +315,20 @@ const LeaveAttendance = () => {
   const isFutureDate = (dateString) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const inputDate = new Date(dateString);
-    inputDate.setHours(0, 0, 0, 0);
-    return inputDate > today;
+    const input = new Date(dateString);
+    input.setHours(0, 0, 0, 0);
+    return input > today;
   };
 
   const getDateString = (date) => {
     if (!date) return "";
     const d = new Date(date);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
 
   const formatDateDisplay = (dateStr) => {
     if (!dateStr) return "";
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("en-US", {
+    return new Date(dateStr).toLocaleDateString("en-US", {
       weekday: "short",
       year: "numeric",
       month: "short",
@@ -326,42 +336,56 @@ const LeaveAttendance = () => {
     });
   };
 
-  // Navigation functions for MRs
-  const getCurrentMRIndex = () => {
-    if (!selectedMr) return -1;
-    return mrList.findIndex((mr) => mr._id === selectedMr._id);
-  };
+  // Compute live duration preview for attendance modal
+  useEffect(() => {
+    if (!startDate || !startTime || !endTime) {
+      setDurationPreview(null);
+      return;
+    }
+    const start = new Date(`${startDate}T${startTime}`);
+    const end = new Date(`${startDate}T${endTime}`);
+    if (end <= start) {
+      setDurationPreview(null);
+      return;
+    }
+    const totalMinutes = Math.floor((end - start) / 60000);
+    const { type, expectedMinutes } = getAttendanceTypeClient(totalMinutes);
+    const extraMinutes = Math.max(0, totalMinutes - expectedMinutes);
+    setDurationPreview({ totalMinutes, type, extraMinutes });
+  }, [startDate, startTime, endTime]);
 
+  // ─── MR navigation ──────────────────────────────────────────────────────────
+  const getCurrentMRIndex = () =>
+    !selectedMr ? -1 : mrList.findIndex((mr) => mr._id === selectedMr._id);
   const handleNextMR = () => {
-    const currentIndex = getCurrentMRIndex();
-    if (currentIndex < mrList.length - 1) {
-      const nextMR = mrList[currentIndex + 1];
-      setSelectedMr(nextMR);
-      // Reset calendar to current date when changing MR
-      const today = new Date();
-      setCurrentMonth(today.getMonth());
-      setCurrentYear(today.getFullYear());
+    const idx = getCurrentMRIndex();
+    if (idx < mrList.length - 1) {
+      setSelectedMr(mrList[idx + 1]);
+      const t = new Date();
+      setCurrentMonth(t.getMonth());
+      setCurrentYear(t.getFullYear());
     }
   };
-
   const handlePreviousMR = () => {
-    const currentIndex = getCurrentMRIndex();
-    if (currentIndex > 0) {
-      const prevMR = mrList[currentIndex - 1];
-      setSelectedMr(prevMR);
-      const today = new Date();
-      setCurrentMonth(today.getMonth());
-      setCurrentYear(today.getFullYear());
+    const idx = getCurrentMRIndex();
+    if (idx > 0) {
+      setSelectedMr(mrList[idx - 1]);
+      const t = new Date();
+      setCurrentMonth(t.getMonth());
+      setCurrentYear(t.getFullYear());
     }
   };
 
+  // ─── Data fetching ───────────────────────────────────────────────────────────
   const fetchMRList = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(
+      const res = await axios.get(
         `${backendUrl}/api/stock-transfer-to-mr/mrs-list`,
       );
-      setMrList(response.data || []);
+      // Filter only active MRs where isActive is true
+      const activeMRs = (res.data || []).filter((mr) => mr.isActive === true);
+      setMrList(activeMRs);
     } catch (err) {
       setError(err.message || "Failed to fetch MR list");
     } finally {
@@ -377,30 +401,25 @@ const LeaveAttendance = () => {
 
   const fetchAttendanceRecords = async () => {
     try {
-      const response = await axios.get(
-        `${backendUrl}/api/hrm/leaves/attendance`,
-      );
-      const records = response.data || [];
-      setAttendanceRecords(records);
-      if (selectedAttendanceMr && showExtraHoursModal) {
+      const res = await axios.get(`${backendUrl}/api/hrm/leaves/attendance`);
+      setAttendanceRecords(res.data || []);
+      if (selectedAttendanceMr && showExtraHoursModal)
         await fetchExtraHoursData(selectedAttendanceMr);
-      }
     } catch (err) {
-      console.error("❌ Failed to fetch attendance records:", err);
+      console.error("Failed to fetch attendance records:", err);
       showToast("error", "Failed to refresh attendance data");
     }
   };
 
   const fetchLeaves = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/hrm/leaves`);
-      const leavesData = response.data || [];
+      const res = await axios.get(`${backendUrl}/api/hrm/leaves`);
       const leavesByUser = {};
-      leavesData.forEach((leave) => {
+      (res.data || []).forEach((leave) => {
         if (leave.status === "approved") {
-          const userId = leave.userId;
-          if (!leavesByUser[userId]) leavesByUser[userId] = [];
-          leavesByUser[userId].push(leave);
+          const uid = leave.userId;
+          if (!leavesByUser[uid]) leavesByUser[uid] = [];
+          leavesByUser[uid].push(leave);
         }
       });
       setMrLeaves(leavesByUser);
@@ -412,30 +431,17 @@ const LeaveAttendance = () => {
 
   const fetchHolidays = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/hrm/holidays`);
-      let holidaysData = response.data.holidays || response.data || [];
-      if (Array.isArray(holidaysData)) {
-        const transformedHolidays = holidaysData
-          .map((holiday) => {
-            const startDate = new Date(holiday.startDate || holiday.date);
-            const endDate = new Date(holiday.endDate || holiday.date);
-            const holidays = [];
-            const currentDate = new Date(startDate);
-            while (currentDate <= endDate) {
-              holidays.push({
-                ...holiday,
-                date: new Date(currentDate),
-                name: holiday.name,
-              });
-              currentDate.setDate(currentDate.getDate() + 1);
-            }
-            return holidays;
-          })
-          .flat();
-        setHolidays(transformedHolidays);
-      } else {
-        setHolidays([]);
-      }
+      const res = await axios.get(`${backendUrl}/api/hrm/holidays`);
+      const raw = res.data.holidays || res.data || [];
+      const flat = [];
+      raw.forEach((h) => {
+        const start = new Date(h.startDate || h.date);
+        const end = new Date(h.endDate || h.date);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          flat.push({ ...h, date: new Date(d) });
+        }
+      });
+      setHolidays(flat);
     } catch (err) {
       console.error("Failed to fetch holidays:", err);
       setHolidays([]);
@@ -447,30 +453,33 @@ const LeaveAttendance = () => {
     setDeletableDates([]);
     setSelectedDeleteIds([]);
     try {
-      const records = attendanceRecords.filter(
-        (record) => record.userId === mrId,
-      );
+      const records = attendanceRecords.filter((r) => r.userId === mrId);
       const sorted = [...records].sort(
         (a, b) => new Date(b.loginTime) - new Date(a.loginTime),
       );
-      const formatted = sorted.map((record) => {
-        const loginDate = new Date(record.loginTime);
-        const dateStr = getDateString(record.loginTime);
-        const isLeave = record.isLeaveDay === true;
+      const formatted = sorted.map((rec) => {
+        const loginDate = new Date(rec.loginTime);
+        const isLeave = rec.isLeaveDay === true;
+        const workedMin = parseTimeToMinutes(rec.totalTime);
+        const { type } = getAttendanceTypeClient(workedMin);
+        const isHalfDay = !isLeave && type === "half";
         let timeInfo = "";
-        if (!isLeave && record.loginTime && record.logoutTime) {
-          const login = new Date(record.loginTime);
-          const logout = new Date(record.logoutTime);
+        if (!isLeave && rec.loginTime && rec.logoutTime) {
+          const login = new Date(rec.loginTime);
+          const logout = new Date(rec.logoutTime);
           timeInfo = `${login.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })} – ${logout.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}`;
+          if (isHalfDay) timeInfo += " (Half Day)";
         }
         return {
-          _id: record._id,
-          dateStr,
+          _id: rec._id,
+          dateStr: getDateString(rec.loginTime),
           displayDate: formatDateDisplay(loginDate),
           timeInfo,
           isLeaveDay: isLeave,
-          totalTime: record.totalTime,
-          extraHoursInMinutes: record.extraHoursInMinutes || 0,
+          isHalfDay,
+          attendanceType: rec.attendanceType || type,
+          totalTime: rec.totalTime,
+          extraHoursInMinutes: rec.extraHoursInMinutes || 0,
         };
       });
       setDeletableDates(formatted);
@@ -492,28 +501,24 @@ const LeaveAttendance = () => {
 
   const handleConfirmDelete = async () => {
     setDeleteLoading(true);
-    let successCount = 0;
-    let errorCount = 0;
-    let deletedDates = [];
-
+    let successCount = 0,
+      errorCount = 0,
+      deletedDates = [];
     for (const id of selectedDeleteIds) {
       try {
-        const response = await axios.delete(
+        const res = await axios.delete(
           `${backendUrl}/api/hrm/leaves/attendance/${id}`,
         );
-
-        if (response.data.success) {
+        if (res.data.success) {
           successCount++;
-          if (response.data.warning) {
-            showToast("warning", response.data.warning);
-            await new Promise((resolve) => setTimeout(resolve, 600));
+          if (res.data.warning) {
+            showToast("warning", res.data.warning);
+            await new Promise((r) => setTimeout(r, 600));
           }
-          if (response.data.deletedDate) {
-            deletedDates.push(response.data.deletedDate);
-          }
+          if (res.data.deletedDate) deletedDates.push(res.data.deletedDate);
         } else {
           errorCount++;
-          showToast("error", `Failed to delete: ${response.data.message}`);
+          showToast("error", `Failed to delete: ${res.data.message}`);
         }
       } catch (err) {
         errorCount++;
@@ -523,7 +528,6 @@ const LeaveAttendance = () => {
         );
       }
     }
-
     if (successCount > 0) {
       const datesPart =
         deletedDates.length > 0 && deletedDates.length <= 3
@@ -531,10 +535,8 @@ const LeaveAttendance = () => {
           : "";
       showToast("success", `${successCount} record(s) deleted${datesPart}.`);
     }
-    if (errorCount > 0) {
+    if (errorCount > 0)
       showToast("error", `${errorCount} record(s) failed to delete.`);
-    }
-
     setConfirmDeleteModal(false);
     setSelectedDeleteIds([]);
     await fetchAttendanceRecords();
@@ -547,33 +549,23 @@ const LeaveAttendance = () => {
     if (!userId || !date) return;
     setCalendarDeleteLoading(true);
     try {
-      const response = await axios.delete(
+      const res = await axios.delete(
         `${backendUrl}/api/hrm/leaves/attendance/date/${userId}/${date}`,
       );
-      if (response.data.success) {
-        const deletedDate = response.data.deletedDate || date;
-        const formattedDate = formatDateDisplay(deletedDate);
+      if (res.data.success) {
         showToast(
           "success",
-          `Attendance record for ${formattedDate} deleted successfully.`,
+          `Attendance record for ${formatDateDisplay(date)} deleted successfully.`,
         );
-        if (response.data.warning) {
-          showToast("warning", response.data.warning);
-        }
+        if (res.data.warning) showToast("warning", res.data.warning);
         setShowCalendarDeleteModal(false);
         await fetchAttendanceRecords();
         await fetchLeaves();
-        if (selectedMr) {
-          setSelectedMr({ ...selectedMr });
-        }
-        if (showDeleteAttendanceModal && deleteSelectedMr) {
+        if (selectedMr) setSelectedMr({ ...selectedMr });
+        if (showDeleteAttendanceModal && deleteSelectedMr)
           fetchDeletableDates(deleteSelectedMr);
-        }
       } else {
-        showToast(
-          "error",
-          response.data.message || "Failed to delete attendance",
-        );
+        showToast("error", res.data.message || "Failed to delete attendance");
       }
     } catch (err) {
       showToast(
@@ -604,18 +596,18 @@ const LeaveAttendance = () => {
     try {
       setExtraHoursData((prev) => ({ ...prev, loading: true }));
       const today = new Date();
-      const response = await axios.get(
+      const res = await axios.get(
         `${backendUrl}/api/hrm/leaves/attendance/extra-hours/${mrId}`,
         {
           params: { year: today.getFullYear(), month: today.getMonth() },
         },
       );
-      if (response.data.success) {
-        const data = response.data.data;
+      if (res.data.success) {
+        const data = res.data.data;
         const totalMinutes = data.totalExtraMinutes || 0;
-        const monthlyMinutes = data.monthlyExtraMinutes || 0;
+        const monthlyMins = data.monthlyExtraMinutes || 0;
         const totalCalc = calculateRemainingTime(totalMinutes);
-        const monthlyCalc = calculateRemainingTime(monthlyMinutes);
+        const monthlyCalc = calculateRemainingTime(monthlyMins);
         setExtraHoursData((prev) => ({
           totalExtraHours: totalCalc.totalHours,
           totalExtraMinutes: totalMinutes,
@@ -628,7 +620,7 @@ const LeaveAttendance = () => {
           useMonthlyOnly: prev.useMonthlyOnly,
         }));
       } else {
-        throw new Error(response.data.message);
+        throw new Error(res.data.message);
       }
     } catch (err) {
       console.error("Failed to fetch extra hours data:", err);
@@ -641,13 +633,11 @@ const LeaveAttendance = () => {
     const { useMonthlyOnly, totalExtraMinutes, monthlyExtraMinutes } =
       extraHoursData;
     const minutesToUse = useMonthlyOnly
-      ? monthlyExtraMinutes
-      : totalExtraMinutes;
-    const hoursToUse = minutesToUse / 60;
-    const totalHours = parseFloat(hoursToUse.toFixed(2));
+      ? monthlyExtraMinutes || 0
+      : totalExtraMinutes || 0;
     const displayCalc = calculateRemainingTime(minutesToUse);
     return {
-      showExtraHours: totalHours,
+      showExtraHours: parseFloat((minutesToUse / 60).toFixed(2)),
       showLeaveDaysAvailable: displayCalc.days,
       showRemainingHours: displayCalc.hours,
       showRemainingMinutes: displayCalc.minutes,
@@ -666,55 +656,37 @@ const LeaveAttendance = () => {
     return Math.max(0, daysInMonth >= 30 ? months : Math.max(0, months - 1));
   };
 
-  const calculatePaidLeaves = (joinDate) => {
-    const monthsOfService = getMonthsOfService(joinDate);
-    return (monthsOfService * 1.25).toFixed(2);
-  };
+  const calculatePaidLeaves = (joinDate) =>
+    (getMonthsOfService(joinDate) * 1).toFixed(2);
 
   const isSunday = (date) => new Date(date).getDay() === 0;
-
   const isHoliday = (date) => {
     if (!Array.isArray(holidays) || holidays.length === 0) return false;
     const checkDate = new Date(date);
     checkDate.setHours(0, 0, 0, 0);
-    return holidays.some((holiday) => {
-      if (!holiday) return false;
-      const holidayDateObj = holiday.date
-        ? new Date(holiday.date)
-        : holiday.startDate
-          ? new Date(holiday.startDate)
-          : null;
-      if (!holidayDateObj) return false;
-      const holidayDate = new Date(holidayDateObj);
-      holidayDate.setHours(0, 0, 0, 0);
-      return holidayDate.getTime() === checkDate.getTime();
+    return holidays.some((h) => {
+      const hd = new Date(h.date || h.startDate);
+      hd.setHours(0, 0, 0, 0);
+      return hd.getTime() === checkDate.getTime();
     });
   };
-
   const getHolidayName = (date) => {
-    if (!Array.isArray(holidays) || holidays.length === 0) return null;
     const checkDate = new Date(date);
     checkDate.setHours(0, 0, 0, 0);
-    const holiday = holidays.find((holiday) => {
-      if (!holiday) return false;
-      const holidayDateObj = holiday.date
-        ? new Date(holiday.date)
-        : holiday.startDate
-          ? new Date(holiday.startDate)
-          : null;
-      if (!holidayDateObj) return false;
-      const holidayDate = new Date(holidayDateObj);
-      holidayDate.setHours(0, 0, 0, 0);
-      return holidayDate.getTime() === checkDate.getTime();
+    const h = holidays.find((h) => {
+      const hd = new Date(h.date || h.startDate);
+      hd.setHours(0, 0, 0, 0);
+      return hd.getTime() === checkDate.getTime();
     });
-    return holiday ? holiday.name : null;
+    return h ? h.name : null;
   };
 
   const filteredMRList = mrList.filter(
     (mr) =>
-      mr.medicalRepName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      mr.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      mr.contactNo?.includes(searchTerm),
+      mr.isActive === true &&
+      (mr.medicalRepName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        mr.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        mr.contactNo?.includes(searchTerm)),
   );
 
   const totalPages = Math.ceil(filteredMRList.length / itemsPerPage);
@@ -727,14 +699,23 @@ const LeaveAttendance = () => {
     if (!mrId || !date) return null;
     const checkDate = new Date(date);
     checkDate.setHours(0, 0, 0, 0);
-    const records = attendanceRecords.filter((record) => {
-      if (record.userId !== mrId) return false;
-      if (!record.loginTime) return false;
-      const recordDate = new Date(record.loginTime);
-      recordDate.setHours(0, 0, 0, 0);
-      return recordDate.getTime() === checkDate.getTime();
+    const records = attendanceRecords.filter((rec) => {
+      if (rec.userId !== mrId || !rec.loginTime) return false;
+      const rd = new Date(rec.loginTime);
+      rd.setHours(0, 0, 0, 0);
+      return rd.getTime() === checkDate.getTime();
     });
     return records.length > 0 ? records[0] : null;
+  };
+
+  // ─── Check if a date is a half-day attendance ─────────────────────────────
+  const isHalfDayAttendance = (date, mrId) => {
+    const att = getAttendanceForDate(date, mrId);
+    if (!att || att.isLeaveDay) return false;
+    // Prefer stored attendanceType, fall back to computed
+    if (att.attendanceType === "half") return true;
+    const workedMin = parseTimeToMinutes(att.totalTime);
+    return getAttendanceTypeClient(workedMin).type === "half";
   };
 
   const isLeave = (date, mrId) => {
@@ -742,21 +723,20 @@ const LeaveAttendance = () => {
     const leaves = mrLeaves[mrId] || [];
     const checkDate = new Date(date);
     checkDate.setHours(0, 0, 0, 0);
-    for (let leave of leaves) {
+    for (const leave of leaves) {
       if (!leave.leaveDate || leave.status !== "approved") continue;
-      const leaveDate = new Date(leave.leaveDate);
-      leaveDate.setHours(0, 0, 0, 0);
-      if (leaveDate.getTime() === checkDate.getTime()) {
+      const ld = new Date(leave.leaveDate);
+      ld.setHours(0, 0, 0, 0);
+      if (ld.getTime() === checkDate.getTime())
         return {
           isLeave: true,
           type: leave.leaveType || "unpaid",
           leaveDate: leave.leaveDate,
           reason: leave.reason,
         };
-      }
     }
     const attendance = getAttendanceForDate(date, mrId);
-    if (attendance && attendance.isLeaveDay) {
+    if (attendance?.isLeaveDay) {
       const swapLeave = leaves.find((leave) => {
         if (
           !leave.leaveDate ||
@@ -764,20 +744,22 @@ const LeaveAttendance = () => {
           leave.leaveType !== "swapleave"
         )
           return false;
-        const leaveDate = new Date(leave.leaveDate);
-        leaveDate.setHours(0, 0, 0, 0);
-        return leaveDate.getTime() === checkDate.getTime();
+        const ld = new Date(leave.leaveDate);
+        ld.setHours(0, 0, 0, 0);
+        return ld.getTime() === checkDate.getTime();
       });
-      if (swapLeave)
-        return { isLeave: true, type: "swapleave", fromAttendance: true };
-      return { isLeave: true, type: "paid", fromAttendance: true };
+      return swapLeave
+        ? { isLeave: true, type: "swapleave", fromAttendance: true }
+        : { isLeave: true, type: "paid", fromAttendance: true };
     }
     return { isLeave: false, type: null };
   };
 
   const getLeaveCounts = (mrId, joinDate) => {
     const leaves = mrLeaves[mrId] || [];
-    const approvedUnpaidLeaves = leaves.filter(
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const approvedUnpaid = leaves.filter(
       (l) => l.status === "approved" && l.leaveType === "unpaid",
     );
     const swapLeaves = leaves.filter(
@@ -786,69 +768,25 @@ const LeaveAttendance = () => {
     const paidLeaves = leaves.filter(
       (l) => l.status === "approved" && l.leaveType === "paid",
     );
-    const currentDate = new Date();
-    currentDate.setHours(0, 0, 0, 0);
-    const currentMonthStart = new Date(currentYear, currentMonth, 1);
-    const currentMonthEnd = new Date(currentYear, currentMonth + 1, 0);
-    const yearStart = new Date(currentYear, 0, 1);
-    const yearEnd = new Date(currentYear, 11, 31);
-    const validUnpaidLeaves = approvedUnpaidLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      d.setHours(0, 0, 0, 0);
-      return d <= currentDate;
-    });
-    const validSwapLeaves = swapLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      d.setHours(0, 0, 0, 0);
-      return d <= currentDate;
-    });
-    const validPaidLeaves = paidLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      d.setHours(0, 0, 0, 0);
-      return d <= currentDate;
-    });
-    const monthlyUnpaidLeaves = validUnpaidLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      return d >= currentMonthStart && d <= currentMonthEnd;
-    }).length;
-    const monthlySwapLeaves = validSwapLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      return d >= currentMonthStart && d <= currentMonthEnd;
-    }).length;
-    const monthlyPaidLeaves = validPaidLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      return d >= currentMonthStart && d <= currentMonthEnd;
-    }).length;
-    const annualUnpaidLeaves = validUnpaidLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      return d >= yearStart && d <= yearEnd;
-    }).length;
-    const annualSwapLeaves = validSwapLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      return d >= yearStart && d <= yearEnd;
-    }).length;
-    const annualPaidLeaves = validPaidLeaves.filter((l) => {
-      const d = new Date(l.leaveDate);
-      return d >= yearStart && d <= yearEnd;
-    }).length;
-    const paidLeavesEntitlement = calculatePaidLeaves(joinDate);
+    const valid = (arr) =>
+      arr.filter((l) => {
+        const d = new Date(l.leaveDate);
+        d.setHours(0, 0, 0, 0);
+        return d <= today;
+      });
     return {
-      monthly: monthlyUnpaidLeaves,
-      annual: annualUnpaidLeaves,
-      paid: parseFloat(paidLeavesEntitlement),
-      total: validUnpaidLeaves.length,
-      swapLeaves: validSwapLeaves.length,
-      paidLeaves: validPaidLeaves.length,
-      monthlySwapLeaves,
-      annualSwapLeaves,
-      monthlyPaidLeaves,
-      annualPaidLeaves,
+      monthly: 0,
+      annual: 0,
+      paid: parseFloat(calculatePaidLeaves(joinDate)),
+      total: valid(approvedUnpaid).length,
+      swapLeaves: valid(swapLeaves).length,
+      paidLeaves: valid(paidLeaves).length,
     };
   };
 
   const getRemainingPaidLeaves = (mrId, joinDate) => {
-    const leaveCounts = getLeaveCounts(mrId, joinDate);
-    return Math.max(0, leaveCounts.paid - leaveCounts.total).toFixed(2);
+    const counts = getLeaveCounts(mrId, joinDate);
+    return Math.max(0, counts.paid - counts.total).toFixed(2);
   };
 
   const getDaysInMonth = (year = currentYear, month = currentMonth) => {
@@ -863,135 +801,66 @@ const LeaveAttendance = () => {
 
   const canNavigateNext = (direction, type = "monthly") => {
     const today = new Date();
-    const currentYearToday = today.getFullYear();
-    const currentMonthToday = today.getMonth();
-    if (type === "monthly") {
-      if (direction === "next") {
-        return (
-          currentYear < currentYearToday ||
-          (currentYear === currentYearToday && currentMonth < currentMonthToday)
-        );
-      }
-    } else {
-      if (direction === "next") return currentYear < currentYearToday;
+    if (type === "monthly" && direction === "next") {
+      return (
+        currentYear < today.getFullYear() ||
+        (currentYear === today.getFullYear() && currentMonth < today.getMonth())
+      );
     }
+    if (type === "annual" && direction === "next")
+      return currentYear < today.getFullYear();
     return true;
   };
 
   const navigateMonth = (direction) => {
     if (direction === "prev") {
-      if (currentMonth === 0) {
-        setCurrentMonth(11);
-        setCurrentYear(currentYear - 1);
-      } else setCurrentMonth(currentMonth - 1);
+      setCurrentMonth((m) =>
+        m === 0 ? (setCurrentYear((y) => y - 1), 11) : m - 1,
+      );
     } else {
       if (canNavigateNext("next", "monthly")) {
-        if (currentMonth === 11) {
-          setCurrentMonth(0);
-          setCurrentYear(currentYear + 1);
-        } else setCurrentMonth(currentMonth + 1);
+        setCurrentMonth((m) =>
+          m === 11 ? (setCurrentYear((y) => y + 1), 0) : m + 1,
+        );
       }
     }
   };
-
   const navigateYear = (direction) => {
-    if (direction === "prev") setCurrentYear(currentYear - 1);
-    else {
-      if (canNavigateNext("next", "annual")) setCurrentYear(currentYear + 1);
-    }
+    if (direction === "prev") setCurrentYear((y) => y - 1);
+    else if (canNavigateNext("next", "annual")) setCurrentYear((y) => y + 1);
   };
 
   const getAttendanceStats = (mrId) => {
-    const mrRecords = attendanceRecords.filter(
-      (record) => record.userId === mrId,
-    );
-    const currentMonthStart = new Date(currentYear, currentMonth, 1);
-    const currentMonthEnd = new Date(currentYear, currentMonth + 1, 0);
-    const yearStart = new Date(currentYear, 0, 1);
-    const yearEnd = new Date(currentYear, 11, 31);
-    const monthlyAttendance = mrRecords.filter((record) => {
-      const recordDate = new Date(record.loginTime);
-      const recordDateOnly = new Date(
-        recordDate.getFullYear(),
-        recordDate.getMonth(),
-        recordDate.getDate(),
-      );
-      return (
-        recordDateOnly >=
-          new Date(
-            currentMonthStart.getFullYear(),
-            currentMonthStart.getMonth(),
-            currentMonthStart.getDate(),
-          ) &&
-        recordDateOnly <=
-          new Date(
-            currentMonthEnd.getFullYear(),
-            currentMonthEnd.getMonth(),
-            currentMonthEnd.getDate(),
-          )
-      );
+    const mrRecords = attendanceRecords.filter((r) => r.userId === mrId);
+    const monthStart = new Date(currentYear, currentMonth, 1);
+    const monthEnd = new Date(currentYear, currentMonth + 1, 0);
+    const monthlyCount = mrRecords.filter((r) => {
+      const d = new Date(r.loginTime);
+      return d >= monthStart && d <= monthEnd;
     }).length;
-    const annualAttendance = mrRecords.filter((record) => {
-      const recordDate = new Date(record.loginTime);
-      const recordDateOnly = new Date(
-        recordDate.getFullYear(),
-        recordDate.getMonth(),
-        recordDate.getDate(),
-      );
-      return (
-        recordDateOnly >=
-          new Date(
-            yearStart.getFullYear(),
-            yearStart.getMonth(),
-            yearStart.getDate(),
-          ) &&
-        recordDateOnly <=
-          new Date(yearEnd.getFullYear(), yearEnd.getMonth(), yearEnd.getDate())
-      );
+    const annualCount = mrRecords.filter((r) => {
+      const d = new Date(r.loginTime);
+      return d.getFullYear() === currentYear;
     }).length;
     const totalWorkingDays = getWorkingDaysInMonth(currentYear, currentMonth);
-    const attendancePercentage =
-      totalWorkingDays > 0
-        ? ((monthlyAttendance / totalWorkingDays) * 100).toFixed(1)
-        : 0;
-    const today = new Date();
-    const todayRecord = mrRecords.find((record) => {
-      const recordDate = new Date(record.loginTime);
-      const recordDateOnly = new Date(
-        recordDate.getFullYear(),
-        recordDate.getMonth(),
-        recordDate.getDate(),
-      );
-      const todayOnly = new Date(
-        today.getFullYear(),
-        today.getMonth(),
-        today.getDate(),
-      );
-      return (
-        recordDateOnly.getTime() === todayOnly.getTime() && !record.logoutTime
-      );
-    });
     return {
-      monthly: monthlyAttendance,
-      annual: annualAttendance,
-      percentage: attendancePercentage,
-      currentStatus: todayRecord ? "Logged In" : "Logged Out",
-      currentAttendanceId: todayRecord?._id,
+      monthly: monthlyCount,
+      annual: annualCount,
+      percentage:
+        totalWorkingDays > 0
+          ? ((monthlyCount / totalWorkingDays) * 100).toFixed(1)
+          : 0,
     };
   };
 
   const getWorkingDaysInMonth = (year, month) => {
-    const startDate = new Date(year, month, 1);
-    const endDate = new Date(year, month + 1, 0);
-    let workingDays = 0;
-    for (
-      let date = new Date(startDate);
-      date <= endDate;
-      date.setDate(date.getDate() + 1)
-    ) {
-      if (date.getDay() !== 0) workingDays++;
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+    let count = 0;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      if (d.getDay() !== 0) count++;
     }
-    return workingDays;
+    return count;
   };
 
   const handleRecordAttendance = async () => {
@@ -1007,47 +876,49 @@ const LeaveAttendance = () => {
       showToast("error", "Cannot record attendance for future dates");
       return;
     }
-    const loginDateTime = `${startDate}T${startTime}`;
-    const logoutDateTime = `${startDate}T${endTime}`;
-    const timezoneOffset = new Date().getTimezoneOffset();
-    const offsetHours = Math.floor(Math.abs(timezoneOffset) / 60);
-    const offsetMinutes = Math.abs(timezoneOffset) % 60;
-    const offsetSign = timezoneOffset > 0 ? "-" : "+";
-    const timezoneString = `${offsetSign}${offsetHours.toString().padStart(2, "0")}:${offsetMinutes.toString().padStart(2, "0")}`;
     if (isSunday(startDate)) {
       showToast("error", "Cannot record attendance on Sunday");
       return;
     }
-    const holidayName = getHolidayName(startDate);
     if (isHoliday(startDate)) {
-      showToast("error", `Cannot record attendance on holiday: ${holidayName}`);
+      showToast(
+        "error",
+        `Cannot record attendance on holiday: ${getHolidayName(startDate)}`,
+      );
       return;
     }
-    const selectedDate = new Date(startDate);
-    const leaveInfo = isLeave(selectedDate, selectedAttendanceMr);
-    if (leaveInfo.isLeave) {
+    if (isLeave(new Date(startDate), selectedAttendanceMr).isLeave) {
       showToast("error", "Cannot record attendance on a leave day");
       return;
     }
+
+    const tz = new Date().getTimezoneOffset();
+    const sign = tz > 0 ? "-" : "+";
+    const tzStr = `${sign}${String(Math.floor(Math.abs(tz) / 60)).padStart(2, "0")}:${String(Math.abs(tz) % 60).padStart(2, "0")}`;
+
     try {
       setAttendanceLoading(true);
-      const attendanceData = {
-        userId: selectedAttendanceMr,
-        loginTime: `${loginDateTime}${timezoneString}`,
-        logoutTime: `${logoutDateTime}${timezoneString}`,
-        workingHoursPerDay: 8,
-      };
-      const response = await axios.post(
+      const res = await axios.post(
         `${backendUrl}/api/hrm/leaves/attendance/record`,
-        attendanceData,
+        {
+          userId: selectedAttendanceMr,
+          loginTime: `${startDate}T${startTime}${tzStr}`,
+          logoutTime: `${startDate}T${endTime}${tzStr}`,
+          workingHoursPerDay: 8,
+        },
       );
-      if (response.data.success) {
-        showToast("success", "Attendance recorded successfully!");
+      if (res.data.success) {
+        const att = res.data.attendance;
+        const msg = att.isHalfDay
+          ? `Half-day attendance recorded! (${att.totalTime} worked, ${att.extraHoursInMinutes} extra min)`
+          : "Attendance recorded successfully!";
+        showToast("success", msg);
         setShowAttendanceModal(false);
         setSelectedAttendanceMr(null);
         setStartDate("");
         setStartTime("");
         setEndTime("");
+        setDurationPreview(null);
         fetchAttendanceRecords();
       }
     } catch (err) {
@@ -1074,17 +945,14 @@ const LeaveAttendance = () => {
       showToast("error", "Cannot apply for leave on Sunday");
       return;
     }
-    const holidayName = getHolidayName(leaveDate);
     if (isHoliday(leaveDate)) {
-      showToast("error", `Cannot apply for leave on holiday: ${holidayName}`);
+      showToast(
+        "error",
+        `Cannot apply for leave on holiday: ${getHolidayName(leaveDate)}`,
+      );
       return;
     }
-    const selectedDate = new Date(leaveDate);
-    const attendanceOnDate = getAttendanceForDate(
-      selectedDate,
-      selectedAttendanceMr,
-    );
-    if (attendanceOnDate) {
+    if (getAttendanceForDate(new Date(leaveDate), selectedAttendanceMr)) {
       showToast(
         "error",
         "Cannot apply for leave on a day with existing attendance",
@@ -1092,33 +960,24 @@ const LeaveAttendance = () => {
       return;
     }
     if (leaveType === "paid") {
-      const mr = mrList.find((mr) => mr._id === selectedAttendanceMr);
-      const remainingPaid = getRemainingPaidLeaves(
-        selectedAttendanceMr,
-        mr?.date,
-      );
-      if (parseFloat(remainingPaid) < 1) {
-        showToast(
-          "error",
-          "Insufficient paid leave balance. Please apply for unpaid leave.",
-        );
+      const mr = mrList.find((m) => m._id === selectedAttendanceMr);
+      if (
+        parseFloat(getRemainingPaidLeaves(selectedAttendanceMr, mr?.date)) < 1
+      ) {
+        showToast("error", "Insufficient paid leave balance.");
         return;
       }
     }
     try {
       setLeaveLoading(true);
-      const leaveData = {
+      const res = await axios.post(`${backendUrl}/api/hrm/leaves`, {
         userId: selectedAttendanceMr,
         leaveDate: new Date(leaveDate).toISOString(),
         reason: leaveReason,
         leaveType,
         status: "approved",
-      };
-      const response = await axios.post(
-        `${backendUrl}/api/hrm/leaves`,
-        leaveData,
-      );
-      if (response.data.success) {
+      });
+      if (res.data.success) {
         showToast(
           "success",
           `${leaveType === "paid" ? "Paid" : "Unpaid"} leave applied successfully!`,
@@ -1152,10 +1011,9 @@ const LeaveAttendance = () => {
       return;
     }
     if (displayValues.showLeaveDaysAvailable < extraHoursDays) {
-      const source = extraHoursData.useMonthlyOnly ? "monthly" : "total";
       showToast(
         "error",
-        `Insufficient ${source} extra hours. Available: ${displayValues.showLeaveDaysAvailable} days, Required: ${extraHoursDays} days`,
+        `Insufficient extra hours. Available: ${displayValues.showLeaveDaysAvailable} days`,
       );
       return;
     }
@@ -1163,41 +1021,42 @@ const LeaveAttendance = () => {
       showToast("error", "Cannot take leave on Sunday");
       return;
     }
-    const holidayName = getHolidayName(extraHoursDate);
     if (isHoliday(extraHoursDate)) {
-      showToast("error", `Cannot take leave on holiday: ${holidayName}`);
+      showToast(
+        "error",
+        `Cannot take leave on holiday: ${getHolidayName(extraHoursDate)}`,
+      );
       return;
     }
-    const existingAttendance = attendanceRecords.find((record) => {
-      if (record.userId !== selectedAttendanceMr) return false;
-      if (!record.loginTime) return false;
-      const recordDate = new Date(record.loginTime);
-      recordDate.setHours(0, 0, 0, 0);
-      const checkDate = new Date(extraHoursDate);
-      checkDate.setHours(0, 0, 0, 0);
-      return recordDate.getTime() === checkDate.getTime();
+    const existing = attendanceRecords.find((rec) => {
+      if (rec.userId !== selectedAttendanceMr || !rec.loginTime) return false;
+      const rd = new Date(rec.loginTime);
+      rd.setHours(0, 0, 0, 0);
+      const cd = new Date(extraHoursDate);
+      cd.setHours(0, 0, 0, 0);
+      return rd.getTime() === cd.getTime();
     });
-    if (existingAttendance && !existingAttendance.isLeaveDay) {
+    if (existing && !existing.isLeaveDay) {
       showToast("error", "Regular attendance already exists for this date");
       return;
     }
-    if (existingAttendance && existingAttendance.isLeaveDay) {
+    if (existing && existing.isLeaveDay) {
       showToast("error", "This date is already marked as a leave day");
       return;
     }
+
     try {
       setConvertingExtraHours(true);
-      const convertData = {
-        userId: selectedAttendanceMr,
-        date: extraHoursDate,
-        leaveDays: extraHoursDays,
-        useMonthlyOnly: extraHoursData.useMonthlyOnly,
-      };
-      const response = await axios.post(
+      const res = await axios.post(
         `${backendUrl}/api/hrm/leaves/attendance/convert-to-leave`,
-        convertData,
+        {
+          userId: selectedAttendanceMr,
+          date: extraHoursDate,
+          leaveDays: extraHoursDays,
+          useMonthlyOnly: extraHoursData.useMonthlyOnly,
+        },
       );
-      if (response.data.success) {
+      if (res.data.success) {
         showToast(
           "success",
           `${extraHoursDays} leave day${extraHoursDays > 1 ? "s" : ""} successfully converted from extra hours!`,
@@ -1211,10 +1070,7 @@ const LeaveAttendance = () => {
         setExtraHoursDate("");
         setExtraHoursDays(1);
       } else {
-        showToast(
-          "error",
-          response.data.message || "Failed to convert to leave",
-        );
+        showToast("error", res.data.message || "Failed to convert to leave");
       }
     } catch (err) {
       showToast(
@@ -1227,15 +1083,11 @@ const LeaveAttendance = () => {
   };
 
   const getExtraHoursForMR = (mrId) => {
-    const mrRecords = attendanceRecords.filter(
-      (record) => record.userId === mrId && record.isLeaveDay !== true,
+    return (
+      attendanceRecords
+        .filter((r) => r.userId === mrId && r.isLeaveDay !== true)
+        .reduce((sum, r) => sum + (r.extraHoursInMinutes || 0), 0) / 60
     );
-    let totalExtraMinutes = 0;
-    mrRecords.forEach((record) => {
-      if (record.extraHoursInMinutes && record.extraHoursInMinutes > 0)
-        totalExtraMinutes += record.extraHoursInMinutes;
-    });
-    return totalExtraMinutes / 60;
   };
 
   const handleOpenDeleteAttendanceModal = (mrId = null) => {
@@ -1253,13 +1105,13 @@ const LeaveAttendance = () => {
     setStartDate(today.toISOString().split("T")[0]);
     setStartTime("09:00");
     setEndTime("17:00");
+    setDurationPreview(null);
   };
 
   const handleOpenLeaveModal = () => {
     setShowLeaveModal(true);
     setSelectedAttendanceMr(null);
-    const today = new Date();
-    setLeaveDate(today.toISOString().split("T")[0]);
+    setLeaveDate(new Date().toISOString().split("T")[0]);
     setLeaveReason("");
     setLeaveType("unpaid");
   };
@@ -1267,15 +1119,16 @@ const LeaveAttendance = () => {
   const handleOpenExtraHoursModal = () => {
     setShowExtraHoursModal(true);
     setSelectedAttendanceMr(null);
-    const today = new Date();
-    setExtraHoursDate(today.toISOString().split("T")[0]);
+    setExtraHoursDate(new Date().toISOString().split("T")[0]);
     setExtraHoursDays(1);
   };
 
-  const mrOptions = mrList.map((mr) => ({
-    value: mr._id,
-    label: `${mr.medicalRepName} (${mr.MRId})`,
-  }));
+  const mrOptions = mrList
+    .filter((mr) => mr.isActive === true)
+    .map((mr) => ({
+      value: mr._id,
+      label: `${mr.medicalRepName} (${mr.MRId})`,
+    }));
 
   const handleView = (mr) => {
     setSelectedMr(mr);
@@ -1294,17 +1147,15 @@ const LeaveAttendance = () => {
   }, []);
 
   useEffect(() => {
-    if (selectedAttendanceMr && showExtraHoursModal) {
+    if (selectedAttendanceMr && showExtraHoursModal)
       fetchExtraHoursData(selectedAttendanceMr);
-    } else {
-      resetExtraHoursData();
-    }
+    else resetExtraHoursData();
   }, [selectedAttendanceMr, showExtraHoursModal]);
 
   useEffect(() => {
-    if (deleteSelectedMr && showDeleteAttendanceModal) {
+    if (deleteSelectedMr && showDeleteAttendanceModal)
       fetchDeletableDates(deleteSelectedMr);
-    } else {
+    else {
       setDeletableDates([]);
       setSelectedDeleteIds([]);
     }
@@ -1312,6 +1163,114 @@ const LeaveAttendance = () => {
 
   if (loading) return <div className="p-6 text-center">Loading MR List...</div>;
   if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
+
+  // ─── Calendar cell style ───────────────────────────────────────────────────
+  // New: half-day gets orange styling
+  const getCalendarCellStyle = (date, mrId) => {
+    if (!date)
+      return {
+        cellStyle:
+          "h-12 flex items-center justify-center rounded-lg border-2 border-transparent",
+        titleText: "",
+        isDeletable: false,
+      };
+
+    const attendance = getAttendanceForDate(date, mrId);
+    const leaveInfo = isLeave(date, mrId);
+    const isSundayDay = isSunday(date);
+    const isHolidayDay = isHoliday(date);
+    const isToday = date.toDateString() === new Date().toDateString();
+    const halfDay =
+      attendance && !attendance.isLeaveDay && isHalfDayAttendance(date, mrId);
+
+    let cellStyle =
+      "h-12 flex items-center justify-center rounded-lg border-2 ";
+    let titleText = "";
+    let isDeletable = false;
+
+    if (attendance && !attendance.isLeaveDay) {
+      if (halfDay) {
+        cellStyle +=
+          "bg-orange-400 text-white border-orange-500 cursor-pointer hover:opacity-80";
+        titleText = "Half Day (click to delete)";
+      } else {
+        cellStyle +=
+          "bg-green-500 text-white border-green-600 cursor-pointer hover:opacity-80";
+        titleText = "Present (click to delete)";
+      }
+      isDeletable = true;
+    } else if (leaveInfo.isLeave) {
+      if (leaveInfo.type === "swapleave") {
+        cellStyle +=
+          "bg-purple-500 text-white border-purple-600 cursor-pointer hover:opacity-80";
+        titleText = "Swap Leave (click to delete)";
+      } else if (leaveInfo.type === "paid") {
+        cellStyle +=
+          "bg-blue-500 text-white border-blue-600 cursor-pointer hover:opacity-80";
+        titleText = "Paid Leave (click to delete)";
+      } else {
+        cellStyle +=
+          "bg-red-500 text-white border-red-600 cursor-pointer hover:opacity-80";
+        titleText = "Unpaid Leave (click to delete)";
+      }
+      isDeletable = true;
+    } else if (isSundayDay) {
+      cellStyle += "bg-red-400 text-white border-red-500 cursor-default";
+      titleText = "Sunday";
+    } else if (isHolidayDay) {
+      cellStyle += "bg-gray-400 text-white border-gray-500 cursor-default";
+      titleText = `Holiday: ${getHolidayName(date)}`;
+    } else if (isToday) {
+      cellStyle += "border-blue-500 bg-blue-50 cursor-default";
+      titleText = "Today";
+    } else {
+      cellStyle += "border-gray-200 bg-gray-50 cursor-default";
+      titleText = "Working Day";
+    }
+
+    return { cellStyle: cellStyle.trim(), titleText, isDeletable };
+  };
+
+  // Annual view cell (compact)
+  const getAnnualCellStyle = (date, mrId) => {
+    const attendance = getAttendanceForDate(date, mrId);
+    const leaveInfo = isLeave(date, mrId);
+    const halfDay =
+      attendance && !attendance.isLeaveDay && isHalfDayAttendance(date, mrId);
+
+    let cellStyle = "h-6 flex items-center justify-center rounded text-xs ";
+    let isDeletable = false;
+    let titleText = "";
+
+    if (attendance && !attendance.isLeaveDay) {
+      cellStyle += halfDay
+        ? "bg-orange-400 text-white cursor-pointer hover:opacity-80"
+        : "bg-green-500 text-white cursor-pointer hover:opacity-80";
+      titleText = halfDay
+        ? "Half Day (click to delete)"
+        : "Present (click to delete)";
+      isDeletable = true;
+    } else if (leaveInfo.isLeave) {
+      if (leaveInfo.type === "swapleave")
+        cellStyle += "bg-purple-500 text-white cursor-pointer hover:opacity-80";
+      else if (leaveInfo.type === "paid")
+        cellStyle += "bg-blue-500 text-white cursor-pointer hover:opacity-80";
+      else cellStyle += "bg-red-500 text-white cursor-pointer hover:opacity-80";
+      titleText = `${leaveInfo.type === "swapleave" ? "Swap" : leaveInfo.type === "paid" ? "Paid" : "Unpaid"} Leave (click to delete)`;
+      isDeletable = true;
+    } else if (isSunday(date)) {
+      cellStyle += "bg-red-400 text-white cursor-default";
+      titleText = "Sunday";
+    } else if (isHoliday(date)) {
+      cellStyle += "bg-gray-400 text-white cursor-default";
+      titleText = `Holiday: ${getHolidayName(date)}`;
+    } else {
+      cellStyle += "bg-gray-100 cursor-default";
+      titleText = "Working Day";
+    }
+
+    return { cellStyle: cellStyle.trim(), titleText, isDeletable };
+  };
 
   return (
     <div className="p-6">
@@ -1321,11 +1280,10 @@ const LeaveAttendance = () => {
         onConfirm={handleConfirmDelete}
         loading={deleteLoading}
         title="Delete Attendance Records"
-        message={`Are you sure you want to delete ${selectedDeleteIds.length} selected record(s)? This action cannot be undone.`}
+        message={`Are you sure you want to delete ${selectedDeleteIds.length} selected record(s)?`}
         confirmLabel="Delete All"
         confirmColor="bg-red-600 hover:bg-red-700"
       />
-
       <ConfirmationModal
         isOpen={showCalendarDeleteModal}
         onClose={() => setShowCalendarDeleteModal(false)}
@@ -1337,13 +1295,13 @@ const LeaveAttendance = () => {
         confirmColor="bg-red-600 hover:bg-red-700"
       />
 
+      {/* ── Delete Attendance Modal ── */}
       {showDeleteAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Trash2 size={20} className="text-red-500" />
-                Delete Attendance
+                <Trash2 size={20} className="text-red-500" /> Delete Attendance
               </h2>
               <button
                 onClick={() => {
@@ -1353,12 +1311,11 @@ const LeaveAttendance = () => {
                   setDeletableDates([]);
                   setSelectedDeleteIds([]);
                 }}
-                className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-1 hover:bg-gray-100 rounded-lg"
               >
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
-
             {!hideMrSelector && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1369,20 +1326,16 @@ const LeaveAttendance = () => {
                   onChange={setDeleteSelectedMr}
                   options={mrOptions}
                   placeholder="Select MR to view attendance"
-                  required={true}
+                  required
                 />
               </div>
             )}
-
             <div className="flex-1 overflow-y-auto min-h-0">
               {!deleteSelectedMr ? (
                 <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
                   <User size={40} className="mx-auto text-gray-300 mb-3" />
                   <p className="text-gray-500 font-medium">
                     Select an MR to view attendance records
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    All attendance marked dates will appear here
                   </p>
                 </div>
               ) : loadingDeletableDates ? (
@@ -1398,17 +1351,13 @@ const LeaveAttendance = () => {
                   <p className="text-gray-500 font-medium">
                     No attendance records found
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    This MR has no recorded attendance
-                  </p>
                 </div>
               ) : (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs text-gray-500">
                       {deletableDates.length} record
-                      {deletableDates.length !== 1 ? "s" : ""} found — select
-                      one or more to delete
+                      {deletableDates.length !== 1 ? "s" : ""} found
                     </p>
                     <label className="flex items-center gap-1 text-sm text-gray-600">
                       <input
@@ -1417,15 +1366,13 @@ const LeaveAttendance = () => {
                           selectedDeleteIds.length === deletableDates.length &&
                           deletableDates.length > 0
                         }
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedDeleteIds(
-                              deletableDates.map((d) => d._id),
-                            );
-                          } else {
-                            setSelectedDeleteIds([]);
-                          }
-                        }}
+                        onChange={(e) =>
+                          setSelectedDeleteIds(
+                            e.target.checked
+                              ? deletableDates.map((d) => d._id)
+                              : [],
+                          )
+                        }
                         className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
                       />
                       <span>Select All</span>
@@ -1435,30 +1382,21 @@ const LeaveAttendance = () => {
                     {deletableDates.map((record) => (
                       <div
                         key={record._id}
-                        className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
-                          selectedDeleteIds.includes(record._id)
-                            ? "border-red-400 bg-red-50"
-                            : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
-                        }`}
+                        className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${selectedDeleteIds.includes(record._id) ? "border-red-400 bg-red-50" : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"}`}
                       >
                         <div className="flex items-center gap-3">
                           <input
                             type="checkbox"
                             checked={selectedDeleteIds.includes(record._id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedDeleteIds([
-                                  ...selectedDeleteIds,
-                                  record._id,
-                                ]);
-                              } else {
-                                setSelectedDeleteIds(
-                                  selectedDeleteIds.filter(
-                                    (id) => id !== record._id,
-                                  ),
-                                );
-                              }
-                            }}
+                            onChange={(e) =>
+                              setSelectedDeleteIds(
+                                e.target.checked
+                                  ? [...selectedDeleteIds, record._id]
+                                  : selectedDeleteIds.filter(
+                                      (id) => id !== record._id,
+                                    ),
+                              )
+                            }
                             className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
                           />
                           <div className="flex-1">
@@ -1482,6 +1420,11 @@ const LeaveAttendance = () => {
                               </span>
                             ) : (
                               <>
+                                {record.isHalfDay && (
+                                  <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium block mb-1">
+                                    Half Day
+                                  </span>
+                                )}
                                 {record.totalTime && (
                                   <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium block mb-1">
                                     {record.totalTime}
@@ -1506,7 +1449,6 @@ const LeaveAttendance = () => {
                 </div>
               )}
             </div>
-
             <div className="flex gap-3 mt-4 pt-4 border-t border-gray-200">
               <button
                 onClick={() => {
@@ -1516,27 +1458,24 @@ const LeaveAttendance = () => {
                   setDeletableDates([]);
                   setSelectedDeleteIds([]);
                 }}
-                className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors"
+                className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={handleBulkDelete}
                 disabled={selectedDeleteIds.length === 0}
-                className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 ${
-                  selectedDeleteIds.length > 0
-                    ? "bg-red-600 hover:bg-red-700 text-white"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                }`}
+                className={`flex-1 px-4 py-2 rounded-lg font-medium flex items-center justify-center gap-2 ${selectedDeleteIds.length > 0 ? "bg-red-600 hover:bg-red-700 text-white" : "bg-gray-300 text-gray-500 cursor-not-allowed"}`}
               >
-                <Trash2 size={16} />
-                Delete Selected ({selectedDeleteIds.length})
+                <Trash2 size={16} /> Delete Selected ({selectedDeleteIds.length}
+                )
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* ── Record Attendance Modal ── */}
       {showAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1550,7 +1489,7 @@ const LeaveAttendance = () => {
                 onChange={setSelectedAttendanceMr}
                 options={mrOptions}
                 placeholder="Select MR"
-                required={true}
+                required
               />
             </div>
             <div className="mb-4">
@@ -1598,7 +1537,7 @@ const LeaveAttendance = () => {
                     <input
                       type="checkbox"
                       id="validWorkingDay"
-                      checked={true}
+                      checked
                       readOnly
                       className="mr-2 h-4 w-4 text-green-600 rounded"
                     />
@@ -1612,7 +1551,7 @@ const LeaveAttendance = () => {
                 )}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Start Time
@@ -1636,6 +1575,57 @@ const LeaveAttendance = () => {
                 />
               </div>
             </div>
+
+            {/* ── Duration preview (half-day indicator) ── */}
+            {durationPreview && (
+              <div
+                className={`mb-4 p-3 rounded-lg border text-sm ${
+                  durationPreview.type === "half"
+                    ? "bg-orange-50 border-orange-200 text-orange-800"
+                    : durationPreview.type === "short"
+                      ? "bg-red-50 border-red-200 text-red-700"
+                      : "bg-green-50 border-green-200 text-green-800"
+                }`}
+              >
+                {durationPreview.type === "short" && (
+                  <p className="font-medium">
+                    ⚠️ Duration {Math.floor(durationPreview.totalMinutes / 60)}h{" "}
+                    {durationPreview.totalMinutes % 60}m — less than 4 hours
+                    (minimum for attendance)
+                  </p>
+                )}
+                {durationPreview.type === "half" && (
+                  <>
+                    <p className="font-semibold">
+                      🌓 Half Day —{" "}
+                      {Math.floor(durationPreview.totalMinutes / 60)}h{" "}
+                      {durationPreview.totalMinutes % 60}m worked
+                    </p>
+                    <p className="text-xs mt-1">
+                      Base: 4 hours · Extra:{" "}
+                      {Math.floor(durationPreview.extraMinutes / 60)}h{" "}
+                      {durationPreview.extraMinutes % 60}m added to your bank
+                    </p>
+                  </>
+                )}
+                {durationPreview.type === "full" && (
+                  <>
+                    <p className="font-semibold">
+                      ✅ Full Day —{" "}
+                      {Math.floor(durationPreview.totalMinutes / 60)}h{" "}
+                      {durationPreview.totalMinutes % 60}m worked
+                    </p>
+                    {durationPreview.extraMinutes > 0 && (
+                      <p className="text-xs mt-1">
+                        Extra: {Math.floor(durationPreview.extraMinutes / 60)}h{" "}
+                        {durationPreview.extraMinutes % 60}m added to your bank
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3 mb-4">
               <button
                 onClick={handleRecordAttendance}
@@ -1648,7 +1638,8 @@ const LeaveAttendance = () => {
                   isFutureDate(startDate) ||
                   isSunday(startDate) ||
                   isHoliday(startDate) ||
-                  isLeave(new Date(startDate), selectedAttendanceMr).isLeave
+                  isLeave(new Date(startDate), selectedAttendanceMr).isLeave ||
+                  (durationPreview && durationPreview.type === "short")
                 }
                 className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
                   attendanceLoading ||
@@ -1659,13 +1650,18 @@ const LeaveAttendance = () => {
                   isFutureDate(startDate) ||
                   isSunday(startDate) ||
                   isHoliday(startDate) ||
-                  isLeave(new Date(startDate), selectedAttendanceMr).isLeave
+                  isLeave(new Date(startDate), selectedAttendanceMr).isLeave ||
+                  (durationPreview && durationPreview.type === "short")
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700"
                 } text-white`}
               >
                 <Clock size={16} />
-                {attendanceLoading ? "Recording..." : "Record Attendance"}
+                {attendanceLoading
+                  ? "Recording..."
+                  : durationPreview?.type === "half"
+                    ? "Record Half Day"
+                    : "Record Attendance"}
               </button>
             </div>
             <div className="flex justify-end gap-3">
@@ -1680,6 +1676,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
+      {/* ── Apply Leave Modal ── */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1693,7 +1690,7 @@ const LeaveAttendance = () => {
                 onChange={setSelectedAttendanceMr}
                 options={mrOptions}
                 placeholder="Select MR"
-                required={true}
+                required
               />
             </div>
             <div className="mb-4">
@@ -1769,7 +1766,7 @@ const LeaveAttendance = () => {
                     <input
                       type="checkbox"
                       id="validLeaveDay"
-                      checked={true}
+                      checked
                       readOnly
                       className="mr-2 h-4 w-4 text-green-600 rounded"
                     />
@@ -1807,29 +1804,14 @@ const LeaveAttendance = () => {
                   isFutureDate(leaveDate) ||
                   isSunday(leaveDate) ||
                   isHoliday(leaveDate) ||
-                  getAttendanceForDate(
+                  !!getAttendanceForDate(
                     new Date(leaveDate),
                     selectedAttendanceMr,
                   )
                 }
-                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                  leaveLoading ||
-                  !selectedAttendanceMr ||
-                  !leaveDate ||
-                  !leaveReason ||
-                  !leaveType ||
-                  isFutureDate(leaveDate) ||
-                  isSunday(leaveDate) ||
-                  isHoliday(leaveDate) ||
-                  getAttendanceForDate(
-                    new Date(leaveDate),
-                    selectedAttendanceMr,
-                  )
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
-                } text-white`}
+                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${leaveLoading || !selectedAttendanceMr || !leaveDate || !leaveReason || !leaveType || isFutureDate(leaveDate) || isSunday(leaveDate) || isHoliday(leaveDate) || !!getAttendanceForDate(new Date(leaveDate), selectedAttendanceMr) ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"} text-white`}
               >
-                <Calendar size={16} />
+                <Calendar size={16} />{" "}
                 {leaveLoading ? "Applying..." : "Apply Leave"}
               </button>
             </div>
@@ -1845,6 +1827,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
+      {/* ── Convert Extra Hours Modal ── */}
       {showExtraHoursModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
@@ -1860,7 +1843,7 @@ const LeaveAttendance = () => {
                 onChange={setSelectedAttendanceMr}
                 options={mrOptions}
                 placeholder="Select MR"
-                required={true}
+                required
               />
             </div>
             {!selectedAttendanceMr ? (
@@ -1869,13 +1852,10 @@ const LeaveAttendance = () => {
                 <p className="text-gray-500 font-medium">
                   Select an MR to view extra hours
                 </p>
-                <p className="text-sm text-gray-400 mt-1">
-                  Extra hours will be calculated from attendance records
-                </p>
               </div>
             ) : extraHoursData.loading ? (
               <div className="text-center py-8">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto" />
                 <p className="text-gray-500 mt-3">
                   Loading extra hours data...
                 </p>
@@ -1899,16 +1879,10 @@ const LeaveAttendance = () => {
                       Use only this month's extra hours
                     </span>
                   </label>
-                  <p className="text-xs text-blue-600 mt-1 ml-6">
-                    {extraHoursData.useMonthlyOnly
-                      ? `Showing: Current month only (${new Date().toLocaleString("default", { month: "long" })} ${new Date().getFullYear()})`
-                      : "Showing: All extra hours from all months"}
-                  </p>
                 </div>
                 {(() => {
-                  const displayValues = getDisplayValues();
-                  const hasExtraHours = displayValues.showTotalMinutes > 0;
-                  return hasExtraHours ? (
+                  const dv = getDisplayValues();
+                  return dv.showTotalMinutes > 0 ? (
                     <>
                       <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <h3 className="font-semibold text-gray-800 mb-2">
@@ -1918,7 +1892,7 @@ const LeaveAttendance = () => {
                           <div className="flex justify-between">
                             <span className="text-gray-600">Total Hours:</span>
                             <span className="font-bold text-green-700">
-                              {displayValues.showExtraHours.toFixed(2)} hrs
+                              {dv.showExtraHours.toFixed(2)} hrs
                             </span>
                           </div>
                           <div className="flex justify-between">
@@ -1926,17 +1900,15 @@ const LeaveAttendance = () => {
                               Available Days:
                             </span>
                             <span className="font-bold text-purple-700">
-                              {displayValues.showLeaveDaysAvailable} day
-                              {displayValues.showLeaveDaysAvailable !== 1
-                                ? "s"
-                                : ""}
+                              {dv.showLeaveDaysAvailable} day
+                              {dv.showLeaveDaysAvailable !== 1 ? "s" : ""}
                             </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-600">Remaining:</span>
                             <span className="font-bold text-gray-700">
-                              {displayValues.showRemainingHours}h{" "}
-                              {displayValues.showRemainingMinutes}m
+                              {dv.showRemainingHours}h {dv.showRemainingMinutes}
+                              m
                             </span>
                           </div>
                         </div>
@@ -1976,7 +1948,7 @@ const LeaveAttendance = () => {
                                 <input
                                   type="checkbox"
                                   id="validConvertDay"
-                                  checked={true}
+                                  checked
                                   readOnly
                                   className="mr-2 h-4 w-4 text-green-600 rounded"
                                 />
@@ -1998,7 +1970,7 @@ const LeaveAttendance = () => {
                             <input
                               type="number"
                               min="1"
-                              max={displayValues.showLeaveDaysAvailable}
+                              max={dv.showLeaveDaysAvailable}
                               value={extraHoursDays}
                               onChange={(e) =>
                                 setExtraHoursDays(parseInt(e.target.value) || 1)
@@ -2006,14 +1978,10 @@ const LeaveAttendance = () => {
                               className="w-24 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
                             />
                             <span className="text-gray-600">day(s)</span>
-                            <span className="text-gray-500 text-sm">
-                              (Each day requires 8 extra hours)
-                            </span>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
-                            Available: {displayValues.showLeaveDaysAvailable}{" "}
-                            days ({displayValues.showExtraHours.toFixed(2)}{" "}
-                            hours)
+                            Available: {dv.showLeaveDaysAvailable} days (
+                            {dv.showExtraHours.toFixed(2)} hours)
                           </p>
                         </div>
                         <button
@@ -2021,27 +1989,16 @@ const LeaveAttendance = () => {
                           disabled={
                             convertingExtraHours ||
                             !extraHoursDate ||
-                            displayValues.showLeaveDaysAvailable <
-                              extraHoursDays ||
+                            dv.showLeaveDaysAvailable < extraHoursDays ||
                             extraHoursDays < 1 ||
                             isSunday(extraHoursDate) ||
                             isHoliday(extraHoursDate)
                           }
-                          className={`w-full py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                            convertingExtraHours ||
-                            !extraHoursDate ||
-                            displayValues.showLeaveDaysAvailable <
-                              extraHoursDays ||
-                            extraHoursDays < 1 ||
-                            isSunday(extraHoursDate) ||
-                            isHoliday(extraHoursDate)
-                              ? "bg-gray-400 cursor-not-allowed"
-                              : "bg-green-600 hover:bg-green-700"
-                          } text-white font-medium transition-colors`}
+                          className={`w-full py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${convertingExtraHours || !extraHoursDate || dv.showLeaveDaysAvailable < extraHoursDays || extraHoursDays < 1 || isSunday(extraHoursDate) || isHoliday(extraHoursDate) ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"} text-white font-medium`}
                         >
                           {convertingExtraHours ? (
                             <>
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                               Processing...
                             </>
                           ) : (
@@ -2053,21 +2010,13 @@ const LeaveAttendance = () => {
                             </>
                           )}
                         </button>
-                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                          <AlertCircle size={12} className="inline mr-1" />
-                          Each leave day requires 8 extra working hours.
-                        </div>
                       </div>
                     </>
                   ) : (
-                    <div className="text-center py-8 bg-gradient-to-r from-gray-50 to-slate-50 rounded-lg border border-gray-200">
+                    <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
                       <Clock size={48} className="mx-auto text-gray-400 mb-3" />
                       <p className="text-gray-500 font-medium">
                         No extra hours available
-                      </p>
-                      <p className="text-sm text-gray-400 mt-1 max-w-sm mx-auto">
-                        This MR hasn't worked beyond the standard 8-hour workday{" "}
-                        {extraHoursData.useMonthlyOnly ? "this month" : "yet"}.
                       </p>
                     </div>
                   );
@@ -2086,6 +2035,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
+      {/* ── List view header ── */}
       {!showCalendarView && (
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-800">
@@ -2124,16 +2074,13 @@ const LeaveAttendance = () => {
 
       {showCalendarView ? (
         <div>
+          {/* ── Calendar top nav ── */}
           <div className="flex justify-between items-center mb-4 bg-white rounded-2xl shadow border border-gray-200 p-4">
             <div className="flex gap-2">
               <button
                 onClick={handlePreviousMR}
                 disabled={getCurrentMRIndex() <= 0}
-                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
-                  getCurrentMRIndex() <= 0
-                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700 text-white"
-                }`}
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() <= 0 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
               >
                 <ChevronsLeft size={16} />
               </button>
@@ -2151,7 +2098,6 @@ const LeaveAttendance = () => {
                 Delete Attendance
               </button>
             </div>
-
             <div className="flex gap-2">
               <button
                 onClick={() => setCalendarViewType("monthly")}
@@ -2168,11 +2114,7 @@ const LeaveAttendance = () => {
               <button
                 onClick={handleNextMR}
                 disabled={getCurrentMRIndex() >= mrList.length - 1}
-                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
-                  getCurrentMRIndex() >= mrList.length - 1
-                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700 text-white"
-                }`}
+                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() >= mrList.length - 1 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
               >
                 <ChevronsRight size={16} />
               </button>
@@ -2186,9 +2128,9 @@ const LeaveAttendance = () => {
                   {selectedMr?.medicalRepName} - Calendar View
                   {selectedMr && (
                     <span className="ml-2 text-lg font-normal">
-                      (Unpaid Leave Taken:{" "}
+                      (Unpaid:{" "}
                       {getLeaveCounts(selectedMr._id, selectedMr.date).total},
-                      Swap Leaves:{" "}
+                      Swap:{" "}
                       {
                         getLeaveCounts(selectedMr._id, selectedMr.date)
                           .swapLeaves
@@ -2200,7 +2142,7 @@ const LeaveAttendance = () => {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => navigateMonth("prev")}
-                    className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+                    className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     <ChevronLeft size={20} />
                   </button>
@@ -2214,7 +2156,7 @@ const LeaveAttendance = () => {
                   <button
                     onClick={() => navigateMonth("next")}
                     disabled={!canNavigateNext("next", "monthly")}
-                    className={`p-2 rounded-lg cursor-pointer transition-colors ${canNavigateNext("next", "monthly") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
+                    className={`p-2 rounded-lg cursor-pointer ${canNavigateNext("next", "monthly") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
                   >
                     <ChevronRight size={20} />
                   </button>
@@ -2232,68 +2174,15 @@ const LeaveAttendance = () => {
                   ),
                 )}
                 {getDaysInMonth().map((date, index) => {
-                  if (date === null)
+                  if (!date)
                     return <div key={`empty-${index}`} className="h-12" />;
-                  const attendance = getAttendanceForDate(
-                    date,
-                    selectedMr?._id,
-                  );
-                  const leaveInfo = isLeave(date, selectedMr?._id);
-                  const isLeaveDay = leaveInfo.isLeave;
-                  const leaveType = leaveInfo.type;
-                  const isSundayDay = isSunday(date);
-                  const isHolidayDay = isHoliday(date);
+                  const { cellStyle, titleText, isDeletable } =
+                    getCalendarCellStyle(date, selectedMr?._id);
                   const isCurrentMonth = date.getMonth() === currentMonth;
-                  const isToday =
-                    date.toDateString() === new Date().toDateString();
-
-                  const isDeletable =
-                    (attendance && !attendance.isLeaveDay) ||
-                    (isLeaveDay &&
-                      (leaveType === "swapleave" ||
-                        leaveType === "paid" ||
-                        leaveType === "unpaid"));
-                  let cellStyle =
-                    "h-12 flex items-center justify-center rounded-lg border-2 ";
-                  let titleText = "";
-                  if (attendance && !attendance.isLeaveDay) {
-                    cellStyle +=
-                      "bg-green-500 text-white border-green-600 cursor-pointer hover:opacity-80";
-                    titleText = "Present (click to delete)";
-                  } else if (isLeaveDay) {
-                    if (leaveType === "swapleave") {
-                      cellStyle +=
-                        "bg-purple-500 text-white border-purple-600 cursor-pointer hover:opacity-80";
-                      titleText = "Swap Leave (click to delete)";
-                    } else if (leaveType === "paid") {
-                      cellStyle +=
-                        "bg-blue-500 text-white border-blue-600 cursor-pointer hover:opacity-80";
-                      titleText = "Paid Leave (click to delete)";
-                    } else {
-                      cellStyle +=
-                        "bg-red-500 text-white border-red-600 cursor-pointer hover:opacity-80";
-                      titleText = "Unpaid Leave (click to delete)";
-                    }
-                  } else if (isSundayDay) {
-                    cellStyle +=
-                      "bg-red-400 text-white border-red-500 cursor-default";
-                    titleText = "Sunday";
-                  } else if (isHolidayDay) {
-                    cellStyle +=
-                      "bg-gray-400 text-white border-gray-500 cursor-default";
-                    titleText = `Holiday: ${getHolidayName(date)}`;
-                  } else if (isToday) {
-                    cellStyle += "border-blue-500 bg-blue-50 cursor-default";
-                    titleText = "Today";
-                  } else {
-                    cellStyle += "border-gray-200 bg-gray-50 cursor-default";
-                    titleText = "Working Day";
-                  }
-                  if (!isCurrentMonth) cellStyle += " opacity-40";
                   return (
                     <div
-                      key={date.toISOString()}
-                      className={cellStyle.trim()}
+                      key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
+                      className={`${cellStyle}${!isCurrentMonth ? " opacity-40" : ""}`}
                       title={titleText}
                       onClick={() => {
                         if (isDeletable && selectedMr) {
@@ -2310,33 +2199,36 @@ const LeaveAttendance = () => {
                   );
                 })}
               </div>
+              {/* Legend — includes Half Day */}
               <div className="flex flex-wrap gap-4 items-center text-sm bg-gray-50 rounded-lg p-4">
                 {[
-                  ["bg-green-500 border-green-600", "Present"],
+                  ["bg-green-500  border-green-600", "Present (Full Day)"],
+                  ["bg-orange-400 border-orange-500", "Half Day"],
                   ["bg-purple-500 border-purple-600", "Leave Swap"],
-                  ["bg-blue-500 border-blue-600", "Paid Leave"],
-                  ["bg-red-500 border-red-600", "Unpaid Leave"],
-                  ["bg-red-400 border-red-500", "Sunday"],
-                  ["bg-gray-400 border-gray-500", "Holiday"],
-                  ["bg-blue-50 border-blue-500", "Today"],
+                  ["bg-blue-500   border-blue-600", "Paid Leave"],
+                  ["bg-red-500    border-red-600", "Unpaid Leave"],
+                  ["bg-red-400    border-red-500", "Sunday"],
+                  ["bg-gray-400   border-gray-500", "Holiday"],
+                  ["bg-blue-50    border-blue-500", "Today"],
                 ].map(([cls, label]) => (
                   <div key={label} className="flex items-center gap-2">
-                    <div className={`w-4 h-4 rounded border-2 ${cls}`}></div>
+                    <div className={`w-4 h-4 rounded border-2 ${cls}`} />
                     <span>{label}</span>
                   </div>
                 ))}
               </div>
             </div>
           ) : (
+            /* Annual view */
             <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-bold text-gray-800">
                   {selectedMr?.medicalRepName} - Annual Calendar
                   {selectedMr && (
                     <span className="ml-2 text-lg font-normal">
-                      (Unpaid Leave Taken:{" "}
+                      (Unpaid:{" "}
                       {getLeaveCounts(selectedMr._id, selectedMr.date).total},
-                      Swap Leaves:{" "}
+                      Swap:{" "}
                       {
                         getLeaveCounts(selectedMr._id, selectedMr.date)
                           .swapLeaves
@@ -2348,7 +2240,7 @@ const LeaveAttendance = () => {
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => navigateYear("prev")}
-                    className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+                    className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
                     <ChevronLeft size={20} />
                   </button>
@@ -2356,19 +2248,19 @@ const LeaveAttendance = () => {
                   <button
                     onClick={() => navigateYear("next")}
                     disabled={!canNavigateNext("next", "annual")}
-                    className={`p-2 rounded-lg cursor-pointer transition-colors ${canNavigateNext("next", "annual") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
+                    className={`p-2 rounded-lg cursor-pointer ${canNavigateNext("next", "annual") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
                   >
                     <ChevronRight size={20} />
                   </button>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {Array.from({ length: 12 }, (_, monthIndex) => {
-                  const monthName = new Date(
-                    currentYear,
-                    monthIndex,
-                  ).toLocaleString("default", { month: "short" });
-                  const monthDays = getDaysInMonth(currentYear, monthIndex);
+                {Array.from({ length: 12 }, (_, mi) => {
+                  const monthName = new Date(currentYear, mi).toLocaleString(
+                    "default",
+                    { month: "short" },
+                  );
+                  const monthDays = getDaysInMonth(currentYear, mi);
                   return (
                     <div
                       key={monthName}
@@ -2378,80 +2270,28 @@ const LeaveAttendance = () => {
                         {monthName}
                       </h3>
                       <div className="grid grid-cols-7 gap-1 mb-2">
-                        {["S", "M", "T", "W", "T", "F", "S"].map(
-                          (day, index) => (
-                            <div
-                              key={`${day}-${index}`}
-                              className={`text-center text-xs font-medium ${index === 0 ? "text-red-600" : "text-gray-600"}`}
-                            >
-                              {day}
-                            </div>
-                          ),
-                        )}
+                        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                          <div
+                            key={`${d}-${i}`}
+                            className={`text-center text-xs font-medium ${i === 0 ? "text-red-600" : "text-gray-600"}`}
+                          >
+                            {d}
+                          </div>
+                        ))}
                       </div>
                       <div className="grid grid-cols-7 gap-1">
                         {monthDays.map((date, index) => {
-                          if (date === null)
+                          if (!date)
                             return (
                               <div key={`empty-${index}`} className="h-6" />
                             );
-                          const attendance = getAttendanceForDate(
-                            date,
-                            selectedMr?._id,
-                          );
-                          const leaveInfo = isLeave(date, selectedMr?._id);
-                          const isLeaveDay = leaveInfo.isLeave;
-                          const leaveType = leaveInfo.type;
-                          const isSundayDay = isSunday(date);
-                          const isHolidayDay = isHoliday(date);
-                          let cellStyle =
-                            "h-6 flex items-center justify-center rounded text-xs ";
-                          let isDeletable = false;
-                          if (attendance && !attendance.isLeaveDay) {
-                            cellStyle +=
-                              "bg-green-500 text-white cursor-pointer hover:opacity-80";
-                            isDeletable = true;
-                          } else if (isLeaveDay) {
-                            if (leaveType === "swapleave") {
-                              cellStyle +=
-                                "bg-purple-500 text-white cursor-pointer hover:opacity-80";
-                              isDeletable = true;
-                            } else if (leaveType === "paid") {
-                              cellStyle +=
-                                "bg-blue-500 text-white cursor-pointer hover:opacity-80";
-                              isDeletable = true;
-                            } else {
-                              cellStyle +=
-                                "bg-red-500 text-white cursor-pointer hover:opacity-80";
-                              isDeletable = true;
-                            }
-                          } else if (isSundayDay) {
-                            cellStyle += "bg-red-400 text-white cursor-default";
-                          } else if (isHolidayDay) {
-                            cellStyle +=
-                              "bg-gray-400 text-white cursor-default";
-                          } else {
-                            cellStyle += "bg-gray-100 cursor-default";
-                          }
+                          const { cellStyle, titleText, isDeletable } =
+                            getAnnualCellStyle(date, selectedMr?._id);
                           return (
                             <div
-                              key={date.toISOString()}
-                              className={cellStyle.trim()}
-                              title={
-                                isHolidayDay
-                                  ? `Holiday: ${getHolidayName(date)}`
-                                  : isLeaveDay
-                                    ? leaveType === "swapleave"
-                                      ? "Swap Leave (click to delete)"
-                                      : leaveType === "paid"
-                                        ? "Paid Leave (click to delete)"
-                                        : "Unpaid Leave (click to delete)"
-                                    : attendance
-                                      ? "Present (click to delete)"
-                                      : isSundayDay
-                                        ? "Sunday"
-                                        : "Working Day"
-                              }
+                              key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
+                              className={cellStyle}
+                              title={titleText}
                               onClick={() => {
                                 if (isDeletable && selectedMr) {
                                   setCalendarDeleteData({
@@ -2475,6 +2315,7 @@ const LeaveAttendance = () => {
           )}
         </div>
       ) : (
+        /* ── MR list table ── */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           {mrList.length > 0 && (
             <div className="flex justify-between items-center p-4 bg-gray-50 border-b">
@@ -2523,11 +2364,21 @@ const LeaveAttendance = () => {
                 currentMRs.map((mr, index) => {
                   const leaveCounts = getLeaveCounts(mr._id, mr.date);
                   const remainingPaid = getRemainingPaidLeaves(mr._id, mr.date);
-                  const leaveTaken = leaveCounts.total;
                   const totalExtraHours = getExtraHoursForMR(mr._id);
                   const extraHoursCalc = calculateRemainingTime(
                     totalExtraHours * 60,
                   );
+
+                  // Count half-day records for this MR
+                  const halfDayCount = attendanceRecords.filter((rec) => {
+                    if (rec.userId !== mr._id || rec.isLeaveDay) return false;
+                    if (rec.attendanceType === "half") return true;
+                    return (
+                      getAttendanceTypeClient(parseTimeToMinutes(rec.totalTime))
+                        .type === "half"
+                    );
+                  }).length;
+
                   return (
                     <tr
                       key={mr._id}
@@ -2550,23 +2401,22 @@ const LeaveAttendance = () => {
                       </td>
                       <td className="p-3">
                         <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-sm font-medium">
-                          {leaveTaken}
+                          {leaveCounts.total}
                         </span>
                         {leaveCounts.swapLeaves > 0 && (
                           <span className="ml-2 bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-sm font-medium">
                             +{leaveCounts.swapLeaves} swap
                           </span>
                         )}
+                        {halfDayCount > 0 && (
+                          <span className="ml-2 bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-sm font-medium">
+                            {halfDayCount} half
+                          </span>
+                        )}
                       </td>
                       <td className="p-3">
                         <span
-                          className={`px-2 py-1 rounded-full text-sm font-medium ${
-                            parseFloat(remainingPaid) > 5
-                              ? "bg-green-100 text-green-800"
-                              : parseFloat(remainingPaid) > 2
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-red-100 text-red-800"
-                          }`}
+                          className={`px-2 py-1 rounded-full text-sm font-medium ${parseFloat(remainingPaid) > 5 ? "bg-green-100 text-green-800" : parseFloat(remainingPaid) > 2 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800"}`}
                         >
                           {remainingPaid}
                         </span>
@@ -2589,9 +2439,9 @@ const LeaveAttendance = () => {
                                 m
                               </span>
                             )}
-                            <span className="text-xs text-gray-500">
+                            {/* <span className="text-xs text-gray-500">
                               Total: {totalExtraHours.toFixed(2)} hours
-                            </span>
+                            </span> */}
                           </div>
                         ) : (
                           <span className="text-gray-400 text-sm">
@@ -2624,7 +2474,7 @@ const LeaveAttendance = () => {
           {currentMRs.length > 0 && (
             <div className="mt-4 p-5 flex gap-2">
               <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
                 className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
@@ -2635,11 +2485,7 @@ const LeaveAttendance = () => {
                   <button
                     key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
+                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
                   >
                     {page}
                   </button>
@@ -2647,7 +2493,7 @@ const LeaveAttendance = () => {
               )}
               <button
                 onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                  setCurrentPage((p) => Math.min(p + 1, totalPages))
                 }
                 disabled={currentPage === totalPages}
                 className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
