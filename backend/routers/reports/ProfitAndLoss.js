@@ -7,162 +7,80 @@ import addExpenseCategary from "../../models/expenses/addExpenseCategary.js";
 
 const router = express.Router();
 
-// Improved helper function to create proper date range filter
-const createDateRangeFilter = (startDate, endDate, fieldName = "recordingDate") => {
+// ==================== HELPER FUNCTIONS FOR DATE HANDLING ====================
+
+/**
+ * Convert a date string (YYYY-MM-DD) to a Date object at UTC midnight (00:00:00)
+ */
+const getUTCMidnight = (dateStr) => {
+  if (!dateStr) return null;
+
+  let year, month, day;
+
+  if (typeof dateStr === "string" && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    [year, month, day] = dateStr.split("-").map(Number);
+  } else if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
+    year = dateStr.getFullYear();
+    month = dateStr.getMonth() + 1;
+    day = dateStr.getDate();
+  } else {
+    return null;
+  }
+
+  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+};
+
+/**
+ * Get the end of day (23:59:59.999) in UTC for a given date string
+ */
+const getUTCEndOfDay = (dateStr) => {
+  if (!dateStr) return null;
+
+  let year, month, day;
+
+  if (typeof dateStr === "string" && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    [year, month, day] = dateStr.split("-").map(Number);
+  } else if (dateStr instanceof Date && !isNaN(dateStr.getTime())) {
+    year = dateStr.getFullYear();
+    month = dateStr.getMonth() + 1;
+    day = dateStr.getDate();
+  } else {
+    return null;
+  }
+
+  return new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+};
+
+/**
+ * Create a date range filter for MongoDB queries
+ */
+const createDateRangeFilter = (
+  startDate,
+  endDate,
+  dateField = "recordingDate",
+) => {
   const filter = {};
-  
+
   if (startDate) {
-    const start = new Date(startDate);
-    // Start of day in UTC
-    const startUTC = new Date(Date.UTC(
-      start.getFullYear(),
-      start.getMonth(),
-      start.getDate(),
-      0, 0, 0, 0
-    ));
-    filter.$gte = startUTC;
-  }
-  
-  if (endDate) {
-    const end = new Date(endDate);
-    // End of day in UTC
-    const endUTC = new Date(Date.UTC(
-      end.getFullYear(),
-      end.getMonth(),
-      end.getDate(),
-      23, 59, 59, 999
-    ));
-    filter.$lte = endUTC;
-  }
-  
-  return Object.keys(filter).length > 0 ? filter : undefined;
-};
-
-// Alternative: Match based on date string comparison for recordingDate
-const createDateRangeFilterForRecordingDate = (startDate, endDate) => {
-  const filter = {};
-  
-  if (startDate) {
-    const start = new Date(startDate);
-    const startStr = start.toISOString().split('T')[0]; // YYYY-MM-DD
-    filter.$gte = new Date(startStr + "T00:00:00.000Z");
-  }
-  
-  if (endDate) {
-    const end = new Date(endDate);
-    const endStr = end.toISOString().split('T')[0]; // YYYY-MM-DD
-    filter.$lte = new Date(endStr + "T23:59:59.999Z");
-  }
-  
-  return Object.keys(filter).length > 0 ? filter : undefined;
-};
-
-// UPDATED: Helper function to calculate profit for multiple sales at once
-// Now uses the existing totalProfitLoss field
-const calculateProfitsForSales = async (sales) => {
-  try {
-    if (!sales || sales.length === 0) {
-      return sales.map(sale => ({ ...sale, profit: 0, _cost: 0 }));
+    const startUTC = getUTCMidnight(startDate);
+    if (startUTC) {
+      filter.$gte = startUTC;
     }
-    
-    // Calculate profit for each sale using the existing totalProfitLoss field
-    return sales.map(sale => {
-      // Convert Mongoose document to plain object if needed
-      const saleData = sale.toObject ? sale.toObject() : sale;
-      
-      let totalProfit = saleData.totalProfitLoss || 0;
-      let totalCost = 0;
-      
-      // Calculate cost from products if available
-      if (saleData.products && Array.isArray(saleData.products)) {
-        saleData.products.forEach(product => {
-          const lcPrice = product.lc || 0;
-          const quantity = product.salesQty || product.quantity || 0;
-          const productCost = lcPrice * quantity;
-          totalCost += productCost;
-        });
-      } else {
-        // If products not available, estimate cost from revenue and profit
-        const revenue = saleData.totalAmount || 0;
-        totalCost = Math.max(0, revenue - totalProfit);
-      }
-      
-      // Store cost for COGS calculation
-      saleData._cost = totalCost;
-      
-      return {
-        ...saleData,
-        profit: totalProfit
-      };
-    });
-  } catch (error) {
-    console.error("Error calculating profits:", error);
-    return sales.map(sale => ({ ...sale, profit: 0, _cost: 0 }));
   }
-};
 
-// UPDATED: Helper function to calculate profit for multiple returns at once
-// Now returns have their own profit/loss calculation
-const calculateProfitsForReturns = async (returns) => {
-  try {
-    if (!returns || returns.length === 0) {
-      return returns.map(ret => ({ ...ret, profit: 0, _cost: 0 }));
+  if (endDate) {
+    const endUTC = getUTCEndOfDay(endDate);
+    if (endUTC) {
+      filter.$lte = endUTC;
     }
-
-    // Get all return IDs
-    const returnIds = returns.map(ret => ret._id);
-    
-    // Get all returns with populated products
-    const populatedReturns = await SalesReturn.find({ _id: { $in: returnIds } })
-      .populate({
-        path: 'products.productId',
-        select: 'lc productName',
-        options: { strictPopulate: false }
-      })
-      .lean();
-    
-    // Create a map for quick lookup
-    const returnMap = new Map();
-    populatedReturns.forEach(ret => {
-      returnMap.set(ret._id.toString(), ret);
-    });
-    
-    // Calculate profit for each return
-    return returns.map((salesReturn) => {
-      const populatedReturn = returnMap.get(salesReturn._id.toString());
-      let totalProfitLoss = 0;
-      let totalCost = 0;
-      
-      if (populatedReturn && populatedReturn.products && Array.isArray(populatedReturn.products)) {
-        populatedReturn.products.forEach(product => {
-          const sellingPrice = product.sellingPrice || product.unitPrice || 0;
-          const lcPrice = product.productId?.lc || 0;
-          const quantity = product.salesQty || product.quantity || 0;
-          
-          // For returns, profit/loss is negative
-          const profitLoss = -(sellingPrice - lcPrice) * quantity;
-          const productCost = lcPrice * quantity;
-          
-          totalProfitLoss += profitLoss;
-          totalCost += productCost;
-        });
-      }
-      
-      // Store cost for COGS calculation
-      salesReturn._cost = totalCost;
-      
-      return {
-        ...salesReturn,
-        profit: totalProfitLoss
-      };
-    });
-  } catch (error) {
-    console.error("Error calculating return profits:", error);
-    return returns.map(ret => ({ ...ret, profit: 0, _cost: 0 }));
   }
+
+  return Object.keys(filter).length > 0 ? { [dateField]: filter } : {};
 };
 
-// GET / - Main Profit & Loss report (was /pl-report)
+// ==================== MAIN ROUTES ====================
+
+// GET / - Main Profit & Loss report
 router.get("/", async (req, res) => {
   try {
     const {
@@ -174,49 +92,50 @@ router.get("/", async (req, res) => {
       limit = 10,
     } = req.query;
 
-    let saleFilter = {};
-    let returnFilter = {};
-    let payrollFilter = {};
-    let expenseFilter = {};
-
-    const recordingDateFilter = createDateRangeFilterForRecordingDate(startDate, endDate);
-    const dateFilter = createDateRangeFilter(startDate, endDate);
-    
-    if (recordingDateFilter) {
-      saleFilter.recordingDate = recordingDateFilter;
-      returnFilter.recordingDate = recordingDateFilter;
-    }
-    
-    if (dateFilter) {
-      payrollFilter.createdAt = dateFilter;
-      expenseFilter.date = dateFilter;
-    }
+    // Create filters using the proper date range function
+    const saleFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "recordingDate",
+    );
+    const returnFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "recordingDate",
+    );
+    const payrollFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "createdAt",
+    );
+    const expenseFilter = createDateRangeFilter(startDate, endDate, "date");
 
     // Calculate pagination
     const skip = (page - 1) * limit;
     const sortDirection = sortOrder === "desc" ? -1 : 1;
+
+    // Get ALL sales without any paymentStatus filter - same as daily reports
     const sales = await SaleSummary.find(saleFilter)
       .select(
-        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products totalProfitLoss"
+        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products totalProfitLoss",
       )
       .sort({ recordingDate: sortDirection })
-      .lean(); // Use lean() to get plain JavaScript objects
+      .lean();
 
     const salesWithProfit = await calculateProfitsForSales(sales);
 
     const salesReturns = await SalesReturn.find(returnFilter)
       .select(
-        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products"
+        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products",
       )
       .sort({ recordingDate: sortDirection })
       .lean();
 
-    // Calculate profit for each return
     const returnsWithProfit = await calculateProfitsForReturns(salesReturns);
 
     const payrolls = await Payroll.find(payrollFilter)
       .select(
-        "period payrollCode employeeId basicSalary totalAllowance deductions netSalary status paymentDate createdAt"
+        "period payrollCode employeeId basicSalary totalAllowance deductions netSalary status paymentDate createdAt",
       )
       .populate("employeeId", "medicalRepName employeeName")
       .sort({ createdAt: sortDirection })
@@ -225,7 +144,7 @@ router.get("/", async (req, res) => {
     const expenses = await addExpense
       .find(expenseFilter)
       .select(
-        "date category remarks amount sourceAccount paymentMethod createdBy"
+        "date category remarks amount sourceAccount paymentMethod createdBy",
       )
       .populate({
         path: "category",
@@ -237,16 +156,16 @@ router.get("/", async (req, res) => {
       .sort({ date: sortDirection })
       .lean();
 
-    // Calculate totals - USING THE PROFIT FROM salesWithProfit
+    // Calculate totals - SAME LOGIC as daily reports
     let totalSalesRevenue = 0;
     let totalProfitFromSales = 0;
     let totalPaidAmount = 0;
     let totalDueAmount = 0;
     let totalCostOfGoodsSold = 0;
-    
-    salesWithProfit.forEach(sale => {
+
+    salesWithProfit.forEach((sale) => {
       totalSalesRevenue += sale.totalAmount || 0;
-      totalProfitFromSales += sale.profit || 0; // This now uses totalProfitLoss
+      totalProfitFromSales += sale.profit || 0;
       totalPaidAmount += sale.paidAmount || 0;
       totalDueAmount += sale.dueAmount || 0;
       totalCostOfGoodsSold += sale._cost || 0;
@@ -255,56 +174,48 @@ router.get("/", async (req, res) => {
     let totalReturnsAmount = 0;
     let totalProfitFromReturns = 0;
     let totalReturnsCost = 0;
-    
-    returnsWithProfit.forEach(returnItem => {
+
+    returnsWithProfit.forEach((returnItem) => {
       totalReturnsAmount += returnItem.totalAmount || 0;
       totalProfitFromReturns += returnItem.profit || 0;
       totalReturnsCost += returnItem._cost || 0;
     });
 
-    // Adjust COGS for returns
     totalCostOfGoodsSold -= totalReturnsCost;
 
-    // Calculate payroll totals
     let totalNetSalary = 0;
     let totalBasicSalary = 0;
     let totalAllowances = 0;
     let totalDeductions = 0;
-    
-    payrolls.forEach(payroll => {
+
+    payrolls.forEach((payroll) => {
       totalNetSalary += payroll.netSalary || 0;
       totalBasicSalary += payroll.basicSalary || 0;
       totalAllowances += payroll.totalAllowance || 0;
       totalDeductions += payroll.deductions || 0;
     });
 
-    // Calculate expense totals
     let totalExpenseAmount = 0;
-    expenses.forEach(expense => {
+    expenses.forEach((expense) => {
       totalExpenseAmount += expense.amount || 0;
     });
 
-    // Calculate net profit
     const grossProfitFromSales = totalProfitFromSales;
     const adjustedGrossProfit = grossProfitFromSales + totalProfitFromReturns;
     const totalExpensesAmount = totalNetSalary + totalExpenseAmount;
     const netProfit = adjustedGrossProfit - totalExpensesAmount;
-    
-    // Calculate profit margin
-    const profitMargin = totalSalesRevenue > 0 ? (netProfit / totalSalesRevenue) * 100 : 0;
-    
-    // Calculate collection rate
-    const collectionRate = totalSalesRevenue > 0 ? 
-      (totalPaidAmount / totalSalesRevenue) * 100 : 0;
 
-    // Get counts
+    const profitMargin =
+      totalSalesRevenue > 0 ? (netProfit / totalSalesRevenue) * 100 : 0;
+    const collectionRate =
+      totalSalesRevenue > 0 ? (totalPaidAmount / totalSalesRevenue) * 100 : 0;
+
     const totalSales = await SaleSummary.countDocuments(saleFilter);
     const totalReturns = await SalesReturn.countDocuments(returnFilter);
     const totalPayrolls = await Payroll.countDocuments(payrollFilter);
     const totalExpenses = await addExpense.countDocuments(expenseFilter);
     const total = totalSales + totalReturns + totalPayrolls + totalExpenses;
 
-    // Prepare totals object for frontend
     const totals = {
       totalSalesRevenue: totalSalesRevenue,
       totalProfitFromSales: totalProfitFromSales,
@@ -326,15 +237,14 @@ router.get("/", async (req, res) => {
       totalDue: totalDueAmount,
     };
 
-    // Transform data for frontend table
     const salesData = salesWithProfit.map((sale) => ({
       _id: sale._id,
       type: "sale",
       date: sale.recordingDate,
       title: sale.invoiceNumber,
-      description: `Sale to ${sale.customerName || 'Unknown'}`,
+      description: `Sale to ${sale.customerName || "Unknown"}`,
       amount: sale.totalAmount || 0,
-      profit: sale.profit || 0, // Uses existing totalProfitLoss
+      profit: sale.profit || 0,
       expense: 0,
       status: sale.paymentStatus || "pending",
       details: {
@@ -344,7 +254,7 @@ router.get("/", async (req, res) => {
         customerName: sale.customerName || "",
         totalAmount: sale.totalAmount || 0,
         calculatedProfit: sale.profit || 0,
-        storedProfitLoss: sale.totalProfitLoss || 0, // Include stored value
+        storedProfitLoss: sale.totalProfitLoss || 0,
       },
     }));
 
@@ -353,7 +263,7 @@ router.get("/", async (req, res) => {
       type: "return",
       date: salesReturn.recordingDate,
       title: `${salesReturn.invoiceNumber} (Return)`,
-      description: `Return from ${salesReturn.customerName || 'Unknown'}`,
+      description: `Return from ${salesReturn.customerName || "Unknown"}`,
       amount: -(salesReturn.totalAmount || 0),
       profit: salesReturn.profit || 0,
       expense: 0,
@@ -439,7 +349,6 @@ router.get("/", async (req, res) => {
       };
     });
 
-    // Create combined data with pagination
     const allCombinedData = [
       ...salesData,
       ...returnData,
@@ -451,24 +360,23 @@ router.get("/", async (req, res) => {
       return sortDirection === -1 ? bDate - aDate : aDate - bDate;
     });
 
-    // Apply pagination to combined data
     const combinedData = allCombinedData.slice(skip, skip + parseInt(limit));
 
-    // Prepare detailed arrays for frontend
     const salaryDetails = payrollData;
     const expenseDetails = expenseData;
 
-    // Extract profit details from sales data
-    const salesProfitDetails = salesWithProfit.map(sale => ({
-      invoiceNumber: sale.invoiceNumber || 'N/A',
+    const salesProfitDetails = salesWithProfit.map((sale) => ({
+      invoiceNumber: sale.invoiceNumber || "N/A",
       date: sale.recordingDate,
       customer: sale.customerName || "Unknown",
       totalAmount: sale.totalAmount || 0,
-      profit: sale.profit || 0, // Uses existing totalProfitLoss
+      profit: sale.profit || 0,
       purchaseCost: sale._cost || 0,
-      margin: (sale.totalAmount || 0) > 0 ? 
-        ((sale.profit || 0) / (sale.totalAmount || 0)) * 100 : 0,
-      storedProfitLoss: sale.totalProfitLoss || 0 // Show stored value
+      margin:
+        (sale.totalAmount || 0) > 0
+          ? ((sale.profit || 0) / (sale.totalAmount || 0)) * 100
+          : 0,
+      storedProfitLoss: sale.totalProfitLoss || 0,
     }));
 
     const response = {
@@ -500,21 +408,13 @@ router.get("/", async (req, res) => {
         totalPayrolls: totalPayrolls,
         totalExpenses: totalExpenses,
         collectionRate: parseFloat(collectionRate.toFixed(2)),
+        // Add these for debugging
+        debug: {
+          totalPaidAmount: totalPaidAmount,
+          totalDueAmount: totalDueAmount,
+          saleCount: sales.length,
+        },
       },
-      debug: {
-        query: { startDate, endDate },
-        salesFound: sales.length,
-        totalRevenueCalculated: totalSalesRevenue,
-        totalCostCalculated: totalCostOfGoodsSold,
-        totalProfitCalculated: totalProfitFromSales,
-        sampleSales: sales.slice(0, 5).map(s => ({
-          invoice: s.invoiceNumber,
-          date: s.recordingDate,
-          total: s.totalAmount,
-          storedProfitLoss: s.totalProfitLoss || 0,
-          productsCount: s.products?.length || 0
-        }))
-      }
     };
 
     res.json(response);
@@ -528,115 +428,107 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /summary - Summary statistics (was /pl-report/summary)
+// GET /summary - Summary statistics
 router.get("/summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    let saleFilter = {};
-    let returnFilter = {};
-    let payrollFilter = {};
-    let expenseFilter = {};
 
-    // Use the specialized filter for recordingDate fields
-    const recordingDateFilter = createDateRangeFilterForRecordingDate(startDate, endDate);
-    const dateFilter = createDateRangeFilter(startDate, endDate);
-    
-    if (recordingDateFilter) {
-      saleFilter.recordingDate = recordingDateFilter;
-      returnFilter.recordingDate = recordingDateFilter;
-    }
-    
-    if (dateFilter) {
-      payrollFilter.createdAt = dateFilter;
-      expenseFilter.date = dateFilter;
-    }
+    const saleFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "recordingDate",
+    );
+    const returnFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "recordingDate",
+    );
+    const payrollFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "createdAt",
+    );
+    const expenseFilter = createDateRangeFilter(startDate, endDate, "date");
 
     const sales = await SaleSummary.find(saleFilter)
-      .select("recordingDate totalAmount paidAmount dueAmount products invoiceNumber totalProfitLoss customerName mrName paymentStatus")
+      .select(
+        "recordingDate totalAmount paidAmount dueAmount products invoiceNumber totalProfitLoss customerName mrName paymentStatus",
+      )
       .sort({ recordingDate: -1 })
       .lean();
 
-    // Calculate profit for all sales - USING EXISTING totalProfitLoss
     const salesWithProfit = await calculateProfitsForSales(sales);
 
-    // Get sales returns summary
     const salesReturns = await SalesReturn.find(returnFilter)
       .select("recordingDate totalAmount products")
       .sort({ recordingDate: -1 })
       .lean();
 
-    // Calculate profit for all returns
     const returnsWithProfit = await calculateProfitsForReturns(salesReturns);
 
-    // Get payroll summary
     const payrolls = await Payroll.find(payrollFilter)
       .select("netSalary basicSalary totalAllowance deductions status")
       .lean();
 
-    // Get expense summary
-    const expenses = await addExpense.find(expenseFilter).select("amount category").lean();
+    const expenses = await addExpense
+      .find(expenseFilter)
+      .select("amount category")
+      .lean();
 
-    // Aggregate sales data - USING THE PROFIT FROM salesWithProfit
     let totalSalesRevenue = 0;
     let totalProfitFromSales = 0;
     let totalPaidAmount = 0;
     let totalDueAmount = 0;
     let totalCostOfGoodsSold = 0;
-    
-    salesWithProfit.forEach(sale => {
+
+    salesWithProfit.forEach((sale) => {
       totalSalesRevenue += sale.totalAmount || 0;
-      totalProfitFromSales += sale.profit || 0; // Uses totalProfitLoss
+      totalProfitFromSales += sale.profit || 0;
       totalPaidAmount += sale.paidAmount || 0;
       totalDueAmount += sale.dueAmount || 0;
       totalCostOfGoodsSold += sale._cost || 0;
     });
 
-    // Aggregate returns data
     let totalReturnsAmount = 0;
     let totalProfitFromReturns = 0;
     let totalReturnsCost = 0;
-    
-    returnsWithProfit.forEach(ret => {
+
+    returnsWithProfit.forEach((ret) => {
       totalReturnsAmount += ret.totalAmount || 0;
       totalProfitFromReturns += ret.profit || 0;
       totalReturnsCost += ret._cost || 0;
     });
 
-    // Adjust COGS for returns
     totalCostOfGoodsSold -= totalReturnsCost;
 
-    // Calculate payroll totals
     let totalNetSalary = 0;
     let totalBasicSalary = 0;
     let totalAllowances = 0;
     let totalDeductions = 0;
-    
-    payrolls.forEach(payroll => {
+
+    payrolls.forEach((payroll) => {
       totalNetSalary += payroll.netSalary || 0;
       totalBasicSalary += payroll.basicSalary || 0;
       totalAllowances += payroll.totalAllowance || 0;
       totalDeductions += payroll.deductions || 0;
     });
 
-    // Calculate expense totals
     let totalExpenseAmount = 0;
-    expenses.forEach(expense => {
+    expenses.forEach((expense) => {
       totalExpenseAmount += expense.amount || 0;
     });
 
-    // Calculate NET profit
     const grossProfit = totalProfitFromSales;
     const returnsProfit = totalProfitFromReturns;
-    
     const adjustedGrossProfit = grossProfit + returnsProfit;
     const totalExpensesAmount = totalNetSalary + totalExpenseAmount;
     const netProfit = adjustedGrossProfit - totalExpensesAmount;
-    
-    const profitMargin = totalSalesRevenue > 0 ? (netProfit / totalSalesRevenue) * 100 : 0;
-    const collectionRate = totalSalesRevenue > 0 ? 
-      (totalPaidAmount / totalSalesRevenue) * 100 : 0;
 
-    // Format summary for frontend
+    const profitMargin =
+      totalSalesRevenue > 0 ? (netProfit / totalSalesRevenue) * 100 : 0;
+    const collectionRate =
+      totalSalesRevenue > 0 ? (totalPaidAmount / totalSalesRevenue) * 100 : 0;
+
     const formattedSummary = {
       revenue: totalSalesRevenue,
       cogs: totalCostOfGoodsSold,
@@ -651,6 +543,9 @@ router.get("/summary", async (req, res) => {
       totalPayrolls: payrolls.length,
       totalExpenses: expenses.length,
       collectionRate: parseFloat(collectionRate.toFixed(2)),
+      // Add cash and credit breakdown for verification
+      cashCollected: totalPaidAmount,
+      creditAmount: totalDueAmount,
     };
 
     res.json({
@@ -667,62 +562,60 @@ router.get("/summary", async (req, res) => {
   }
 });
 
-// GET /orders - Orders breakdown (was /pl-report/orders)
+// GET /orders - Orders breakdown
 router.get("/orders", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 
-    let saleFilter = {};
-    let returnFilter = {};
-
-    // Use the specialized filter for recordingDate fields
-    const recordingDateFilter = createDateRangeFilterForRecordingDate(startDate, endDate);
-    
-    if (recordingDateFilter) {
-      saleFilter.recordingDate = recordingDateFilter;
-      returnFilter.recordingDate = recordingDateFilter;
-    }
+    const saleFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "recordingDate",
+    );
+    const returnFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "recordingDate",
+    );
 
     const sales = await SaleSummary.find(saleFilter)
       .select(
-        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products totalProfitLoss"
+        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products totalProfitLoss",
       )
       .sort({ recordingDate: -1 })
       .lean();
 
-    // Calculate profit for each sale - USING EXISTING totalProfitLoss
     const salesWithProfit = await calculateProfitsForSales(sales);
 
     const returns = await SalesReturn.find(returnFilter)
       .select(
-        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products"
+        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products",
       )
       .sort({ recordingDate: -1 })
       .lean();
 
-    // Calculate profit for each return
     const returnsWithProfit = await calculateProfitsForReturns(returns);
 
-    // Transform sales data
     const salesData = salesWithProfit.map((order) => ({
-      orderId: order.invoiceNumber || 'N/A',
+      orderId: order.invoiceNumber || "N/A",
       date: order.recordingDate,
       customer: order.customerName || "Unknown",
       mrName: order.mrName || "",
       amount: order.totalAmount || 0,
-      profit: order.profit || 0, // Uses totalProfitLoss
+      profit: order.profit || 0,
       purchaseCost: order._cost || 0,
-      margin: (order.totalAmount || 0) > 0 ? 
-        ((order.profit || 0) / (order.totalAmount || 0)) * 100 : 0,
+      margin:
+        (order.totalAmount || 0) > 0
+          ? ((order.profit || 0) / (order.totalAmount || 0)) * 100
+          : 0,
       paid: order.paidAmount || 0,
       due: order.dueAmount || 0,
       status: order.paymentStatus?.toLowerCase() || "pending",
       type: "sale",
     }));
 
-    // Transform returns data
     const returnsData = returnsWithProfit.map((returnOrder) => ({
-      orderId: `${returnOrder.invoiceNumber || 'N/A'} (Return)`,
+      orderId: `${returnOrder.invoiceNumber || "N/A"} (Return)`,
       date: returnOrder.recordingDate,
       customer: returnOrder.customerName || "Unknown",
       mrName: returnOrder.mrName || "",
@@ -736,9 +629,8 @@ router.get("/orders", async (req, res) => {
       type: "return",
     }));
 
-    // Combine and sort
     const ordersData = [...salesData, ...returnsData].sort(
-      (a, b) => new Date(b.date) - new Date(a.date)
+      (a, b) => new Date(b.date) - new Date(a.date),
     );
 
     res.json({
@@ -755,19 +647,16 @@ router.get("/orders", async (req, res) => {
   }
 });
 
-// POST /update-profits - Update profit/loss for existing sales (was /pl-report/update-profits)
+// POST /update-profits - Update profit/loss for existing sales
 router.post("/update-profits", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
-    
-    let saleFilter = {};
-    const recordingDateFilter = createDateRangeFilterForRecordingDate(startDate, endDate);
-    
-    if (recordingDateFilter) {
-      saleFilter.recordingDate = recordingDateFilter;
-    }
+    const saleFilter = createDateRangeFilter(
+      startDate,
+      endDate,
+      "recordingDate",
+    );
 
-    // Get all sales in the date range
     const sales = await SaleSummary.find(saleFilter)
       .select("products totalAmount")
       .sort({ recordingDate: -1 })
@@ -776,32 +665,29 @@ router.post("/update-profits", async (req, res) => {
     let updatedCount = 0;
     let errors = [];
 
-    // Update each sale's totalProfitLoss
     for (const sale of sales) {
       try {
         let totalProfitLoss = 0;
-        
+
         if (sale.products && Array.isArray(sale.products)) {
-          sale.products.forEach(product => {
+          sale.products.forEach((product) => {
             const sellingPrice = product.sellingPrice || product.unitPrice || 0;
             const lc = product.lc || 0;
             const quantity = product.salesQty || product.quantity || 0;
-            
             const productProfitLoss = (sellingPrice - lc) * quantity;
             totalProfitLoss += productProfitLoss;
           });
         }
 
-        // Update the sale with calculated profit/loss
         await SaleSummary.findByIdAndUpdate(sale._id, {
-          totalProfitLoss: totalProfitLoss
+          totalProfitLoss: totalProfitLoss,
         });
 
         updatedCount++;
       } catch (error) {
         errors.push({
           saleId: sale._id,
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -810,16 +696,112 @@ router.post("/update-profits", async (req, res) => {
       success: true,
       message: `Updated totalProfitLoss for ${updatedCount} sales`,
       updatedCount,
-      errors: errors.length > 0 ? errors : undefined
+      errors: errors.length > 0 ? errors : undefined,
     });
   } catch (error) {
     console.error("Update profits error:", error);
     res.status(500).json({
       success: false,
       message: "Error updating profit/loss",
-      error: error.message
+      error: error.message,
     });
   }
 });
+
+// ==================== HELPER FUNCTIONS FOR PROFIT CALCULATIONS ====================
+
+const calculateProfitsForSales = async (sales) => {
+  try {
+    if (!sales || sales.length === 0) {
+      return sales.map((sale) => ({ ...sale, profit: 0, _cost: 0 }));
+    }
+
+    return sales.map((sale) => {
+      const saleData = sale.toObject ? sale.toObject() : sale;
+
+      let totalProfit = saleData.totalProfitLoss || 0;
+      let totalCost = 0;
+
+      if (saleData.products && Array.isArray(saleData.products)) {
+        saleData.products.forEach((product) => {
+          const lcPrice = product.lc || 0;
+          const quantity = product.salesQty || product.quantity || 0;
+          const productCost = lcPrice * quantity;
+          totalCost += productCost;
+        });
+      } else {
+        const revenue = saleData.totalAmount || 0;
+        totalCost = Math.max(0, revenue - totalProfit);
+      }
+
+      saleData._cost = totalCost;
+
+      return {
+        ...saleData,
+        profit: totalProfit,
+      };
+    });
+  } catch (error) {
+    console.error("Error calculating profits:", error);
+    return sales.map((sale) => ({ ...sale, profit: 0, _cost: 0 }));
+  }
+};
+
+const calculateProfitsForReturns = async (returns) => {
+  try {
+    if (!returns || returns.length === 0) {
+      return returns.map((ret) => ({ ...ret, profit: 0, _cost: 0 }));
+    }
+
+    const returnIds = returns.map((ret) => ret._id);
+
+    const populatedReturns = await SalesReturn.find({ _id: { $in: returnIds } })
+      .populate({
+        path: "products.productId",
+        select: "lc productName",
+        options: { strictPopulate: false },
+      })
+      .lean();
+
+    const returnMap = new Map();
+    populatedReturns.forEach((ret) => {
+      returnMap.set(ret._id.toString(), ret);
+    });
+
+    return returns.map((salesReturn) => {
+      const populatedReturn = returnMap.get(salesReturn._id.toString());
+      let totalProfitLoss = 0;
+      let totalCost = 0;
+
+      if (
+        populatedReturn &&
+        populatedReturn.products &&
+        Array.isArray(populatedReturn.products)
+      ) {
+        populatedReturn.products.forEach((product) => {
+          const sellingPrice = product.sellingPrice || product.unitPrice || 0;
+          const lcPrice = product.productId?.lc || 0;
+          const quantity = product.salesQty || product.quantity || 0;
+
+          const profitLoss = -(sellingPrice - lcPrice) * quantity;
+          const productCost = lcPrice * quantity;
+
+          totalProfitLoss += profitLoss;
+          totalCost += productCost;
+        });
+      }
+
+      salesReturn._cost = totalCost;
+
+      return {
+        ...salesReturn,
+        profit: totalProfitLoss,
+      };
+    });
+  } catch (error) {
+    console.error("Error calculating return profits:", error);
+    return returns.map((ret) => ({ ...ret, profit: 0, _cost: 0 }));
+  }
+};
 
 export default router;

@@ -703,14 +703,14 @@ const AddTransactionModal = ({
         // Insert loss charges and remarks for remittance
         baseFields.splice(3, 0, {
           key: "lossCharges",
-          label: "Loss Charges ($)",
+          label: "Bank charges ($)",
           type: "number",
           required: false,
           layout: "half",
         });
         baseFields.splice(4, 0, {
           key: "lossRemarks",
-          label: "Loss Charges Remarks",
+          label: "Bank charges Remarks",
           type: "textarea",
           required: false,
           layout: "full",

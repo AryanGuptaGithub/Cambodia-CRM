@@ -43,9 +43,6 @@ const formatCurrency = (value) => {
   });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Excel Template Download Helper
-// ─────────────────────────────────────────────────────────────────────────────
 const downloadExcelTemplate = (availableProducts = []) => {
   const wb = XLSX.utils.book_new();
 
@@ -88,9 +85,6 @@ const downloadExcelTemplate = (availableProducts = []) => {
   XLSX.writeFile(wb, "StockTransferToMR_Template.xlsx");
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Parse uploaded Excel file → array of { productName, sendQuantity }
-// ─────────────────────────────────────────────────────────────────────────────
 const parseExcelFile = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -139,9 +133,6 @@ const parseExcelFile = (file) => {
   });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────────────────────
 const CreateStockTransfer = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -422,24 +413,35 @@ const CreateStockTransfer = () => {
   };
 
   // ── Send qty change ─────────────────────────────────────────────────────
-  const handleSendQtyChange = (productId, rawValue) => {
-    const numeric = rawValue.replace(/[^0-9]/g, "");
-    setSendMrTableData((prev) =>
-      prev.map((p) => {
-        if (p.productId !== productId) return p;
-        if (numeric === "") {
-          return { ...p, sendQuantity: 0, sendQuantityDisplay: "" };
-        }
-        const parsed = parseInt(numeric, 10);
-        const clamped = Math.min(Math.max(0, parsed), p.totalBoxes);
-        return {
-          ...p,
-          sendQuantity: clamped,
-          sendQuantityDisplay: String(clamped),
-        };
-      }),
-    );
-  };
+  // ── Send qty change ─────────────────────────────────────────────────────
+  // ✅ Updated Handler - Controls value internally
+  const handleSendQtyChange = useCallback(
+    (productId, rawValue, isBlur = false) => {
+      const numericStr = rawValue.replace(/[^0-9]/g, "");
+
+      setSendMrTableData((prev) =>
+        prev.map((p) => {
+          if (p.productId !== productId) return p;
+
+          let newQty = 0;
+
+          if (numericStr !== "") {
+            const parsed = parseInt(numericStr, 10);
+            newQty = Math.min(Math.max(0, parsed), p.totalBoxes || 0);
+          }
+
+          // If user is still typing (not blur), we allow temporary display value
+          // But we still clamp on blur or when value is final
+          return {
+            ...p,
+            sendQuantity: newQty,
+            // Optional: You can keep a separate display field if needed
+          };
+        }),
+      );
+    },
+    [],
+  );
 
   // ── Remove a row from the send table ────────────────────────────────────
   const handleRemoveSendItem = (productId) => {
@@ -954,16 +956,32 @@ const CreateStockTransfer = () => {
                   <input
                     type="text"
                     inputMode="numeric"
-                    value={p.sendQuantityDisplay ?? String(p.sendQuantity)}
+                    value={p.sendQuantity || ""} // still needed for controlled input
                     onChange={(e) =>
                       handleSendQtyChange(p.productId, e.target.value)
+                    }
+                    onFocus={(e) => e.target.select()}
+                    className="w-24 text-center border rounded-lg px-2 py-1.5 text-sm 
+             focus:ring-2 focus:ring-indigo-400 outline-none mx-auto block 
+             transition-colors"
+                    placeholder="0"
+                  />
+                  {/* <input
+                    type="text"
+                    inputMode="numeric"
+                    //value={p.sendQuantityDisplay ?? String(p.sendQuantity)}
+                    onChange={(e) =>
+                      handleSendQtyChange(p.productId, e.target.value, false)
+                    }
+                    onBlur={(e) =>
+                      handleSendQtyChange(p.productId, e.target.value, true)
                     }
                     className={`w-24 text-center border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400 outline-none mx-auto block transition-colors ${
                       (p.sendQuantity || 0) > 0
                         ? "border-indigo-400 bg-white font-semibold text-indigo-700"
                         : "border-gray-300 bg-white text-gray-500"
                     }`}
-                  />
+                  /> */}
                 </td>
                 <td className="px-4 py-3 text-center">
                   <button
@@ -1051,19 +1069,6 @@ const CreateStockTransfer = () => {
 
       {/* Footer summary + Add Product */}
       <div className="mt-3 flex items-center justify-between px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-        <p className="text-xs text-indigo-700">
-          <strong>{selectedSendItems.length}</strong> of{" "}
-          <strong>{sendMrTableData.length}</strong> product(s) with qty · total{" "}
-          <strong>
-            {selectedSendItems.reduce((s, p) => s + p.sendQuantity, 0)}
-          </strong>{" "}
-          boxes
-          {hasDeletedSendRows && !showAddRow && (
-            <span className="ml-2 text-amber-600 font-medium">
-              · {deletedSendProductOptions.length - 1} product(s) removed
-            </span>
-          )}
-        </p>
         {hasDeletedSendRows && !showAddRow && (
           <button
             type="button"
@@ -1641,7 +1646,6 @@ const CreateStockTransfer = () => {
 
                       {/* Table only shown after successful Excel import */}
                       {sendMrTableData.length > 0 && <SendProductTable />}
-
                     </>
                   )}
                 </>

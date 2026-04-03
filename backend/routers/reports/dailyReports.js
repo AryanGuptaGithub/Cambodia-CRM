@@ -56,14 +56,10 @@ router.get("/", async (req, res) => {
     // Build match conditions
     const matchConditions = {};
 
-    // Payment Status Condition
-    if (saleType && saleType !== "Total sales") {
-      if (saleType.toLowerCase().includes("cash")) {
-        matchConditions.paymentStatus = { $in: ["Cash", "Partial Paid"] };
-      } else if (saleType.toLowerCase().includes("credit")) {
-        matchConditions.paymentStatus = { $in: ["Credit", "Partial Paid"] };
-      }
-    }
+    // IMPORTANT: For Cash Sales tab - we want ALL invoices, but cash amount is paidAmount
+    // For Credit Sales tab - we want ALL invoices, but credit amount is dueAmount
+    // DO NOT filter by paymentStatus - that was the mistake!
+    // The saleType filter is only for display purposes, not for filtering records
 
     // Search Condition
     if (search?.trim()) {
@@ -136,12 +132,6 @@ router.get("/", async (req, res) => {
       basePipeline.push({ $match: matchConditions });
     }
 
-    // FIX: Use paidAmount for cash and dueAmount for credits directly.
-    // This ensures cash + credits = totalSalesAmount for ALL payment statuses:
-    // - Cash: paidAmount=totalAmount, dueAmount=0
-    // - Credit: paidAmount=0, dueAmount=totalAmount
-    // - Partial Paid: paidAmount + dueAmount = totalAmount
-    // - Any other status: still correctly split
     basePipeline.push({
       $group: {
         _id: { $toLower: { $trim: { input: "$mrName" } } },
@@ -154,9 +144,7 @@ router.get("/", async (req, res) => {
         totalSalesQty: { $sum: "$salesQty" },
         totalBonusQty: { $sum: "$bonusQty" },
         totalQty: { $sum: "$totalQty" },
-        // Credits = dueAmount (what's owed across all payment types)
         credits: { $sum: "$dueAmount" },
-        // Cash = paidAmount (what's been paid across all payment types)
         cash: { $sum: "$paidAmount" },
         uniqueCustomers: { $addToSet: "$customerCode" },
         latestInvoiceDate: { $max: "$invoiceDate" },
@@ -211,7 +199,7 @@ router.get("/", async (req, res) => {
       },
     });
 
-    // Project output
+    // Project output with proper date handling
     basePipeline.push({
       $project: {
         _id: 0,
@@ -228,10 +216,16 @@ router.get("/", async (req, res) => {
         cash: { $round: ["$cash", 2] },
         totalCustomers: { $size: "$uniqueCustomers" },
         date: {
-          $dateToString: {
-            format: "%Y-%m-%d",
-            date: "$latestInvoiceDate",
-            timezone: "Asia/Dhaka",
+          $cond: {
+            if: { $eq: ["$latestInvoiceDate", null] },
+            then: "",
+            else: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$latestInvoiceDate",
+                timezone: "Asia/Dhaka",
+              },
+            },
           },
         },
         latestInvoiceDate: 1,
@@ -315,11 +309,11 @@ router.get("/", async (req, res) => {
       },
     ];
 
-    // Summary pipeline
+    // Summary pipeline - NO paymentStatus filtering for cash/credit totals
+    // We want ALL invoices to calculate total cash (paidAmount) and total credits (dueAmount)
     const summaryMatchConditions = { ...matchConditions };
-    if (saleType === "Total sales" || !saleType) {
-      delete summaryMatchConditions.paymentStatus;
-    }
+    // Remove any paymentStatus filter for summary - we want all invoices
+    delete summaryMatchConditions.paymentStatus;
 
     const summaryPipelineStages = [
       ...(Object.keys(summaryMatchConditions).length > 0
@@ -332,7 +326,6 @@ router.get("/", async (req, res) => {
           totalOrders: { $sum: 1 },
           totalPaidAmount: { $sum: "$paidAmount" },
           totalDueAmount: { $sum: "$dueAmount" },
-          // FIX: credits = dueAmount, cash = paidAmount — always sums correctly
           credits: { $sum: "$dueAmount" },
           cash: { $sum: "$paidAmount" },
           uniqueCustomers: { $addToSet: "$customerCode" },
@@ -551,16 +544,8 @@ router.get("/export", async (req, res) => {
   try {
     const { saleType, startDate, endDate, dateFilter, search } = req.query;
 
-    // Build match conditions
+    // Build match conditions - NO paymentStatus filtering for export
     const matchConditions = {};
-
-    if (saleType && saleType !== "Total sales") {
-      if (saleType.toLowerCase().includes("cash")) {
-        matchConditions.paymentStatus = { $in: ["Cash", "Partial Paid"] };
-      } else if (saleType.toLowerCase().includes("credit")) {
-        matchConditions.paymentStatus = { $in: ["Credit", "Partial Paid"] };
-      }
-    }
 
     if (search?.trim()) {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
@@ -616,6 +601,29 @@ router.get("/export", async (req, res) => {
       }
     }
 
+    // Helper function to format currency without $ symbol
+    const formatCurrencyNoSymbol = (value) => {
+      if (value === null || value === undefined) return "0.00";
+      return value.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    };
+
+    // Helper function to format date for display
+    const formatDateForExcel = (date) => {
+      if (!date) return "";
+      const d = new Date(date);
+      if (isNaN(d.getTime())) return "";
+      const day = d.getUTCDate();
+      const month = d.toLocaleString("default", {
+        month: "long",
+        timeZone: "UTC",
+      });
+      const year = d.getUTCFullYear();
+      return `${day} ${month} ${year}`;
+    };
+
     // Build export pipeline
     const exportPipeline = [];
 
@@ -623,7 +631,6 @@ router.get("/export", async (req, res) => {
       exportPipeline.push({ $match: matchConditions });
     }
 
-    // FIX: credits = dueAmount, cash = paidAmount — always sums correctly
     exportPipeline.push({
       $group: {
         _id: { $toLower: { $trim: { input: "$mrName" } } },
@@ -631,9 +638,7 @@ router.get("/export", async (req, res) => {
         mrId: { $first: "$mrId" },
         totalSalesAmount: { $sum: "$totalAmount" },
         totalOrders: { $sum: 1 },
-        // Credits = dueAmount (what's owed)
         credits: { $sum: "$dueAmount" },
-        // Cash = paidAmount (what's been paid)
         cash: { $sum: "$paidAmount" },
         latestInvoiceDate: { $max: "$invoiceDate" },
       },
@@ -699,13 +704,7 @@ router.get("/export", async (req, res) => {
         totalOrders: 1,
         credits: { $round: ["$credits", 2] },
         cash: { $round: ["$cash", 2] },
-        date: {
-          $dateToString: {
-            format: "%Y-%m-%d",
-            date: "$latestInvoiceDate",
-            timezone: "Asia/Dhaka",
-          },
-        },
+        date: "$latestInvoiceDate",
         mrContactNo: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
@@ -791,11 +790,7 @@ router.get("/export", async (req, res) => {
 
     // Summary pipeline for export
     const exportSummaryMatchConditions = { ...matchConditions };
-    if (saleType === "Total sales" || !saleType) {
-      delete exportSummaryMatchConditions.paymentStatus;
-    }
 
-    // FIX: credits = dueAmount, cash = paidAmount in summary too
     const summaryPipeline = [
       ...(Object.keys(exportSummaryMatchConditions).length > 0
         ? [{ $match: exportSummaryMatchConditions }]
@@ -836,14 +831,14 @@ router.get("/export", async (req, res) => {
 
     const summaryRow = worksheet.getRow(3);
     summaryRow.getCell(1).value =
-      `Summary: Total Sales: ${formatCurrency(summary.totalSalesAmount)} | Total Orders: ${summary.totalOrders} | Total MRs: ${summary.totalMRs} | Total Customers: ${summary.totalCustomers} | Credits: ${formatCurrency(summary.credits)} | Cash: ${formatCurrency(summary.cash)}`;
+      `Summary: Total Sales: ${formatCurrencyNoSymbol(summary.totalSalesAmount)} | Total Orders: ${summary.totalOrders} | Total MRs: ${summary.totalMRs} | Total Customers: ${summary.totalCustomers} | Credits: ${formatCurrencyNoSymbol(summary.credits)} | Cash: ${formatCurrencyNoSymbol(summary.cash)}`;
     summaryRow.getCell(1).font = { bold: true };
     summaryRow.getCell(1).alignment = { horizontal: "center" };
     worksheet.mergeCells(3, 1, 3, columnCount);
 
     worksheet.getRow(4); // Empty row
 
-    // Define headers
+    // Define headers (without $ symbol in header text)
     let headers = [];
     if (saleType === "Cash Sales") {
       headers = [
@@ -852,8 +847,8 @@ router.get("/export", async (req, res) => {
         "Contact No.",
         "Email",
         "Team",
-        "Cash ($)",
-        "Total Sales ($)",
+        "Cash",
+        "Total Sales",
         "Date",
       ];
       columnCount = 8;
@@ -864,8 +859,8 @@ router.get("/export", async (req, res) => {
         "Contact No.",
         "Email",
         "Team",
-        "Credits ($)",
-        "Total Sales ($)",
+        "Credits",
+        "Total Sales",
         "Date",
       ];
       columnCount = 8;
@@ -876,9 +871,9 @@ router.get("/export", async (req, res) => {
         "Contact No.",
         "Email",
         "Team",
-        "Credits ($)",
-        "Cash ($)",
-        "Total Sales ($)",
+        "Credits",
+        "Cash",
+        "Total Sales",
         "Date",
       ];
       columnCount = 9;
@@ -917,32 +912,40 @@ router.get("/export", async (req, res) => {
       row.getCell(col++).value = record.mrTeamName;
 
       if (saleType === "Cash Sales") {
-        row.getCell(col).value = record.cash;
-        row.getCell(col).numFmt = "$#,##0.00";
+        row.getCell(col).value = formatCurrencyNoSymbol(record.cash);
+        row.getCell(col).alignment = { horizontal: "right" };
         col++;
-        row.getCell(col).value = record.totalSalesAmount;
-        row.getCell(col).numFmt = "$#,##0.00";
+        row.getCell(col).value = formatCurrencyNoSymbol(
+          record.totalSalesAmount,
+        );
+        row.getCell(col).alignment = { horizontal: "right" };
         col++;
       } else if (saleType === "Credit Sales") {
-        row.getCell(col).value = record.credits;
-        row.getCell(col).numFmt = "$#,##0.00";
+        row.getCell(col).value = formatCurrencyNoSymbol(record.credits);
+        row.getCell(col).alignment = { horizontal: "right" };
         col++;
-        row.getCell(col).value = record.totalSalesAmount;
-        row.getCell(col).numFmt = "$#,##0.00";
+        row.getCell(col).value = formatCurrencyNoSymbol(
+          record.totalSalesAmount,
+        );
+        row.getCell(col).alignment = { horizontal: "right" };
         col++;
       } else {
-        row.getCell(col).value = record.credits;
-        row.getCell(col).numFmt = "$#,##0.00";
+        row.getCell(col).value = formatCurrencyNoSymbol(record.credits);
+        row.getCell(col).alignment = { horizontal: "right" };
         col++;
-        row.getCell(col).value = record.cash;
-        row.getCell(col).numFmt = "$#,##0.00";
+        row.getCell(col).value = formatCurrencyNoSymbol(record.cash);
+        row.getCell(col).alignment = { horizontal: "right" };
         col++;
-        row.getCell(col).value = record.totalSalesAmount;
-        row.getCell(col).numFmt = "$#,##0.00";
+        row.getCell(col).value = formatCurrencyNoSymbol(
+          record.totalSalesAmount,
+        );
+        row.getCell(col).alignment = { horizontal: "right" };
         col++;
       }
 
-      row.getCell(col).value = record.date;
+      // Format date as "25 March 2026"
+      row.getCell(col).value = formatDateForExcel(record.date);
+      row.getCell(col).alignment = { horizontal: "center" };
 
       // Borders and alignment for all cells
       for (let i = 1; i <= columnCount; i++) {
@@ -953,7 +956,13 @@ router.get("/export", async (req, res) => {
           bottom: { style: "thin" },
           right: { style: "thin" },
         };
-        cell.alignment = { horizontal: "center", vertical: "middle" };
+        if (i === 1) {
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        } else if (i === 6 || i === 7 || i === 8) {
+          cell.alignment = { horizontal: "right", vertical: "middle" };
+        } else {
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+        }
       }
     });
 

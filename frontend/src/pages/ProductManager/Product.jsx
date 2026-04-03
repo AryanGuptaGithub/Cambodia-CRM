@@ -17,6 +17,8 @@ import {
   Menu,
   AlertCircle,
   CheckCircle,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -346,7 +348,10 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
       const res = await axios.post(
         `${backendUrl}/api/products/import`,
         uniqueData,
-        { headers: { "Content-Type": "application/json" }, timeout: 60000 },
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 60000,
+        },
       );
       if (res.status === 200) {
         showToast(
@@ -372,7 +377,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile }) => {
   };
 
   if (!isOpen) return null;
-
   const isDuplicateRow = (row) => duplicateRows.includes(row);
 
   return ReactDOM.createPortal(
@@ -529,6 +533,7 @@ const Product = () => {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [selectedTab, setSelectedTab] = useState("All");
+  const [statusFilter, setStatusFilter] = useState("all"); // "all" | "active" | "inactive"
   const [searchTerm, setSearchTerm] = useState("");
   const [selected, setSelected] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -547,6 +552,7 @@ const Product = () => {
     totalItems: 0,
     itemsPerPage: 9,
   });
+  const [togglingId, setTogglingId] = useState(null); // track which product is being toggled
   const inputRef = useRef(null);
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
 
@@ -643,14 +649,16 @@ const Product = () => {
     page = 1,
     search = searchTerm,
     type = selectedTab,
+    status = statusFilter,
   ) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         page: page.toString(),
         limit: "9",
-        search: search,
+        search,
         type: type === "All" ? "" : type,
+        status, // "all" | "active" | "inactive"
       });
       const response = await fetch(
         `${backendUrl}/api/products/paginated?` + params,
@@ -672,12 +680,12 @@ const Product = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-    fetchProducts(1, debouncedSearchTerm, selectedTab);
-  }, [debouncedSearchTerm, selectedTab]);
+    fetchProducts(1, debouncedSearchTerm, selectedTab, statusFilter);
+  }, [debouncedSearchTerm, selectedTab, statusFilter]);
 
   const handlePageChange = (page) => {
     setCurrentPage(page);
-    fetchProducts(page, searchTerm, selectedTab);
+    fetchProducts(page, searchTerm, selectedTab, statusFilter);
   };
 
   const toggleSelect = useCallback((product) => {
@@ -694,6 +702,45 @@ const Product = () => {
     },
     [products],
   );
+
+  // ── Toggle isActive ───────────────────────────────────────────────────────
+  const handleToggleStatus = async (product) => {
+    const action = product.isActive ? "disable" : "enable";
+    const displayName = product.productName;
+
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to <b>${action}</b> <b>${displayName}</b>?`,
+      icon: "warning",
+      confirmButtonText: `Yes, ${action}`,
+      cancelButtonText: "Cancel",
+    });
+    if (!confirm.isConfirmed) return;
+
+    setTogglingId(product._id);
+    try {
+      const res = await axios.patch(
+        `${backendUrl}/api/products/${product._id}/toggle-status`,
+      );
+      showToast(
+        "success",
+        res.data.message || `Product ${action}d successfully`,
+      );
+      // Update in-place so the row updates immediately without full refetch
+      setProducts((prev) =>
+        prev.map((p) =>
+          p._id === product._id ? { ...p, isActive: res.data.isActive } : p,
+        ),
+      );
+    } catch (err) {
+      showToast(
+        "error",
+        err.response?.data?.message || `Failed to ${action} product`,
+      );
+    } finally {
+      setTogglingId(null);
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   const handleImportClick = () => {
     if (!suppliers || suppliers.length === 0) {
@@ -737,7 +784,6 @@ const Product = () => {
     setIsEditModalOpen(false);
     setForm(initialFormState);
   };
-
   const closeViewModal = () => {
     setIsViewModalOpen(false);
     setForm(initialFormState);
@@ -836,9 +882,8 @@ const Product = () => {
 
   const handleNumericInput = (e, field) => {
     const value = e.target.value;
-    if (value === "" || /^\d+$/.test(value)) {
+    if (value === "" || /^\d+$/.test(value))
       setForm({ ...form, [field]: value });
-    }
   };
 
   const handleTypeChange = useCallback(
@@ -865,10 +910,15 @@ const Product = () => {
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
     setCurrentPage(1);
-    fetchProducts(1, searchTerm, tab);
+    fetchProducts(1, searchTerm, tab, statusFilter);
   };
 
   const handleSearch = (e) => setSearchTerm(e.target.value);
+
+  const handleStatusFilterChange = (newStatus) => {
+    setStatusFilter(newStatus);
+    setCurrentPage(1);
+  };
 
   const visiblePages = getVisiblePages(currentPage, paginationInfo.totalPages);
 
@@ -932,7 +982,6 @@ const Product = () => {
 
   return (
     <div className="p-4 md:p-6 relative pb-20 md:pb-6">
-      {/* Sidebar for mobile */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -959,7 +1008,6 @@ const Product = () => {
       {/* ── DESKTOP top action bar ── */}
       {!isMobileView && (
         <div className="flex items-center justify-between mb-5">
-          {/* Left side buttons */}
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate("/productmanagerlayout/addproduct")}
@@ -986,8 +1034,6 @@ const Product = () => {
               </button>
             )}
           </div>
-
-          {/* Right side export button */}
           <div className="flex items-center gap-3">
             <button
               onClick={handleDownloadAll}
@@ -1000,38 +1046,62 @@ const Product = () => {
         </div>
       )}
 
-      {/* ── DESKTOP: tabs (only if products exist) + total count + search ── */}
+      {/* ── DESKTOP: status filter + type tabs + search ── */}
       {!isMobileView && (
         <div className="flex items-center justify-between gap-4 mb-4">
-          {/* Left: type tabs - hidden when no products */}
-          {products.length > 0 && (
-            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide flex-shrink-0">
-              <button
-                onClick={() => handleTabChange("All")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
-                  selectedTab === "All"
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 text-gray-700"
-                }`}
-              >
-                All
-              </button>
-              {types.map((tab) => (
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            {/* <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+              {[
+                { key: "all", label: "All" },
+                { key: "active", label: "Enabled" },
+                { key: "inactive", label: "Disabled" },
+              ].map(({ key, label }) => (
+                <button key={key} onClick={() => handleStatusFilterChange(key)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition ${
+                    statusFilter === key
+                      ? key === "active"
+                        ? "bg-green-600 text-white"
+                        : key === "inactive"
+                        ? "bg-red-500 text-white"
+                        : "bg-indigo-600 text-white"
+                      : "text-gray-600 hover:bg-gray-200"
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div> */}
+
+            {/* Type tabs — hidden when no products */}
+            {products.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
                 <button
-                  key={tab}
-                  onClick={() => handleTabChange(tab)}
+                  onClick={() => handleTabChange("All")}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
-                    selectedTab === tab
+                    selectedTab === "All"
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 text-gray-700"
                   }`}
                 >
-                  {formatDisplayText(tab)}
+                  All
                 </button>
-              ))}
-            </div>
-          )}
-          {/* Right: total count + search - always visible */}
+                {types.map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => handleTabChange(tab)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                      selectedTab === tab
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 text-gray-700"
+                    }`}
+                  >
+                    {formatDisplayText(tab)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right: total count + search */}
           <div
             className={`flex items-center gap-4 flex-shrink-0 ${products.length === 0 ? "ml-auto" : ""}`}
           >
@@ -1060,7 +1130,7 @@ const Product = () => {
         </div>
       )}
 
-      {/* ── MOBILE: tabs scroll row (always visible) ── */}
+      {/* ── MOBILE: tabs + search ── */}
       {isMobileView && types.length > 0 && (
         <div className="mb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
           <div className="flex gap-2 pb-2">
@@ -1091,7 +1161,6 @@ const Product = () => {
         </div>
       )}
 
-      {/* ── MOBILE: search bar ── */}
       {isMobileView && (
         <div className="relative mt-2 mb-3">
           <Search
@@ -1108,7 +1177,6 @@ const Product = () => {
         </div>
       )}
 
-      {/* Search result info */}
       {searchTerm && paginationInfo.totalItems > 0 && (
         <div className="mb-4 p-3 bg-blue-50 rounded-lg">
           <p
@@ -1167,6 +1235,10 @@ const Product = () => {
               <th className="p-2 md:p-3 text-xs md:text-sm font-medium">
                 Validity
               </th>
+              {/* ── NEW STATUS COLUMN ── */}
+              <th className="p-2 md:p-3 text-xs md:text-sm font-medium">
+                Status
+              </th>
               <th className="p-2 md:p-3 text-xs md:text-sm font-medium">
                 Action
               </th>
@@ -1175,7 +1247,7 @@ const Product = () => {
           <tbody>
             {products.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-4 text-center text-gray-500">
+                <td colSpan={9} className="p-4 text-center text-gray-500">
                   {loading ? "Loading..." : "No products found."}
                 </td>
               </tr>
@@ -1183,7 +1255,9 @@ const Product = () => {
               products.map((product, idx) => (
                 <tr
                   key={product._id}
-                  className={`hover:bg-gray-50 ${idx + 1 < products.length ? "border-b" : ""}`}
+                  className={`hover:bg-gray-50 ${idx + 1 < products.length ? "border-b" : ""} ${
+                    !product.isActive ? "opacity-60" : ""
+                  }`}
                 >
                   {!isMobileView && (
                     <td className="p-3">
@@ -1220,8 +1294,22 @@ const Product = () => {
                   <td className="p-2 md:p-3 text-xs md:text-sm">
                     {formatDateUTC(product.licenseValidityDate)}
                   </td>
+
+                  {/* ── STATUS BADGE ── */}
                   <td className="p-2 md:p-3">
-                    <div className="flex items-center justify-center gap-1 md:gap-3">
+                    <span
+                      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                        product.isActive
+                          ? "bg-green-100 text-green-700"
+                          : "bg-red-100 text-red-600"
+                      }`}
+                    >
+                      {product.isActive ? "Enabled" : "Disabled"}
+                    </span>
+                  </td>
+
+                  <td className="p-2 md:p-3">
+                    <div className="flex items-center justify-center gap-1 md:gap-2">
                       <button
                         className="text-blue-600 hover:text-blue-800 p-1"
                         onClick={() => handleView(product)}
@@ -1238,6 +1326,31 @@ const Product = () => {
                           >
                             <Edit size={18} />
                           </button>
+
+                          {/* ── TOGGLE BUTTON ── */}
+                          <button
+                            onClick={() => handleToggleStatus(product)}
+                            disabled={togglingId === product._id}
+                            title={
+                              product.isActive
+                                ? "Disable product"
+                                : "Enable product"
+                            }
+                            className={`p-1 transition-colors disabled:opacity-40 ${
+                              product.isActive
+                                ? "text-green-600 hover:text-red-500"
+                                : "text-red-400 hover:text-green-600"
+                            }`}
+                          >
+                            {togglingId === product._id ? (
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+                            ) : product.isActive ? (
+                              <ToggleRight size={20} />
+                            ) : (
+                              <ToggleLeft size={20} />
+                            )}
+                          </button>
+
                           <button
                             className="text-red-600 hover:text-red-800 p-1"
                             onClick={() => deleteProduct(product)}
@@ -1268,26 +1381,24 @@ const Product = () => {
               ← Prev
             </button>
             {!isMobileView ? (
-              <>
-                {visiblePages.map((page, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() =>
-                      typeof page === "number" && handlePageChange(page)
-                    }
-                    disabled={page === "..."}
-                    className={`px-4 py-2 rounded text-sm ${
-                      page === "..."
-                        ? "bg-gray-200 cursor-not-allowed"
-                        : currentPage === page
-                          ? "bg-indigo-600 text-white"
-                          : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-              </>
+              visiblePages.map((page, idx) => (
+                <button
+                  key={idx}
+                  onClick={() =>
+                    typeof page === "number" && handlePageChange(page)
+                  }
+                  disabled={page === "..."}
+                  className={`px-4 py-2 rounded text-sm ${
+                    page === "..."
+                      ? "bg-gray-200 cursor-not-allowed"
+                      : currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))
             ) : (
               <span className="px-3 py-1 text-sm text-gray-700 font-medium">
                 Page {currentPage} of {paginationInfo.totalPages}
@@ -1379,6 +1490,21 @@ const Product = () => {
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
                     {formatDateUTC(form.licenseValidityDate)}
+                  </p>
+                </div>
+                {/* ── STATUS in view modal ── */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Status
+                  </label>
+                  <p
+                    className={`border px-3 py-2 rounded-lg font-medium ${
+                      form.isActive !== false
+                        ? "bg-green-50 text-green-700"
+                        : "bg-red-50 text-red-600"
+                    }`}
+                  >
+                    {form.isActive !== false ? "Enabled" : "Disabled"}
                   </p>
                 </div>
                 <div className="md:col-span-2">

@@ -54,6 +54,22 @@ const isSampleDownloadFile =
 
 const DEFAULT_CREDIT_DAYS = 30;
 
+// ── Role helper ──────────────────────────────────────────────────────────────
+const getCurrentUserRole = () => {
+  try {
+    const token = localStorage.getItem("token");
+    if (!token) return null;
+    // JWT payload is the second segment (base64url encoded)
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload?.role || null;
+  } catch {
+    return null;
+  }
+};
+
+const isSuperAdmin = () => getCurrentUserRole() === "super admin";
+// ─────────────────────────────────────────────────────────────────────────────
+
 const getAuthHeaders = () => {
   const token = localStorage.getItem("token");
   return {
@@ -149,112 +165,6 @@ const DuplicateInvoicesModal = ({
 };
 
 // ==========================================
-// Helper: Parse and group failed invoices
-// ==========================================
-const groupFailedInvoicesByMRAndProduct = (failedInvoices) => {
-  const grouped = new Map();
-
-  failedInvoices.forEach((inv) => {
-    const invoiceNumber = inv.invoiceNumber || inv.row || "Unknown";
-    const errorMsg = inv.error || inv.message || "";
-
-    let mrName = inv.mrName || "Unknown MR";
-    let productName = inv.productName || null;
-    let needed = null;
-    let available = null;
-
-    const notFoundMatch = errorMsg.match(
-      /Product\s+"([^"]+)"\s+not found in\s+(.+?)(?:'s stock|'s hand stock)/i,
-    );
-    if (notFoundMatch) {
-      productName = notFoundMatch[1].trim();
-      mrName = notFoundMatch[2].trim();
-      needed = null;
-      available = 0;
-    }
-
-    const insufficientMatch = errorMsg.match(
-      /Insufficient MR stock.*?Required\s+([\d.]+),\s*Available\s+([\d.]+)/i,
-    );
-    if (insufficientMatch) {
-      needed = parseFloat(insufficientMatch[1]);
-      available = parseFloat(insufficientMatch[2]);
-      const forProductMatch = errorMsg.match(
-        /Insufficient MR stock for\s+"?([^".]+?)"?\.\s*Required/i,
-      );
-      if (forProductMatch) {
-        productName = forProductMatch[1].trim();
-      }
-    }
-
-    const detailedInsufficientMatch = errorMsg.match(
-      /Insufficient.*?stock for\s+"?([^".]+?)"?\.\s*(?:Available|Required):\s*([\d.]+),?\s*(?:Available|Required):\s*([\d.]+)/i,
-    );
-    if (detailedInsufficientMatch) {
-      productName = detailedInsufficientMatch[1].trim();
-      if (/Required.*Available/i.test(errorMsg)) {
-        needed = parseFloat(detailedInsufficientMatch[2]);
-        available = parseFloat(detailedInsufficientMatch[3]);
-      } else {
-        available = parseFloat(detailedInsufficientMatch[2]);
-        needed = parseFloat(detailedInsufficientMatch[3]);
-      }
-    }
-
-    const deductionFailMatch = errorMsg.match(
-      /stock deduction failed for\s+"?([^":]+?)"?:\s*/i,
-    );
-    if (deductionFailMatch && !productName) {
-      productName = deductionFailMatch[1].trim();
-    }
-
-    if (!productName) productName = "Unknown Product";
-    if (!mrName || mrName === "N/A") mrName = "Unknown MR";
-
-    if (!grouped.has(mrName)) {
-      grouped.set(mrName, new Map());
-    }
-    const mrGroup = grouped.get(mrName);
-
-    if (!mrGroup.has(productName)) {
-      mrGroup.set(productName, {
-        productName,
-        needed: needed || 0,
-        available: available !== null ? available : 0,
-        invoices: [],
-        rawErrors: [],
-        errorType: notFoundMatch ? "not_found" : "insufficient",
-      });
-    }
-
-    const productGroup = mrGroup.get(productName);
-
-    if (needed !== null && needed > 0) {
-      productGroup.needed = (productGroup.needed || 0) + needed;
-    }
-
-    if (available !== null) {
-      if (
-        productGroup.available === null ||
-        productGroup.available === undefined
-      ) {
-        productGroup.available = available;
-      } else {
-        productGroup.available = Math.min(productGroup.available, available);
-      }
-    }
-
-    const invNum = String(invoiceNumber);
-    if (!productGroup.invoices.includes(invNum)) {
-      productGroup.invoices.push(invNum);
-    }
-    productGroup.rawErrors.push(errorMsg);
-  });
-
-  return grouped;
-};
-
-// ==========================================
 // StockValidationModal
 // ==========================================
 const StockValidationModal = ({
@@ -273,7 +183,6 @@ const StockValidationModal = ({
     stockIssues = [],
     summary = {},
     importBlocked = false,
-    message = "",
   } = stockValidationResult;
 
   const isBlocked =
@@ -363,7 +272,7 @@ const StockValidationModal = ({
             <>
               <p className="font-semibold text-red-800">
                 ⛔ IMPORT BLOCKED: {summary.totalInsufficient || 0} products
-                have insufficient stock. You must:
+                have insufficient stock.
               </p>
               <ol className="mt-2 text-sm text-red-700 list-decimal list-inside space-y-1">
                 <li>Update inventory to have sufficient stock</li>
@@ -375,18 +284,13 @@ const StockValidationModal = ({
             <>
               <p className="font-semibold text-yellow-800">
                 ⚠️ Missing Products Found: {summary.missingProducts || 0}{" "}
-                products are not in inventory. These products will:
+                products are not in inventory.
               </p>
               <ol className="mt-2 text-sm text-yellow-700 list-decimal list-inside space-y-1">
                 <li>Be created automatically during import</li>
-                <li>
-                  Have zero initial stock (you'll need to add inventory later)
-                </li>
+                <li>Have zero initial stock</li>
                 <li>Appear in your product catalog</li>
               </ol>
-              <p className="mt-2 text-sm text-yellow-700">
-                You can proceed if you want to create these products.
-              </p>
             </>
           )}
         </div>
@@ -436,10 +340,6 @@ const StockValidationModal = ({
           </div>
         </div>
 
-        <p className="text-sm text-gray-500 mb-4">
-          {summary.totalInvoices || 0} invoices affected
-        </p>
-
         <div className="flex justify-end gap-3">
           {isBlocked ? (
             <button
@@ -481,8 +381,7 @@ const MRValidationModal = ({
   onProceed,
 }) => {
   if (!isOpen || !mrValidationResult) return null;
-
-  const { mrIssues = [], summary = {}, totalInvoices = 0 } = mrValidationResult;
+  const { mrIssues = [] } = mrValidationResult;
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
@@ -493,29 +392,22 @@ const MRValidationModal = ({
         >
           <X size={20} />
         </button>
-
         <h2 className="text-xl font-semibold text-gray-800 mb-2">
           ⚠️ Invalid MRs Detected
         </h2>
         <div className="inline-block bg-yellow-100 text-yellow-800 text-sm px-3 py-1 rounded-full mb-4">
           {mrIssues.length} Invalid MRs
         </div>
-
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4 text-sm text-yellow-800">
           <p className="font-semibold mb-1">
-            ⚠️ Warning: The following MRs are not registered in the Staff
-            system. These invoices will still be imported, but:
+            ⚠️ Warning: These MRs are not registered in the Staff system.
           </p>
           <ol className="list-decimal list-inside space-y-1">
             <li>MR names will be saved as provided</li>
             <li>You can add these MRs to Staff module later</li>
             <li>Reports may show "Unknown" for unregistered MRs</li>
           </ol>
-          <p className="mt-2">
-            You can proceed with import if this is acceptable.
-          </p>
         </div>
-
         <div className="border border-gray-200 rounded-lg overflow-hidden mb-4">
           <div className="bg-gray-50 px-4 py-2 font-medium text-sm">
             Invalid MRs List ({mrIssues.length} MRs)
@@ -548,11 +440,6 @@ const MRValidationModal = ({
             </table>
           </div>
         </div>
-
-        <p className="text-xs text-gray-500 mb-4">
-          Warning: MRs not found in Staff module
-        </p>
-
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
@@ -573,19 +460,20 @@ const MRValidationModal = ({
   );
 };
 
+// ==========================================
+// FailedInvoicesModal
+// ==========================================
 const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedRow, setExpandedRow] = useState(null);
   const [filterType, setFilterType] = useState("all");
 
   if (!isOpen) return null;
-
   const list = failedInvoices || [];
 
   const classify = (inv) => {
     const msg = (inv.message || inv.error || "").toLowerCase();
     const type = (inv.type || "").toLowerCase();
-
     if (
       type === "duplicate_skipped" ||
       msg.includes("duplicate") ||
@@ -660,43 +548,6 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
     return matchesType && matchesSearch;
   });
 
-  const downloadReport = () => {
-    try {
-      const rows = list.map((inv, idx) => ({
-        "S.No": idx + 1,
-        "Row (Excel)": inv.row || "",
-        "Invoice Number": inv.invoiceNumber || "Unknown",
-        "MR Name": inv.mrName || "",
-        "Customer Name": inv.customerName || "",
-        "Error Category": classify(inv).label,
-        "Reason / Message": inv.message || inv.error || "Unknown error",
-        "Error Type Code": inv.type || "",
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(rows);
-      ws["!cols"] = [
-        { wch: 6 },
-        { wch: 10 },
-        { wch: 20 },
-        { wch: 22 },
-        { wch: 26 },
-        { wch: 22 },
-        { wch: 80 },
-        { wch: 22 },
-      ];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Failed Invoices");
-      XLSX.writeFile(
-        wb,
-        `failed_invoices_${new Date().toISOString().slice(0, 10)}.xlsx`,
-      );
-      showToast("success", "Failed invoices report downloaded");
-    } catch (err) {
-      console.error(err);
-      showToast("error", "Failed to download report");
-    }
-  };
-
   const fixTips = {
     Duplicate:
       "These invoices already exist. Remove them from your Excel file and re-import.",
@@ -712,6 +563,31 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
       "Required fields are missing or have invalid values (e.g. Invoice Number or Qty).",
     "Import Error":
       "Unexpected error. Read the full reason below and fix the data in your file.",
+  };
+
+  const downloadReport = () => {
+    try {
+      const rows = list.map((inv, idx) => ({
+        "S.No": idx + 1,
+        "Row (Excel)": inv.row || "",
+        "Invoice Number": inv.invoiceNumber || "Unknown",
+        "MR Name": inv.mrName || "",
+        "Customer Name": inv.customerName || "",
+        "Error Category": classify(inv).label,
+        "Reason / Message": inv.message || inv.error || "Unknown error",
+        "Error Type Code": inv.type || "",
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Failed Invoices");
+      XLSX.writeFile(
+        wb,
+        `failed_invoices_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      showToast("success", "Failed invoices report downloaded");
+    } catch (err) {
+      showToast("error", "Failed to download report");
+    }
   };
 
   return ReactDOM.createPortal(
@@ -752,9 +628,7 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
                 <button
                   key={label}
                   onClick={() => setFilterType(active ? "all" : label)}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer select-none transition-all
-                    ${color}
-                    ${active ? "ring-2 ring-offset-1 ring-current shadow-sm scale-105" : "opacity-75 hover:opacity-100"}`}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer select-none transition-all ${color} ${active ? "ring-2 ring-offset-1 ring-current shadow-sm scale-105" : "opacity-75 hover:opacity-100"}`}
                 >
                   {label}: {count}
                 </button>
@@ -788,170 +662,126 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
               onClick={downloadReport}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors cursor-pointer"
             >
-              <Download size={15} />
-              Download Report (.xlsx)
+              <Download size={15} /> Download Report (.xlsx)
             </button>
           </div>
 
           {filtered.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">
-              {searchTerm || filterType !== "all"
-                ? "No results match your search / filter."
-                : "No failed invoices to display."}
+              No results match your search / filter.
             </div>
           ) : (
-            <>
-              <div className="border border-gray-200 rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-red-50 text-red-800">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold w-16">
-                        Row
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold min-w-[130px]">
-                        Invoice No
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold min-w-[120px]">
-                        MR Name
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold min-w-[130px]">
-                        Customer
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold min-w-[140px]">
-                        Error Type
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold">
-                        Reason
-                      </th>
-                      <th className="px-4 py-3 w-8"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((inv, idx) => {
-                      const { label, color } = classify(inv);
-                      const reason =
-                        inv.message || inv.error || "Unknown error";
-                      const isLong = reason.length > 90;
-                      const isExpanded = expandedRow === idx;
-
-                      return (
-                        <React.Fragment key={idx}>
-                          <tr
-                            className={`border-t transition-colors ${
-                              isExpanded
-                                ? "bg-red-50"
-                                : idx % 2 === 0
-                                  ? "bg-white"
-                                  : "bg-gray-50/50"
-                            }`}
-                          >
-                            <td className="px-4 py-3 text-gray-400 text-xs font-mono">
-                              {inv.row ? `#${inv.row}` : "—"}
-                            </td>
-                            <td className="px-4 py-3 font-semibold text-gray-800">
-                              {inv.invoiceNumber || "Unknown"}
-                            </td>
-                            <td className="px-4 py-3 text-gray-600 text-xs">
-                              {inv.mrName || "—"}
-                            </td>
-                            <td className="px-4 py-3 text-gray-600 text-xs">
-                              {inv.customerName || "—"}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span
-                                className={`text-xs font-semibold px-2 py-1 rounded-full border ${color}`}
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-red-50 text-red-800">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold w-16">
+                      Row
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold min-w-[130px]">
+                      Invoice No
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold min-w-[120px]">
+                      MR Name
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold min-w-[130px]">
+                      Customer
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold min-w-[140px]">
+                      Error Type
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold">
+                      Reason
+                    </th>
+                    <th className="px-4 py-3 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((inv, idx) => {
+                    const { label, color } = classify(inv);
+                    const reason = inv.message || inv.error || "Unknown error";
+                    const isLong = reason.length > 90;
+                    const isExpanded = expandedRow === idx;
+                    return (
+                      <React.Fragment key={idx}>
+                        <tr
+                          className={`border-t transition-colors ${isExpanded ? "bg-red-50" : idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}`}
+                        >
+                          <td className="px-4 py-3 text-gray-400 text-xs font-mono">
+                            {inv.row ? `#${inv.row}` : "—"}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-gray-800">
+                            {inv.invoiceNumber || "Unknown"}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">
+                            {inv.mrName || "—"}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">
+                            {inv.customerName || "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`text-xs font-semibold px-2 py-1 rounded-full border ${color}`}
+                            >
+                              {label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-red-700 text-xs max-w-xs leading-relaxed">
+                            {isLong && !isExpanded
+                              ? `${reason.slice(0, 90)}…`
+                              : reason}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {isLong && (
+                              <button
+                                onClick={() =>
+                                  setExpandedRow(isExpanded ? null : idx)
+                                }
+                                className="text-gray-400 hover:text-gray-700 cursor-pointer"
                               >
-                                {label}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-red-700 text-xs max-w-xs leading-relaxed">
-                              {isLong && !isExpanded
-                                ? `${reason.slice(0, 90)}…`
-                                : reason}
-                            </td>
-                            <td className="px-3 py-3 text-center">
-                              {isLong && (
-                                <button
-                                  onClick={() =>
-                                    setExpandedRow(isExpanded ? null : idx)
-                                  }
-                                  className="text-gray-400 hover:text-gray-700 cursor-pointer"
-                                  title={
-                                    isExpanded ? "Collapse" : "See full reason"
-                                  }
-                                >
-                                  {isExpanded ? (
-                                    <ChevronDown size={15} />
-                                  ) : (
-                                    <ChevronRight size={15} />
-                                  )}
-                                </button>
+                                {isExpanded ? (
+                                  <ChevronDown size={15} />
+                                ) : (
+                                  <ChevronRight size={15} />
+                                )}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="border-t border-red-100 bg-red-50">
+                            <td colSpan={7} className="px-6 py-3 space-y-2">
+                              <div className="bg-white border border-red-200 rounded-lg p-3 text-xs text-red-800 font-mono break-all whitespace-pre-wrap leading-relaxed">
+                                {reason}
+                              </div>
+                              {fixTips[label] && (
+                                <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                  <AlertTriangle
+                                    size={13}
+                                    className="flex-shrink-0 mt-0.5"
+                                  />
+                                  <span>
+                                    <strong>How to fix:</strong>{" "}
+                                    {fixTips[label]}
+                                  </span>
+                                </div>
                               )}
                             </td>
                           </tr>
-
-                          {isExpanded && (
-                            <tr className="border-t border-red-100 bg-red-50">
-                              <td colSpan={7} className="px-6 py-3 space-y-2">
-                                <div className="bg-white border border-red-200 rounded-lg p-3 text-xs text-red-800 font-mono break-all whitespace-pre-wrap leading-relaxed">
-                                  {reason}
-                                </div>
-                                {fixTips[label] && (
-                                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                                    <AlertTriangle
-                                      size={13}
-                                      className="flex-shrink-0 mt-0.5"
-                                    />
-                                    <span>
-                                      <strong>How to fix:</strong>{" "}
-                                      {fixTips[label]}
-                                    </span>
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {(searchTerm || filterType !== "all") && (
-                <p className="text-xs text-gray-400 text-right">
-                  Showing {filtered.length} of {list.length} failed invoices
-                </p>
-              )}
-            </>
-          )}
-
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-            <p className="text-sm font-bold text-amber-800 mb-3 flex items-center gap-2">
-              <AlertTriangle size={16} />
-              Common Causes &amp; How to Fix Them
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
-              {Object.entries(fixTips).map(([cat, tip]) => (
-                <div
-                  key={cat}
-                  className="flex items-start gap-1.5 text-xs text-amber-700"
-                >
-                  <span className="font-bold flex-shrink-0 mt-0.5">•</span>
-                  <span>
-                    <strong>{cat}:</strong> {tip}
-                  </span>
-                </div>
-              ))}
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex-shrink-0">
           <p className="text-xs text-gray-500">
-            {list.length} invoice{list.length !== 1 ? "s" : ""} failed
-            &nbsp;·&nbsp; Fix the issues &nbsp;·&nbsp; Re-import your corrected
-            file
+            {list.length} invoice{list.length !== 1 ? "s" : ""} failed · Fix the
+            issues · Re-import your corrected file
           </p>
           <button
             onClick={onClose}
@@ -979,17 +809,14 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
     const map = new Map();
     stockIssues.forEach((issue) => {
       const mrName = issue.mrName || "Unknown MR";
-      const productName = issue.productName;
       const normMr = mrName.toLowerCase().trim();
-      const normProd = productName.toLowerCase().trim();
-
-      if (!map.has(normMr)) {
+      const normProd = issue.productName.toLowerCase().trim();
+      if (!map.has(normMr))
         map.set(normMr, { originalMrName: mrName, products: new Map() });
-      }
       const mrGroup = map.get(normMr);
       if (!mrGroup.products.has(normProd)) {
         mrGroup.products.set(normProd, {
-          originalProductName: productName,
+          originalProductName: issue.productName,
           totalRequired: 0,
           availableStock: 0,
           insufficientQty: 0,
@@ -1004,32 +831,26 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
     return map;
   }, [stockIssues]);
 
-  const allProductsMap = useMemo(() => {
+  const allProductsList = useMemo(() => {
     const map = new Map();
     stockIssues.forEach((issue) => {
-      const productName = issue.productName;
-      const normProd = productName.toLowerCase().trim();
+      const normProd = issue.productName.toLowerCase().trim();
       if (!map.has(normProd)) {
         map.set(normProd, {
-          originalProductName: productName,
+          originalProductName: issue.productName,
           totalRequired: 0,
           totalAvailable: 0,
           totalInsufficient: 0,
           productExists: issue.productExists,
         });
       }
-      const productData = map.get(normProd);
-      productData.totalRequired += issue.totalRequired;
-      productData.totalAvailable += issue.availableStock;
-      productData.totalInsufficient += issue.insufficientQty;
+      const d = map.get(normProd);
+      d.totalRequired += issue.totalRequired;
+      d.totalAvailable += issue.availableStock;
+      d.totalInsufficient += issue.insufficientQty;
     });
-    return map;
+    return Array.from(map.values());
   }, [stockIssues]);
-
-  const allProductsList = useMemo(
-    () => Array.from(allProductsMap.values()),
-    [allProductsMap],
-  );
 
   const toggleMR = (normMr) => {
     setExpandedMRs((prev) => {
@@ -1062,15 +883,13 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
           });
         });
       } else {
-        allProductsList.forEach((productData) => {
+        allProductsList.forEach((p) => {
           rows.push({
-            "Product Name": productData.originalProductName,
-            "Required Quantity": productData.totalRequired,
-            "Available Stock": productData.totalAvailable,
-            Shortage: productData.totalInsufficient,
-            Status: productData.productExists
-              ? "Insufficient"
-              : "Product Not Found",
+            "Product Name": p.originalProductName,
+            "Required Quantity": p.totalRequired,
+            "Available Stock": p.totalAvailable,
+            Shortage: p.totalInsufficient,
+            Status: p.productExists ? "Insufficient" : "Product Not Found",
           });
         });
       }
@@ -1104,7 +923,6 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
           {stockIssues.length} product issue(s) have insufficient stock in the
           respective MR's hand.
         </p>
-
         <div className="flex gap-2 mb-4">
           {["mr", "all"].map((mode) => (
             <button
@@ -1116,7 +934,6 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
             </button>
           ))}
         </div>
-
         <div className="flex justify-end mb-4">
           <button
             onClick={downloadGroupedReport}
@@ -1125,7 +942,6 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
             <Download size={14} /> Download Report
           </button>
         </div>
-
         {viewMode === "mr" ? (
           <div className="space-y-3">
             {Array.from(groupedByMR.entries()).map(([normMr, mrGroup]) => {
@@ -1241,7 +1057,6 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
             </table>
           </div>
         )}
-
         <div className="flex justify-end gap-3 mt-6">
           <button
             onClick={onCancel}
@@ -1257,7 +1072,7 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
 };
 
 // ==========================================
-// ImportSalesModal
+// ImportSalesModal  (unchanged logic, kept intact)
 // ==========================================
 const ImportSalesModal = ({
   isOpen,
@@ -1416,8 +1231,7 @@ const ImportSalesModal = ({
         .replace(/,/g, "")
         .replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
-      if (isNaN(num) || !isFinite(num)) return 0;
-      return Math.max(0, num);
+      return isNaN(num) || !isFinite(num) ? 0 : Math.max(0, num);
     } catch {
       return 0;
     }
@@ -1432,8 +1246,7 @@ const ImportSalesModal = ({
         .replace(/[$,\s]/g, "")
         .replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
-      if (isNaN(num) || !isFinite(num)) return 0;
-      return Math.max(0, num);
+      return isNaN(num) || !isFinite(num) ? 0 : Math.max(0, num);
     } catch {
       return 0;
     }
@@ -1452,8 +1265,7 @@ const ImportSalesModal = ({
               cellNF: false,
               cellText: false,
             });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const rows = XLSX.utils.sheet_to_json(worksheet, {
               header: 1,
               defval: "",
@@ -1479,29 +1291,24 @@ const ImportSalesModal = ({
                 break;
               }
             }
-
             if (headerIndex === -1) {
-              reject(
-                new Error(
-                  "Could not find header row. Make sure your file has a row containing 'Invoice #' or 'Invoice'.",
-                ),
-              );
+              reject(new Error("Could not find header row."));
               return;
             }
 
             const headerRow = rows[headerIndex];
-            const allDataRows = rows.slice(headerIndex + 1);
-            const dataRows = allDataRows.filter(
-              (row) =>
-                Array.isArray(row) &&
-                row.some(
-                  (cell) =>
-                    cell !== null &&
-                    cell !== undefined &&
-                    String(cell).trim() !== "",
-                ),
-            );
-
+            const dataRows = rows
+              .slice(headerIndex + 1)
+              .filter(
+                (row) =>
+                  Array.isArray(row) &&
+                  row.some(
+                    (cell) =>
+                      cell !== null &&
+                      cell !== undefined &&
+                      String(cell).trim() !== "",
+                  ),
+              );
             if (dataRows.length === 0) {
               reject(new Error("No data rows found after the header row."));
               return;
@@ -1640,7 +1447,6 @@ const ImportSalesModal = ({
             for (let ri = 0; ri < dataRows.length; ri++) {
               const row = dataRows[ri];
               const excelRow = headerIndex + 2 + ri;
-
               const invoiceNumber = getVal(row, col.invoiceNumber);
               const invoiceDate = getVal(row, col.invoiceDate);
               const recordingDate =
@@ -1740,23 +1546,15 @@ const ImportSalesModal = ({
 
             if (validInvoices.length === 0) {
               let errorMsg = "No valid invoices found. ";
-              if (validationErrors.length > 0) {
-                errorMsg +=
-                  `${validationErrors.length} row(s) had validation errors. ` +
-                  validationErrors
-                    .slice(0, 3)
-                    .map((e) => `Row ${e.row}: ${e.error}`)
-                    .join(" | ");
-              } else {
-                errorMsg += "No data rows found after the header row.";
-              }
+              if (validationErrors.length > 0)
+                errorMsg += `${validationErrors.length} row(s) had validation errors.`;
+              else errorMsg += "No data rows found after the header row.";
               reject(new Error(errorMsg));
               return;
             }
 
             resolve({ validInvoices, validationErrors });
           } catch (error) {
-            console.error("Error parsing Excel:", error);
             reject(error);
           }
         };
@@ -1771,7 +1569,6 @@ const ImportSalesModal = ({
     async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-
       const validExtensions = [".xlsx", ".xls", ".csv"];
       const fileExtension = "." + file.name.split(".").pop().toLowerCase();
       if (!validExtensions.includes(fileExtension)) {
@@ -1785,19 +1582,15 @@ const ImportSalesModal = ({
         showToast("error", "File size too large. Maximum size is 20MB.");
         return;
       }
-
       resetModal(false);
       setImportMessage("Reading file...");
       setIsUploading(true);
       setIsProcessingFile(true);
-
       try {
         setImportMessage("Processing Excel data...");
         const { validInvoices, validationErrors } = await parseExcelFile(file);
-
         if (validInvoices.length === 0)
           throw new Error("No valid invoices found in the file");
-
         if (importSaleType === "mr") {
           validInvoices.forEach((inv) => {
             inv.isMrSaleImport = true;
@@ -1808,20 +1601,15 @@ const ImportSalesModal = ({
             inv.saleType = "Normal Sale";
           });
         }
-
         setParsedData(validInvoices);
         setImportErrorDetails(validationErrors);
-
-        if (validationErrors.length > 0) {
+        if (validationErrors.length > 0)
           showToast(
             "warning",
             `Found ${validInvoices.length} valid invoices with ${validationErrors.length} validation errors`,
           );
-        }
-
         setShowParsedSection(true);
       } catch (error) {
-        console.error("File processing error:", error);
         showToast("error", `Failed to process file: ${error.message}`);
         resetModal(false);
       } finally {
@@ -1846,7 +1634,6 @@ const ImportSalesModal = ({
       if (response.data.success) return response.data.existingInvoices;
       return [];
     } catch (error) {
-      console.error("Duplicate check error:", error);
       showToast("error", "Failed to check for duplicate invoices");
       return [];
     }
@@ -1866,7 +1653,6 @@ const ImportSalesModal = ({
       setIsValidatingStock(false);
       return response.data.validationResult;
     } catch (error) {
-      console.error("MR stock validation error:", error);
       setIsValidatingStock(false);
       return {
         stockIssues: [],
@@ -1892,22 +1678,21 @@ const ImportSalesModal = ({
     try {
       setIsValidatingMR(true);
       setImportMessage(`🔍 Validating MRs for ${invoices.length} invoices...`);
-
       const mrNames = new Set();
       const mrToInvoices = new Map();
-
       for (const invoice of invoices) {
         if (invoice.mrName && invoice.mrName.trim()) {
           const mrName = invoice.mrName.trim();
           mrNames.add(mrName);
           if (!mrToInvoices.has(mrName)) mrToInvoices.set(mrName, []);
-          mrToInvoices.get(mrName).push({
-            invoiceNumber: invoice.invoiceNumber,
-            customerName: invoice.customerName,
-          });
+          mrToInvoices
+            .get(mrName)
+            .push({
+              invoiceNumber: invoice.invoiceNumber,
+              customerName: invoice.customerName,
+            });
         }
       }
-
       if (mrNames.size === 0) {
         setIsValidatingMR(false);
         return {
@@ -1916,15 +1701,13 @@ const ImportSalesModal = ({
           summary: { totalMRs: 0, validMRs: 0, invalidMRs: 0 },
         };
       }
-
       const response = await axios.post(
         `${backendUrl}/api/sales/validate-mr`,
         { mrNames: Array.from(mrNames) },
         getAuthHeaders(),
       );
       setIsValidatingMR(false);
-
-      if (response.data.success) {
+      if (response.data.success)
         return {
           mrIssues: [],
           totalInvoices: invoices.length,
@@ -1934,11 +1717,8 @@ const ImportSalesModal = ({
             invalidMRs: 0,
           },
         };
-      }
-
       const mrIssues = [];
       const invalidMRMap = new Map();
-
       response.data.invalidMRs.forEach((invalidMR) => {
         const affectedInvoices = mrToInvoices.get(invalidMR.mrName) || [];
         invalidMRMap.set(invalidMR.mrName, {
@@ -1948,7 +1728,6 @@ const ImportSalesModal = ({
           affectedCount: affectedInvoices.length,
         });
       });
-
       mrIssues.push(...Array.from(invalidMRMap.values()));
       return {
         mrIssues,
@@ -1960,7 +1739,6 @@ const ImportSalesModal = ({
         },
       };
     } catch (error) {
-      console.error("MR validation error:", error);
       setIsValidatingMR(false);
       return {
         mrIssues: [],
@@ -1976,7 +1754,6 @@ const ImportSalesModal = ({
       try {
         setIsValidatingStock(true);
         setImportMessage(`Checking stock for ${invoices.length} invoices...`);
-
         if (importSaleType === "mr") {
           setIsValidatingStock(false);
           return {
@@ -2001,7 +1778,6 @@ const ImportSalesModal = ({
               "MR sale - stock from MR hands will be validated during import.",
           };
         }
-
         const response = await axios.post(
           `${backendUrl}/api/sales/validate-import-stock`,
           { invoices, isMrSaleImport: importSaleType === "mr" },
@@ -2012,7 +1788,6 @@ const ImportSalesModal = ({
         else
           throw new Error(response.data.message || "Stock validation failed");
       } catch (error) {
-        console.error("Stock validation error:", error);
         setIsValidatingStock(false);
         return {
           stockIssues: [],
@@ -2056,7 +1831,6 @@ const ImportSalesModal = ({
     setImportStep("");
     showToast("info", "Import cancelled");
   }, []);
-
   const handleMrStockGroupedCancel = useCallback(() => {
     setShowMrStockGroupedModal(false);
     setMrStockIssuesGrouped([]);
@@ -2085,14 +1859,12 @@ const ImportSalesModal = ({
       showToast("error", "No data to import");
       return;
     }
-
     const duplicates = await checkDuplicateInvoices(parsedData);
     if (duplicates.length > 0) {
       setDuplicateInvoices(duplicates);
       setShowDuplicateModal(true);
       return;
     }
-
     if (importSaleType === "mr") {
       const mrValResult = await validateMRsBeforeImport(parsedData);
       if (mrValResult.mrIssues && mrValResult.mrIssues.length > 0) {
@@ -2101,14 +1873,10 @@ const ImportSalesModal = ({
         return;
       }
     }
-
     let svResult;
-    if (importSaleType === "mr") {
+    if (importSaleType === "mr")
       svResult = await validateMRStockBeforeImport(parsedData);
-    } else {
-      svResult = await validateStockBeforeImport(parsedData);
-    }
-
+    else svResult = await validateStockBeforeImport(parsedData);
     if (svResult.stockIssues?.length > 0) {
       const insufficientStockIssues = svResult.stockIssues.filter(
         (i) => i.productExists && i.insufficient,
@@ -2116,7 +1884,6 @@ const ImportSalesModal = ({
       const missingProductIssues = svResult.stockIssues.filter(
         (i) => !i.productExists,
       );
-
       if (insufficientStockIssues.length > 0) {
         if (importSaleType === "mr") {
           setMrStockIssuesGrouped(insufficientStockIssues);
@@ -2137,7 +1904,6 @@ const ImportSalesModal = ({
         }
         return;
       }
-
       if (
         missingProductIssues.length > 0 &&
         insufficientStockIssues.length === 0
@@ -2162,7 +1928,6 @@ const ImportSalesModal = ({
         return;
       }
     }
-
     await handleProductImport(parsedData);
   }, [
     parsedData,
@@ -2179,7 +1944,6 @@ const ImportSalesModal = ({
         showToast("error", "No data to import");
         return;
       }
-
       setIsImporting(true);
       setImportStep("Preparing data...");
       setServerProgress(0);
@@ -2187,7 +1951,6 @@ const ImportSalesModal = ({
       setServerTotal(dataToImport.length);
       setFailedInvoices([]);
       abortControllerRef.current = new AbortController();
-
       try {
         const isMrSale = importSaleType === "mr";
         const transformedInvoices = dataToImport.map((inv) => ({
@@ -2210,7 +1973,6 @@ const ImportSalesModal = ({
               (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0),
           })),
         }));
-
         setImportStep("Sending to server...");
         const response = await axios.post(
           `${backendUrl}/api/sales/import-with-stock-deduction`,
@@ -2226,29 +1988,24 @@ const ImportSalesModal = ({
             ...getAuthHeaders(),
           },
         );
-
         if (response.data.success) {
           const newSessionId = response.data.sessionId;
           setSessionId(newSessionId);
           setImportStep("Import started – processing invoices...");
-
           pollingIntervalRef.current = setInterval(async () => {
             try {
               const progressResponse = await axios.get(
                 `${backendUrl}/api/sales/import/progress/${newSessionId}`,
                 { timeout: 5000, ...getAuthHeaders() },
               );
-
               if (progressResponse.data.success) {
                 const progress = progressResponse.data.progress;
                 setServerProgress(progress.percentage || 0);
                 setServerProcessed(progress.processed || 0);
                 setServerTotal(progress.total || dataToImport.length);
-
                 if (progress.completed) {
                   clearPolling();
                   setIsImporting(false);
-
                   if (progress.failed > 0) {
                     try {
                       const failedResponse = await axios.get(
@@ -2297,9 +2054,7 @@ const ImportSalesModal = ({
               console.error("Progress polling error:", err);
             }
           }, 1000);
-        } else {
-          throw new Error(response.data.message || "Import failed");
-        }
+        } else throw new Error(response.data.message || "Import failed");
       } catch (err) {
         clearPolling();
         setIsImporting(false);
@@ -2358,11 +2113,9 @@ const ImportSalesModal = ({
           >
             <X size={20} />
           </button>
-
           <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
             <Upload size={20} /> Import Sales Data
           </h2>
-
           {!isImporting && (
             <div className="flex rounded-lg overflow-hidden border border-gray-200 mb-4">
               <button
@@ -2389,7 +2142,6 @@ const ImportSalesModal = ({
               </button>
             </div>
           )}
-
           {!isImporting && (
             <div
               className={`p-3 rounded-lg mb-4 text-sm ${importSaleType === "normal" ? "bg-indigo-50 text-indigo-800" : "bg-green-50 text-green-800"}`}
@@ -2407,7 +2159,6 @@ const ImportSalesModal = ({
               )}
             </div>
           )}
-
           {!showParsedSection &&
             !isUploading &&
             !isProcessingFile &&
@@ -2434,7 +2185,6 @@ const ImportSalesModal = ({
                 <SampleExcelDownloadSale saleType={importSaleType} />
               </div>
             )}
-
           {!showParsedSection &&
             !isUploading &&
             !isProcessingFile &&
@@ -2459,7 +2209,6 @@ const ImportSalesModal = ({
                 />
               </label>
             )}
-
           {(isUploading || isProcessingFile) && (
             <div className="text-center py-8">
               <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto mb-3" />
@@ -2469,7 +2218,6 @@ const ImportSalesModal = ({
               <p className="text-sm text-gray-500 mt-1">{importMessage}</p>
             </div>
           )}
-
           {isValidatingMR && (
             <div className="text-center py-6 bg-yellow-50 rounded-lg mb-4">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-600 mx-auto mb-2" />
@@ -2479,7 +2227,6 @@ const ImportSalesModal = ({
               </p>
             </div>
           )}
-
           {isValidatingStock && (
             <div className="text-center py-6 bg-blue-50 rounded-lg mb-4">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2" />
@@ -2491,7 +2238,6 @@ const ImportSalesModal = ({
               </p>
             </div>
           )}
-
           {showParsedSection && parsedData.length > 0 && (
             <div className="border border-green-200 bg-green-50 rounded-lg p-4 mb-4">
               <div className="flex items-center justify-between mb-3">
@@ -2516,7 +2262,6 @@ const ImportSalesModal = ({
                   ⚠️ {importErrorDetails.length} rows skipped due to errors
                 </div>
               )}
-
               <div className="grid grid-cols-3 gap-3 mb-3">
                 {[
                   ["Total Invoices", parsedData.length],
@@ -2541,7 +2286,6 @@ const ImportSalesModal = ({
                   </div>
                 ))}
               </div>
-
               {importSaleType === "mr" && (
                 <p className="text-sm text-green-700 mb-3">
                   MRs detected in file:{" "}
@@ -2550,7 +2294,6 @@ const ImportSalesModal = ({
                   ].join(", ") || "None"}
                 </p>
               )}
-
               <div>
                 <p className="text-sm font-medium text-gray-700 mb-2">
                   Sample Data (First 3 invoices):
@@ -2592,7 +2335,6 @@ const ImportSalesModal = ({
               </div>
             </div>
           )}
-
           {importErrorDetails.length > 0 &&
             showParsedSection &&
             !isImporting && (
@@ -2628,14 +2370,8 @@ const ImportSalesModal = ({
                     </tbody>
                   </table>
                 </div>
-                {importErrorDetails.length > 10 && (
-                  <p className="text-xs text-gray-500 text-center py-1">
-                    Showing 10 of {importErrorDetails.length} errors
-                  </p>
-                )}
               </div>
             )}
-
           {isImporting && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
               <div className="flex items-center justify-between mb-2">
@@ -2665,7 +2401,6 @@ const ImportSalesModal = ({
               </button>
             </div>
           )}
-
           {!isImporting &&
             showParsedSection &&
             parsedData.length > 0 &&
@@ -2679,7 +2414,6 @@ const ImportSalesModal = ({
                 Import ({parsedData.length} invoices)
               </button>
             )}
-
           <div className="flex justify-between">
             {showParsedSection && parsedData.length > 0 && (
               <label className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg cursor-pointer text-sm">
@@ -2736,8 +2470,8 @@ const ImportSalesModal = ({
         <StockValidationModal
           isOpen={showStockValidation}
           onClose={() => setShowStockValidation(false)}
-          onProceed={handleProceedWithStockIssues}
-          onCancel={handleCancelStockValidation}
+          onProceed={() => {}}
+          onCancel={() => {}}
           stockValidationResult={stockValidationResult}
         />
       )}
@@ -2745,7 +2479,10 @@ const ImportSalesModal = ({
         <MRValidationModal
           isOpen={showMRValidation}
           onClose={() => setShowMRValidation(false)}
-          onProceed={handleProceedWithMRIssues}
+          onProceed={() => {
+            setShowMRValidation(false);
+            handleImportData();
+          }}
           mrValidationResult={mrValidationResult}
         />
       )}
@@ -2761,12 +2498,18 @@ const ImportSalesModal = ({
   );
 };
 
+// ==========================================
+// ProductDetailsModal — role-aware LC & P/L
+// ==========================================
 const ProductDetailsModal = ({
   isOpen,
   onClose,
   products,
   title = "Product Details",
 }) => {
+  // ── Only superadmin sees LC and Profit/Loss ──
+  const showSensitiveColumns = isSuperAdmin();
+
   if (!isOpen) return null;
 
   const totals = useMemo(() => {
@@ -2808,20 +2551,19 @@ const ProductDetailsModal = ({
         >
           <X size={20} />
         </button>
-
         <h2 className="text-xl font-semibold text-gray-800 mb-4">
           {title} ({products?.length || 0} items)
         </h2>
-
         {!products || products.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             No products found
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
+            <table className="w-full text-sm text-center border-collapse">
               <thead className="bg-gray-100">
                 <tr>
+                  {/* Base columns — always visible */}
                   {[
                     "Product Name",
                     "Sales Qty",
@@ -2832,8 +2574,6 @@ const ProductDetailsModal = ({
                     "Discount ($)",
                     "Net Amount ($)",
                     "Avg. Price",
-                    "LC ($)",
-                    "Profit / Loss ($)",
                   ].map((h) => (
                     <th
                       key={h}
@@ -2842,6 +2582,17 @@ const ProductDetailsModal = ({
                       {h}
                     </th>
                   ))}
+                  {/* Sensitive columns — superadmin only */}
+                  {showSensitiveColumns && (
+                    <>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap border-b">
+                        LC ($)
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap border-b">
+                        Profit / Loss ($)
+                      </th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -2872,15 +2623,20 @@ const ProductDetailsModal = ({
                       </td>
                       <td className="px-3 py-2">${netAmount.toFixed(2)}</td>
                       <td className="px-3 py-2">${avgUnitPrice.toFixed(2)}</td>
-                      <td className="px-3 py-2">${lc.toFixed(3)}</td>
-                      <td
-                        className={`px-3 py-2 font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                      >
-                        ${profitLoss.toFixed(3)}
-                      </td>
+                      {showSensitiveColumns && (
+                        <>
+                          <td className="px-3 py-2">${lc.toFixed(3)}</td>
+                          <td
+                            className={`px-3 py-2 font-medium ${profitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                          >
+                            ${profitLoss.toFixed(3)}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
+                {/* Totals row */}
                 <tr className="bg-gray-100 font-semibold">
                   <td className="px-3 py-2">Total</td>
                   <td className="px-3 py-2">{totals.totalSalesQty}</td>
@@ -2899,18 +2655,21 @@ const ProductDetailsModal = ({
                     ${totals.totalNetAmount.toFixed(2)}
                   </td>
                   <td className="px-3 py-2">-</td>
-                  <td className="px-3 py-2">-</td>
-                  <td
-                    className={`px-3 py-2 ${totals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                  >
-                    ${totals.totalProfitLoss.toFixed(2)}
-                  </td>
+                  {showSensitiveColumns && (
+                    <>
+                      <td className="px-3 py-2">-</td>
+                      <td
+                        className={`px-3 py-2 ${totals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                      >
+                        ${totals.totalProfitLoss.toFixed(2)}
+                      </td>
+                    </>
+                  )}
                 </tr>
               </tbody>
             </table>
           </div>
         )}
-
         <div className="flex justify-end mt-4">
           <button
             onClick={onClose}
@@ -2953,7 +2712,9 @@ const Sales = () => {
   const { statuses, loading } = useInitialSaleData();
   const [saleTypeTab, setSaleTypeTab] = useState("all");
 
-  // ── Mobile states ──────────────────────────────────────────
+  // ── Role check (computed once per render, stable) ──
+  const canSeeSensitiveData = useMemo(() => isSuperAdmin(), []);
+
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -2987,7 +2748,6 @@ const Sales = () => {
     customerProvince: "",
   });
 
-  // Mobile detection
   useEffect(() => {
     const checkMobile = () => setIsMobileView(window.innerWidth < 768);
     checkMobile();
@@ -3082,7 +2842,6 @@ const Sales = () => {
           { name: "Province C" },
         ]);
     } catch (error) {
-      console.error("Error fetching provinces:", error);
       setProvincesList([
         { name: "Province A" },
         { name: "Province B" },
@@ -3171,7 +2930,6 @@ const Sales = () => {
           fetchMRList(),
           fetchCustomerList(),
         ]);
-
         if (mrs && mrs.success && Array.isArray(mrs.data)) {
           const names = [];
           const full = [];
@@ -3196,7 +2954,6 @@ const Sales = () => {
           setMrList([]);
           setMrFullList([]);
         }
-
         if (customers && customers.success && Array.isArray(customers.data)) {
           setCustomerList(
             customers.data.map((c) => ({ ...c, _id: String(c._id) })),
@@ -3258,8 +3015,9 @@ const Sales = () => {
     }
   }, [selected, fetchSaleSummaries]);
 
-  const tableColumns = useMemo(
-    () => [
+  // ── Table columns — LC and P/L only for superadmin ──────────────────────
+  const tableColumns = useMemo(() => {
+    const base = [
       "invoiceNumber",
       "invoiceDate",
       "productCount",
@@ -3268,12 +3026,12 @@ const Sales = () => {
       "totalAmount",
       "paymentStatus",
       "actions",
-    ],
-    [],
-  );
+    ];
+    return base;
+  }, []);
 
-  const allFields = useMemo(
-    () => [
+  const allFields = useMemo(() => {
+    const base = [
       { id: "invoiceNumber", name: "Invoice No", dbName: "invoiceNumber" },
       { id: "invoiceDate", name: "Invoice Date", dbName: "invoiceDate" },
       { id: "productCount", name: "Products", dbName: "products" },
@@ -3282,11 +3040,10 @@ const Sales = () => {
       { id: "totalAmount", name: "Total Amount ($)", dbName: "totalAmount" },
       { id: "paymentStatus", name: "Payment Status", dbName: "paymentStatus" },
       { id: "actions", name: "Actions", dbName: "actions" },
-    ],
-    [],
-  );
+    ];
+    return base;
+  }, []);
 
-  // Mobile shows fewer columns
   const mobileColumns = [
     "invoiceNumber",
     "customerName",
@@ -3333,7 +3090,6 @@ const Sales = () => {
     const lowerSearch = searchTerm.trim().toLowerCase();
     const tabStatus = selectedTab.toLowerCase();
     const tabSaleType = saleTypeTab;
-
     return sales.filter((sale) => {
       if (tabStatus !== "all") {
         const ps = (sale.paymentStatus || "").toLowerCase();
@@ -3506,21 +3262,17 @@ const Sales = () => {
     const filtered = filterNumericInput(rawValue, true);
     e.target.value = filtered;
     const numericValue = parseFloat(filtered) || 0;
-
     setForm((prev) => {
       const net = formTotals.netAmount;
       const clampedPaid = Math.min(Math.max(numericValue, 0), net);
       const newDue = net - clampedPaid;
       const isFullyPaid = Math.abs(clampedPaid - net) < 0.001;
-      const updatedCreditDays = isFullyPaid ? "" : prev.creditDays;
-      const updatedDueDate = isFullyPaid ? "" : prev.dueDate;
-
       return {
         ...prev,
         paidAmount: clampedPaid,
         dueAmount: newDue,
-        creditDays: updatedCreditDays,
-        dueDate: updatedDueDate,
+        creditDays: isFullyPaid ? "" : prev.creditDays,
+        dueDate: isFullyPaid ? "" : prev.dueDate,
         paymentStatus: computePaymentStatus(clampedPaid, net),
       };
     });
@@ -3531,21 +3283,17 @@ const Sales = () => {
     const filtered = filterNumericInput(rawValue, true);
     e.target.value = filtered;
     const numericValue = parseFloat(filtered) || 0;
-
     setForm((prev) => {
       const net = formTotals.netAmount;
       const clampedDue = Math.min(Math.max(numericValue, 0), net);
       const newPaid = net - clampedDue;
       const isFullyPaid = Math.abs(newPaid - net) < 0.001;
-      const updatedCreditDays = isFullyPaid ? "" : prev.creditDays;
-      const updatedDueDate = isFullyPaid ? "" : prev.dueDate;
-
       return {
         ...prev,
         dueAmount: clampedDue,
         paidAmount: newPaid,
-        creditDays: updatedCreditDays,
-        dueDate: updatedDueDate,
+        creditDays: isFullyPaid ? "" : prev.creditDays,
+        dueDate: isFullyPaid ? "" : prev.dueDate,
         paymentStatus: computePaymentStatus(newPaid, net),
       };
     });
@@ -3555,16 +3303,13 @@ const Sales = () => {
     const rawValue = e.target.value;
     const filtered = filterNumericInput(rawValue, false);
     e.target.value = filtered;
-
     const days = filtered ? parseInt(filtered, 10) : DEFAULT_CREDIT_DAYS;
     let newDueDate = "";
-
     if (days > 0) {
       const today = new Date();
       today.setDate(today.getDate() + days);
       newDueDate = today.toISOString().split("T")[0];
     }
-
     setForm((prev) => ({ ...prev, creditDays: days, dueDate: newDueDate }));
   };
 
@@ -3647,12 +3392,11 @@ const Sales = () => {
     if (
       form.customerProvince &&
       !options.some((opt) => opt.value === form.customerProvince.trim())
-    ) {
+    )
       options.push({
         value: form.customerProvince.trim(),
         label: form.customerProvince.trim(),
       });
-    }
     return options;
   }, [provincesList, provincesLoading, form.customerProvince]);
 
@@ -3685,12 +3429,11 @@ const Sales = () => {
     if (
       form.customerZone &&
       !options.some((opt) => opt.value === form.customerZone.trim())
-    ) {
+    )
       options.push({
         value: form.customerZone.trim(),
         label: form.customerZone.trim(),
       });
-    }
     return options;
   }, [zonesList, zonesLoading, form.customerProvince, form.customerZone]);
 
@@ -3701,7 +3444,6 @@ const Sales = () => {
       customerZone: "",
     }));
   };
-
   const handleZoneChange = (value) => {
     setForm((prev) => ({ ...prev, customerZone: value.trim() }));
   };
@@ -3730,7 +3472,6 @@ const Sales = () => {
           updatedForm,
           { headers: { Authorization: `Bearer ${token}` } },
         );
-
         if (res.status === 200) {
           showToast("success", "Sales record updated successfully");
           setIsEditModalOpen(false);
@@ -3746,7 +3487,7 @@ const Sales = () => {
         );
       }
     },
-    [form, calculateProductTotals, fetchSaleSummaries, selectedSale],
+    [form, calculateProductTotals, fetchSaleSummaries],
   );
 
   const handleImportSuccess = useCallback(() => {
@@ -3756,12 +3497,10 @@ const Sales = () => {
     }, 1000);
   }, [fetchSaleSummaries]);
 
-  const showMRCustomerWarning = useMemo(() => {
-    const hasMRs = mrList && mrList.length > 0;
-    const hasCustomers = customerList && customerList.length > 0;
-    return !hasMRs && !hasCustomers;
-  }, [mrList, customerList]);
-
+  const showMRCustomerWarning = useMemo(
+    () => !mrList?.length && !customerList?.length,
+    [mrList, customerList],
+  );
   const shouldDisableButtons = useMemo(
     () =>
       checkingPurchaseInventories ||
@@ -3786,64 +3525,71 @@ const Sales = () => {
     showMRCustomerWarning,
   ]);
 
-  const downloadExcel = useCallback((data, baseFileName) => {
-    if (!data || data.length === 0) {
-      showToast("error", "No data to download");
-      return;
-    }
-    const excelRows = [];
-    data.forEach((sale) => {
-      const products =
-        sale.products && sale.products.length
-          ? sale.products
-          : [
-              {
-                productName: "—",
-                salesQty: 0,
-                bonusQty: 0,
-                totalQty: 0,
-                sellingPrice: 0,
-                discount: 0,
-                netSellingAmount: 0,
-                lc: 0,
-                profitLoss: 0,
-              },
-            ];
-      products.forEach((product) => {
-        excelRows.push({
-          "Invoice Number": sale.invoiceNumber,
-          "Invoice Date": sale.invoiceDate
-            ? new Date(sale.invoiceDate).toLocaleDateString()
-            : "",
-          "MR Name": sale.mrName || "",
-          "Customer Name": sale.customerName || "",
-          "Customer Code": sale.customerCode || "",
-          "Payment Status": sale.paymentStatus || "",
-          "Product Name": product.productName || "",
-          "Sales Qty": product.salesQty || 0,
-          "Bonus Qty": product.bonusQty || 0,
-          "Total Qty": product.totalQty || 0,
-          "Selling Price": product.sellingPrice || 0,
-          Discount: product.discount || 0,
-          "Net Amount": product.netSellingAmount || 0,
-          LC: product.lc || 0,
-          "Profit/Loss": product.profitLoss || 0,
-          "Total Amount": sale.totalAmount || 0,
-          "Paid Amount": sale.paidAmount || 0,
-          "Due Amount": sale.dueAmount || 0,
-          "Cost Amount": sale.costAmount || 0,
-          "Sale Type": isMRSaleDoc(sale) ? "MR Sale" : "Normal Sale",
+  const downloadExcel = useCallback(
+    (data, baseFileName) => {
+      if (!data || data.length === 0) {
+        showToast("error", "No data to download");
+        return;
+      }
+      const excelRows = [];
+      data.forEach((sale) => {
+        const products =
+          sale.products && sale.products.length
+            ? sale.products
+            : [
+                {
+                  productName: "—",
+                  salesQty: 0,
+                  bonusQty: 0,
+                  totalQty: 0,
+                  sellingPrice: 0,
+                  discount: 0,
+                  netSellingAmount: 0,
+                  lc: 0,
+                  profitLoss: 0,
+                },
+              ];
+        products.forEach((product) => {
+          const row = {
+            "Invoice Number": sale.invoiceNumber,
+            "Invoice Date": sale.invoiceDate
+              ? new Date(sale.invoiceDate).toLocaleDateString()
+              : "",
+            "MR Name": sale.mrName || "",
+            "Customer Name": sale.customerName || "",
+            "Customer Code": sale.customerCode || "",
+            "Payment Status": sale.paymentStatus || "",
+            "Product Name": product.productName || "",
+            "Sales Qty": product.salesQty || 0,
+            "Bonus Qty": product.bonusQty || 0,
+            "Total Qty": product.totalQty || 0,
+            "Selling Price": product.sellingPrice || 0,
+            Discount: product.discount || 0,
+            "Net Amount": product.netSellingAmount || 0,
+            "Total Amount": sale.totalAmount || 0,
+            "Paid Amount": sale.paidAmount || 0,
+            "Due Amount": sale.dueAmount || 0,
+            "Sale Type": isMRSaleDoc(sale) ? "MR Sale" : "Normal Sale",
+          };
+          // Only include LC and Profit/Loss for superadmin exports
+          if (canSeeSensitiveData) {
+            row["LC"] = product.lc || 0;
+            row["Profit/Loss"] = product.profitLoss || 0;
+            row["Cost Amount"] = sale.costAmount || 0;
+          }
+          excelRows.push(row);
         });
       });
-    });
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Sales");
-    XLSX.writeFile(
-      workbook,
-      `${baseFileName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-    );
-  }, []);
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Sales");
+      XLSX.writeFile(
+        workbook,
+        `${baseFileName}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+    },
+    [canSeeSensitiveData],
+  );
 
   const handleSampleDownload = useCallback(() => {
     const normalSales = sales.filter((s) => !isMRSaleDoc(s));
@@ -3860,7 +3606,6 @@ const Sales = () => {
     }, 500);
   }, [sales, downloadExcel]);
 
-  // Determine which fields to show based on viewport
   const visibleFields = allFields.filter((item) =>
     isMobileView
       ? mobileColumns.includes(item.id)
@@ -3871,7 +3616,6 @@ const Sales = () => {
 
   return (
     <div className="p-4 md:p-6 relative">
-      {/* Sidebar for mobile */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -3964,7 +3708,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       MR Name
@@ -3991,7 +3734,6 @@ const Sales = () => {
                       ))}
                     </select>
                   </div>
-
                   <div className="col-span-1 md:col-span-2">
                     <SearchableDropdown
                       value={form.customerId}
@@ -4005,7 +3747,6 @@ const Sales = () => {
                       disabled={false}
                     />
                   </div>
-
                   {form.customerId && (
                     <div className="col-span-1 md:col-span-2">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -4106,14 +3847,17 @@ const Sales = () => {
                       <div className="font-semibold text-gray-800">{val}</div>
                     </div>
                   ))}
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <div className="text-xs text-gray-500">Profit/Loss</div>
-                    <div
-                      className={`font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                    >
-                      ${formTotals.totalProfitLoss.toFixed(2)}
+                  {/* Profit/Loss in edit modal — superadmin only */}
+                  {canSeeSensitiveData && (
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <div className="text-xs text-gray-500">Profit/Loss</div>
+                      <div
+                        className={`font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                      >
+                        ${formTotals.totalProfitLoss.toFixed(2)}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4129,7 +3873,6 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Due Amount ($)
@@ -4141,11 +3884,10 @@ const Sales = () => {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100 cursor-not-allowed"
                     />
                   </div>
-
                   {form.paymentStatus !== "Cash" && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Credit Days
+                        Credit Days{" "}
                         <span className="ml-1 text-xs text-gray-400">
                           (default: {DEFAULT_CREDIT_DAYS})
                         </span>
@@ -4161,7 +3903,6 @@ const Sales = () => {
                       />
                     </div>
                   )}
-
                   {form.paymentStatus !== "Cash" && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -4184,7 +3925,6 @@ const Sales = () => {
                       />
                     </div>
                   )}
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Payment Status
@@ -4203,7 +3943,6 @@ const Sales = () => {
                       ))}
                     </select>
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Delivery Date
@@ -4359,6 +4098,7 @@ const Sales = () => {
                 )}
               </div>
 
+              {/* Financial summary — Profit/Loss only for superadmin */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4 mb-6">
                 {[
                   ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
@@ -4374,16 +4114,18 @@ const Sales = () => {
                     </div>
                   </div>
                 ))}
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Profit/Loss
-                  </label>
-                  <div
-                    className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
-                  >
-                    ${formTotals.totalProfitLoss.toFixed(2)}
+                {canSeeSensitiveData && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Profit/Loss
+                    </label>
+                    <div
+                      className={`text-lg font-semibold ${formTotals.totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}`}
+                    >
+                      ${formTotals.totalProfitLoss.toFixed(2)}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -4411,15 +4153,7 @@ const Sales = () => {
                     Payment Status
                   </label>
                   <div
-                    className={`text-sm font-medium ${
-                      form.paymentStatus === "Cash"
-                        ? "text-green-600"
-                        : form.paymentStatus === "Credit"
-                          ? "text-yellow-600"
-                          : form.paymentStatus === "Partial Paid"
-                            ? "text-blue-600"
-                            : "text-gray-600"
-                    }`}
+                    className={`text-sm font-medium ${form.paymentStatus === "Cash" ? "text-green-600" : form.paymentStatus === "Credit" ? "text-yellow-600" : form.paymentStatus === "Partial Paid" ? "text-blue-600" : "text-gray-600"}`}
                   >
                     {form.paymentStatus || "-"}
                   </div>
@@ -4451,7 +4185,6 @@ const Sales = () => {
 
       {/* ── Main Content ── */}
       <div className="container">
-        {/* ── MOBILE header: hamburger + total ── */}
         {isMobileView && (
           <div className="flex justify-between items-center mb-4">
             <button
@@ -4468,7 +4201,6 @@ const Sales = () => {
           </div>
         )}
 
-        {/* ── DESKTOP action bar (buttons + download) ── */}
         {!isMobileView && (
           <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
             <div className="flex gap-3 items-center">
@@ -4497,7 +4229,6 @@ const Sales = () => {
                 </button>
               )}
             </div>
-
             {isSampleDownloadFile ? (
               <button
                 onClick={handleSampleDownload}
@@ -4545,7 +4276,6 @@ const Sales = () => {
           </div>
         )}
 
-        {/* Warnings */}
         {!checkingPurchaseInventories && !hasPurchaseInventories && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start gap-3">
@@ -4559,7 +4289,7 @@ const Sales = () => {
                 </h3>
                 <p className="text-sm text-red-700">
                   Please add purchase inventory entries first before creating or
-                  importing sales.
+                  importing sales.{" "}
                   <button
                     onClick={recheckPurchaseInventories}
                     className="ml-2 text-red-800 underline hover:text-red-900 cursor-pointer"
@@ -4597,15 +4327,11 @@ const Sales = () => {
             </div>
           )}
 
-        {/* ── Filter tabs (ALWAYS visible, but styled differently on mobile) ── */}
         {sales.length > 0 && (
           <div
-            className={`flex ${
-              !isMobileView ? "flex-row items-center justify-between" : ""
-            } mb-4`}
+            className={`flex ${!isMobileView ? "flex-row items-center justify-between" : ""} mb-4`}
           >
             <div className="flex flex-wrap gap-2 items-center">
-              {/* Payment Status Tabs */}
               <div
                 className={`flex items-center gap-1 bg-gray-100 border border-gray-300 rounded-xl ${isMobileView ? "px-1 py-0.5" : "px-2 py-1"} flex-wrap`}
               >
@@ -4622,19 +4348,12 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"}
-                     rounded-lg cursor-pointer transition-colors font-medium ${
-                      selectedTab === tab
-                        ? "bg-indigo-600 text-white shadow"
-                        : "text-gray-600 hover:bg-gray-200"
-                    }`}
+                    className={`${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${selectedTab === tab ? "bg-indigo-600 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
                   >
                     {tab}
                   </button>
                 ))}
               </div>
-
-              {/* Sale Type Tabs */}
               <div
                 className={`flex items-center gap-1 bg-gray-100 border border-gray-300 rounded-xl ${isMobileView ? "px-1 py-0.5" : "px-2 py-1"} flex-wrap`}
               >
@@ -4651,75 +4370,13 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`flex items-center gap-1 ${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${
-                      saleTypeTab === tab.id
-                        ? tab.id === "normal"
-                          ? "bg-indigo-600 text-white shadow"
-                          : tab.id === "mr"
-                            ? "bg-green-600 text-white shadow"
-                            : "bg-gray-600 text-white shadow"
-                        : "text-gray-600 hover:bg-gray-200"
-                    }`}
+                    className={`flex items-center gap-1 ${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${saleTypeTab === tab.id ? (tab.id === "normal" ? "bg-indigo-600 text-white shadow" : tab.id === "mr" ? "bg-green-600 text-white shadow" : "bg-gray-600 text-white shadow") : "text-gray-600 hover:bg-gray-200"}`}
                   >
-                    {tab.id === "normal" ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className={`${isMobileView ? "w-2 h-2" : "w-3 h-3"}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M16 3H8v4h8V3z"
-                        />
-                      </svg>
-                    ) : tab.id === "mr" ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className={`${isMobileView ? "w-2 h-2" : "w-3 h-3"}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                        />
-                      </svg>
-                    ) : (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className={`${isMobileView ? "w-2 h-2" : "w-3 h-3"}`}
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 6h16M4 12h16M4 18h16"
-                        />
-                      </svg>
-                    )}
                     <span>{tab.label}</span>
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* Desktop search & total count */}
             {!isMobileView && (
               <div className="flex items-center justify-end gap-4 flex-wrap">
                 <p className="text-lg font-semibold text-gray-700">
@@ -4749,12 +4406,11 @@ const Sales = () => {
             )}
           </div>
         )}
-        {/* Table */}
+
         <div className="overflow-x-auto shadow-lg rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                {/* Checkbox header — desktop only */}
                 {!isMobileView && (
                   <th className="p-3 whitespace-nowrap min-w-[40px] text-sm font-medium">
                     {currentSales.length > 0 && (
@@ -4774,9 +4430,7 @@ const Sales = () => {
                 {visibleFields.map((item) => (
                   <th
                     key={`header-${item.id}`}
-                    className={`p-3 whitespace-nowrap min-w-[80px] font-medium ${
-                      isMobileView ? "text-[10px]" : "text-sm"
-                    }`}
+                    className={`p-3 whitespace-nowrap min-w-[80px] font-medium ${isMobileView ? "text-[10px]" : "text-sm"}`}
                   >
                     {item.name}
                   </th>
@@ -4814,11 +4468,8 @@ const Sales = () => {
                   return (
                     <tr
                       key={`sale-${sale._id || index}`}
-                      className={`hover:bg-gray-50 transition-colors ${
-                        index < currentSales.length - 1 ? "border-b" : ""
-                      }`}
+                      className={`hover:bg-gray-50 transition-colors ${index < currentSales.length - 1 ? "border-b" : ""}`}
                     >
-                      {/* Checkbox — desktop only */}
                       {!isMobileView && (
                         <td className="p-3">
                           <input
@@ -4829,22 +4480,17 @@ const Sales = () => {
                           />
                         </td>
                       )}
-
                       {visibleFields.map((item) => (
                         <td
                           key={`cell-${sale._id}-${item.id}`}
-                          className={`p-3 whitespace-nowrap min-w-[80px] ${
-                            isMobileView ? "text-[9px]" : "text-sm"
-                          }`}
+                          className={`p-3 whitespace-nowrap min-w-[80px] ${isMobileView ? "text-[9px]" : "text-sm"}`}
                         >
                           {item.id === "invoiceNumber" ? (
                             <span className="font-medium">
                               {sale.invoiceNumber}
                               {isMRSale && (
                                 <span
-                                  className={`ml-1 bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full ${
-                                    isMobileView ? "text-[8px]" : "text-xs"
-                                  }`}
+                                  className={`ml-1 bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full ${isMobileView ? "text-[8px]" : "text-xs"}`}
                                 >
                                   MR
                                 </span>
@@ -4863,7 +4509,6 @@ const Sales = () => {
                             </button>
                           ) : item.id === "actions" ? (
                             <div className="flex items-center justify-center gap-2 min-w-[60px]">
-                              {/* View always shown */}
                               <button
                                 className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1"
                                 onClick={() => handleView(sale)}
@@ -4871,7 +4516,6 @@ const Sales = () => {
                               >
                                 <Eye size={isMobileView ? 14 : 18} />
                               </button>
-                              {/* Edit & Delete — desktop only */}
                               {!isMobileView && (
                                 <>
                                   <button
@@ -4893,17 +4537,7 @@ const Sales = () => {
                             </div>
                           ) : item.id === "paymentStatus" ? (
                             <span
-                              className={`px-2 py-0.5 rounded-full font-medium ${
-                                isMobileView ? "text-[8px]" : "text-xs"
-                              } ${
-                                sale.paymentStatus === "Cash"
-                                  ? "bg-green-100 text-green-800"
-                                  : sale.paymentStatus === "Credit"
-                                    ? "bg-yellow-100 text-yellow-800"
-                                    : sale.paymentStatus === "Partial Paid"
-                                      ? "bg-blue-100 text-blue-800"
-                                      : "bg-gray-100 text-gray-800"
-                              }`}
+                              className={`px-2 py-0.5 rounded-full font-medium ${isMobileView ? "text-[8px]" : "text-xs"} ${sale.paymentStatus === "Cash" ? "bg-green-100 text-green-800" : sale.paymentStatus === "Credit" ? "bg-yellow-100 text-yellow-800" : sale.paymentStatus === "Partial Paid" ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
                             >
                               {getFieldValue(sale, item.dbName)}
                             </span>
@@ -4935,8 +4569,6 @@ const Sales = () => {
                 >
                   ← Prev
                 </button>
-
-                {/* Desktop: page numbers | Mobile: "Page X of Y" */}
                 {!isMobileView ? (
                   visiblePages.map((page, idx) =>
                     page === "..." ? (
@@ -4953,11 +4585,7 @@ const Sales = () => {
                           setCurrentPage(page);
                           window.scrollTo({ top: 0, behavior: "smooth" });
                         }}
-                        className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                          currentPage === page
-                            ? "bg-indigo-600 text-white"
-                            : "bg-gray-200 hover:bg-gray-300"
-                        }`}
+                        className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
                       >
                         {page}
                       </button>
@@ -4968,7 +4596,6 @@ const Sales = () => {
                     Page {currentPage} of {totalPages}
                   </span>
                 )}
-
                 <button
                   onClick={() =>
                     setCurrentPage((prev) => {
@@ -4983,8 +4610,6 @@ const Sales = () => {
                   Next →
                 </button>
               </div>
-
-              {/* Show count summary on desktop only */}
               {!isMobileView && (
                 <div className="text-sm text-gray-600">
                   Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}

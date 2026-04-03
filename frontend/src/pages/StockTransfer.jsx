@@ -68,7 +68,7 @@ const StockTransfer = () => {
     productId: "",
     productName: "",
     boxQuantity: "",
-    lc: "",
+    sellingPrice: "",
     productCost: 0,
   });
 
@@ -76,11 +76,10 @@ const StockTransfer = () => {
   const [currentProductIndex, setCurrentProductIndex] = useState(null);
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
 
-  // ── MR list from stockInMRHand (separate from staff) ────────────────────
+  // ── MR list from stockInMRHand ───────────────────────────────────────────
   const [mrListFromStock, setMrListFromStock] = useState([]);
   const [mrListFromStockLoading, setMrListFromStockLoading] = useState(false);
 
-  // Original staff MR list (kept for general use)
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(true);
   const [isMrListEmpty, setIsMrListEmpty] = useState(false);
@@ -102,13 +101,13 @@ const StockTransfer = () => {
   // MR info for display in modals
   const [currentMRInfo, setCurrentMRInfo] = useState(null);
 
-  // ── MR stock for CREATE modal (receive type, auto-loaded on MR select) ────
+  // ── MR stock for CREATE modal ─────────────────────────────────────────────
   const [createMRStockData, setCreateMRStockData] = useState([]);
   const [loadingCreateMRStock, setLoadingCreateMRStock] = useState(false);
   const [createMRInfo, setCreateMRInfo] = useState(null);
 
-  // ── LC loading state for add product modal ────────────────────────────────
-  const [lcLoading, setLcLoading] = useState(false);
+  // ── Selling price loading state for add product modal ─────────────────────
+  const [sellingPriceLoading, setSellingPriceLoading] = useState(false);
 
   const [form, setForm] = useState({
     invoiceNo: "",
@@ -157,8 +156,8 @@ const StockTransfer = () => {
     }
   }, []);
 
-  // ── Fetch LC from ReportInHand for a product name ─────────────────────────
-  const fetchLCFromReportInHand = useCallback(async (productName) => {
+  // ── Fetch Selling Price from ReportInHand for a product name ─────────────
+  const fetchSellingPriceFromReportInHand = useCallback(async (productName) => {
     if (!productName) return 0;
     try {
       const res = await axios.get(
@@ -170,32 +169,17 @@ const StockTransfer = () => {
             (p) => p.productName?.toLowerCase() === productName.toLowerCase(),
           )
         : data;
-      if (!productStock || !productStock.batches?.length) return 0;
-      const batchWithStock = [...productStock.batches]
-        .reverse()
-        .find((b) => b.boxes > 0);
-      const batch =
-        batchWithStock || productStock.batches[productStock.batches.length - 1];
-      return batch?.lc || 0;
+      if (!productStock) return 0;
+      return productStock.sellingPrice || 0;
     } catch (err) {
-      console.error("fetchLCFromReportInHand error:", err);
+      console.error("fetchSellingPriceFromReportInHand error:", err);
       return 0;
     }
   }, []);
 
-  const getProductLc = useCallback((product) => {
+  const getProductSellingPrice = useCallback((product) => {
     if (!product) return 0;
-    if (
-      product.batches &&
-      Array.isArray(product.batches) &&
-      product.batches.length > 0
-    ) {
-      const batchWithLc = product.batches.find((b) => b.lc && b.lc > 0);
-      if (batchWithLc) return batchWithLc.lc;
-      if (product.batches[0].lc !== undefined)
-        return product.batches[0].lc || 0;
-    }
-    return product.lc || 0;
+    return product.sellingPrice || 0;
   }, []);
 
   const fetchMRList = useCallback(async () => {
@@ -227,7 +211,7 @@ const StockTransfer = () => {
     }));
   }, [mrListFromStock]);
 
-  // Original staff options (used in general / fallback)
+  // Original staff options
   const mrOptions = useMemo(() => {
     if (isMrListEmpty) return [];
     return mrList.map((mr) => ({
@@ -261,6 +245,7 @@ const StockTransfer = () => {
     });
   };
 
+  // ── Cost calculations using sellingPrice ──────────────────────────────────
   const calculateTotalTransferCost = (items) => {
     if (!items || !Array.isArray(items)) return 0;
     return parseFloat(
@@ -269,8 +254,9 @@ const StockTransfer = () => {
           let itemCost = 0;
           if (item.productCost !== undefined && item.productCost !== null)
             itemCost = parseFloat(item.productCost);
-          else if (item.lc && item.boxQuantity)
-            itemCost = parseFloat(item.lc) * parseInt(item.boxQuantity);
+          else if (item.sellingPrice && item.boxQuantity)
+            itemCost =
+              parseFloat(item.sellingPrice) * parseInt(item.boxQuantity);
           return sum + (isNaN(itemCost) ? 0 : itemCost);
         }, 0)
         .toFixed(2),
@@ -342,10 +328,9 @@ const StockTransfer = () => {
           totalAmount: product.totalAmount || 0,
           status: product.status || "Out of Stock",
           minStockLevel: product.minStockLevel || 0,
-          lc: getProductLc(product),
+          sellingPrice: getProductSellingPrice(product),
           fob: product.fob || 0,
           cif: product.cif || 0,
-          sellingPrice: product.sellingPrice,
           stockLastUpdated: product.stockLastUpdated || null,
           createdAt: product.createdAt,
           updatedAt: product.updatedAt,
@@ -354,9 +339,9 @@ const StockTransfer = () => {
     } catch {
       showToast("error", "Failed to fetch products");
     }
-  }, [getProductLc]);
+  }, [getProductSellingPrice]);
 
-  // ── Product options filtered to exclude already-added products (MR transfer) ──
+  // ── Product options filtered to exclude already-added products ────────────
   const getAvailableProductOptions = useCallback(
     (currentItems = [], isForMRTransfer = false) => {
       const addedProductIds = new Set(
@@ -369,9 +354,7 @@ const StockTransfer = () => {
           .filter(Boolean),
       );
 
-      const baseProducts = isForMRTransfer
-        ? products.filter((p) => p.totalBoxes > 0)
-        : products.filter((p) => p.totalBoxes > 0);
+      const baseProducts = products.filter((p) => p.totalBoxes > 0);
 
       return [
         { value: "", label: "Select Product" },
@@ -381,7 +364,7 @@ const StockTransfer = () => {
             value: product._id,
             label: `${product.productName} (Stock: ${product.totalBoxes || 0} boxes)`,
             qtyPerCarton: product.qtyPerCarton || 0,
-            lc: product.lc || 0,
+            sellingPrice: product.sellingPrice || 0,
             availableStock: product.totalBoxes || 0,
             productName: product.productName,
           })),
@@ -397,9 +380,9 @@ const StockTransfer = () => {
         .filter((p) => p.totalBoxes > 0)
         .map((product) => ({
           value: product._id,
-          label: `${product.productName} (Stock: ${product.totalBoxes || 0} boxes, LC: $${formatCurrency(product.lc)})`,
+          label: `${product.productName} (Stock: ${product.totalBoxes || 0} boxes, Price: $${formatCurrency(product.sellingPrice)})`,
           qtyPerCarton: product.qtyPerCarton || 0,
-          lc: product.lc || 0,
+          sellingPrice: product.sellingPrice || 0,
           availableStock: product.totalBoxes || 0,
           productName: product.productName,
         })),
@@ -412,9 +395,9 @@ const StockTransfer = () => {
       { value: "", label: "Select Product" },
       ...products.map((product) => ({
         value: product._id,
-        label: `${product.productName} (Stock: ${product.totalBoxes || 0} boxes, LC: $${formatCurrency(product.lc)})`,
+        label: `${product.productName} (Stock: ${product.totalBoxes || 0} boxes, Price: $${formatCurrency(product.sellingPrice)})`,
         qtyPerCarton: product.qtyPerCarton || 0,
-        lc: product.lc || 0,
+        sellingPrice: product.sellingPrice || 0,
         availableStock: product.totalBoxes || 0,
         productName: product.productName,
       })),
@@ -492,7 +475,6 @@ const StockTransfer = () => {
     setForm((prev) => ({ ...prev, [name]: newValue }));
   };
 
-  // ── Handle Transfer Type change in Edit modal ─────────────────────────────
   const handleTransferTypeChange = (e) => {
     const newType = e.target.value;
     setForm((prev) => ({ ...prev, transferType: newType }));
@@ -512,7 +494,7 @@ const StockTransfer = () => {
           productId: id,
           productName: item.productName || "-",
           boxQuantity: 0,
-          lc: parseFloat(item.lc) || 0,
+          sellingPrice: parseFloat(item.sellingPrice) || 0,
         };
       grouped[id].boxQuantity += parseFloat(item.boxQuantity) || 0;
     });
@@ -520,27 +502,26 @@ const StockTransfer = () => {
       Object.values(grouped).map((item) => ({
         ...item,
         productCost: parseFloat(
-          ((item.lc || 0) * (item.boxQuantity || 0)).toFixed(2),
+          ((item.sellingPrice || 0) * (item.boxQuantity || 0)).toFixed(2),
         ),
       })),
     );
     setIsProductModalOpen(true);
   };
 
-  // ── Handle Add New Item for MR Transfer (send type) ───────────────────────
+  // ── Handle Add New Item ───────────────────────────────────────────────────
   const handleAddNewItem = () => {
     setNewProductForm({
       productId: "",
       productName: "",
       boxQuantity: "",
-      lc: "",
+      sellingPrice: "",
       productCost: 0,
     });
     setIsAddProductModalOpen(true);
   };
 
-  // ── Handle product select in Add Product Modal ────────────────────────────
-  // For MR transfer: fetch LC from ReportInHand
+  // ── Handle product select in Add Product Modal (MR transfer) ─────────────
   const handleNewProductSelectForMR = async (selectedValue) => {
     const availableOpts = getAvailableProductOptions(form.items, true);
     const sel = availableOpts.find((opt) => opt.value === selectedValue);
@@ -549,22 +530,24 @@ const StockTransfer = () => {
         ...prev,
         productId: selectedValue,
         productName: sel.productName,
-        lc: "",
+        sellingPrice: "",
         boxQuantity: "",
         productCost: 0,
       }));
-      // Fetch LC from ReportInHand
-      setLcLoading(true);
+      setSellingPriceLoading(true);
       try {
-        const lcValue = await fetchLCFromReportInHand(sel.productName);
+        const spValue = await fetchSellingPriceFromReportInHand(
+          sel.productName,
+        );
         setNewProductForm((prev) => ({
           ...prev,
-          lc: lcValue || sel.lc || 0,
+          sellingPrice: spValue || sel.sellingPrice || 0,
           productCost:
             prev.boxQuantity !== ""
               ? parseFloat(
                   (
-                    (lcValue || sel.lc || 0) * parseInt(prev.boxQuantity || 0)
+                    (spValue || sel.sellingPrice || 0) *
+                    parseInt(prev.boxQuantity || 0)
                   ).toFixed(2),
                 )
               : 0,
@@ -572,10 +555,10 @@ const StockTransfer = () => {
       } catch {
         setNewProductForm((prev) => ({
           ...prev,
-          lc: sel.lc || 0,
+          sellingPrice: sel.sellingPrice || 0,
         }));
       } finally {
-        setLcLoading(false);
+        setSellingPriceLoading(false);
       }
     }
   };
@@ -587,25 +570,23 @@ const StockTransfer = () => {
         ...prev,
         productId: selectedValue,
         productName: sel.productName,
-        lc: sel.lc || 0,
+        sellingPrice: sel.sellingPrice || 0,
         boxQuantity: "",
         productCost: 0,
       }));
     }
   };
 
-  // ── Box quantity change: text input accepting only numeric values ──────────
+  // ── Box quantity change ───────────────────────────────────────────────────
   const handleNewProductBoxQuantityChange = (e) => {
     const value = e.target.value;
-    // Allow only digits (numeric only, text input)
     if (value === "" || /^\d+$/.test(value)) {
-      const boxQty = value === "" ? "" : parseInt(value, 10);
       setNewProductForm((prev) => {
-        const lc = parseFloat(prev.lc) || 0;
-        const updated = { ...prev, boxQuantity: value }; // keep as string for text input
+        const sp = parseFloat(prev.sellingPrice) || 0;
+        const updated = { ...prev, boxQuantity: value };
         updated.productCost =
-          value !== "" && lc > 0
-            ? parseFloat((lc * (parseInt(value, 10) || 0)).toFixed(2))
+          value !== "" && sp > 0
+            ? parseFloat((sp * (parseInt(value, 10) || 0)).toFixed(2))
             : 0;
         return updated;
       });
@@ -643,23 +624,24 @@ const StockTransfer = () => {
         const updatedItems = [...prev.items];
         const ex = updatedItems[existingIndex];
         const totalBoxQuantity = (parseInt(ex.boxQuantity) || 0) + boxQty;
-        const lc = parseFloat(newProductForm.lc) || ex.lc || 0;
+        const sp =
+          parseFloat(newProductForm.sellingPrice) || ex.sellingPrice || 0;
         updatedItems[existingIndex] = {
           ...ex,
           boxQuantity: totalBoxQuantity,
-          lc,
-          productCost: parseFloat((lc * totalBoxQuantity).toFixed(2)),
+          sellingPrice: sp,
+          productCost: parseFloat((sp * totalBoxQuantity).toFixed(2)),
         };
         showToast("success", "Product quantity updated successfully");
         return { ...prev, items: updatedItems };
       } else {
-        const lc = parseFloat(newProductForm.lc) || 0;
+        const sp = parseFloat(newProductForm.sellingPrice) || 0;
         const newItem = {
           productId: newProductForm.productId,
           productName: newProductForm.productName,
           boxQuantity: boxQty,
-          lc,
-          productCost: parseFloat((lc * boxQty).toFixed(2)),
+          sellingPrice: sp,
+          productCost: parseFloat((sp * boxQty).toFixed(2)),
           _id: `new-${Date.now()}`,
           product: {
             value: newProductForm.productId,
@@ -680,7 +662,7 @@ const StockTransfer = () => {
       productId: "",
       productName: "",
       boxQuantity: "",
-      lc: "",
+      sellingPrice: "",
       productCost: 0,
     });
   };
@@ -728,8 +710,8 @@ const StockTransfer = () => {
             productId: p.productId,
             productName: p.productName,
             boxQuantity: p.returnQuantity,
-            lc: p.lc,
-            productCost: p.lc * p.returnQuantity,
+            sellingPrice: p.sellingPrice,
+            productCost: p.sellingPrice * p.returnQuantity,
             expenses: 0,
           }));
       } else {
@@ -738,15 +720,15 @@ const StockTransfer = () => {
             const productId =
               item.productId?._id || item.productId || item.product?.value;
             const boxQuantity = parseInt(item.boxQuantity) || 0;
-            const lc = parseFloat(item.lc) || 0;
+            const sp = parseFloat(item.sellingPrice) || 0;
             return {
               productId,
               productName: item.productName || item.product?.label || "",
               boxQuantity,
-              lc: parseFloat(lc.toFixed(4)),
+              sellingPrice: parseFloat(sp.toFixed(4)),
               productCost:
-                lc > 0
-                  ? parseFloat((lc * boxQuantity).toFixed(2))
+                sp > 0
+                  ? parseFloat((sp * boxQuantity).toFixed(2))
                   : parseFloat(item.productCost) || 0,
               expenses: parseFloat(item.expenses) || 0,
             };
@@ -792,6 +774,40 @@ const StockTransfer = () => {
 
   const getCurrentData = () =>
     activeTab === "general" ? generalTransfers : mrTransfers;
+
+  // ── Resolve MR name from mrId using mrList / mrListFromStock ─────────────
+  const resolveMRName = useCallback(
+    (transfer) => {
+      // First try the stored name fields
+      const storedName =
+        transfer.stockTransferToMr ||
+        transfer.stockTransferFromMrToMain ||
+        transfer.mrName;
+
+      if (storedName) return storedName;
+
+      // Try to look up by mrId in mrListFromStock
+      if (transfer.mrId) {
+        const fromStock = mrListFromStock.find(
+          (mr) => mr.mrId === transfer.mrId || mr._id === transfer.mrId,
+        );
+        if (fromStock?.mrName) return fromStock.mrName;
+
+        // Try staff list
+        const fromStaff = mrList.find((mr) => mr._id === transfer.mrId);
+        if (fromStaff)
+          return (
+            fromStaff.medicalRepName ||
+            fromStaff.employeeName ||
+            `MR ${transfer.mrId}`
+          );
+      }
+
+      return "-";
+    },
+    [mrListFromStock, mrList],
+  );
+
   const getMRName = (transfer) =>
     transfer.stockTransferToMr ||
     transfer.stockTransferFromMrToMain ||
@@ -822,10 +838,10 @@ const StockTransfer = () => {
       return (
         matchesInvoice ||
         matchesRemarks ||
-        getMRName(transfer).toLowerCase().includes(lowerSearch)
+        resolveMRName(transfer).toLowerCase().includes(lowerSearch)
       );
     });
-  }, [activeTab, getCurrentData, searchTerm]);
+  }, [activeTab, getCurrentData, searchTerm, resolveMRName]);
 
   const currentTransfers = useMemo(
     () =>
@@ -853,7 +869,7 @@ const StockTransfer = () => {
     setForm((prev) => {
       const updatedItems = [...prev.items];
       let newValue = value;
-      if (field === "lc" || field === "expenses") {
+      if (field === "sellingPrice" || field === "expenses") {
         const num = parseFloat(value);
         newValue = isNaN(num) ? 0 : parseFloat(num.toFixed(2));
       } else if (
@@ -875,10 +891,10 @@ const StockTransfer = () => {
             (updatedItems[index].qtyPerCarton || 0) +
           (updatedItems[index].openPieces || 0);
       }
-      if (field === "boxQuantity" || field === "lc") {
+      if (field === "boxQuantity" || field === "sellingPrice") {
         updatedItems[index].productCost = parseFloat(
           (
-            (parseFloat(updatedItems[index].lc) || 0) *
+            (parseFloat(updatedItems[index].sellingPrice) || 0) *
             (parseInt(updatedItems[index].boxQuantity) || 0)
           ).toFixed(2),
         );
@@ -965,7 +981,7 @@ const StockTransfer = () => {
   const handleView = async (transfer) => {
     setForm({
       ...transfer,
-      mrName: getMRName(transfer),
+      mrName: resolveMRName(transfer),
       stockTransferToMr: transfer.stockTransferToMr || transfer.mrName || "",
       stockTransferFromMrToMain: transfer.stockTransferFromMrToMain || "",
       shipping: parseFloat(transfer.shipping || 0).toFixed(2),
@@ -981,7 +997,6 @@ const StockTransfer = () => {
       setMrStockLoading(true);
       try {
         const result = await fetchMRStockByMrId(transfer.mrId);
-        // Only show products with quantity > 0
         const filtered = (result?.products || []).filter((p) => p.quantity > 0);
         setMrStockData(filtered);
         setCurrentMRInfo(result?.data || null);
@@ -1040,7 +1055,7 @@ const StockTransfer = () => {
           return {
             productId: p.productId,
             productName: p.productName,
-            lc: p.lc || 0,
+            sellingPrice: p.sellingPrice || 0,
             availableQty: p.quantity || 0,
             assignedQty: p.assignedQuantity || 0,
             returnQuantity: existingItem
@@ -1063,7 +1078,7 @@ const StockTransfer = () => {
     [fetchMRStockByMrId],
   );
 
-  // ── Load MR stock for CREATE modal (auto on MR select, receive type) ──────
+  // ── Load MR stock for CREATE modal ────────────────────────────────────────
   const loadMRStockForCreate = useCallback(
     async (mrId, mrName) => {
       if (!mrId) {
@@ -1076,7 +1091,6 @@ const StockTransfer = () => {
         const result = await fetchMRStockByMrId(mrId);
         const mrInfo = result?.data || { mrId, mrName };
         setCreateMRInfo(mrInfo);
-        // Only show products with quantity > 0
         const filtered = (result?.products || []).filter((p) => p.quantity > 0);
         setCreateMRStockData(
           filtered.map((p) => ({
@@ -1084,7 +1098,7 @@ const StockTransfer = () => {
             productName: p.productName,
             assignedQuantity: p.assignedQuantity || 0,
             quantity: p.quantity || 0,
-            lc: p.lc || 0,
+            sellingPrice: p.sellingPrice || 0,
             returnQuantity: p.quantity || 0,
           })),
         );
@@ -1105,14 +1119,15 @@ const StockTransfer = () => {
       productId: item.productId?._id || item.productId,
       productName: item.productName || "",
       boxQuantity: item.boxQuantity || 0,
-      lc: item.lc || 0,
-      productCost: item.productCost || (item.lc || 0) * (item.boxQuantity || 0),
+      sellingPrice: item.sellingPrice || 0,
+      productCost:
+        item.productCost || (item.sellingPrice || 0) * (item.boxQuantity || 0),
       expenses: item.expenses || 0,
     }));
     const formData = {
       ...transfer,
       items: clonedItems,
-      mrName: getMRName(transfer),
+      mrName: resolveMRName(transfer),
       stockTransferToMr: transfer.stockTransferToMr || transfer.mrName || "",
       stockTransferFromMrToMain: transfer.stockTransferFromMrToMain || "",
       shipping: parseFloat(transfer.shipping || 0).toFixed(2),
@@ -1124,7 +1139,11 @@ const StockTransfer = () => {
     setForm(formData);
 
     if (activeTab === "mr" && isReceiveType(transfer.transferType)) {
-      await loadMRStockForEdit(transfer.mrId, getMRName(transfer), clonedItems);
+      await loadMRStockForEdit(
+        transfer.mrId,
+        resolveMRName(transfer),
+        clonedItems,
+      );
       setIsMrStockSelectModalOpen(true);
     } else {
       setMrStockDataForEdit([]);
@@ -1145,7 +1164,7 @@ const StockTransfer = () => {
       _id: product.productId?._id || product.productId || product._id,
       productName: product.productName || product.product?.label,
       boxQuantity: product.boxQuantity || 0,
-      lc: product.lc || 0,
+      sellingPrice: product.sellingPrice || 0,
       productCost: product.productCost || 0,
     });
     setCurrentProductIndex(index);
@@ -1162,7 +1181,8 @@ const StockTransfer = () => {
           if (name === "boxQuantity")
             u.productCost = parseFloat(
               (
-                (parseFloat(u.lc) || 0) * (parseInt(processedValue) || 0)
+                (parseFloat(u.sellingPrice) || 0) *
+                (parseInt(processedValue) || 0)
               ).toFixed(2),
             );
           return u;
@@ -1173,7 +1193,7 @@ const StockTransfer = () => {
         const processedValue = value === "" ? "" : parseFloat(value) || 0;
         setCurrentProduct((prev) => {
           const u = { ...prev, [name]: processedValue };
-          if (name === "lc")
+          if (name === "sellingPrice")
             u.productCost = parseFloat(
               (
                 (parseFloat(processedValue) || 0) *
@@ -1202,10 +1222,10 @@ const StockTransfer = () => {
           qtyPerCarton: sel.qtyPerCarton,
         },
         qtyPerCarton: sel.qtyPerCarton || 0,
-        lc: sel.lc || 0,
+        sellingPrice: sel.sellingPrice || 0,
         boxQuantity: prev.boxQuantity || 0,
         productCost: parseFloat(
-          ((sel.lc || 0) * (prev.boxQuantity || 0)).toFixed(2),
+          ((sel.sellingPrice || 0) * (prev.boxQuantity || 0)).toFixed(2),
         ),
       }));
     }
@@ -1232,7 +1252,7 @@ const StockTransfer = () => {
           (parseInt(currentProduct.boxQuantity) || 0) *
             (parseInt(currentProduct.qtyPerCarton) || 0) +
           (parseInt(currentProduct.openPieces) || 0),
-        lc: parseFloat(currentProduct.lc) || 0,
+        sellingPrice: parseFloat(currentProduct.sellingPrice) || 0,
         productCost: parseFloat(currentProduct.productCost) || 0,
       };
       return { ...prev, items: updatedItems };
@@ -1263,7 +1283,7 @@ const StockTransfer = () => {
     }
   };
 
-  // ── Handle MR Name change in CREATE modal (from stockInMRHand list) ───────
+  // ── Handle MR Name change in CREATE modal ─────────────────────────────────
   const handleCreateMRNameChange = async (selectedValue) => {
     const sel = mrOptionsFromStock.find((mr) => mr.value === selectedValue);
     const newMrName = sel?.label || "";
@@ -1278,11 +1298,9 @@ const StockTransfer = () => {
     }
   };
 
-  // ── Handle Transfer Type change in CREATE modal ───────────────────────────
   const handleCreateTransferTypeChange = (e) => {
     const newType = e.target.value;
     setForm((prev) => ({ ...prev, transferType: newType }));
-    // Clear MR stock data if switching away from receive
     if (!isReceiveType(newType)) {
       setCreateMRStockData([]);
       setCreateMRInfo(null);
@@ -1291,7 +1309,6 @@ const StockTransfer = () => {
     }
   };
 
-  // ── Update return qty in create modal ─────────────────────────────────────
   const handleCreateReturnQtyChange = (productId, value) => {
     const num = parseInt(value) || 0;
     setCreateMRStockData((prev) =>
@@ -1347,19 +1364,19 @@ const StockTransfer = () => {
     (p) => p.returnQuantity > 0,
   );
   const receiveTotalValue = mrStockSelectData.reduce(
-    (sum, p) => sum + p.lc * p.returnQuantity,
+    (sum, p) => sum + (p.sellingPrice || 0) * p.returnQuantity,
     0,
   );
   const editReceiveTotalValue = mrStockDataForEdit.reduce(
-    (sum, p) => sum + p.lc * p.returnQuantity,
+    (sum, p) => sum + (p.sellingPrice || 0) * p.returnQuantity,
     0,
   );
   const createReceiveTotalValue = createMRStockData.reduce(
-    (sum, p) => sum + p.lc * (p.returnQuantity || p.quantity || 0),
+    (sum, p) =>
+      sum + (p.sellingPrice || 0) * (p.returnQuantity || p.quantity || 0),
     0,
   );
 
-  // Available product options for MR transfer add product modal (excluding already added)
   const mrAddProductOptions = getAvailableProductOptions(form.items, true);
 
   return (
@@ -1465,8 +1482,8 @@ const StockTransfer = () => {
               </th>
               <th className="p-3 min-w-[100px] text-sm font-medium">Type</th>
               <th className="p-3 min-w-[120px] text-sm font-medium">Date</th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">
-                Total LC Cost ($)
+              <th className="p-3 min-w-[150px] text-sm font-medium">
+                Total Selling Price ($)
               </th>
               <th className="p-3 min-w-[120px] text-sm font-medium">
                 # Products
@@ -1477,7 +1494,7 @@ const StockTransfer = () => {
           <tbody>
             {currentTransfers.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-4 text-center text-gray-500">
+                <td colSpan={7} className="p-4 text-center text-gray-500">
                   {searchTerm
                     ? "No matching records found"
                     : "No data available"}
@@ -1517,7 +1534,7 @@ const StockTransfer = () => {
                         ? item.transferType === "send"
                           ? item.destination || "Main Warehouse"
                           : item.source || "Main Warehouse"
-                        : getMRName(item)}
+                        : resolveMRName(item)}
                     </td>
                     <td className="p-3 min-w-[100px]">
                       <span
@@ -1535,7 +1552,7 @@ const StockTransfer = () => {
                     <td className="p-3 min-w-[120px]">
                       {formatDateToReadable(item.date)}
                     </td>
-                    <td className="p-3 min-w-[120px] font-medium">
+                    <td className="p-3 min-w-[150px] font-medium">
                       <div className="flex items-center justify-center gap-1">
                         <DollarSign size={14} className="text-green-600" />
                         <span className="text-green-700">
@@ -1659,11 +1676,6 @@ const StockTransfer = () => {
                       form.mrName ||
                       "Medical Representative"}
                   </p>
-                  {currentMRInfo?.mrId && (
-                    <p className="text-xs text-blue-500 font-mono">
-                      MR ID: {currentMRInfo.mrId}
-                    </p>
-                  )}
                   <p className="text-xs text-blue-600 mt-0.5">
                     {mrStockSelectData.length} product(s) in hand
                   </p>
@@ -1688,7 +1700,9 @@ const StockTransfer = () => {
                       <div className="col-span-4">Product</div>
                       <div className="col-span-2 text-center">Assigned</div>
                       <div className="col-span-2 text-center">Available</div>
-                      <div className="col-span-2 text-center">LC ($)</div>
+                      <div className="col-span-2 text-center">
+                        Selling Price ($)
+                      </div>
                       <div className="col-span-2 text-center">Return Qty</div>
                     </div>
                     {mrStockSelectData.map((product) => (
@@ -1705,7 +1719,8 @@ const StockTransfer = () => {
                             <span className="text-green-700 font-medium">
                               $
                               {formatCurrency(
-                                product.lc * product.returnQuantity,
+                                (product.sellingPrice || 0) *
+                                  product.returnQuantity,
                               )}
                             </span>
                           </p>
@@ -1724,7 +1739,7 @@ const StockTransfer = () => {
                         </div>
                         <div className="col-span-2 text-center">
                           <span className="text-sm text-gray-700 font-medium">
-                            ${formatCurrency(product.lc)}
+                            ${formatCurrency(product.sellingPrice)}
                           </span>
                         </div>
                         <div className="col-span-2 text-center">
@@ -1784,7 +1799,7 @@ const StockTransfer = () => {
         )}
 
       {/* ── View Modal ────────────────────────────────────────────────────────── */}
-       {isViewModalOpen &&
+      {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
@@ -1809,21 +1824,20 @@ const StockTransfer = () => {
                     Loading MR stock details...
                   </div>
                 )}
-              {activeTab === "mr" && currentMRInfo && (
+              {activeTab === "mr" && (currentMRInfo || form.mrName) && (
                 <div className="mb-4 flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
                   <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
                     <User size={18} />
                   </div>
                   <div>
                     <p className="font-bold text-blue-900">
-                      {currentMRInfo.mrName}
-                    </p>
-                    <p className="text-xs text-blue-500 font-mono">
-                      MR ID: {currentMRInfo.mrId}
+                      {currentMRInfo?.mrName ||
+                        form.stockTransferToMr ||
+                        form.mrName}
                     </p>
                   </div>
                   <span className="ml-auto text-xs bg-blue-600 text-white px-2 py-1 rounded-full capitalize">
-                    {form.transferType}
+                    {isReceiveType(form.transferType) ? "Receive" : "Send"}
                   </span>
                 </div>
               )}
@@ -1882,18 +1896,11 @@ const StockTransfer = () => {
                         MR Name
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.stockTransferToMr ||
+                        {currentMRInfo?.mrName ||
+                          form.stockTransferToMr ||
                           form.stockTransferFromMrToMain ||
                           form.mrName ||
                           "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        MR ID
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-mono text-gray-600 text-xs">
-                        {form.mrId || "-"}
                       </p>
                     </div>
                   </>
@@ -1967,7 +1974,6 @@ const StockTransfer = () => {
                       </div>
                     )}
 
-                    {/* Also show the transferred items */}
                     <h3 className="text-lg font-medium text-gray-800 mt-5 mb-3">
                       Returned Products ({form.items?.length || 0})
                     </h3>
@@ -1975,7 +1981,6 @@ const StockTransfer = () => {
                       {form.items && form.items.length > 0 ? (
                         form.items.map((item, index) => {
                           const productCost =
-                           
                             (item.sellingPrice || 0) * (item.boxQuantity || 0);
                           return (
                             <div
@@ -2065,7 +2070,7 @@ const StockTransfer = () => {
                                 </div>
                                 <div>
                                   <label className="block text-sm font-medium text-gray-600">
-                                  Selling Price ($)
+                                    Selling Price ($)
                                   </label>
                                   <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
                                     <DollarSign
@@ -2145,11 +2150,6 @@ const StockTransfer = () => {
                         form.mrName ||
                         "Medical Representative"}
                     </p>
-                    {(currentMRInfo?.mrId || form.mrId) && (
-                      <p className="text-xs text-blue-500 font-mono">
-                        MR ID: {currentMRInfo?.mrId || form.mrId}
-                      </p>
-                    )}
                   </div>
                   <span className="ml-auto text-xs bg-blue-600 text-white px-2 py-1 rounded-full">
                     Receive Transfer
@@ -2215,11 +2215,15 @@ const StockTransfer = () => {
                       <label className="block text-sm font-medium text-gray-700">
                         MR Name
                       </label>
-                      {/* Only show MR dropdown for non-receive; for receive show read-only */}
                       {isReceiveType(form.transferType) ? (
                         <input
                           type="text"
-                          value={form.stockTransferToMr || form.mrName || ""}
+                          value={
+                            currentMRInfo?.mrName ||
+                            form.stockTransferToMr ||
+                            form.mrName ||
+                            ""
+                          }
                           readOnly
                           className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-700"
                         />
@@ -2271,26 +2275,10 @@ const StockTransfer = () => {
                       </div>
                     )}
                   </div>
-                ) : (
-                  <div className="md:col-span-3">
-                    <label className="block text-sm font-medium text-gray-700">
-                      MR ID (Reference)
-                    </label>
-                    <input
-                      type="text"
-                      name="mrId"
-                      value={form.mrId || ""}
-                      readOnly
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-mono text-gray-600 text-xs"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Automatically linked to the selected MR
-                    </p>
-                  </div>
-                )}
+                ) : null}
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700">
-                    Total LC Cost ($)
+                    Total Selling Price ($)
                   </label>
                   <input
                     type="number"
@@ -2305,7 +2293,7 @@ const StockTransfer = () => {
                     className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium text-green-700"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Calculated automatically (LC × Box Quantity)
+                    Calculated automatically (Selling Price × Box Quantity)
                   </p>
                 </div>
                 <div className="md:col-span-3">
@@ -2344,7 +2332,6 @@ const StockTransfer = () => {
                   </div>
 
                   {activeTab === "mr" && isReceiveType(form.transferType) ? (
-                    /* ── RECEIVE: show selected products from MR stock (NO Add Product) */
                     loadingMRStockForEdit ? (
                       <div className="text-center py-4 text-gray-500">
                         Loading MR stock...
@@ -2380,8 +2367,8 @@ const StockTransfer = () => {
                                 </p>
                                 <p className="text-xs text-gray-500">
                                   Available: {product.availableQty} · Assigned:{" "}
-                                  {product.assignedQty} · LC: $
-                                  {formatCurrency(product.lc)}
+                                  {product.assignedQty} · Price: $
+                                  {formatCurrency(product.sellingPrice)}
                                 </p>
                               </div>
                               <div className="text-center">
@@ -2399,7 +2386,8 @@ const StockTransfer = () => {
                                 <span className="text-sm font-semibold text-green-700">
                                   $
                                   {formatCurrency(
-                                    product.lc * product.returnQuantity,
+                                    (product.sellingPrice || 0) *
+                                      product.returnQuantity,
                                   )}
                                 </span>
                               </div>
@@ -2409,14 +2397,14 @@ const StockTransfer = () => {
                       </div>
                     )
                   ) : (
-                    /* ── SEND: editable items list WITH Add Products button ──────── */
                     <div>
                       <div className="space-y-4 max-h-60 overflow-y-auto border rounded-lg p-4">
                         {form.items && form.items.length > 0 ? (
                           form.items.map((item, index) => {
                             const productCost =
                               item.productCost ||
-                              (item.lc || 0) * (item.boxQuantity || 0);
+                              (item.sellingPrice || 0) *
+                                (item.boxQuantity || 0);
                             return (
                               <div
                                 key={item._id || index}
@@ -2428,9 +2416,9 @@ const StockTransfer = () => {
                                       {item.productName || "Product"}
                                     </h4>
                                     <p className="text-sm text-gray-600">
-                                      Boxes: {item.boxQuantity || 0} | LC:{" "}
+                                      Boxes: {item.boxQuantity || 0} | Price:{" "}
                                       <span className="text-green-600 font-medium">
-                                        ${formatCurrency(item.lc)}
+                                        ${formatCurrency(item.sellingPrice)}
                                       </span>{" "}
                                       | Total:{" "}
                                       <span className="text-green-700 font-medium">
@@ -2464,7 +2452,6 @@ const StockTransfer = () => {
                           <p className="text-gray-500 text-center">No items</p>
                         )}
                       </div>
-                      {/* Add Products button — only for send type */}
                       <div className="mt-4">
                         <button
                           type="button"
@@ -2507,10 +2494,7 @@ const StockTransfer = () => {
           document.body,
         )}
 
-      {/* ── Add Product Modal — MR Transfer (send type) ───────────────────────
-          Uses separate MR list from stockInMRHand, LC from ReportInHand,
-          text input for box qty (numeric only), selected products excluded
-      ════════════════════════════════════════════════════════════════════════ */}
+      {/* ── Add Product Modal ─────────────────────────────────────────────────── */}
       {isAddProductModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -2541,7 +2525,6 @@ const StockTransfer = () => {
                 )}
               </p>
               <div className="space-y-4">
-                {/* ── Product Dropdown (excludes already added products) ─────── */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Product Name <span className="text-red-500">*</span>
@@ -2586,11 +2569,11 @@ const StockTransfer = () => {
                           {productOptions.find(
                             (p) => p.value === newProductForm.productId,
                           )?.availableStock || 0}{" "}
-                          boxes | LC: $
+                          boxes | Price: $
                           {formatCurrency(
                             productOptions.find(
                               (p) => p.value === newProductForm.productId,
-                            )?.lc || 0,
+                            )?.sellingPrice || 0,
                           )}
                         </p>
                       )}
@@ -2598,7 +2581,6 @@ const StockTransfer = () => {
                   )}
                 </div>
 
-                {/* ── Box Quantity: text input, numeric only ─────────────────── */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Box Quantity <span className="text-red-500">*</span>
@@ -2619,42 +2601,43 @@ const StockTransfer = () => {
                     )}
                 </div>
 
-                {/* ── LC: auto-filled from ReportInHand ─────────────────────── */}
+                {/* ── Selling Price: auto-filled ────────────────────────────── */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    LC ($) Per Box
+                    Selling Price ($) Per Box
                   </label>
                   <div className="relative">
                     <input
                       type="text"
                       value={
-                        lcLoading
+                        sellingPriceLoading
                           ? "Loading..."
-                          : newProductForm.lc !== "" && newProductForm.lc !== 0
-                            ? `$${formatCurrency(newProductForm.lc)}`
+                          : newProductForm.sellingPrice !== "" &&
+                              newProductForm.sellingPrice !== 0
+                            ? `$${formatCurrency(newProductForm.sellingPrice)}`
                             : "$0.00"
                       }
-                      className={`w-full border px-3 py-2 rounded-lg text-green-700 ${lcLoading ? "bg-yellow-50 border-yellow-300" : "bg-gray-100"}`}
+                      className={`w-full border px-3 py-2 rounded-lg text-green-700 ${sellingPriceLoading ? "bg-yellow-50 border-yellow-300" : "bg-gray-100"}`}
                       readOnly
                       disabled
                     />
-                    {lcLoading && (
+                    {sellingPriceLoading && (
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-yellow-600 animate-pulse">
-                        Fetching LC...
+                        Fetching price...
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
                     {activeTab === "mr"
-                      ? "Auto-filled from ReportInHand batches"
-                      : "Auto-filled from product batches data"}
+                      ? "Auto-filled from ReportInHand"
+                      : "Auto-filled from product data"}
                   </p>
                 </div>
 
-                {/* ── Total LC Cost (per product, calculated) ───────────────── */}
+                {/* ── Total Selling Price ───────────────────────────────────── */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Total LC Cost ($)
+                    Total Selling Price ($)
                   </label>
                   <input
                     type="text"
@@ -2664,10 +2647,13 @@ const StockTransfer = () => {
                     disabled
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Calculated: LC × Box Quantity ={" "}
+                    Selling Price × Box Quantity ={" "}
                     <span className="font-semibold text-green-700">
-                      ${formatCurrency(parseFloat(newProductForm.lc) || 0)} ×{" "}
-                      {parseInt(newProductForm.boxQuantity, 10) || 0} = $
+                      $
+                      {formatCurrency(
+                        parseFloat(newProductForm.sellingPrice) || 0,
+                      )}{" "}
+                      × {parseInt(newProductForm.boxQuantity, 10) || 0} = $
                       {formatCurrency(newProductForm.productCost)}
                     </span>
                   </p>
@@ -2690,7 +2676,7 @@ const StockTransfer = () => {
                     !newProductForm.boxQuantity ||
                     !/^\d+$/.test(String(newProductForm.boxQuantity)) ||
                     parseInt(newProductForm.boxQuantity, 10) <= 0 ||
-                    lcLoading
+                    sellingPriceLoading
                   }
                 >
                   Add Product
@@ -2748,23 +2734,21 @@ const StockTransfer = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    LC ($) Per Box <span className="text-red-500">*</span>
+                    Selling Price ($) Per Box{" "}
+                    <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
-                    name="lc"
-                    value={currentProduct?.lc || ""}
+                    name="sellingPrice"
+                    value={currentProduct?.sellingPrice || ""}
                     onChange={(e) => handleProductNumericChange(e, false)}
                     className="w-full border px-3 py-2 rounded-lg border-gray-300 text-green-700"
                     placeholder="0.00"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Landed Cost per box from product batches
-                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    Total LC Cost ($)
+                    Total Selling Price ($)
                   </label>
                   <input
                     type="text"
@@ -2773,7 +2757,7 @@ const StockTransfer = () => {
                     readOnly
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Calculated: LC × Box Quantity
+                    Calculated: Selling Price × Box Quantity
                   </p>
                 </div>
               </div>
@@ -2827,7 +2811,7 @@ const StockTransfer = () => {
                     <h2 className="text-xl font-semibold text-gray-800">
                       {productModalIsReceive
                         ? "Returned Products"
-                        : "Product Details with LC (Landed Cost)"}
+                        : "Product Details"}
                     </h2>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {productModalIsReceive
@@ -2865,11 +2849,11 @@ const StockTransfer = () => {
                               ? "Returned Qty"
                               : "Box Quantity"}
                           </th>
-                          <th className="p-3 min-w-[120px] text-sm font-medium">
-                            LC ($) Per Box
-                          </th>
                           <th className="p-3 min-w-[140px] text-sm font-medium">
-                            Total LC Cost ($)
+                            Selling Price ($)
+                          </th>
+                          <th className="p-3 min-w-[160px] text-sm font-medium">
+                            Total Selling Price ($)
                           </th>
                         </tr>
                       </thead>
@@ -2879,7 +2863,8 @@ const StockTransfer = () => {
                             {selectedProducts.map((product, index) => {
                               const productCost =
                                 product.productCost ||
-                                (product.lc || 0) * (product.boxQuantity || 0);
+                                (product.sellingPrice || 0) *
+                                  (product.boxQuantity || 0);
                               return (
                                 <tr
                                   key={product._id || index}
@@ -2906,16 +2891,16 @@ const StockTransfer = () => {
                                       )}
                                     </div>
                                   </td>
-                                  <td className="p-3 min-w-[120px]">
+                                  <td className="p-3 min-w-[140px]">
                                     <div className="flex items-center justify-center gap-1">
                                       <DollarSign
                                         size={14}
                                         className="text-green-600"
                                       />
-                                      {formatCurrency(product.lc)}
+                                      {formatCurrency(product.sellingPrice)}
                                     </div>
                                   </td>
-                                  <td className="p-3 min-w-[140px] font-medium">
+                                  <td className="p-3 min-w-[160px] font-medium">
                                     <div className="flex items-center justify-center gap-1">
                                       <DollarSign
                                         size={14}
@@ -2936,9 +2921,9 @@ const StockTransfer = () => {
                               >
                                 {productModalIsReceive
                                   ? "Total Return Value:"
-                                  : "Total:"}
+                                  : "Total Selling Price:"}
                               </td>
-                              <td className="p-3 min-w-[140px]">
+                              <td className="p-3 min-w-[160px]">
                                 <div className="flex items-center justify-center gap-1">
                                   <DollarSign
                                     size={14}
@@ -2960,7 +2945,8 @@ const StockTransfer = () => {
                                         (sum, p) =>
                                           sum +
                                           (p.productCost ||
-                                            (p.lc || 0) * (p.boxQuantity || 0)),
+                                            (p.sellingPrice || 0) *
+                                              (p.boxQuantity || 0)),
                                         0,
                                       ),
                                     )}

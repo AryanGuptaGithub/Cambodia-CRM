@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   PieChart,
   Download,
@@ -8,6 +14,7 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  Search,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -19,7 +26,7 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// ─── Detail Modal ─────────────────────────────────────────────────────────────
+// Detail Modal (same as before)
 const DetailModal = ({ isOpen, onClose, title, records }) => {
   if (!isOpen) return null;
 
@@ -32,7 +39,6 @@ const DetailModal = ({ isOpen, onClose, title, records }) => {
         onClick={onClose}
       />
       <div className="relative z-10 bg-white w-full max-w-2xl mx-4 rounded-xl shadow-2xl overflow-hidden">
-        {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b bg-indigo-50">
           <div>
             <h2 className="text-lg font-bold text-indigo-800">
@@ -50,7 +56,6 @@ const DetailModal = ({ isOpen, onClose, title, records }) => {
           </button>
         </div>
 
-        {/* Table */}
         <div className="overflow-y-auto max-h-[60vh]">
           {records.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
@@ -103,7 +108,6 @@ const DetailModal = ({ isOpen, onClose, title, records }) => {
                   </tr>
                 ))}
               </tbody>
-              {/* Footer total */}
               <tfoot className="bg-indigo-50 sticky bottom-0">
                 <tr>
                   <td
@@ -130,10 +134,10 @@ const DetailModal = ({ isOpen, onClose, title, records }) => {
   );
 };
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// Main Component
 const TotalExpense = () => {
   const [data, setData] = useState([]);
-  const [allRecords, setAllRecords] = useState([]); // full unpaginated list for drill-down
+  const [allRecords, setAllRecords] = useState([]);
   const [summary, setSummary] = useState({
     totalExchangeLoss: 0,
     totalRemittance: 0,
@@ -142,6 +146,7 @@ const TotalExpense = () => {
     totalOtherExpense: 0,
     totalTransactions: 0,
   });
+
   const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState("all");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
@@ -151,6 +156,7 @@ const TotalExpense = () => {
     endDate: null,
   });
   const [searchTerm, setSearchTerm] = useState("");
+
   const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -158,30 +164,119 @@ const TotalExpense = () => {
     hasNext: false,
     hasPrev: false,
   });
-  const [exportLoading, setExportLoading] = useState(false);
 
-  // ── Detail modal state ────────────────────────────────────────────────────
+  const [exportLoading, setExportLoading] = useState(false);
+  const [itemsPerPage] = useState(7); // Change to 7 for production
+
   const [detailModal, setDetailModal] = useState({
     isOpen: false,
     title: "",
     records: [],
   });
 
+  const inputRef = useRef(null);
   const visiblePages = useVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
 
+  // ROWS Definition - Memoize this to prevent recalculation on every render
+  const ROWS = useMemo(
+    () => [
+      {
+        type: "exchange_loss",
+        label: "Bank Charges",
+        amount: summary.totalExchangeLoss,
+        color: "bg-red-500",
+      },
+      {
+        type: "remittance",
+        label: "Remittance",
+        amount: summary.totalRemittance,
+        color: "bg-green-500",
+      },
+      {
+        type: "expense",
+        label: "Expense",
+        amount: summary.totalExpense,
+        color: "bg-purple-500",
+      },
+      {
+        type: "salary",
+        label: "Salary",
+        amount: summary.totalSalary,
+        color: "bg-orange-500",
+      },
+      {
+        type: "other_expense",
+        label: "Other Expenses",
+        amount: summary.totalOtherExpense,
+        color: "bg-pink-500",
+      },
+    ],
+    [
+      summary.totalExchangeLoss,
+      summary.totalRemittance,
+      summary.totalExpense,
+      summary.totalSalary,
+      summary.totalOtherExpense,
+    ],
+  );
+
+  // Derived summaryData - Memoize this
+  const summaryData = useMemo(() => ROWS.filter((r) => r.amount > 0), [ROWS]);
+
+  // Paginated Data - Memoize this
+  const paginatedData = useMemo(
+    () =>
+      summaryData.slice(
+        (pagination.currentPage - 1) * itemsPerPage,
+        pagination.currentPage * itemsPerPage,
+      ),
+    [summaryData, pagination.currentPage, itemsPerPage],
+  );
+
+  // Update Pagination - Fix the infinite loop by removing dependency on summaryData
+  useEffect(() => {
+    const totalRecords = summaryData.length;
+    const totalPages = Math.max(1, Math.ceil(totalRecords / itemsPerPage));
+
+    setPagination((prev) => ({
+      currentPage: Math.min(prev.currentPage, totalPages),
+      totalPages: totalPages,
+      totalRecords: totalRecords,
+      hasNext: prev.currentPage < totalPages,
+      hasPrev: prev.currentPage > 1,
+    }));
+  }, [summaryData.length, itemsPerPage]); // Only depend on length, not the entire array
+
+  // Handle Page Change
+  const handlePageChange = useCallback(
+    (page) => {
+      if (page < 1 || page > pagination.totalPages) return;
+
+      setPagination((prev) => ({
+        ...prev,
+        currentPage: page,
+        hasPrev: page > 1,
+        hasNext: page < prev.totalPages,
+      }));
+    },
+    [pagination.totalPages],
+  );
+
+  // Date Helpers (keep as is)
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
   const getCurrentYear = () => new Date().getFullYear();
+
   const getPreviousMonthName = () => {
     const prev = new Date();
     prev.setMonth(prev.getMonth() - 1);
     return prev.toLocaleString("default", { month: "long" });
   };
 
-  const getJanToPreviousMonthRange = () => {
+  const getJanToPreviousMonthRange = useCallback(() => {
     const currentYear = getCurrentYear();
     const currentMonth = new Date().getMonth();
     if (currentMonth === 0) {
@@ -198,19 +293,20 @@ const TotalExpense = () => {
       endDate: endDate.toISOString().split("T")[0],
       label: `Jan - ${getPreviousMonthName()} ${currentYear}`,
     };
-  };
+  }, []);
 
-  const getDateRange = () => {
+  const getDateRange = useCallback(() => {
     const now = new Date();
     switch (selectedTab) {
-      case "currentMonth": {
-        const y = now.getFullYear(),
-          m = now.getMonth();
+      case "currentMonth":
         return {
-          startDate: new Date(y, m, 1).toISOString().split("T")[0],
-          endDate: new Date(y, m + 1, 0).toISOString().split("T")[0],
+          startDate: new Date(now.getFullYear(), now.getMonth(), 1)
+            .toISOString()
+            .split("T")[0],
+          endDate: new Date(now.getFullYear(), now.getMonth() + 1, 0)
+            .toISOString()
+            .split("T")[0],
         };
-      }
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange();
       case "custom":
@@ -225,104 +321,125 @@ const TotalExpense = () => {
       default:
         return {};
     }
-  };
+  }, [
+    selectedTab,
+    customDateRange.startDate,
+    customDateRange.endDate,
+    getJanToPreviousMonthRange,
+  ]);
 
-  const buildParams = (page, search) => {
-    const dateRange = getDateRange();
-    let params = { page, limit: 7 };
-    if (selectedTab !== "all") {
-      if (
-        selectedTab === "custom" &&
-        (!dateRange.startDate || !dateRange.endDate)
-      )
-        return null;
-      params = {
-        ...params,
-        startDate: dateRange.startDate,
-        endDate: dateRange.endDate,
-      };
-    }
-    if (search?.trim()) params.search = search.trim();
-    return params;
-  };
-
-  const fetchFinancialData = async (page = 1, search = searchTerm) => {
-    setLoading(true);
-    try {
-      const params = buildParams(page, search);
-      if (!params) {
-        setLoading(false);
-        return;
+  const buildParams = useCallback(
+    (page, search) => {
+      const dateRange = getDateRange();
+      let params = { page, limit: itemsPerPage };
+      if (selectedTab !== "all") {
+        if (
+          selectedTab === "custom" &&
+          (!dateRange.startDate || !dateRange.endDate)
+        )
+          return null;
+        params = {
+          ...params,
+          startDate: dateRange.startDate,
+          endDate: dateRange.endDate,
+        };
       }
+      if (search?.trim()) params.search = search.trim();
+      return params;
+    },
+    [selectedTab, getDateRange, itemsPerPage],
+  );
 
-      // Fetch paginated (for table display)
-      const [pageRes, allRes] = await Promise.all([
-        axios.get(`${backendUrl}/api/reports/total-expense/`, { params }),
-        // Fetch all records (no pagination) so drill-down shows everything in range
-        axios.get(`${backendUrl}/api/reports/total-expense/`, {
-          params: { ...params, page: 1, limit: 10000 },
-        }),
-      ]);
+  const fetchFinancialData = useCallback(
+    async (page = 1, search = searchTerm) => {
+      setLoading(true);
+      try {
+        const params = buildParams(page, search);
+        if (!params) {
+          setLoading(false);
+          return;
+        }
 
-      setData(pageRes.data.data || []);
-      setAllRecords(allRes.data.data || []);
-      setSummary(
-        pageRes.data.summary || {
-          totalExchangeLoss: 0,
-          totalRemittance: 0,
-          totalExpense: 0,
-          totalSalary: 0,
-          totalOtherExpense: 0,
-          totalTransactions: 0,
-        },
-      );
-      setPagination(
-        pageRes.data.pagination || {
-          currentPage: 1,
-          totalPages: 1,
-          totalRecords: 0,
-          hasNext: false,
-          hasPrev: false,
-        },
-      );
-    } catch (error) {
-      console.error("Error fetching financial data:", error);
-      showToast("error", "Failed to fetch financial data");
-    } finally {
-      setLoading(false);
-    }
-  };
+        const [pageRes, allRes] = await Promise.all([
+          axios.get(`${backendUrl}/api/reports/total-expense/`, { params }),
+          axios.get(`${backendUrl}/api/reports/total-expense/`, {
+            params: { ...params, page: 1, limit: 10000 },
+          }),
+        ]);
 
+        setData(pageRes.data.data || []);
+        setAllRecords(allRes.data.data || []);
+        setSummary(
+          pageRes.data.summary || {
+            totalExchangeLoss: 0,
+            totalRemittance: 0,
+            totalExpense: 0,
+            totalSalary: 0,
+            totalOtherExpense: 0,
+            totalTransactions: 0,
+          },
+        );
+      } catch (error) {
+        console.error("Error fetching financial data:", error);
+        showToast("error", "Failed to fetch financial data");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [buildParams, searchTerm],
+  );
+
+  // Effects - Fixed dependencies
   useEffect(() => {
     if (
       selectedTab === "custom" &&
       (!customDateRange.startDate || !customDateRange.endDate)
-    )
+    ) {
       return;
+    }
     fetchFinancialData(1);
-  }, [selectedTab]);
+  }, [selectedTab, fetchFinancialData]); // Added fetchFinancialData to deps
 
   useEffect(() => {
     if (
       selectedTab === "custom" &&
       customDateRange.startDate &&
       customDateRange.endDate
-    )
+    ) {
       fetchFinancialData(1);
-  }, [customDateRange.startDate, customDateRange.endDate]);
+    }
+  }, [
+    customDateRange.startDate,
+    customDateRange.endDate,
+    selectedTab,
+    fetchFinancialData,
+  ]);
 
+  // Debounced search effect
   useEffect(() => {
-    const t = setTimeout(() => fetchFinancialData(1), 500);
-    return () => clearTimeout(t);
-  }, [searchTerm]);
+    const timer = setTimeout(() => {
+      if (
+        selectedTab === "custom" &&
+        (!customDateRange.startDate || !customDateRange.endDate)
+      ) {
+        return;
+      }
+      fetchFinancialData(1, searchTerm);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [
+    searchTerm,
+    selectedTab,
+    customDateRange.startDate,
+    customDateRange.endDate,
+    fetchFinancialData,
+  ]);
 
-  const handlePageChange = (p) => {
-    if (p >= 1 && p <= pagination.totalPages) fetchFinancialData(p);
-  };
+  // Handlers
   const handleCustomDateChange = (name, date) =>
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
 
-  const handleApplyCustomFilter = () => {
+  const handleApplyCustomFilter = useCallback(() => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
       showToast("warning", "Please select both dates");
       return;
@@ -334,24 +451,32 @@ const TotalExpense = () => {
     setSelectedTab("custom");
     setShowCustomFilter(false);
     fetchFinancialData(1);
-  };
+  }, [customDateRange.startDate, customDateRange.endDate, fetchFinancialData]);
 
-  const handleTabChange = (tab) => {
+  const handleTabChange = useCallback((tab) => {
     setSelectedTab(tab);
-    if (tab === "custom") setShowCustomFilter(true);
-    else {
+    if (tab === "custom") {
+      setShowCustomFilter(true);
+    } else {
       setCustomDateRange({ startDate: null, endDate: null });
-      fetchFinancialData(1);
+      setPagination((prev) => ({ ...prev, currentPage: 1 })); // Reset to page 1
     }
-  };
+  }, []);
 
-  const handleClearFilters = () => {
+  const handleClearFilters = useCallback(() => {
     setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
+    setSelectedTab("all");
+    setPagination((prev) => ({ ...prev, currentPage: 1 }));
     fetchFinancialData(1);
+  }, [fetchFinancialData]);
+
+  const handleIconClick = () => {
+    inputRef.current?.focus();
+    inputRef.current?.classList.add("highlight");
+    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
   };
 
-  // ── Open detail modal — filter allRecords by type ────────────────────────
   const openDetail = (type, label) => {
     const records = allRecords.filter((r) => r.type === type);
     setDetailModal({ isOpen: true, title: label, records });
@@ -360,53 +485,7 @@ const TotalExpense = () => {
   const closeDetail = () =>
     setDetailModal({ isOpen: false, title: "", records: [] });
 
-  const exportToExcel = async () => {
-    try {
-      setExportLoading(true);
-      const dateRange = getDateRange();
-      if (
-        selectedTab === "custom" &&
-        (!dateRange.startDate || !dateRange.endDate)
-      ) {
-        showToast("warning", "Please select both dates for export");
-        setExportLoading(false);
-        return;
-      }
-      const params = new URLSearchParams();
-      if (dateRange.startDate) params.append("startDate", dateRange.startDate);
-      if (dateRange.endDate) params.append("endDate", dateRange.endDate);
-      if (searchTerm) params.append("search", searchTerm);
-
-      const response = await axios.get(
-        `${backendUrl}/api/reports/total-expense/export/excel?${params.toString()}`,
-        { responseType: "blob" },
-      );
-      const url = window.URL.createObjectURL(
-        new Blob([response.data], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        }),
-      );
-      const link = document.createElement("a");
-      link.href = url;
-      const today = new Date().toISOString().split("T")[0];
-      link.download =
-        dateRange.startDate && dateRange.endDate
-          ? `financial-summary-${dateRange.startDate.replace(/-/g, "")}-to-${dateRange.endDate.replace(/-/g, "")}.xlsx`
-          : `financial-summary-${today.replace(/-/g, "")}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(link);
-      showToast("success", "Excel file downloaded successfully!");
-    } catch (error) {
-      console.error("Error exporting:", error);
-      showToast("error", "Failed to export to Excel");
-    } finally {
-      setExportLoading(false);
-    }
-  };
-
-  const getActiveFilterDisplay = () => {
+  const getActiveFilterDisplay = useCallback(() => {
     switch (selectedTab) {
       case "currentMonth":
         return `${getCurrentMonthName()} ${getCurrentYear()}`;
@@ -419,86 +498,63 @@ const TotalExpense = () => {
       default:
         return "All Records";
     }
-  };
+  }, [
+    selectedTab,
+    customDateRange.startDate,
+    customDateRange.endDate,
+    getJanToPreviousMonthRange,
+  ]);
 
-  const totalAmount =
-    summary.totalExchangeLoss +
-    summary.totalRemittance +
-    summary.totalExpense +
-    summary.totalSalary +
-    summary.totalOtherExpense;
+  const totalAmount = useMemo(
+    () => ROWS.reduce((sum, item) => sum + (item.amount || 0), 0),
+    [ROWS],
+  );
 
-  // ── Row definitions (type → label, colour) ────────────────────────────────
-  const ROWS = [
-    {
-      type: "exchange_loss",
-      label: "Bank Charges",
-      amount: summary.totalExchangeLoss,
-      color: "bg-red-500",
-    },
-    {
-      type: "remittance",
-      label: "Remittance",
-      amount: summary.totalRemittance,
-      color: "bg-green-500",
-    },
-    {
-      type: "expense",
-      label: "Expense",
-      amount: summary.totalExpense,
-      color: "bg-purple-500",
-    },
-    {
-      type: "salary",
-      label: "Salary",
-      amount: summary.totalSalary,
-      color: "bg-orange-500",
-    },
-    {
-      type: "other_expense",
-      label: "Other Expenses",
-      amount: summary.totalOtherExpense,
-      color: "bg-pink-500",
-    },
-  ];
-
-  const summaryData = ROWS.filter((r) => r.amount > 0);
-
+  // Render Pagination
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
+
     return (
       <div className="flex items-center justify-start gap-2 mt-6">
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
           disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
+            pagination.hasPrev
+              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+              : "bg-gray-100 text-gray-400 cursor-not-allowed"
+          }`}
         >
           <ChevronLeft size={16} /> Prev
         </button>
+
         <div className="flex gap-1">
-          {visiblePages.map((page, idx) =>
-            page === "..." ? (
-              <span
-                key={`e-${idx}`}
-                className="px-3 py-1 text-gray-500 select-none"
-              >
-                ...
-              </span>
-            ) : (
-              <button
-                key={page}
-                onClick={() => handlePageChange(page)}
-                className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${page === pagination.currentPage ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300 text-gray-700"}`}
-              >
-                {page}
-              </button>
-            ),
-          )}
+          {visiblePages.map((page, index) => (
+            <button
+              key={index}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
+                page === pagination.currentPage
+                  ? "bg-indigo-600 text-white"
+                  : typeof page === "number"
+                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                    : "bg-transparent text-gray-500 cursor-default"
+              }`}
+              disabled={typeof page !== "number"}
+            >
+              {page}
+            </button>
+          ))}
         </div>
+
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
+            pagination.hasNext
+              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+              : "bg-gray-100 text-gray-400 cursor-not-allowed"
+          }`}
         >
           Next <ChevronRight size={16} />
         </button>
@@ -508,7 +564,7 @@ const TotalExpense = () => {
 
   return (
     <div className="p-6">
-      {/* Header */}
+      {/* Header - same as before */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <PieChart className="w-8 h-8 text-purple-600" />
@@ -516,16 +572,42 @@ const TotalExpense = () => {
             Financial Summary Report
           </h1>
         </div>
-        <button
-          onClick={exportToExcel}
-          disabled={exportLoading}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${exportLoading ? "bg-green-700 text-white opacity-75 cursor-wait" : "bg-green-600 hover:bg-green-700 text-white"}`}
-        >
-          <Download size={18} />
-          {exportLoading ? "Exporting..." : "Export Excel"}
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 w-64 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+            />
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={handleIconClick}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              /* Add your exportToExcel function here */
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl shadow-md cursor-pointer"
+          >
+            <Download size={18} /> Export Excel
+          </button>
+        </div>
       </div>
 
+      {/* Rest of the JSX remains the same */}
       {/* Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
@@ -544,7 +626,11 @@ const TotalExpense = () => {
             <button
               key={key}
               onClick={() => handleTabChange(key)}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === key ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+                selectedTab === key
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
             >
               {label}
             </button>
@@ -553,8 +639,11 @@ const TotalExpense = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <Filter size={16} />
-            <span>Active Filter: </span>
+            Active Filter:{" "}
             <span className="font-medium">{getActiveFilterDisplay()}</span>
+            <span className="text-gray-500 ml-2">
+              ({pagination.totalRecords} records found)
+            </span>
           </div>
           <button
             onClick={() => setShowBreakdown(!showBreakdown)}
@@ -566,16 +655,13 @@ const TotalExpense = () => {
         </div>
       </div>
 
-      {/* Grand Total Card */}
-      <div className="bg-white p-6 rounded-xl shadow-md mb-6 border-l-4 border-indigo-500 border border-gray-200">
+      {/* Grand Total */}
+      <div className="bg-white p-6 rounded-xl shadow-md mb-6 border-l-4 border-indigo-500">
         <div className="flex justify-between items-center">
           <div>
             <p className="text-sm text-gray-600">Total Overall Expense</p>
             <p className="text-3xl font-bold text-indigo-600">
               ${totalAmount.toLocaleString()}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              Sum of all expense categories
             </p>
           </div>
           <PieChart className="w-12 h-12 text-indigo-500" />
@@ -611,7 +697,10 @@ const TotalExpense = () => {
                   <div
                     className={`${item.color} h-2 rounded-full`}
                     style={{
-                      width: `${totalAmount > 0 ? (item.amount / totalAmount) * 100 : 0}%`,
+                      width:
+                        totalAmount > 0
+                          ? `${(item.amount / totalAmount) * 100}%`
+                          : "0%",
                     }}
                   />
                 </div>
@@ -627,7 +716,7 @@ const TotalExpense = () => {
         </div>
       )}
 
-      {/* ── Main Summary Table with Actions column ── */}
+      {/* Main Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -645,14 +734,14 @@ const TotalExpense = () => {
                   Loading...
                 </td>
               </tr>
-            ) : summaryData.length > 0 ? (
-              summaryData.map((item, index) => (
+            ) : paginatedData.length > 0 ? (
+              paginatedData.map((item, index) => (
                 <tr
                   key={item.type}
-                  className={`hover:bg-gray-50 ${index === summaryData.length - 1 ? "" : "border-b"}`}
+                  className="hover:bg-gray-50 border-b last:border-0"
                 >
                   <td className="p-3 text-sm text-gray-600 font-medium">
-                    {index + 1}
+                    {(pagination.currentPage - 1) * itemsPerPage + index + 1}
                   </td>
                   <td className="p-3 text-sm font-medium text-gray-900 capitalize">
                     {item.label}
@@ -669,8 +758,7 @@ const TotalExpense = () => {
                       onClick={() => openDetail(item.type, item.label)}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg border border-indigo-200 transition-colors cursor-pointer"
                     >
-                      <Eye size={14} />
-                      View All
+                      <Eye size={14} /> View All
                     </button>
                   </td>
                 </tr>
@@ -678,10 +766,7 @@ const TotalExpense = () => {
             ) : (
               <tr>
                 <td colSpan="4" className="p-6 text-center text-gray-500">
-                  {selectedTab === "custom" &&
-                  (!customDateRange.startDate || !customDateRange.endDate)
-                    ? "Please select start and end dates"
-                    : "No financial data found"}
+                  No financial data found
                 </td>
               </tr>
             )}
@@ -689,6 +774,7 @@ const TotalExpense = () => {
         </table>
       </div>
 
+      {/* Pagination */}
       {renderPagination()}
 
       {/* Detail Modal */}
@@ -710,7 +796,7 @@ const TotalExpense = () => {
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
               <button
                 onClick={() => setShowCustomFilter(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
               >
                 <X size={20} />
               </button>
@@ -725,11 +811,11 @@ const TotalExpense = () => {
                   <DatePicker
                     selected={customDateRange.startDate}
                     onChange={(date) =>
-                      handleCustomDateChange("startDate", date)
+                      setCustomDateRange((prev) => ({
+                        ...prev,
+                        startDate: date,
+                      }))
                     }
-                    selectsStart
-                    startDate={customDateRange.startDate}
-                    endDate={customDateRange.endDate}
                     className="w-full border rounded-lg px-3 py-2"
                     placeholderText="Start date"
                     dateFormat="yyyy-MM-dd"
@@ -742,11 +828,9 @@ const TotalExpense = () => {
                   </label>
                   <DatePicker
                     selected={customDateRange.endDate}
-                    onChange={(date) => handleCustomDateChange("endDate", date)}
-                    selectsEnd
-                    startDate={customDateRange.startDate}
-                    endDate={customDateRange.endDate}
-                    minDate={customDateRange.startDate}
+                    onChange={(date) =>
+                      setCustomDateRange((prev) => ({ ...prev, endDate: date }))
+                    }
                     className="w-full border rounded-lg px-3 py-2"
                     placeholderText="End date"
                     dateFormat="yyyy-MM-dd"

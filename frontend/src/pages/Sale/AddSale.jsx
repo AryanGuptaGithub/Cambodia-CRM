@@ -20,6 +20,30 @@ import {
   fetchProducts,
 } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
+// ─── Role helpers ─────────────────────────────────────────────────────────────
+// Reads the logged-in user from localStorage.
+// Adjust the key ("user" / "authUser" / "currentUser") to match your auth setup.
+const getCurrentUser = () => {
+  try {
+    const raw =
+      localStorage.getItem("user") ||
+      localStorage.getItem("authUser") ||
+      localStorage.getItem("currentUser");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const isSuperAdmin = (user) => {
+  if (!user) return false;
+  return (
+    user.role === "superadmin" ||
+    user._id === "69ba5b0ff10fd4e8d92f2964" // hard-coded superadmin _id
+  );
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Helper function to format date to YYYY-MM-DD without timezone issues
 const formatDateToYYYYMMDD = (date) => {
   if (!date) return "";
@@ -34,21 +58,17 @@ const formatDateToYYYYMMDD = (date) => {
   return `${year}-${month}-${day}`;
 };
 
-// Helper to parse YYYY-MM-DD to Date object without timezone issues
 const parseDateFromYYYYMMDD = (dateString) => {
   if (!dateString) return null;
   const [year, month, day] = dateString.split("-");
-  // Create date using UTC to avoid timezone shifts
   return new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day)));
 };
 
-// Helper to get today's date in YYYY-MM-DD format
 const getTodayDate = () => {
   const today = new Date();
   return formatDateToYYYYMMDD(today);
 };
 
-// Helper to compute due date from current date + N days
 const computeDueDate = (days) => {
   const today = new Date();
   const due = new Date(today);
@@ -153,7 +173,6 @@ const getNearestExpiryDate = (productData) => {
 
 const hasStock = (productData) => calculateAvailableStock(productData) > 0;
 
-// --- MR-specific stock helpers ---
 const calculateMRStock = (mrStockData) => {
   if (!mrStockData) return 0;
   return mrStockData.totalBoxes || mrStockData.quantity || 0;
@@ -503,9 +522,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       if (name === "paidAmount") {
         const totalNetAmount = calculateTotalNetAmount(currentForm.products);
         const paidAmount = parseNumber(value);
-        const newDueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(
-          2,
-        );
+        const newDueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(2);
         updatedForm.dueAmount = newDueAmount;
         updatedForm.paymentStatus = autoSetPaymentStatus({
           ...updatedForm,
@@ -516,14 +533,12 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
 
         const isFullPayment = parseFloat(totalNetAmount) === parseFloat(value);
         if (isFullPayment) {
-          // Cash — clear credit fields
           updatedForm.creditDays = "";
           updatedForm.dueDate = "";
         } else if (
           updatedForm.paymentStatus === "Credit" ||
           updatedForm.paymentStatus === "Partial Paid"
         ) {
-          // Default to 30 credit days if not already set by user
           if (!updatedForm.creditDays || updatedForm.creditDays === "") {
             updatedForm.creditDays = String(DEFAULT_CREDIT_DAYS);
             updatedForm.dueDate = computeDueDate(DEFAULT_CREDIT_DAYS);
@@ -631,7 +646,6 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  // Helper to apply default credit days to form state atomically
   const applyDefaultCreditDays = useCallback((prevForm) => {
     if (!prevForm.creditDays || prevForm.creditDays === "") {
       return {
@@ -820,9 +834,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       totalQty > 0
         ? (parseFloat(netSellingAmount) / totalQty).toFixed(2)
         : "0.00";
-    const profitLoss = (parseFloat(netSellingAmount) - lc * totalQty).toFixed(
-      2,
-    );
+    const profitLoss = (parseFloat(netSellingAmount) - lc * totalQty).toFixed(2);
 
     return {
       ...product,
@@ -870,7 +882,6 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     ],
   );
 
-  // --- STOCK VALIDATION (Normal Sale) ---
   const validateTotalQuantity = useCallback((product, index, productsData) => {
     if (!product.productName) return null;
     const productData = productsData.find(
@@ -913,7 +924,6 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     return availableStock - totalQty;
   }, []);
 
-  // --- MR SALE: Stock validation ---
   const validateMRTotalQuantity = useCallback((product, index, mrStock) => {
     if (!product.productName || !product.selectedMrId) return null;
     const stockData = mrStock[index];
@@ -1064,11 +1074,7 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
             const stockError = validateMRTotalQuantity(product, index, mrStock);
             if (stockError) newErrors[`salesQty_${index}`] = stockError;
           } else {
-            const stockError = validateTotalQuantity(
-              product,
-              index,
-              productsData,
-            );
+            const stockError = validateTotalQuantity(product, index, productsData);
             if (stockError) newErrors[`salesQty_${index}`] = stockError;
           }
         }
@@ -1085,7 +1091,6 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
     [form, validateTotalQuantity, validateMRTotalQuantity],
   );
 
-  // --- Process products list for Normal Sale ---
   const [products, setProducts] = useState([]);
   const [productNames, setProductNames] = useState([]);
 
@@ -1187,7 +1192,6 @@ const DatePickerField = React.memo(
     const handleDateChange = useCallback(
       (date) => {
         if (!disabled && date && !isNaN(date.getTime())) {
-          // Format date without timezone issues
           const formattedDate = formatDateToYYYYMMDD(date);
           const event = {
             target: {
@@ -1201,7 +1205,6 @@ const DatePickerField = React.memo(
       [name, onChange, disabled],
     );
 
-    // Parse the stored date string to a Date object for the picker
     const selectedDate = useMemo(() => {
       if (!value) return null;
       return parseDateFromYYYYMMDD(value);
@@ -1335,6 +1338,14 @@ const AddSale = () => {
 
   const [saleType, setSaleType] = useState("normal");
 
+  // ── Role check — computed once on mount ────────────────────────────────────
+  const currentUser = useMemo(() => getCurrentUser(), []);
+  const canViewSensitiveFields = useMemo(
+    () => isSuperAdmin(currentUser),
+    [currentUser],
+  );
+  // ──────────────────────────────────────────────────────────────────────────
+
   const {
     form,
     errors,
@@ -1374,7 +1385,6 @@ const AddSale = () => {
 
   const { statuses, loading: initialLoading } = useInitialSaleData();
 
-  // ----- MR Stock List -----
   const [mrStockList, setMrStockList] = useState([]);
   const [mrStockListLoading, setMrStockListLoading] = useState(false);
 
@@ -1402,7 +1412,6 @@ const AddSale = () => {
     }
   }, [saleType, backendUrl]);
 
-  // Build MR dropdown options
   const mrStockOptions = useMemo(() => {
     if (mrStockListLoading) {
       return [{ value: "", label: "Loading MRs...", disabled: true }];
@@ -1423,7 +1432,6 @@ const AddSale = () => {
     ];
   }, [mrStockList, mrStockListLoading]);
 
-  // --- Fetch available products for a given MR row ---
   const fetchMRAvailableProducts = useCallback(
     async (mrId, index) => {
       if (!mrId) return;
@@ -1447,7 +1455,6 @@ const AddSale = () => {
     [backendUrl, setMrAvailableProducts],
   );
 
-  // Auto-fetch products when new MR row is added with existing MR selected
   useEffect(() => {
     if (saleType === "mr" && form.products.length > 0) {
       const lastIndex = form.products.length - 1;
@@ -1484,7 +1491,6 @@ const AddSale = () => {
     productsListLoading ||
     mrStockListLoading;
 
-  // --- Normal Sale MR options ---
   const mrOptions = useMemo(() => {
     if (mrList.length === 0 && !mrListLoading) {
       return [
@@ -1504,7 +1510,6 @@ const AddSale = () => {
     ];
   }, [mrList, mrListLoading]);
 
-  // --- Customer dropdown ---
   const customerOptions = useMemo(() => {
     if (customerList.length === 0 && !customerListLoading) {
       return [{ value: "", label: "No Customers Available", disabled: true }];
@@ -1518,17 +1523,14 @@ const AddSale = () => {
     ];
   }, [customerList, customerListLoading]);
 
-  // --- Payment status suggestions ---
   const paymentStatusSuggestions = useSuggestions(
     statuses,
     "type",
     form.paymentStatus,
   );
 
-  // --- Product suggestions (for Normal Sale) ---
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
-  // --- MR-specific stock fetch ---
   const fetchMRProductStock = useCallback(
     async (mrId, productName, index) => {
       if (!mrId || !productName) return null;
@@ -1556,7 +1558,6 @@ const AddSale = () => {
     [backendUrl, setMrProductStock],
   );
 
-  // --- Normal Sale expiry info ---
   const getProductExpiryInfo = useCallback(
     (productName) => {
       const productData = products.find((p) => p.productName === productName);
@@ -1581,7 +1582,6 @@ const AddSale = () => {
     [products],
   );
 
-  // --- MR Sale expiry info ---
   const getMRProductExpiryInfo = useCallback((mrStockData) => {
     if (!mrStockData?.batches) return null;
     const valid = mrStockData.batches.filter(
@@ -1603,7 +1603,6 @@ const AddSale = () => {
     };
   }, []);
 
-  // --- Check required master data ---
   const checkRequiredData = useCallback(() => {
     const missingFields = [];
     if (productsList.length === 0 && !productsListLoading) {
@@ -1651,7 +1650,6 @@ const AddSale = () => {
     checkRequiredData();
   }, [checkRequiredData]);
 
-  // --- getProductDetails checks MR products for lc/fob/sellingPrice ---
   const getProductDetails = useCallback(
     (productName, index) => {
       if (saleType === "mr") {
@@ -1674,7 +1672,6 @@ const AddSale = () => {
         return { lc: "", fob: "", cif: "", sellingPrice: "" };
       }
 
-      // Normal sale
       const product = products.find((p) => p.productName === productName);
       if (!product) {
         return { lc: "", fob: "", cif: "", sellingPrice: "" };
@@ -1734,7 +1731,6 @@ const AddSale = () => {
               updateFormField("paymentStatus", newPaymentStatus);
             }
 
-            // Set default 30 credit days if Credit or Partial Paid and not already set
             if (
               (newPaymentStatus === "Credit" ||
                 newPaymentStatus === "Partial Paid") &&
@@ -1744,7 +1740,6 @@ const AddSale = () => {
               updateFormField("dueDate", computeDueDate(DEFAULT_CREDIT_DAYS));
             }
 
-            // Clear credit days if full payment (Cash)
             if (newPaymentStatus === "Cash") {
               updateFormField("creditDays", "");
               updateFormField("dueDate", "");
@@ -1764,7 +1759,6 @@ const AddSale = () => {
     ],
   );
 
-  // --- Returns MR-specific product names for dropdown ---
   const getProductNamesForRow = useCallback(
     (index) => {
       if (saleType === "mr") {
@@ -1779,7 +1773,6 @@ const AddSale = () => {
     [saleType, mrAvailableProducts, productNames],
   );
 
-  // ✅ Enhanced product change handler
   const enhancedProductChange = useCallback(
     (index, field, value) => {
       if (isFormDisabled) return;
@@ -1878,7 +1871,6 @@ const AddSale = () => {
     ],
   );
 
-  // --- Keyboard / focus handlers ---
   const handlePaymentStatusKeyDown = useCallback(
     (e) => {
       if (isFormDisabled) return;
@@ -1923,7 +1915,6 @@ const AddSale = () => {
     [productSuggestions, isFormDisabled],
   );
 
-  // --- "Add Product" validation ---
   const isCurrentProductValid = useCallback(() => {
     if (isFormDisabled) return false;
     const currentProduct = form.products[form.products.length - 1];
@@ -2073,7 +2064,6 @@ const AddSale = () => {
 
       const safeFormatDate = (dateString) => {
         if (!dateString) return "";
-        // If already YYYY-MM-DD string, return as-is — no Date parsing needed
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return dateString;
         const date = new Date(dateString);
         if (isNaN(date.getTime())) return "";
@@ -2092,6 +2082,9 @@ const AddSale = () => {
         customerCode: form.customerCode || "",
         customerId: form.customerId || null,
         customerName: form.customerName || "",
+        // ── Always send lc / fob / cif / profitLoss to backend ─────────────
+        // These values are always calculated internally regardless of role.
+        // The role check only hides them from the UI.
         products: validProducts.map((product) => ({
           productName: product.productName.trim(),
           salesQty: Number(product.salesQty) || 0,
@@ -2102,10 +2095,10 @@ const AddSale = () => {
           discount: Number(product.discount) || 0,
           netSellingAmount: Number(product.netSellingAmount) || 0,
           averageUnitPrice: Number(product.averageUnitPrice) || 0,
-          lc: Number(product.lc) || 0,
-          fob: Number(product.fob) || 0,
-          cif: Number(product.cif) || 0,
-          profitLoss: Number(product.profitLoss) || 0,
+          lc: Number(product.lc) || 0,           // always sent
+          fob: Number(product.fob) || 0,         // always sent
+          cif: Number(product.cif) || 0,         // always sent
+          profitLoss: Number(product.profitLoss) || 0, // always sent
           isProductAccept: true,
           remark: product.remark || "",
           ...(saleType === "mr" && {
@@ -2588,6 +2581,7 @@ const AddSale = () => {
                       )}
                     </div>
 
+                    {/* ── Common fields (visible to all roles) ── */}
                     <InputField
                       label="Sales Quantity"
                       name={`salesQty_${index}`}
@@ -2658,27 +2652,42 @@ const AddSale = () => {
                       error={errors[`discount_${index}`]}
                       disabled={isFormDisabled}
                     />
-                    <InputField
-                      label="LC"
-                      name={`lc_${index}`}
-                      value={product.lc}
-                      readOnly
-                      disabled={true}
-                    />
-                    <InputField
-                      label="FOB (USD)"
-                      name={`fob_${index}`}
-                      value={product.fob}
-                      readOnly
-                      disabled={true}
-                    />
-                    <InputField
-                      label="CIF (USD)"
-                      name={`cif_${index}`}
-                      value={product.cif}
-                      readOnly
-                      disabled={true}
-                    />
+
+                    {/* ── Superadmin-only fields: LC, FOB, CIF, Profit/Loss ── */}
+                    {canViewSensitiveFields && (
+                      <>
+                        <InputField
+                          label="LC"
+                          name={`lc_${index}`}
+                          value={product.lc}
+                          readOnly
+                          disabled={true}
+                        />
+                        <InputField
+                          label="FOB (USD)"
+                          name={`fob_${index}`}
+                          value={product.fob}
+                          readOnly
+                          disabled={true}
+                        />
+                        <InputField
+                          label="CIF (USD)"
+                          name={`cif_${index}`}
+                          value={product.cif}
+                          readOnly
+                          disabled={true}
+                        />
+                        <InputField
+                          label="Profit / Loss"
+                          name={`profitLoss_${index}`}
+                          value={product.profitLoss}
+                          readOnly
+                          disabled={true}
+                        />
+                      </>
+                    )}
+
+                    {/* ── Read-only calculated fields (visible to all roles) ── */}
                     <InputField
                       label="Total Quantity"
                       name={`totalQty_${index}`}
@@ -2704,13 +2713,6 @@ const AddSale = () => {
                       label="Average Unit Price"
                       name={`averageUnitPrice_${index}`}
                       value={product.averageUnitPrice}
-                      readOnly
-                      disabled={true}
-                    />
-                    <InputField
-                      label="Profit / Loss"
-                      name={`profitLoss_${index}`}
-                      value={product.profitLoss}
                       readOnly
                       disabled={true}
                     />
@@ -2877,7 +2879,6 @@ const AddSale = () => {
             }
             onSuggestionSelect={(value) => {
               updateFormField("paymentStatus", value);
-              // Apply default 30 credit days when manually selecting Credit or Partial Paid
               if (value === "Credit" || value === "Partial Paid") {
                 if (!form.creditDays || form.creditDays === "") {
                   updateFormField("creditDays", String(DEFAULT_CREDIT_DAYS));
@@ -2887,7 +2888,6 @@ const AddSale = () => {
                   );
                 }
               }
-              // Clear credit days when selecting Cash
               if (value === "Cash") {
                 updateFormField("creditDays", "");
                 updateFormField("dueDate", "");

@@ -64,13 +64,13 @@ const tabLabelMap = {
   reports_mrwisesales: "MR Wise Sales",
   reports_cashsales: "Cash Sales",
   reports_outstandingcollection: "Outstanding Collection",
-  reports_totalexpense: "Total Expense",
+  reports_totalcashoutflow: "Total Cash Outflow", // Changed from reports_totalexpense
   reports_remittance: "Remittance",
   reports_provincewisesale: "Province Wise Sale",
   reports_provincewisecustomer: "Province Wise Customer",
   reports_profitloss: "Profit Loss",
   reports_financeReports: "Finance Reports",
-  reports_reportsinhand: "Reports in Hand",
+  reports_stocksinhands: "Stock in hands",
   reports_salesummary: "Sale Summary",
   reports_dailysample: "Daily Sample",
   reports_expirystock: "Expiry Stock",
@@ -119,7 +119,7 @@ const tabLabelMap = {
   hrm_payroll: "Payroll",
   hrm_mrbasicpayroll: "MR Basic Payroll",
   utility_companyprofile: "Company Profile",
-  utility_tabhideview: "Tab Hide and Show",
+  utility_tabhideview: "Tab Hide and View",
   settings_companyprofile: "Company Profile",
   settings_tabmanipulation: "Tab Manipulation",
 };
@@ -209,13 +209,13 @@ const tabService = {
       reports_mrwisesales: v(9),
       reports_cashsales: v(10),
       reports_outstandingcollection: v(11),
-      reports_totalexpense: v(12),
+      reports_totalcashoutflow: v(12), // Changed from reports_totalexpense
       reports_remittance: v(13),
       reports_provincewisesale: v(14),
       reports_provincewisecustomer: v(15),
       reports_profitloss: v(16),
       reports_financeReports: v(17),
-      reports_reportsinhand: v(18),
+      reports_stocksinhands: v(18),
       reports_salesummary: v(19),
       reports_dailysample: v(20),
       reports_expirystock: v(21),
@@ -774,13 +774,13 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                     "reports_mrwisesales",
                     "reports_cashsales",
                     "reports_outstandingcollection",
-                    "reports_totalexpense",
+                    "reports_totalcashoutflow", // Changed from reports_totalexpense
                     "reports_remittance",
                     "reports_provincewisesale",
                     "reports_provincewisecustomer",
                     "reports_profitloss",
                     "reports_financeReports",
-                    "reports_reportsinhand",
+                    "reports_stocksinhands",
                     "reports_salesummary",
                     "reports_dailysample",
                     "reports_expirystock",
@@ -908,6 +908,29 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                           <span>Profit Loss</span>
                         </Link>
                       );
+                    if (tabId === "reports_totalcashoutflow")
+                      // Changed from reports_totalexpense
+                      return (
+                        <Link
+                          key={tabId}
+                          to="/reportlayout/totalexpense"
+                          className={cld("/reportlayout/totalexpense")}
+                        >
+                          <PieChart className="w-4 h-4 flex-shrink-0" />
+                          <span>Total Cash Outflow</span>
+                        </Link>
+                      );
+                    if (tabId === "reports_stocksinhands")
+                      return (
+                        <Link
+                          key={tabId}
+                          to="/reportlayout/reports-in-hand"
+                          className={cld("/reportlayout/reports-in-hand")}
+                        >
+                          <HandCoins className="w-4 h-4 flex-shrink-0" />
+                          <span>Stock in hands</span>
+                        </Link>
+                      );
                     const lm = {
                       reports_dailyreport: "/reportlayout/dailyreport",
                       reports_averageprice: "/reportlayout/averageprice",
@@ -924,13 +947,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                       reports_cashsales: "/reportlayout/cashsales",
                       reports_outstandingcollection:
                         "/reportlayout/outstandingcollection",
-                      reports_totalexpense: "/reportlayout/totalexpense",
                       reports_remittance: "/reportlayout/remittance",
                       reports_provincewisesale:
                         "/reportlayout/province-wise-sale",
                       reports_provincewisecustomer:
                         "/reportlayout/province-wise-customer",
-                      reports_reportsinhand: "/reportlayout/reports-in-hand",
                       reports_salesummary: "/reportlayout/salesummary",
                       reports_dailysample: "/reportlayout/dailysample",
                       reports_expirystock: "/reportlayout/expiry-stock-report",
@@ -946,11 +967,9 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                       reports_mrwisesales: Target,
                       reports_cashsales: DollarSign,
                       reports_outstandingcollection: Receipt,
-                      reports_totalexpense: PieChart,
                       reports_remittance: Coins,
                       reports_provincewisesale: Globe,
                       reports_provincewisecustomer: Users,
-                      reports_reportsinhand: HandCoins,
                       reports_salesummary: TrendingUp,
                       reports_dailysample: Boxes,
                       reports_expirystock: Clock,

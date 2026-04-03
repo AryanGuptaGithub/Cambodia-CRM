@@ -6,6 +6,8 @@ import {
   Calendar,
   X,
   Package,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -41,6 +43,10 @@ const CashSales = () => {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const [selectedSaleInfo, setSelectedSaleInfo] = useState(null);
   const [grandTotal, setGrandTotal] = useState(0);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(8);
 
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
@@ -131,6 +137,7 @@ const CashSales = () => {
       ) {
         setData([]);
         setGrandTotal(0);
+        setCurrentPage(1);
         return;
       }
 
@@ -144,6 +151,7 @@ const CashSales = () => {
       const records = response.data.data || [];
       setData(records);
       setGrandTotal(response.data.totalSalesAmount || 0);
+      setCurrentPage(1); // Reset to first page when new data loads
     } catch (error) {
       console.error("Error fetching cash sales:", error);
       showToast("error", "Failed to fetch cash sales data");
@@ -289,6 +297,59 @@ const CashSales = () => {
 
   const isExportDisabled = loading || exportLoading || data.length === 0;
 
+  // Pagination calculations
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = data.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(data.length / itemsPerPage);
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
+
+  const handlePrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handlePageChange = (pageNumber) => {
+    setCurrentPage(pageNumber);
+  };
+
+  // Generate page numbers to display
+  const getPageNumbers = () => {
+    const pageNumbers = [];
+    const maxPagesToShow = 5;
+
+    if (totalPages <= maxPagesToShow) {
+      for (let i = 1; i <= totalPages; i++) {
+        pageNumbers.push(i);
+      }
+    } else {
+      const startPage = Math.max(1, currentPage - 2);
+      const endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+      if (startPage > 1) {
+        pageNumbers.push(1);
+        if (startPage > 2) pageNumbers.push("...");
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        pageNumbers.push(i);
+      }
+
+      if (endPage < totalPages) {
+        if (endPage < totalPages - 1) pageNumbers.push("...");
+        pageNumbers.push(totalPages);
+      }
+    }
+
+    return pageNumbers;
+  };
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -405,8 +466,8 @@ const CashSales = () => {
                   </div>
                 </td>
               </tr>
-            ) : data.length > 0 ? (
-              data.map((sale, index) => {
+            ) : currentItems.length > 0 ? (
+              currentItems.map((sale, index) => {
                 const hasMultipleProducts =
                   sale.displayProducts && sale.displayProducts.length > 1;
                 const productCount = sale.displayProducts?.length || 1;
@@ -414,9 +475,11 @@ const CashSales = () => {
                 return (
                   <tr
                     key={index}
-                    className={`hover:bg-gray-50 ${index === data.length - 1 ? "" : "border-b"}`}
+                    className={`hover:bg-gray-50 ${index === currentItems.length - 1 ? "" : "border-b"}`}
                   >
-                    <td className="p-3 text-sm text-gray-900">{index + 1}</td>
+                    <td className="p-3 text-sm text-gray-900">
+                      {indexOfFirstItem + index + 1}
+                    </td>
                     <td className="p-3 text-sm text-gray-900">
                       {/* Always show invoiceDate */}
                       {fmtDate(sale.invoiceDate)}
@@ -484,6 +547,60 @@ const CashSales = () => {
             )}
           </tbody>
         </table>
+
+        {/* Pagination */}
+        {!loading && data.length > 0 && (
+          <div className="flex justify-between items-center p-4 bg-gray-50 border-t">
+            <div className="text-sm text-gray-600">
+              Showing {indexOfFirstItem + 1} to{" "}
+              {Math.min(indexOfLastItem, data.length)} of {data.length} entries
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handlePrevPage}
+                disabled={currentPage === 1}
+                className={`px-3 py-1 rounded-lg flex items-center gap-1 ${
+                  currentPage === 1
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    : "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                }`}
+              >
+                <ChevronLeft size={16} />
+                Prev
+              </button>
+
+              {getPageNumbers().map((pageNum, idx) => (
+                <button
+                  key={idx}
+                  onClick={() =>
+                    typeof pageNum === "number" && handlePageChange(pageNum)
+                  }
+                  className={`px-3 py-1 rounded-lg ${
+                    currentPage === pageNum
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  } ${typeof pageNum !== "number" ? "cursor-default" : "cursor-pointer"}`}
+                  disabled={typeof pageNum !== "number"}
+                >
+                  {pageNum}
+                </button>
+              ))}
+
+              <button
+                onClick={handleNextPage}
+                disabled={currentPage === totalPages}
+                className={`px-3 py-1 rounded-lg flex items-center gap-1 ${
+                  currentPage === totalPages
+                    ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    : "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                }`}
+              >
+                Next
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Product Details Modal */}

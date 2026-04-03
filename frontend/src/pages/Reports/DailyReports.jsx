@@ -68,6 +68,28 @@ const DailyReports = () => {
     return `${year}-${month}-${day}`;
   };
 
+  // Format date to "1 April 2026" format
+  const formatDateToDisplay = (dateString) => {
+    if (!dateString) return "N/A";
+
+    // If dateString is already in "1 April 2026" format, return as is
+    if (
+      typeof dateString === "string" &&
+      dateString.match(/^\d{1,2}\s+[A-Za-z]+\s+\d{4}$/)
+    ) {
+      return dateString;
+    }
+
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "N/A";
+
+    const day = date.getDate();
+    const month = date.toLocaleString("default", { month: "long" });
+    const year = date.getFullYear();
+
+    return `${day} ${month} ${year}`;
+  };
+
   // Calculate serial number based on current page and items per page
   const getSerialNumber = (index) => {
     const itemsPerPage = 7;
@@ -156,7 +178,7 @@ const DailyReports = () => {
             : "",
           displayDate:
             customDateRange.startDate && customDateRange.endDate
-              ? `${formatDateToReadable(customDateRange.startDate)} - ${formatDateToReadable(customDateRange.endDate)}`
+              ? `${formatDateToDisplay(customDateRange.startDate)} - ${formatDateToDisplay(customDateRange.endDate)}`
               : "Select custom dates",
         };
 
@@ -220,15 +242,19 @@ const DailyReports = () => {
 
       let records = response.data.data?.records || [];
 
-      // If it's a custom date filter, override the date with the selected range
+      // For custom date filter, set the date field to the selected range display
       if (
         selectedTab === "custom" &&
         dateRange.startDate &&
         dateRange.endDate
       ) {
+        const startDateObj = customDateRange.startDate;
+        const endDateObj = customDateRange.endDate;
+        const dateRangeText = `${formatDateToDisplay(startDateObj)} - ${formatDateToDisplay(endDateObj)}`;
+
         records = records.map((record) => ({
           ...record,
-          date: dateRange.displayDate,
+          date: dateRangeText,
         }));
       }
 
@@ -646,6 +672,8 @@ const DailyReports = () => {
           <th className="p-3 text-sm font-medium">Sr.No</th>
           <th className="p-3 text-sm font-medium">MR Name</th>
           <th className="p-3 text-sm font-medium">Contact</th>
+          <th className="p-3 text-sm font-medium">Email</th>
+          <th className="p-3 text-sm font-medium">Team</th>
           {columns.includes("credits") && (
             <th className="p-3 text-sm font-medium">Credits ($)</th>
           )}
@@ -661,6 +689,24 @@ const DailyReports = () => {
 
   const renderTableRow = (mr, index) => {
     const columns = getTableColumns();
+
+    // Get the date to display
+    let displayDate = mr.date;
+
+    // If it's custom filter and we have date range, show the range
+    if (
+      selectedTab === "custom" &&
+      customDateRange.startDate &&
+      customDateRange.endDate
+    ) {
+      const startDateObj = customDateRange.startDate;
+      const endDateObj = customDateRange.endDate;
+      displayDate = `${formatDateToDisplay(startDateObj)} - ${formatDateToDisplay(endDateObj)}`;
+    } else if (mr.date && mr.date !== "N/A" && mr.date !== "") {
+      displayDate = formatDateToDisplay(mr.date);
+    } else {
+      displayDate = "N/A";
+    }
 
     return (
       <tr
@@ -682,32 +728,61 @@ const DailyReports = () => {
             </div>
           </div>
         </td>
+
         <td className="p-3">
           <div className="text-sm text-gray-900">
             {mr.mrContactNo || "Not Available"}
           </div>
         </td>
+
+        <td className="p-3">
+          <div className="text-sm text-gray-900">
+            {mr.mrEmail || "Not Available"}
+          </div>
+        </td>
+
+        <td className="p-3">
+          <div className="text-sm text-gray-900">
+            {mr.mrTeamName || "Not Available"}
+          </div>
+        </td>
+
         {columns.includes("credits") && (
           <td className="p-3 text-sm font-semibold text-blue-600">
-            ${mr.credits?.toLocaleString() || 0}
+            $
+            {mr.credits?.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            }) || "0.00"}
           </td>
         )}
+
         {columns.includes("cash") && (
           <td className="p-3 text-sm font-semibold text-green-600">
-            ${mr.cash?.toLocaleString() || 0}
+            $
+            {mr.cash?.toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            }) || "0.00"}
           </td>
         )}
+
         <td className="p-3 text-sm font-semibold text-gray-800">
-          ${mr.totalSalesAmount?.toLocaleString() || 0}
+          $
+          {mr.totalSalesAmount?.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }) || "0.00"}
         </td>
-        <td className="p-3 text-sm text-gray-600">{mr.date || "N/A"}</td>
+
+        <td className="p-3 text-sm text-gray-600">{displayDate}</td>
       </tr>
     );
   };
 
   const getColSpan = () => {
     const columns = getTableColumns();
-    let colCount = 5;
+    let colCount = 6; // Sr.No, MR Name, Contact, Email, Team, Total Sales, Date
     if (columns.includes("credits")) colCount++;
     if (columns.includes("cash")) colCount++;
     return colCount;
