@@ -112,8 +112,8 @@ router.get('/', async (req, res) => {
             
             // Calculate values for ALL batches (for totals)
             const boxes = batch.boxes || 0;
-            const cifPrice = batch.cif || 0;
-            const batchValue = boxes * cifPrice;
+            const lcPrice = batch.lc || 0;
+            const batchValue = boxes * lcPrice;
             
             // Add to filtered totals (only items that match the search)
             totalFilteredBoxes += boxes;
@@ -159,7 +159,7 @@ router.get('/', async (req, res) => {
                 daysRemaining: Math.abs(daysRemaining),
                 isExpired: isExpired,
                 quantity: boxes,
-                unitPrice: cifPrice,
+                unitPrice: lcPrice,
                 totalValue: batchValue,
                 lc: batch.lc || 0,
                 fob: batch.fob || 0,
@@ -336,8 +336,8 @@ router.get('/export', async (req, res) => {
             
             // Calculate values
             const boxes = batch.boxes || 0;
-            const cifPrice = batch.cif || 0;
-            const batchValue = boxes * cifPrice;
+            const lcPrice = batch.lc || 0;
+            const batchValue = boxes * lcPrice;
             
             // Apply filter based on client request
             let shouldInclude = false;
@@ -384,7 +384,7 @@ router.get('/export', async (req, res) => {
                 daysRemaining: Math.abs(daysRemaining),
                 isExpired: isExpired,
                 quantity: boxes,
-                unitPrice: cifPrice,
+                unitPrice: lcPrice,
                 totalValue: batchValue,
                 lc: batch.lc || 0,
                 fob: batch.fob || 0,

@@ -1,5 +1,6 @@
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
+import Customer from "../../models/master/customer.js"; // adjust path as needed
 import ExcelJS from "exceljs";
 
 const router = express.Router();
@@ -96,9 +97,11 @@ function buildDateFilter(period, startDate, endDate) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AGGREGATION — groups by zone (mrName), then by customer within each zone
+// AGGREGATION — groups by mrName, then by customer within each MR
+// FIX: Total Customers = customers with ≥1 order
+//      Retained Customers = customers with ≥2 orders (repeat only)
 // ─────────────────────────────────────────────────────────────────────────────
-function buildZonePipeline(period, startDate, endDate, search) {
+function buildMRPipeline(period, startDate, endDate, search) {
   const dateFilter = buildDateFilter(period, startDate, endDate);
 
   const matchQuery = {
@@ -107,7 +110,6 @@ function buildZonePipeline(period, startDate, endDate, search) {
     isExchange: { $ne: true },
   };
 
-  // Search filter applied at customer level before grouping
   const searchFilter =
     search && search.trim()
       ? {
@@ -122,47 +124,53 @@ function buildZonePipeline(period, startDate, endDate, search) {
   const pipeline = [
     { $match: { ...matchQuery, ...(searchFilter || {}) } },
 
-    // Group by customer first
+    // Group by customer first — count total orders per customer
     {
       $group: {
         _id: "$customerCode",
         customerName: { $first: "$customerName" },
         customerCode: { $first: "$customerCode" },
+        customerId: { $first: "$customerId" },
         mrName: { $first: "$mrName" },
-        totalSales: { $sum: 1 },
+        totalOrders: { $sum: 1 },
         firstPurchaseDate: { $min: "$invoiceDate" },
         lastPurchaseDate: { $max: "$invoiceDate" },
       },
     },
+
+    // A customer is "retained" only if they have 2+ orders
     {
       $addFields: {
-        isRepeatCustomer: { $gte: ["$totalSales", 2] },
+        isRetained: { $gte: ["$totalOrders", 2] },
       },
     },
 
-    // Group by zone (mrName)
+    // Group by MR name
     {
       $group: {
         _id: "$mrName",
-        zoneName: { $first: "$mrName" },
+        mrName: { $first: "$mrName" },
+        // Total customers = ALL unique customers (1+ orders)
         totalCustomers: { $sum: 1 },
+        // Retained = only those with 2+ orders
         retainedCustomers: {
-          $sum: { $cond: ["$isRepeatCustomer", 1, 0] },
+          $sum: { $cond: ["$isRetained", 1, 0] },
         },
         customers: {
           $push: {
-            customerId: "$_id",
+            customerId: "$customerId",
             customerName: "$customerName",
             customerCode: "$customerCode",
-            medicalRepName: "$mrName",
-            totalSales: "$totalSales",
+            mrName: "$mrName",
+            totalOrders: "$totalOrders",
             firstPurchaseDate: "$firstPurchaseDate",
             lastPurchaseDate: "$lastPurchaseDate",
-            isRepeatCustomer: "$isRepeatCustomer",
+            isRetained: "$isRetained",
           },
         },
       },
     },
+
     {
       $addFields: {
         retentionRate: {
@@ -185,6 +193,12 @@ function buildZonePipeline(period, startDate, endDate, search) {
   return pipeline;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUMMARY
+// Total Customers = unique customers with ≥1 order
+// Retained Customers = unique customers with ≥2 orders
+// New Customers = unique customers with exactly 1 order
+// ─────────────────────────────────────────────────────────────────────────────
 async function getSummary(period, startDate, endDate) {
   const dateFilter = buildDateFilter(period, startDate, endDate);
 
@@ -196,31 +210,34 @@ async function getSummary(period, startDate, endDate) {
         isExchange: { $ne: true },
       },
     },
-    { $group: { _id: "$customerCode", totalPurchases: { $sum: 1 } } },
+    // Count orders per customer
+    { $group: { _id: "$customerCode", totalOrders: { $sum: 1 } } },
     {
       $group: {
         _id: null,
         totalCustomers: { $sum: 1 },
-        repeatCustomers: {
-          $sum: { $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0] },
+        // Retained = 2+ orders
+        retainedCustomers: {
+          $sum: { $cond: [{ $gte: ["$totalOrders", 2] }, 1, 0] },
         },
+        // New = exactly 1 order
         newCustomers: {
-          $sum: { $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0] },
+          $sum: { $cond: [{ $eq: ["$totalOrders", 1] }, 1, 0] },
         },
       },
     },
     {
       $project: {
         totalCustomers: 1,
-        repeatCustomers: 1,
+        retainedCustomers: 1,
         newCustomers: 1,
-        repeatRate: {
+        retentionRate: {
           $cond: [
             { $eq: ["$totalCustomers", 0] },
             0,
             {
               $multiply: [
-                { $divide: ["$repeatCustomers", "$totalCustomers"] },
+                { $divide: ["$retainedCustomers", "$totalCustomers"] },
                 100,
               ],
             },
@@ -232,23 +249,143 @@ async function getSummary(period, startDate, endDate) {
 
   const raw = result[0] || {
     totalCustomers: 0,
-    repeatCustomers: 0,
+    retainedCustomers: 0,
     newCustomers: 0,
-    repeatRate: 0,
+    retentionRate: 0,
   };
 
   return {
     totalCustomers: raw.totalCustomers,
-    repeatCustomers: raw.repeatCustomers,
-    retainedCustomers: raw.repeatCustomers,
+    retainedCustomers: raw.retainedCustomers,
     newCustomers: raw.newCustomers,
-    repeatRate: parseFloat((raw.repeatRate || 0).toFixed(2)),
-    retentionRate: parseFloat((raw.repeatRate || 0).toFixed(2)),
+    retentionRate: parseFloat((raw.retentionRate || 0).toFixed(2)),
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BASE HANDLER — used by /customer-retention and legacy /monthly & /annual
+// CUSTOMER DETAIL MODAL — fetch all sales + customer info for a specific
+// customer or all customers (filtered by retained/all)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/customer-details", async (req, res) => {
+  try {
+    const {
+      period = "all",
+      startDate,
+      endDate,
+      filterType = "all", // "all" | "retained"
+      mrName,
+    } = req.query;
+
+    const dateFilter = buildDateFilter(period, startDate, endDate);
+
+    const matchQuery = {
+      ...dateFilter,
+      isReturn: { $ne: true },
+      isExchange: { $ne: true },
+    };
+
+    if (mrName) matchQuery.mrName = mrName;
+
+    // Get all sales grouped by customer
+    const customerGroups = await SaleSummary.aggregate([
+      { $match: matchQuery },
+      {
+        $group: {
+          _id: "$customerCode",
+          customerName: { $first: "$customerName" },
+          customerCode: { $first: "$customerCode" },
+          customerId: { $first: "$customerId" },
+          mrName: { $first: "$mrName" },
+          totalOrders: { $sum: 1 },
+          totalAmount: { $sum: "$totalAmount" },
+          firstPurchaseDate: { $min: "$invoiceDate" },
+          lastPurchaseDate: { $max: "$invoiceDate" },
+          invoices: {
+            $push: {
+              invoiceNumber: "$invoiceNumber",
+              invoiceDate: "$invoiceDate",
+              totalAmount: "$totalAmount",
+              paymentStatus: "$paymentStatus",
+              saleType: "$saleType",
+            },
+          },
+        },
+      },
+      {
+        $addFields: {
+          isRetained: { $gte: ["$totalOrders", 2] },
+        },
+      },
+    ]);
+
+    // Filter based on filterType
+    let filtered = customerGroups;
+    if (filterType === "retained") {
+      filtered = customerGroups.filter((c) => c.isRetained);
+    }
+    // "all" includes everyone (both new and retained)
+
+    // Enrich with Customer collection data
+    const customerIds = filtered.map((c) => c.customerId).filter(Boolean);
+
+    let customerMap = {};
+    if (customerIds.length > 0) {
+      const customers = await Customer.find(
+        { _id: { $in: customerIds } },
+        {
+          name: 1,
+          customerCode: 1,
+          medicalRepName: 1,
+          zone: 1,
+          province: 1,
+          address: 1,
+          customerNumber: 1,
+          typeOfBusiness: 1,
+        },
+      );
+      customers.forEach((c) => {
+        customerMap[c._id.toString()] = c;
+      });
+    }
+
+    const enriched = filtered.map((c) => {
+      const custInfo = c.customerId
+        ? customerMap[c.customerId.toString()]
+        : null;
+      return {
+        customerCode: c.customerCode,
+        customerId: c.customerId,
+        customerName: custInfo?.name || c.customerName || "N/A",
+        mrName: c.mrName || "N/A",
+        zone: custInfo?.zone || "N/A",
+        province: custInfo?.province || "N/A",
+        address: custInfo?.address || "N/A",
+        customerNumber: custInfo?.customerNumber || "N/A",
+        typeOfBusiness: custInfo?.typeOfBusiness || "N/A",
+        totalOrders: c.totalOrders,
+        totalAmount: c.totalAmount,
+        firstPurchaseDate: c.firstPurchaseDate,
+        lastPurchaseDate: c.lastPurchaseDate,
+        isRetained: c.isRetained,
+        invoices: c.invoices || [],
+      };
+    });
+
+    // Sort: retained first, then by totalOrders desc
+    enriched.sort((a, b) => {
+      if (b.isRetained !== a.isRetained) return b.isRetained ? 1 : -1;
+      return b.totalOrders - a.totalOrders;
+    });
+
+    res.json({ success: true, data: enriched, total: enriched.length });
+  } catch (err) {
+    console.error("❌ Error fetching customer details:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BASE HANDLER
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleGetRequest(req, res, defaultPeriod) {
   try {
@@ -264,7 +401,7 @@ async function handleGetRequest(req, res, defaultPeriod) {
     const pageNum = Math.max(1, parseInt(page, 10));
     const limitNum = Math.max(1, parseInt(limit, 10));
 
-    const basePipeline = buildZonePipeline(period, startDate, endDate, search);
+    const basePipeline = buildMRPipeline(period, startDate, endDate, search);
 
     const [countResult, records, summary] = await Promise.all([
       SaleSummary.aggregate([...basePipeline, { $count: "total" }]),
@@ -285,7 +422,7 @@ async function handleGetRequest(req, res, defaultPeriod) {
         summary,
         records: records.map((r) => ({
           _id: r._id,
-          zoneName: r.zoneName || r._id || "N/A",
+          mrName: r.mrName || r._id || "N/A",
           totalCustomers: r.totalCustomers || 0,
           retainedCustomers: r.retainedCustomers || 0,
           retentionRate: parseFloat((r.retentionRate || 0).toFixed(2)),
@@ -293,11 +430,11 @@ async function handleGetRequest(req, res, defaultPeriod) {
             customerId: c.customerId,
             customerName: c.customerName || "N/A",
             customerCode: c.customerCode || "",
-            medicalRepName: c.medicalRepName || "",
-            totalSales: c.totalSales || 0,
+            mrName: c.mrName || "",
+            totalOrders: c.totalOrders || 0,
             firstPurchaseDate: c.firstPurchaseDate || null,
             lastPurchaseDate: c.lastPurchaseDate || null,
-            isRepeatCustomer: c.isRepeatCustomer,
+            isRetained: c.isRetained,
           })),
         })),
       },
@@ -326,7 +463,7 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
 
     const [records, summary] = await Promise.all([
       SaleSummary.aggregate(
-        buildZonePipeline(period, startDate, endDate, search),
+        buildMRPipeline(period, startDate, endDate, search),
       ),
       getSummary(period, startDate, endDate),
     ]);
@@ -353,7 +490,7 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
     });
     summarySheet.addRow(["Total Customers", summary.totalCustomers]);
     summarySheet.addRow(["Retained Customers", summary.retainedCustomers]);
-    summarySheet.addRow(["Repeat Customers", summary.repeatCustomers]);
+    summarySheet.addRow(["New Customers", summary.newCustomers]);
     summarySheet.addRow([
       "Retention Rate",
       `${summary.retentionRate?.toFixed(2) || 0}%`,
@@ -372,14 +509,14 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
     detailsSheet.addRow([]);
     const detailsHeaderRow = detailsSheet.addRow([
       "Sr.No",
-      "Zone / MR Name",
+      "MR Name",
       "Customer Name",
       "Customer Code",
-      "Total Sales",
+      "Total Orders",
       "First Purchase",
       "Last Purchase",
       "Status",
-      "Zone Retention Rate",
+      "MR Retention Rate",
     ]);
     detailsHeaderRow.eachCell((cell) => {
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -392,22 +529,22 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
     });
 
     let srNo = 1;
-    records.forEach((zone) => {
-      (zone.customers || []).forEach((customer) => {
+    records.forEach((mr) => {
+      (mr.customers || []).forEach((customer) => {
         const row = detailsSheet.addRow([
           srNo++,
-          zone.zoneName || "N/A",
+          mr.mrName || "N/A",
           capitalizeFirstLetter(customer.customerName),
           customer.customerCode || "N/A",
-          customer.totalSales || 0,
+          customer.totalOrders || 0,
           formatDateForExcel(customer.firstPurchaseDate),
           formatDateForExcel(customer.lastPurchaseDate),
-          customer.isRepeatCustomer ? "Repeat" : "One-Time",
-          `${(zone.retentionRate || 0).toFixed(1)}%`,
+          customer.isRetained ? "Retained" : "New",
+          `${(mr.retentionRate || 0).toFixed(1)}%`,
         ]);
 
         const statusCell = row.getCell(8);
-        if (customer.isRepeatCustomer) {
+        if (customer.isRetained) {
           statusCell.font = { bold: true, color: { argb: "166534" } };
           statusCell.fill = {
             type: "pattern",
@@ -457,14 +594,12 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
-
-// ✅ NEW — base route that the frontend calls
 router.get("/", (req, res) => handleGetRequest(req, res, "all"));
 router.get("/export", (req, res) =>
   handleExportRequest(req, res, "all", "Customer Retention Rate"),
 );
 
-// Legacy routes (kept for backward compatibility)
+// Legacy routes
 router.get("/monthly", (req, res) => handleGetRequest(req, res, "last_month"));
 router.get("/monthly/export", (req, res) =>
   handleExportRequest(req, res, "last_month", "Monthly Customer Repeat Rate"),

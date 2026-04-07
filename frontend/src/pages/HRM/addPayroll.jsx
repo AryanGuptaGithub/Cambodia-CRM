@@ -30,7 +30,6 @@ const allowanceTypes = [
 ];
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
-
 const getPreviousMonth = () => {
   const now = new Date();
   now.setMonth(now.getMonth() - 1);
@@ -144,19 +143,44 @@ const MultipleSelectDropdown = ({
   );
 };
 
+// Updated Allowance Breakdown Modal with Cash Balance and User Value
 const AllowanceBreakdownModal = ({
   allowances,
   isOpen,
   onClose,
   onAmountChange,
   onRemove,
+  cashBalance,
 }) => {
+  const [splitType, setSplitType] = useState({});
+  const [userValue, setUserValue] = useState({});
+
   if (!isOpen) return null;
+
+  const handleSplitTypeChange = (type, split) => {
+    setSplitType({ ...splitType, [type]: split });
+    if (split === "cash") {
+      const halfAmount = (cashBalance / 2).toFixed(2);
+      onAmountChange(type, halfAmount);
+      setUserValue({ ...userValue, [type]: "" });
+    } else {
+      onAmountChange(type, "");
+    }
+  };
+
+  const handleUserValueChange = (type, value) => {
+    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+      setUserValue({ ...userValue, [type]: value });
+      onAmountChange(type, value);
+    }
+  };
+
   const handleNumeric = (e, type) => {
     const { value } = e.target;
     if (value === "" || /^\d*\.?\d{0,2}$/.test(value))
       onAmountChange(type, value);
   };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 w-full max-w-md">
@@ -169,36 +193,79 @@ const AllowanceBreakdownModal = ({
             ✕
           </button>
         </div>
-        <div className="space-y-3 max-h-96 overflow-y-auto">
+        <div className="space-y-4 max-h-96 overflow-y-auto">
           {allowances.length === 0 ? (
             <p className="text-gray-500 text-center py-4">
               No allowances added
             </p>
           ) : (
             allowances.map((a, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 p-2 border rounded"
-              >
-                <div className="flex-1">
+              <div key={i} className="p-3 border rounded-lg bg-gray-50">
+                <div className="mb-2">
                   <label className="text-sm font-medium text-gray-700">
                     {a.type}
                   </label>
-                  <input
-                    type="text"
-                    value={a.amount}
-                    onChange={(e) => handleNumeric(e, a.type)}
-                    placeholder="0.00"
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onRemove(a.type)}
-                  className="text-red-500 hover:text-red-700 p-1"
-                >
-                  ✕
-                </button>
+
+                {splitType[a.type] === "cash" && (
+                  <div className="mb-2">
+                    <label className="text-xs text-gray-600 mb-1 block">
+                      Amount (50% of Cash Balance):
+                    </label>
+                    <input
+                      type="text"
+                      value={(cashBalance / 2).toFixed(2)}
+                      readOnly
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm bg-gray-100 cursor-not-allowed"
+                    />
+                    <p className="text-xs text-green-600 mt-1">
+                      Cash Balance: ${cashBalance.toFixed(2)} → Half: $
+                      {(cashBalance / 2).toFixed(2)}
+                    </p>
+                  </div>
+                )}
+
+                {splitType[a.type] === "user" && (
+                  <div className="mb-2">
+                    <label className="text-xs text-gray-600 mb-1 block">
+                      Enter Amount:
+                    </label>
+                    <input
+                      type="text"
+                      value={userValue[a.type] || a.amount}
+                      onChange={(e) =>
+                        handleUserValueChange(a.type, e.target.value)
+                      }
+                      placeholder="0.00"
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+
+                {!splitType[a.type] && (
+                  <div className="mb-2">
+                    <label className="text-xs text-gray-600 mb-1 block">
+                      Amount:
+                    </label>
+                    <input
+                      type="text"
+                      value={a.amount}
+                      onChange={(e) => handleNumeric(e, a.type)}
+                      placeholder="0.00"
+                      className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+
+                <div className="flex justify-end mt-2">
+                  <button
+                    type="button"
+                    onClick={() => onRemove(a.type)}
+                    className="text-red-500 hover:text-red-700 text-sm"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -331,6 +398,286 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
   );
 };
 
+// Updated Salary Sources List Component with Checkboxes
+const SalarySourcesList = ({
+  sources,
+  setSources,
+  sourceOptions,
+  netSalary,
+  errors,
+  setErrors,
+}) => {
+  const addSource = () => {
+    setSources([...sources, { accountId: "", amount: "", type: "" }]);
+  };
+
+  const updateSource = (idx, field, value) => {
+    const updated = [...sources];
+    updated[idx][field] = value;
+
+    // If type is selected, find the matching account and set amount
+    if (field === "type") {
+      const selectedAccount = sourceOptions.find((opt) => opt.type === value);
+      if (selectedAccount) {
+        updated[idx].accountId = selectedAccount.value;
+        updated[idx].amount = selectedAccount.balance.toString();
+      } else {
+        updated[idx].amount = "";
+      }
+    }
+
+    setSources(updated);
+
+    // Validate total after change
+    const total = updated.reduce(
+      (sum, s) => sum + (parseFloat(s.amount) || 0),
+      0,
+    );
+    if (Math.abs(total - parseFloat(netSalary)) > 0.01) {
+      setErrors((prev) => ({
+        ...prev,
+        sources: `Total sources (${total.toFixed(2)}) must equal net salary (${parseFloat(netSalary).toFixed(2)})`,
+      }));
+    } else {
+      setErrors((prev) => ({ ...prev, sources: "" }));
+    }
+  };
+
+  const removeSource = (idx) => {
+    const updated = sources.filter((_, i) => i !== idx);
+    setSources(updated);
+    const total = updated.reduce(
+      (sum, s) => sum + (parseFloat(s.amount) || 0),
+      0,
+    );
+    if (Math.abs(total - parseFloat(netSalary)) > 0.01) {
+      setErrors((prev) => ({
+        ...prev,
+        sources: `Total sources (${total.toFixed(2)}) must equal net salary (${parseFloat(netSalary).toFixed(2)})`,
+      }));
+    } else {
+      setErrors((prev) => ({ ...prev, sources: "" }));
+    }
+  };
+
+  // Group source options by type
+  const getOptionsByType = () => {
+    const grouped = {
+      cash_balance: [],
+      personal: [],
+      company: [],
+    };
+
+    sourceOptions.forEach((option) => {
+      if (option.type === "cash_balance" || option.type === "cashbalance") {
+        grouped.cash_balance.push(option);
+      } else if (
+        option.type === "personal" ||
+        option.type === "personal_account"
+      ) {
+        grouped.personal.push(option);
+      } else if (
+        option.type === "company" ||
+        option.type === "company_account"
+      ) {
+        grouped.company.push(option);
+      }
+    });
+
+    return grouped;
+  };
+
+  const groupedOptions = getOptionsByType();
+
+  const accountTypes = [
+    {
+      value: "cash_balance",
+      label: "Cash Balance Account",
+      options: groupedOptions.cash_balance,
+    },
+    {
+      value: "personal",
+      label: "Personal Account",
+      options: groupedOptions.personal,
+    },
+    {
+      value: "company",
+      label: "Company Account",
+      options: groupedOptions.company,
+    },
+  ];
+
+  // Check if a type is selected for a source
+  const isTypeSelected = (idx, typeValue) => {
+    return sources[idx]?.type === typeValue;
+  };
+
+  return (
+    <div className="mb-6">
+      <label className="block text-sm font-medium text-gray-700 mb-2">
+        Salary Sources (Split Payment) *
+      </label>
+      {sources.map((src, idx) => (
+        <div key={idx} className="border rounded-lg p-4 mb-3 bg-gray-50">
+          <div className="flex justify-between items-center mb-3">
+            <h4 className="text-sm font-semibold text-gray-700">
+              Source {idx + 1}
+            </h4>
+            {sources.length > 1 && (
+              <button
+                type="button"
+                onClick={() => removeSource(idx)}
+                className="text-red-500 hover:text-red-700 text-sm"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+
+          <div className="mb-3">
+            <label className="text-xs text-gray-600 mb-2 block">
+              Select Account Type:
+            </label>
+            <div className="space-y-3">
+              {accountTypes.map(
+                (type) =>
+                  type.options.length > 0 && (
+                    <div
+                      key={type.value}
+                      className="border rounded-md p-3 bg-white"
+                    >
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isTypeSelected(idx, type.value)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              // Uncheck other types first
+                              updateSource(idx, "type", type.value);
+                            } else {
+                              // Uncheck this type
+                              updateSource(idx, "type", "");
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">
+                          {type.label}
+                        </span>
+                      </label>
+
+                      {isTypeSelected(idx, type.value) &&
+                        type.options.length > 0 && (
+                          <div className="mt-3 ml-6 pl-3 border-l-2 border-blue-200">
+                            {type.options.map((option) => (
+                              <div
+                                key={option.value}
+                                className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0"
+                              >
+                                <input
+                                  className="text-sm text-gray-600"
+                                  type="text"
+                                />
+
+                                <div className="flex items-center gap-3">
+                                  <span className="text-sm font-semibold text-green-600">
+                                    Balance: ${option.balance.toFixed(2)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateSource(idx, "type", type.value);
+                                    }}
+                                    className={`px-3 py-1 text-xs rounded ${
+                                      src.type === type.value &&
+                                      src.accountId === option.value
+                                        ? "bg-green-600 text-white"
+                                        : "bg-blue-600 text-white hover:bg-blue-700"
+                                    }`}
+                                  >
+                                    Use This
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                    </div>
+                  ),
+              )}
+            </div>
+          </div>
+
+          {/* Selected Source Details */}
+          {src.type && src.accountId && (
+            <div className="mt-3 p-3 bg-blue-50 rounded-md">
+              <div className="flex justify-between items-center">
+                <div>
+                  <span className="text-xs text-gray-600">
+                    Selected Account:
+                  </span>
+                  <p className="text-sm font-medium text-gray-800">
+                    {sourceOptions.find((opt) => opt.value === src.accountId)
+                      ?.label || "Account selected"}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs text-gray-600">
+                    Amount to Transfer:
+                  </span>
+                  <p className="text-lg font-bold text-green-600">
+                    ${parseFloat(src.amount || 0).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {errors.sources && (
+        <p className="text-red-500 text-xs mt-2">{errors.sources}</p>
+      )}
+
+      {/* Total Sources Summary */}
+      {sources.length > 0 && (
+        <div className="mt-4 p-3 bg-gray-100 rounded-md">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-medium text-gray-700">
+              Total from all sources:
+            </span>
+            <span
+              className={`text-lg font-bold ${Math.abs(parseFloat(sources.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0)).toFixed(2) - parseFloat(netSalary)) < 0.01 ? "text-green-600" : "text-red-600"}`}
+            >
+              $
+              {sources
+                .reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0)
+                .toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between items-center mt-1">
+            <span className="text-sm font-medium text-gray-700">
+              Net Salary:
+            </span>
+            <span className="text-lg font-bold text-blue-600">
+              ${netSalary}
+            </span>
+          </div>
+          {Math.abs(
+            parseFloat(
+              sources.reduce((sum, s) => sum + (parseFloat(s.amount) || 0), 0),
+            ).toFixed(2) - parseFloat(netSalary),
+          ) > 0.01 && (
+            <p className="text-xs text-red-500 mt-2">
+              Total source amounts must equal net salary
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─────────────────────────────────────────────
 // HOOK: fetch ALL MRs from Staff collection
 // ─────────────────────────────────────────────
@@ -373,7 +720,7 @@ const useAllMRList = () => {
 };
 
 // ─────────────────────────────────────────────
-// CURRENT MONTH — hook
+// CURRENT MONTH — hook (updated for multiple sources)
 // ─────────────────────────────────────────────
 const usePayrollForm = () => {
   const navigate = useNavigate();
@@ -385,7 +732,7 @@ const usePayrollForm = () => {
     deductions: "",
     netSalary: "0.00",
     status: "pending",
-    source: "",
+    sources: [],
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -398,7 +745,7 @@ const usePayrollForm = () => {
   const [salaryCalculation, setSalaryCalculation] = useState(null);
   const [calculatingSalary, setCalculatingSalary] = useState(false);
   const [showSalaryDetails, setShowSalaryDetails] = useState(false);
-  const [selectedSourceAccount, setSelectedSourceAccount] = useState(null);
+  const [cashBalance, setCashBalance] = useState(0);
 
   const fetchMRList = useCallback(async () => {
     try {
@@ -458,6 +805,7 @@ const usePayrollForm = () => {
             : Array.isArray(rd.results)
               ? rd.results
               : [];
+
       const options = destinations
         .filter((d) => (d.totalAmount || d.amount || d.balance || 0) > 0)
         .map((d) => ({
@@ -468,27 +816,34 @@ const usePayrollForm = () => {
             d.balance ||
             0
           ).toFixed(2)})`,
-          ...d,
+          balance: d.totalAmount || d.amount || d.balance || 0,
+          type: d.code || d.name?.toLowerCase().replace(/\s/g, "_") || "",
         }));
       setSourceOptions(options);
+
+      // Find the cash balance account specifically
+      const cashBalanceAccount = destinations.find(
+        (d) =>
+          d.code === "cash_balance" || d.name?.toLowerCase() === "cash balance",
+      );
+      const cashBalanceAmount =
+        cashBalanceAccount?.totalAmount ||
+        cashBalanceAccount?.amount ||
+        cashBalanceAccount?.balance ||
+        0;
+      setCashBalance(cashBalanceAmount);
+
       if (options.length === 0)
         showToast("warning", "No source accounts with balance available.");
-    } catch {
+    } catch (error) {
+      console.error("Error fetching source options:", error);
       showToast("error", "Failed to load source options");
       setSourceOptions([]);
+      setCashBalance(0);
     } finally {
       setSourceLoading(false);
     }
   }, []);
-
-  const handleSourceChange = useCallback(
-    (sourceId) => {
-      setForm((p) => ({ ...p, source: sourceId }));
-      setErrors((p) => ({ ...p, source: "" }));
-      setSelectedSourceAccount(sourceOptions.find((o) => o.value === sourceId));
-    },
-    [sourceOptions],
-  );
 
   const calculateSalary = useCallback(async (employeeId, period) => {
     if (!employeeId || !period) {
@@ -538,22 +893,34 @@ const usePayrollForm = () => {
     else if (form.period > getCurrentMonth())
       e.period = "Future months are not allowed";
     if (!form.basicSalary) e.basicSalary = "Basic Salary is required";
-    if (!form.source) e.source = "Source is required";
-    if (selectedSourceAccount && form.netSalary) {
+    if (!form.sources || form.sources.length === 0) {
+      e.sources = "At least one source account is required";
+    } else {
+      let totalSources = 0;
+      for (let src of form.sources) {
+        if (!src.type) {
+          e.sources = "Please select account type for each source";
+          break;
+        }
+        if (!src.accountId) {
+          e.sources = "Please select an account for each source";
+          break;
+        }
+        totalSources += parseFloat(src.amount) || 0;
+      }
       const net = parseFloat(form.netSalary) || 0;
-      const bal =
-        selectedSourceAccount.totalAmount ||
-        selectedSourceAccount.amount ||
-        selectedSourceAccount.balance ||
-        0;
-      if (bal < net)
-        e.source = `Insufficient balance. Available: $${bal.toFixed(
-          2,
-        )}, Required: $${net.toFixed(2)}`;
+      if (Math.abs(totalSources - net) > 0.01) {
+        e.sources = `Total source amounts (${totalSources.toFixed(2)}) must equal net salary (${net.toFixed(2)})`;
+      }
+    }
+    const basic = parseFloat(form.basicSalary) || 0;
+    const net = parseFloat(form.netSalary) || 0;
+    if (net > basic) {
+      e.netSalary = `Net salary cannot exceed basic salary (${basic.toFixed(2)})`;
     }
     setErrors(e);
     return Object.keys(e).length === 0;
-  }, [form, selectedSourceAccount]);
+  }, [form]);
 
   const handleNumeric = useCallback((e) => {
     const { name, value } = e.target;
@@ -620,6 +987,11 @@ const usePayrollForm = () => {
     [form.employeeId, calculateSalary],
   );
 
+  const handleSourcesChange = useCallback((newSources) => {
+    setForm((p) => ({ ...p, sources: newSources }));
+    setErrors((p) => ({ ...p, sources: "" }));
+  }, []);
+
   const totalAllowance = useMemo(
     () =>
       (form.allowances || []).reduce(
@@ -651,12 +1023,18 @@ const usePayrollForm = () => {
         .filter((a) => a.type && a.amount)
         .map((a) => ({ type: a.type, amount: parseFloat(a.amount) || 0 }));
       const payload = {
-        ...form,
-        totalAllowance: totalAllowance.toFixed(2),
-        allowances: processedAllowances,
+        employeeId: form.employeeId,
+        period: form.period,
         basicSalary: parseFloat(form.basicSalary) || 0,
+        allowances: processedAllowances,
         deductions: parseFloat(form.deductions) || 0,
         netSalary: parseFloat(form.netSalary) || 0,
+        status: form.status,
+        sources: form.sources.map((s) => ({
+          accountId: s.accountId,
+          accountType: s.type,
+          amount: parseFloat(s.amount) || 0,
+        })),
       };
       const res = await axios.post(`${backendUrl}/api/hrm/payroll`, payload, {
         headers: { "Content-Type": "application/json" },
@@ -692,6 +1070,7 @@ const usePayrollForm = () => {
   return {
     form,
     errors,
+    setErrors,
     loading,
     mrList,
     mrListLoading,
@@ -706,27 +1085,167 @@ const usePayrollForm = () => {
     calculatingSalary,
     showSalaryDetails,
     setShowSalaryDetails,
-    selectedSourceAccount,
+    cashBalance,
     handleNumeric,
     handleAllowanceChange,
     handleAllowanceAmountChange,
     removeAllowance,
     handleEmployeeChange,
     handlePeriodChange,
-    handleSourceChange,
+    handleSourcesChange,
     handleSubmit,
     setForm,
     validate,
   };
 };
+const SalarySourcesSection = ({
+  sources,
+  setSources,
+  sourceOptions,
+  netSalary,
+  errors,
+  setErrors,
+}) => {
+  const [selectedAccountIds, setSelectedAccountIds] = useState([]);
 
-// ─────────────────────────────────────────────
-// CURRENT MONTH TAB (with Advance Deduction as a column)
-// ─────────────────────────────────────────────
+  // Auto select cash balance if available
+  useEffect(() => {
+    if (sourceOptions.length > 0 && sources.length === 0) {
+      const cashAccount = sourceOptions.find((opt) =>
+        opt.label.toLowerCase().includes("cash"),
+      );
+      if (cashAccount) {
+        setSources([
+          { accountId: cashAccount.value, amount: "", type: "cash_balance" },
+        ]);
+        setSelectedAccountIds([cashAccount.value]);
+      }
+    }
+  }, [sourceOptions]);
+
+  const toggleAccount = (account) => {
+    const isSelected = selectedAccountIds.includes(account.value);
+
+    if (isSelected) {
+      setSelectedAccountIds((prev) =>
+        prev.filter((id) => id !== account.value),
+      );
+      setSources((prev) => prev.filter((s) => s.accountId !== account.value));
+    } else {
+      setSelectedAccountIds((prev) => [...prev, account.value]);
+      setSources((prev) => [
+        ...prev,
+        {
+          accountId: account.value,
+          amount: "",
+          type: account.type || "personal",
+        },
+      ]);
+    }
+    setErrors((prev) => ({ ...prev, sources: "" }));
+  };
+
+  const updateAmount = (accountId, amount) => {
+    setSources((prev) =>
+      prev.map((src) =>
+        src.accountId === accountId ? { ...src, amount } : src,
+      ),
+    );
+
+    const total = sources.reduce(
+      (sum, s) => sum + (parseFloat(s.amount) || 0),
+      0,
+    );
+    if (Math.abs(total - parseFloat(netSalary)) > 0.01) {
+      setErrors((prev) => ({
+        ...prev,
+        sources: `Total sources ($${total.toFixed(2)}) must equal net salary ($${parseFloat(netSalary).toFixed(2)})`,
+      }));
+    } else {
+      setErrors((prev) => ({ ...prev, sources: "" }));
+    }
+  };
+
+  const totalFromSources = sources.reduce(
+    (sum, s) => sum + (parseFloat(s.amount) || 0),
+    0,
+  );
+
+  return (
+    <div className="mb-8">
+      <label className="block text-sm font-medium text-gray-700 mb-3">
+        Salary Sources (Split Payment) <span className="text-red-500">*</span>
+      </label>
+
+      {/* Same as Allowance Type */}
+      <MultipleSelectDropdown
+        label="Select Payment Accounts"
+        value={selectedAccountIds}
+        onChange={setSelectedAccountIds}
+        options={sourceOptions.map((acc) => ({
+          value: acc.value,
+          label: acc.label,
+        }))}
+        placeholder="Select accounts to split salary"
+      />
+
+      {/* Amount Input Fields */}
+      {sources.length > 0 && (
+        <div className="mt-6 space-y-4">
+          {sources.map((src, idx) => {
+            const account = sourceOptions.find(
+              (a) => a.value === src.accountId,
+            );
+            return (
+              <div
+                key={idx}
+                className="bg-white border border-gray-200 rounded-xl p-5"
+              >
+                <div className="font-medium text-gray-800 mb-3">
+                  {account?.label}
+                </div>
+                <input
+                  type="text"
+                  value={src.amount || ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === "" || /^\d*\.?\d{0,2}$/.test(val)) {
+                      updateAmount(src.accountId, val);
+                    }
+                  }}
+                  placeholder="0.00"
+                  className="w-full px-5 py-4 border border-gray-300 rounded-xl text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            );
+          })}
+
+          {/* Total from Sources - Same as Total Allowance */}
+          <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl p-5">
+            <span className="text-sm font-medium text-gray-700">
+              Total from Sources
+            </span>
+            <span
+              className={`text-2xl font-bold ${Math.abs(totalFromSources - parseFloat(netSalary)) < 0.01 ? "text-green-600" : "text-red-600"}`}
+            >
+              ${totalFromSources.toFixed(2)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {errors.sources && (
+        <p className="text-red-500 text-sm mt-3">{errors.sources}</p>
+      )}
+    </div>
+  );
+};
+
 const CurrentMonthTab = () => {
   const {
     form,
     errors,
+    setErrors,
     loading,
     mrList,
     mrListLoading,
@@ -741,99 +1260,46 @@ const CurrentMonthTab = () => {
     calculatingSalary,
     showSalaryDetails,
     setShowSalaryDetails,
-    selectedSourceAccount,
+    cashBalance,
     handleNumeric,
     handleAllowanceChange,
     handleAllowanceAmountChange,
     removeAllowance,
     handleEmployeeChange,
     handlePeriodChange,
-    handleSourceChange,
+    handleSourcesChange,
     handleSubmit,
     setForm,
   } = usePayrollForm();
+
   const navigate = useNavigate();
-
-  // Local currency formatter
-  const formatCurrency = (amount) => {
-    const num = parseFloat(amount) || 0;
-    return `$${num.toFixed(2)}`;
-  };
-
-  useEffect(() => {
-    setForm((p) => ({ ...p, period: getCurrentMonth() }));
-  }, [setForm]);
-
-  const mrOptions = useMemo(() => {
-    if (mrListLoading)
-      return [{ value: "", label: "Loading MRs...", disabled: true }];
-    if (isMrListEmpty)
-      return [{ value: "", label: "No MRs Available", disabled: true }];
-    return mrList.map((mr) => ({
-      value: mr._id,
-      label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
-    }));
-  }, [mrList, isMrListEmpty, mrListLoading]);
 
   const selectedAllowanceTypes = useMemo(
     () => (form.allowances || []).map((a) => a.type),
     [form.allowances],
   );
-  const isFormValid = useMemo(
-    () =>
-      form.employeeId &&
-      form.period &&
-      form.basicSalary &&
-      form.source &&
-      !errors.period &&
-      !errors.employeeId &&
-      !errors.basicSalary &&
-      !errors.source,
-    [form, errors],
-  );
-  const srcBal = selectedSourceAccount
-    ? selectedSourceAccount.totalAmount ||
-      selectedSourceAccount.amount ||
-      selectedSourceAccount.balance ||
-      0
-    : 0;
-
-  const hasAdvance = salaryCalculation?.advanceDeduction > 0;
 
   return (
     <>
       {isMrListEmpty && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-          <svg
-            className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-              clipRule="evenodd"
-            />
-          </svg>
-          <div>
-            <h3 className="text-sm font-medium text-red-800">
-              No MRs Available
-            </h3>
-            <p className="mt-1 text-sm text-red-700">
-              You need to add at least one MR with basic salary before creating
-              payroll records. Please go to MR Basic Payroll first.
-            </p>
-          </div>
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <h3 className="text-sm font-medium text-red-800">No MRs Available</h3>
+          <p className="text-sm text-red-700 mt-1">
+            Please add basic salary for MRs first in MR Basic Payroll section.
+          </p>
         </div>
       )}
 
       <form onSubmit={handleSubmit}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <SearchableDropdown
             label="MR Name"
             value={form.employeeId}
             onChange={handleEmployeeChange}
-            options={mrOptions}
+            options={mrList.map((mr) => ({
+              value: mr._id,
+              label: mr.medicalRepName || `MR ${mr._id}`,
+            }))}
             placeholder={
               mrListLoading
                 ? "Loading..."
@@ -841,107 +1307,28 @@ const CurrentMonthTab = () => {
                   ? "No MRs Available"
                   : "Select MR"
             }
-            required
             loading={mrListLoading}
             error={errors.employeeId}
             disabled={isMrListEmpty || mrListLoading}
           />
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Pay Period <span className="text-red-500">*</span>
             </label>
             <input
               type="month"
-              name="period"
               value={form.period}
               onChange={(e) => handlePeriodChange(e.target.value)}
               max={getCurrentMonth()}
               disabled={isMrListEmpty}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${
-                errors.period
-                  ? "border-red-500 focus:ring-red-200"
-                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
-              } ${isMrListEmpty ? "bg-gray-100 cursor-not-allowed" : "bg-white"}`}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
             />
-            {errors.period && (
-              <p className="mt-1 text-sm text-red-600">{errors.period}</p>
-            )}
-          </div>
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Source Account <span className="text-red-500">*</span>
-            </label>
-            <SearchableDropdown
-              value={form.source}
-              onChange={handleSourceChange}
-              options={sourceOptions}
-              placeholder={
-                sourceLoading
-                  ? "Loading sources..."
-                  : sourceOptions.length === 0
-                    ? "No accounts available"
-                    : "Select Source"
-              }
-              required
-              loading={sourceLoading}
-              error={errors.source}
-              disabled={
-                isMrListEmpty || sourceLoading || sourceOptions.length === 0
-              }
-            />
-            {selectedSourceAccount && (
-              <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded">
-                <p className="text-sm text-green-700">
-                  <span className="font-medium">Account Balance:</span> $
-                  {srcBal.toFixed(2)}
-                </p>
-                {form.netSalary && parseFloat(form.netSalary) > 0 && (
-                  <p className="text-sm text-blue-700 mt-1">
-                    <span className="font-medium">After Payment:</span> $
-                    {(srcBal - parseFloat(form.netSalary)).toFixed(2)}
-                  </p>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
-        {salaryCalculation && (
-          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex justify-between items-center">
-            <div>
-              <h4 className="text-sm font-medium text-blue-800">
-                Salary Calculated Automatically
-              </h4>
-              <p className="text-sm text-blue-700">
-                Based on attendance and leave records (including swap leaves and
-                extra time)
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowSalaryDetails(true)}
-              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-            >
-              View Details
-            </button>
-          </div>
-        )}
-        {calculatingSalary && (
-          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex items-center gap-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600"></div>
-            <span className="text-sm text-yellow-700">
-              Calculating salary based on attendance, leaves, and extra time...
-            </span>
-          </div>
-        )}
-
-        {/* Salary fields grid – adapts to show Advance Deduction when present */}
-        <div
-          className={`grid grid-cols-1 gap-6 mb-6 ${
-            hasAdvance ? "md:grid-cols-4" : "md:grid-cols-3"
-          }`}
-        >
-          {/* Basic Salary */}
+        {/* Basic Salary, Deductions, Net Salary */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Basic Salary ($) <span className="text-red-500">*</span>
@@ -952,102 +1339,60 @@ const CurrentMonthTab = () => {
               value={form.basicSalary}
               onChange={handleNumeric}
               placeholder="0.00"
-              disabled={isMrListEmpty || calculatingSalary}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${
-                errors.basicSalary
-                  ? "border-red-500 focus:ring-red-200"
-                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
-              } ${
-                isMrListEmpty || calculatingSalary
-                  ? "bg-gray-100 cursor-not-allowed"
-                  : "bg-white"
-              }`}
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
             />
-            {errors.basicSalary && (
-              <p className="mt-1 text-sm text-red-600">{errors.basicSalary}</p>
-            )}
           </div>
 
-          {/* Advance Deduction (only if present) */}
-          {hasAdvance && (
-            <div>
-              <label className="block text-sm font-medium text-red-700 mb-1">
-                Advance Deduction ($)
-              </label>
-              <input
-                type="text"
-                value={formatCurrency(salaryCalculation.advanceDeduction)}
-                readOnly
-                className="w-full px-3 py-2 border border-red-300 rounded-lg bg-red-100 text-red-700 font-semibold cursor-not-allowed"
-              />
-              <p className="text-xs text-red-600 mt-1">Deducted from salary</p>
-            </div>
-          )}
-
-          {/* Deductions */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Deductions ($)
             </label>
             <input
               type="text"
-              name="deductions"
-              value={form.deductions}
+              value={form.deductions || "0.00"}
               readOnly
-              placeholder="0.00"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-100"
             />
-            <p className="text-xs text-gray-500 mt-1">Based on unpaid leaves</p>
           </div>
 
-          {/* Net Salary */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Net Salary ($)
             </label>
             <input
               type="text"
-              name="netSalary"
               value={form.netSalary}
               readOnly
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed font-semibold"
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-blue-50 font-semibold text-blue-700"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Basic + Allowances - Deductions - Advance
-            </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {/* Allowance Type + Total Allowance */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <MultipleSelectDropdown
             label="Allowance Type"
             value={selectedAllowanceTypes}
             onChange={handleAllowanceChange}
             options={allowanceOptions}
             placeholder="Select allowance types"
-            disabled={isMrListEmpty || calculatingSalary}
           />
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
               Total Allowance ($)
             </label>
-            <div className="flex gap-2">
+            <div className="flex gap-3">
               <input
                 type="text"
                 value={totalAllowance.toFixed(2)}
                 readOnly
-                className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 cursor-not-allowed"
+                className="flex-1 px-4 py-3 border border-gray-300 rounded-xl bg-gray-100 font-medium"
               />
               <button
                 type="button"
                 onClick={() => setShowAllowanceBreakdown(true)}
-                disabled={
-                  isMrListEmpty ||
-                  !form.allowances ||
-                  form.allowances.length === 0 ||
-                  calculatingSalary
-                }
-                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 rounded-xl font-medium"
               >
                 View
               </button>
@@ -1055,127 +1400,81 @@ const CurrentMonthTab = () => {
           </div>
         </div>
 
-        <div className="mt-8 p-4 bg-white rounded-md shadow-md">
+        {/* Salary Sources - Same Layout as Allowance Type */}
+        <SalarySourcesSection
+          sources={form.sources}
+          setSources={handleSourcesChange}
+          sourceOptions={sourceOptions}
+          netSalary={form.netSalary}
+          errors={errors}
+          setErrors={setErrors}
+        />
+
+        {/* Summary Table */}
+        <div className="mt-10 p-5 bg-white rounded-2xl shadow">
           <h3 className="text-lg font-semibold mb-4 text-center">
             Salary Summary
           </h3>
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
-            <thead className="bg-gray-200 text-gray-700 border-b">
+          <table className="w-full text-center">
+            <thead className="bg-gray-100">
               <tr>
-                <th className="p-3 font-medium">Basic Salary ($)</th>
-                <th className="p-3 font-medium">Allowance ($)</th>
-                <th className="p-3 font-medium">Deductions ($)</th>
-                <th className="p-3 font-medium">Net Salary ($)</th>
+                <th className="p-3">Basic Salary ($)</th>
+                <th className="p-3">Allowance ($)</th>
+                <th className="p-3">Deductions ($)</th>
+                <th className="p-3">Net Salary ($)</th>
               </tr>
             </thead>
             <tbody>
-              <tr className="bg-white hover:bg-gray-50">
-                <td className="p-3 font-semibold">
+              <tr>
+                <td className="p-4 font-semibold">
                   {form.basicSalary || "0.00"}
                 </td>
-                <td className="p-3 font-semibold">
+                <td className="p-4 font-semibold">
                   {totalAllowance.toFixed(2)}
                 </td>
-                <td className="p-3 font-semibold text-red-600">
+                <td className="p-4 font-semibold text-red-600">
                   -{form.deductions || "0.00"}
                 </td>
-                <td className="p-3 font-semibold text-green-600">
+                <td className="p-4 font-semibold text-green-600">
                   {form.netSalary}
                 </td>
               </tr>
             </tbody>
           </table>
-          {selectedSourceAccount && (
-            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-              <h4 className="text-md font-semibold mb-2 text-center">
-                Source Account Summary
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm text-gray-600">Account Name</p>
-                  <p className="font-medium">
-                    {selectedSourceAccount.name ||
-                      `Account ${selectedSourceAccount.code || selectedSourceAccount._id}`}
-                  </p>
-                </div>
-                <div className="bg-white p-3 rounded border">
-                  <p className="text-sm text-gray-600">Current Balance</p>
-                  <p className="font-medium text-green-600">
-                    ${srcBal.toFixed(2)}
-                  </p>
-                </div>
-                {form.netSalary && parseFloat(form.netSalary) > 0 && (
-                  <>
-                    <div className="bg-white p-3 rounded border">
-                      <p className="text-sm text-gray-600">Payment Amount</p>
-                      <p className="font-medium text-red-600">
-                        -${parseFloat(form.netSalary).toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="bg-white p-3 rounded border">
-                      <p className="text-sm text-gray-600">
-                        Balance After Payment
-                      </p>
-                      <p className="font-medium text-blue-600">
-                        ${(srcBal - parseFloat(form.netSalary)).toFixed(2)}
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
-        <div className="flex justify-end mt-10 gap-4">
+        {/* Buttons */}
+        <div className="flex justify-end gap-4 mt-10">
           <button
             type="button"
             onClick={() => navigate("/hrmlayout/payroll")}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-3 rounded-lg cursor-pointer transition-colors text-lg font-medium transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+            className="px-8 py-3 bg-gray-200 hover:bg-gray-300 rounded-2xl font-medium"
           >
             Cancel
           </button>
           <button
             type="submit"
-            disabled={
-              loading ||
-              !isFormValid ||
-              isMrListEmpty ||
-              calculatingSalary ||
-              sourceOptions.length === 0
-            }
-            className={`px-4 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              loading ||
-              !isFormValid ||
-              isMrListEmpty ||
-              calculatingSalary ||
-              sourceOptions.length === 0
-                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 focus:ring-green-500"
-            }`}
+            disabled={loading}
+            className="px-10 py-3 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-semibold disabled:bg-gray-400"
           >
-            {loading
-              ? "Saving…"
-              : calculatingSalary
-                ? "Calculating…"
-                : sourceOptions.length === 0
-                  ? "No Source Account"
-                  : "Save Payroll"}
+            {loading ? "Saving..." : "Save Payroll"}
           </button>
         </div>
       </form>
 
-      <SalaryDetailsModal
-        calculation={salaryCalculation}
-        isOpen={showSalaryDetails}
-        onClose={() => setShowSalaryDetails(false)}
-      />
       <AllowanceBreakdownModal
         allowances={form.allowances || []}
         isOpen={showAllowanceBreakdown}
         onClose={() => setShowAllowanceBreakdown(false)}
         onAmountChange={handleAllowanceAmountChange}
         onRemove={removeAllowance}
+        cashBalance={cashBalance}
+      />
+
+      <SalaryDetailsModal
+        calculation={salaryCalculation}
+        isOpen={showSalaryDetails}
+        onClose={() => setShowSalaryDetails(false)}
       />
     </>
   );
@@ -1199,7 +1498,6 @@ const MrAdvanceTab = () => {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch source accounts (same as in CurrentMonthTab)
   useEffect(() => {
     const fetchSourceOptions = async () => {
       try {
@@ -1277,7 +1575,6 @@ const MrAdvanceTab = () => {
       const res = await axios.post(`${backendUrl}/api/hrm/mr-advance`, payload);
       if (res.data.success) {
         showToast("success", "Advance recorded successfully");
-        // Reset form and refresh source balances
         setForm({
           employeeId: "",
           date: new Date().toISOString().split("T")[0],
@@ -1285,7 +1582,6 @@ const MrAdvanceTab = () => {
           amount: "",
           remarks: "",
         });
-        // Re‑fetch source options to update balances
         const fetchOptions = async () => {
           const res2 = await axios.get(
             `${backendUrl}/api/accounts/destinations`,
@@ -1320,7 +1616,6 @@ const MrAdvanceTab = () => {
     <div>
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          {/* MR Name */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               MR Name <span className="text-red-500">*</span>
@@ -1341,7 +1636,6 @@ const MrAdvanceTab = () => {
             )}
           </div>
 
-          {/* Date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Date <span className="text-red-500">*</span>
@@ -1365,7 +1659,6 @@ const MrAdvanceTab = () => {
             )}
           </div>
 
-          {/* Source Account */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Source Account <span className="text-red-500">*</span>
@@ -1390,7 +1683,6 @@ const MrAdvanceTab = () => {
             )}
           </div>
 
-          {/* Amount */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Amount ($) <span className="text-red-500">*</span>
@@ -1413,7 +1705,6 @@ const MrAdvanceTab = () => {
           </div>
         </div>
 
-        {/* Remarks */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Remarks
@@ -1512,8 +1803,6 @@ const EXCEL_HEADERS = [
 const PreviousMonthTab = () => {
   const navigate = useNavigate();
   const [entryMode, setEntryMode] = useState("manual");
-
-  // ── ALL MRs — not filtered by basic payroll ──
   const { mrList, mrListLoading } = useAllMRList();
 
   const [rows, setRows] = useState([
@@ -1533,14 +1822,12 @@ const PreviousMonthTab = () => {
       return [{ value: "", label: "Loading MRs...", disabled: true }];
     if (mrList.length === 0)
       return [{ value: "", label: "No MRs Available", disabled: true }];
-    // Show ALL MRs from Staff collection
     return mrList.map((mr) => ({
       value: mr._id,
       label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
     }));
   }, [mrList, mrListLoading]);
 
-  // ── Manual helpers ──
   const addRow = () => {
     setRows((p) => [...p, { ...PREV_INITIAL_ROW, period: getPreviousMonth() }]);
     setRowErrors((p) => [...p, {}]);
@@ -1624,21 +1911,16 @@ const PreviousMonthTab = () => {
     }
   };
 
-  // ── Excel helpers (UPDATED with dropdown) ──
   const downloadTemplate = async () => {
     try {
       const workbook = new ExcelJS.Workbook();
-
-      // 1. Main Payroll sheet with headers only
       const mainSheet = workbook.addWorksheet("Payroll");
       mainSheet.columns = EXCEL_HEADERS.map((h) => ({
         header: h,
         key: h.replace(/[^a-zA-Z]/g, ""),
         width: 22,
       }));
-      mainSheet.addRow({}); // optional empty row to make dropdown visible
-
-      // 2. MR List sheet
+      mainSheet.addRow({});
       const mrSheet = workbook.addWorksheet("MR List");
       mrSheet.columns = [{ header: "MR Name", key: "name", width: 30 }];
       mrList.forEach((mr) => {
@@ -1646,10 +1928,7 @@ const PreviousMonthTab = () => {
           name: mr.medicalRepName || mr.employeeName || "Unknown",
         });
       });
-
-      // 3. Add dropdown validation to "MR Name" column in main sheet (starting from row 2)
-      //    Reference the list from MR List sheet (cells A2:A{lastRow})
-      const lastRow = mrList.length + 1; // +1 for header
+      const lastRow = mrList.length + 1;
       const validationFormula = `'MR List'!$A$2:$A$${lastRow}`;
       mainSheet.dataValidations.add(`A2:A1000`, {
         type: "list",
@@ -1658,8 +1937,6 @@ const PreviousMonthTab = () => {
         error: "Please select a valid MR name from the list",
         errorTitle: "Invalid MR Name",
       });
-
-      // Generate file
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: "application/octet-stream" });
       saveAs(blob, "previous_month_payroll_template.xlsx");
@@ -1816,7 +2093,6 @@ const PreviousMonthTab = () => {
 
   return (
     <div>
-      {/* Info banner */}
       <div className="mb-5 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
         <svg
           className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5"
@@ -1835,7 +2111,6 @@ const PreviousMonthTab = () => {
         </p>
       </div>
 
-      {/* Sub-tabs */}
       <div className="flex gap-3 mb-6">
         <button
           type="button"
@@ -1861,7 +2136,6 @@ const PreviousMonthTab = () => {
         </button>
       </div>
 
-      {/* ── MANUAL ENTRY ── */}
       {entryMode === "manual" && (
         <form onSubmit={handleManualSubmit}>
           <div className="space-y-6">
@@ -1885,7 +2159,6 @@ const PreviousMonthTab = () => {
                   )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* MR Name — ALL MRs from staff */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       MR Name <span className="text-red-500">*</span>
@@ -1906,7 +2179,6 @@ const PreviousMonthTab = () => {
                       </p>
                     )}
                   </div>
-                  {/* Pay Period */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Pay Period <span className="text-red-500">*</span>
@@ -1930,7 +2202,6 @@ const PreviousMonthTab = () => {
                       </p>
                     )}
                   </div>
-                  {/* Salary */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Salary ($) <span className="text-red-500">*</span>
@@ -1954,7 +2225,6 @@ const PreviousMonthTab = () => {
                       </p>
                     )}
                   </div>
-                  {/* Incentive */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Incentive ($)
@@ -1969,7 +2239,6 @@ const PreviousMonthTab = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 focus:outline-none bg-white"
                     />
                   </div>
-                  {/* Allowance */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Allowance ($)
@@ -1984,7 +2253,6 @@ const PreviousMonthTab = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 focus:outline-none bg-white"
                     />
                   </div>
-                  {/* Tour Expense */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Tour Expense ($)
@@ -1999,7 +2267,6 @@ const PreviousMonthTab = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 focus:outline-none bg-white"
                     />
                   </div>
-                  {/* Other Expense */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Other Expense ($)
@@ -2014,7 +2281,6 @@ const PreviousMonthTab = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 focus:outline-none bg-white"
                     />
                   </div>
-                  {/* Total Expense */}
                   <div className="flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Total Expense ($)
@@ -2072,7 +2338,6 @@ const PreviousMonthTab = () => {
         </form>
       )}
 
-      {/* ── EXCEL UPLOAD ── */}
       {entryMode === "excel" && (
         <form onSubmit={handleExcelSubmit}>
           <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center mb-6 bg-gray-50">
@@ -2235,31 +2500,33 @@ const PreviousMonthTab = () => {
 // ─────────────────────────────────────────────
 const AddPayroll = () => {
   const [activeTab, setActiveTab] = useState("current");
+
   return (
     <div className="max-w-4xl mx-auto p-8 bg-white rounded-3xl shadow-lg">
-      <h2 className="text-xl font-semibold text-gray-800 mb-6">
+      <h2 className="text-2xl font-semibold text-gray-800 mb-8">
         Add New Payroll
       </h2>
-      <div className="flex border-b border-gray-200 mb-6">
+
+      <div className="flex border-b border-gray-200 mb-8">
         {[
-          ["current", "Current Month"],
-          ["previous", "Previous Month"],
-          ["advance", "MR Advance"],
-        ].map(([key, label]) => (
+          { key: "current", label: "Current Month" },
+          { key: "previous", label: "Previous Month" },
+          { key: "advance", label: "MR Advance" },
+        ].map(({ key, label }) => (
           <button
             key={key}
-            type="button"
             onClick={() => setActiveTab(key)}
-            className={`py-2 px-4 font-medium text-sm focus:outline-none transition-colors ${
+            className={`py-3 px-8 font-medium text-sm border-b-2 transition-colors ${
               activeTab === key
-                ? "border-b-2 border-blue-600 text-blue-600"
-                : "text-gray-500 hover:text-gray-700"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
             {label}
           </button>
         ))}
       </div>
+
       {activeTab === "current" && <CurrentMonthTab />}
       {activeTab === "previous" && <PreviousMonthTab />}
       {activeTab === "advance" && <MrAdvanceTab />}

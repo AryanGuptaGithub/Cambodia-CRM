@@ -8,7 +8,6 @@ import ExcelJS from "exceljs";
 const router = express.Router();
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
-
 const getYearMonthFromDate = (date) => {
   const d = new Date(date);
   return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, "0")}`;
@@ -59,7 +58,7 @@ const normalizeNameInJS = (name) => {
   return n;
 };
 
-// ─── COGS expression (reused in both aggregations) ────────────────────────────
+// ─── COGS expression ───────────────────────────────────────────────────────────
 const cogsExpr = {
   $reduce: {
     input: "$products",
@@ -254,24 +253,14 @@ const fetchSalaryCOGSData = async (params) => {
 
   // ── payroll aggregation ───────────────────────────────────────────────────
   //
-  //  ROOT CAUSE OF WRONG VALUES (now fixed):
+  //  Salary / COGS report uses ONLY:
+  //    salary    → effectiveSalary (adjustedBasicSalary for current, basicSalary for previous)
+  //    incentive → allowances[type === "Incentive"]
+  //    allowance → all OTHER allowances (NOT Incentive, NOT Travel Allowance,
+  //                NOT Tour Allowance)
   //
-  //  OLD (wrong):
-  //    salary      → $sum: "$basicSalary"          — always full $1000, ignores proration
-  //    tourExpense → $sum: { $ifNull: ["$tourExpense", 0] } — top-level field doesn't exist → always 0
-  //    allowance   → $sum: (totalAllowance − incentive)    — fragile subtraction
-  //
-  //  NEW (correct):
-  //    effectiveSalary:
-  //      current-month payroll  → adjustedBasicSalary  (prorated value, e.g. $604.31)
-  //      previous-month payroll → basicSalary           (manually entered value)
-  //
-  //    allowanceBuckets via $reduce on allowances[]:
-  //      incentive       → type === "incentive"         (case-insensitive)
-  //      travelAllowance → type === "travel allowance"  → shown as Tour Expense ($)
-  //      other           → everything else              → shown as Allowance ($)
-  //
-  //  totalExpense = salary + incentive + tourExpense + allowance  (all four correct values)
+  //  Travel Allowance and Tour Allowance are EXCLUDED here — they belong
+  //  only to the Tour Expense / Sales Ratio report.
   // ─────────────────────────────────────────────────────────────────────────
   let payrollAggregate = [];
   const allStaffIds = allStaffMembers.map(
@@ -317,12 +306,9 @@ const fetchSalaryCOGSData = async (params) => {
     payrollAggregate = await Payroll.aggregate([
       { $match: payrollMatchConditions },
 
-      // ── Step 1: compute effectiveSalary + bucket the allowances array ──────
+      // Step 1: compute effectiveSalary + bucket allowances (two buckets only)
       {
         $addFields: {
-          // effectiveSalary:
-          //   current-month → adjustedBasicSalary (e.g. $604.31 after proration)
-          //   previous-month → basicSalary         (the value the user entered)
           effectiveSalary: {
             $cond: {
               if: {
@@ -336,13 +322,14 @@ const fetchSalaryCOGSData = async (params) => {
             },
           },
 
-          // Walk allowances[] and split into three buckets in one pass
+          // ── Two buckets: incentive + other ───────────────────────────────
+          // Travel Allowance and Tour Allowance are intentionally EXCLUDED
+          // — they are counted only in the Tour Expense report.
           allowanceBuckets: {
             $reduce: {
               input: { $ifNull: ["$allowances", []] },
-              initialValue: { incentive: 0, travelAllowance: 0, other: 0 },
+              initialValue: { incentive: 0, other: 0 },
               in: {
-                // ── incentive bucket ─────────────────────────────────────
                 incentive: {
                   $cond: {
                     if: {
@@ -364,29 +351,8 @@ const fetchSalaryCOGSData = async (params) => {
                     else: "$$value.incentive",
                   },
                 },
-                // ── Travel Allowance → tourExpense bucket ─────────────────
-                travelAllowance: {
-                  $cond: {
-                    if: {
-                      $eq: [
-                        {
-                          $toLower: {
-                            $trim: { input: { $ifNull: ["$$this.type", ""] } },
-                          },
-                        },
-                        "travel allowance",
-                      ],
-                    },
-                    then: {
-                      $add: [
-                        "$$value.travelAllowance",
-                        { $ifNull: ["$$this.amount", 0] },
-                      ],
-                    },
-                    else: "$$value.travelAllowance",
-                  },
-                },
-                // ── everything else → allowance bucket ────────────────────
+                // "other" = everything EXCEPT incentive, travel allowance,
+                //           tour allowance
                 other: {
                   $cond: {
                     if: {
@@ -415,6 +381,18 @@ const fetchSalaryCOGSData = async (params) => {
                             "travel allowance",
                           ],
                         },
+                        {
+                          $ne: [
+                            {
+                              $toLower: {
+                                $trim: {
+                                  input: { $ifNull: ["$$this.type", ""] },
+                                },
+                              },
+                            },
+                            "tour allowance",
+                          ],
+                        },
                       ],
                     },
                     then: {
@@ -432,14 +410,14 @@ const fetchSalaryCOGSData = async (params) => {
         },
       },
 
-      // ── Step 2: group by employee, sum the bucketed values ────────────────
+      // Step 2: group by employee
       {
         $group: {
           _id: "$employeeId",
-          salary: { $sum: "$effectiveSalary" }, // prorated/adjusted
-          incentive: { $sum: "$allowanceBuckets.incentive" }, // type="Incentive"
-          tourExpense: { $sum: "$allowanceBuckets.travelAllowance" }, // type="Travel Allowance"
-          allowance: { $sum: "$allowanceBuckets.other" }, // all other allowances
+          salary: { $sum: "$effectiveSalary" },
+          incentive: { $sum: "$allowanceBuckets.incentive" },
+          allowance: { $sum: "$allowanceBuckets.other" },
+          // tourExpense intentionally NOT included
           payrollCount: { $sum: 1 },
         },
       },
@@ -452,22 +430,15 @@ const fetchSalaryCOGSData = async (params) => {
       totalSalary: acc.totalSalary + (parseFloat(p.salary) || 0),
       totalIncentive: acc.totalIncentive + (parseFloat(p.incentive) || 0),
       totalAllowance: acc.totalAllowance + (parseFloat(p.allowance) || 0),
-      totalTourExpense: acc.totalTourExpense + (parseFloat(p.tourExpense) || 0),
     }),
-    {
-      totalSalary: 0,
-      totalIncentive: 0,
-      totalAllowance: 0,
-      totalTourExpense: 0,
-    },
+    { totalSalary: 0, totalIncentive: 0, totalAllowance: 0 },
   );
 
-  // totalExpense = salary + incentive + allowance + tourExpense
+  // totalExpense = salary + incentive + allowance  (NO tour fields)
   const totalExpenseFromAllRecords =
     totalPayrollSummary.totalSalary +
     totalPayrollSummary.totalIncentive +
-    totalPayrollSummary.totalAllowance +
-    totalPayrollSummary.totalTourExpense;
+    totalPayrollSummary.totalAllowance;
 
   const salaryCOGSRatio =
     totalCOGSFromAllRecords > 0
@@ -520,7 +491,7 @@ const fetchSalaryCOGSData = async (params) => {
     salarySaleRatio,
     totalAllowance: totalPayrollSummary.totalAllowance,
     totalIncentive: totalPayrollSummary.totalIncentive,
-    totalTourExpense: totalPayrollSummary.totalTourExpense,
+    // totalTourExpense intentionally omitted from this report
     profitMargin,
     cogsPercentage,
   };
@@ -553,11 +524,11 @@ const fetchSalaryCOGSData = async (params) => {
     const salary = parseFloat(payroll.salary) || 0;
     const incentive = parseFloat(payroll.incentive) || 0;
     const allowance = parseFloat(payroll.allowance) || 0;
-    const tourExpense = parseFloat(payroll.tourExpense) || 0;
+    // No tourExpense in this report
     const cogs = parseFloat(record.totalCOGS) || 0;
     const sales = parseFloat(record.totalSales) || 0;
     const profit = parseFloat(record.totalProfit) || 0;
-    const totalExpense = salary + incentive + allowance + tourExpense;
+    const totalExpense = salary + incentive + allowance;
 
     return {
       srDate: record.lastSaleDate || new Date(),
@@ -569,7 +540,6 @@ const fetchSalaryCOGSData = async (params) => {
       salary,
       incentive,
       allowance,
-      tourExpense,
       totalExpense,
       salaryCOGSRatio: cogs > 0 ? parseFloat((salary / cogs).toFixed(4)) : 0,
       expenseCOGSRatio:
@@ -594,8 +564,7 @@ const fetchSalaryCOGSData = async (params) => {
       const salary = parseFloat(payroll.salary) || 0;
       const incentive = parseFloat(payroll.incentive) || 0;
       const allowance = parseFloat(payroll.allowance) || 0;
-      const tourExpense = parseFloat(payroll.tourExpense) || 0;
-      const totalExpense = salary + incentive + allowance + tourExpense;
+      const totalExpense = salary + incentive + allowance;
       const staffEntry = allStaffMembers.find(
         (s) => s._id.toString() === staffId,
       );
@@ -609,7 +578,6 @@ const fetchSalaryCOGSData = async (params) => {
         salary,
         incentive,
         allowance,
-        tourExpense,
         totalExpense,
         salaryCOGSRatio: 0,
         expenseCOGSRatio: 0,
@@ -649,13 +617,11 @@ router.get("/", async (req, res) => {
     res.status(200).json(await fetchSalaryCOGSData(req.query));
   } catch (error) {
     console.error("Error in salary-cogs-ratio:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch salary COGS ratio data",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch salary COGS ratio data",
+      error: error.message,
+    });
   }
 });
 
@@ -680,14 +646,10 @@ router.get("/export", async (req, res) => {
       { header: "COGS ($)", key: "cogs", width: 15 },
       { header: "Sales ($)", key: "sales", width: 15 },
       { header: "Profit ($)", key: "profit", width: 15 },
-      // Salary = effectiveSalary (adjustedBasicSalary for current, basicSalary for previous)
       { header: "Salary ($)", key: "salary", width: 15 },
-      // Incentive = allowances[type==="Incentive"]
       { header: "Incentive ($)", key: "incentive", width: 15 },
-      // Allowance = all allowances except Incentive & Travel Allowance
       { header: "Allowance ($)", key: "allowance", width: 15 },
-      // Tour Expense = allowances[type==="Travel Allowance"]
-      { header: "Tour Expense ($)", key: "tourExpense", width: 15 },
+      // Tour Expense column intentionally removed from this report
       { header: "Total Expense ($)", key: "totalExpense", width: 16 },
       { header: "Salary/COGS Ratio", key: "salaryCOGSRatio", width: 15 },
       { header: "Expense/COGS Ratio", key: "expenseCOGSRatio", width: 16 },
@@ -717,7 +679,6 @@ router.get("/export", async (req, res) => {
         salary: parseFloat(rec.salary) || 0,
         incentive: parseFloat(rec.incentive) || 0,
         allowance: parseFloat(rec.allowance) || 0,
-        tourExpense: parseFloat(rec.tourExpense) || 0,
         totalExpense: parseFloat(rec.totalExpense) || 0,
         salaryCOGSRatio: parseFloat(rec.salaryCOGSRatio) || 0,
         expenseCOGSRatio: parseFloat(rec.expenseCOGSRatio) || 0,
@@ -733,7 +694,6 @@ router.get("/export", async (req, res) => {
         "salary",
         "incentive",
         "allowance",
-        "tourExpense",
         "totalExpense",
       ].forEach((c) => {
         row.getCell(c).numFmt = "$#,##0.00";

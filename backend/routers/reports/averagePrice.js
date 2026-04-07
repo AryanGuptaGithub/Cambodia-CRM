@@ -4,17 +4,23 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
+const fixPrecision = (num) => {
+  if (typeof num !== "number") return num;
+  return Math.round(num * 100) / 100;
+};
+
 // ======================================================
-// GET / (base path is /api/reports/average-price)
+// GET /api/reports/average-price
 // ======================================================
 router.get("/", async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 8;
     const search = req.query.search || "";
-    const pipeline = [
-      // 1️⃣ Break invoice → product rows
-      { $unwind: "$products" },
+    const skip = (page - 1) * limit;
 
-      // 2️⃣ CLEAN PRODUCT NAME + CONVERT NUMBERS
+    const pipeline = [
+      { $unwind: "$products" },
       {
         $addFields: {
           productNameClean: {
@@ -24,74 +30,123 @@ router.get("/", async (req, res) => {
                   $replaceAll: {
                     input: { $ifNull: ["$products.productName", ""] },
                     find: "\n",
-                    replacement: ""
-                  }
-                }
-              }
-            }
+                    replacement: "",
+                  },
+                },
+              },
+            },
           },
-
           salesQty: { $toDouble: { $ifNull: ["$products.salesQty", 0] } },
           bonusQty: { $toDouble: { $ifNull: ["$products.bonusQty", 0] } },
-          amount:   { $toDouble: { $ifNull: ["$products.amount", 0] } }
-        }
+          amount: { $toDouble: { $ifNull: ["$products.amount", 0] } },
+        },
       },
-
-      // 3️⃣ Line total qty
       {
         $addFields: {
-          lineTotalQty: { $add: ["$salesQty", "$bonusQty"] }
-        }
+          lineTotalQty: { $add: ["$salesQty", "$bonusQty"] },
+        },
       },
-
-      // 4️⃣ GROUP BY PRODUCT
+      // 🔍 LOOKUP product master collection to get type
+      {
+        $lookup: {
+          from: "products", // name of your product master collection
+          let: { prodName: "$productNameClean" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: [
+                    { $toLower: { $trim: { input: "$productName" } } },
+                    "$$prodName",
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+            { $project: { type: 1, _id: 0 } },
+          ],
+          as: "productInfo",
+        },
+      },
+      {
+        $addFields: {
+          productType: { $arrayElemAt: ["$productInfo.type", 0] },
+        },
+      },
       {
         $group: {
           _id: "$productNameClean",
           productName: { $first: "$productNameClean" },
+          // ✅ Use the looked-up type as category
+          category: { $first: "$productType" },
           totalSalesQty: { $sum: "$salesQty" },
           totalBonusQty: { $sum: "$bonusQty" },
           totalQuantity: { $sum: "$lineTotalQty" },
-          totalAmount: { $sum: "$amount" }
-        }
+          totalAmount: { $sum: "$amount" },
+        },
       },
-
-      // 5️⃣ Average price
       {
         $addFields: {
           averagePrice: {
             $cond: [
               { $eq: ["$totalQuantity", 0] },
               0,
-              { $divide: ["$totalAmount", "$totalQuantity"] }
-            ]
-          }
-        }
+              { $divide: ["$totalAmount", "$totalQuantity"] },
+            ],
+          },
+        },
       },
-
-      // 6️⃣ Search
+      // Search filter
       ...(search
         ? [{ $match: { productName: { $regex: search, $options: "i" } } }]
         : []),
-
-      // 7️⃣ Final output
       {
         $project: {
           _id: 0,
           productName: 1,
-          totalSalesQty: 1,
-          totalBonusQty: 1,
+          category: { $ifNull: ["$category", "N/A"] },
           totalQuantity: 1,
           totalAmount: { $round: ["$totalAmount", 2] },
-          averagePrice: { $round: ["$averagePrice", 2] }
-        }
+          averagePrice: { $round: ["$averagePrice", 2] },
+        },
       },
-
-      { $sort: { productName: 1 } }
+      { $sort: { productName: 1 } },
     ];
 
-    const reports = await Sale.aggregate(pipeline);
-    res.json({ success: true, reports });
+    const allReports = await Sale.aggregate(pipeline);
+
+    let totalAmountAll = 0;
+    let totalQtyAll = 0;
+    allReports.forEach((record) => {
+      totalAmountAll += record.totalAmount;
+      totalQtyAll += record.totalQuantity;
+    });
+    const overallAveragePrice =
+      totalQtyAll > 0 ? fixPrecision(totalAmountAll / totalQtyAll) : 0;
+    const totalRecords = allReports.length;
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    const paginatedReports = allReports.slice(skip, skip + limit);
+
+    const formattedRecords = paginatedReports.map((record, idx) => ({
+      _id: `${record.productName}_${idx}`,
+      productId: `${record.productName}_${idx}`,
+      productName: record.productName,
+      category: record.category || "N/A",
+      qty: record.totalQuantity,
+      amount: record.totalAmount,
+      averagePrice: fixPrecision(record.averagePrice),
+    }));
+
+    res.json({
+      success: true,
+      reports: formattedRecords,
+      total: totalRecords,
+      currentPage: page,
+      totalPages: totalPages,
+      overallAveragePrice: overallAveragePrice,
+      totalProducts: totalRecords,
+    });
   } catch (error) {
     console.error("❌ ERROR:", error);
     res.status(500).json({ success: false, error: error.message });
@@ -99,23 +154,74 @@ router.get("/", async (req, res) => {
 });
 
 // ======================================================
-// EXPORT EXCEL (base path /api/reports/average-price/export)
+// EXPORT EXCEL (same lookup logic)
 // ======================================================
 router.get("/export", async (req, res) => {
   try {
-    const reports = await Sale.aggregate([
+    const search = req.query.search || "";
+
+    const pipeline = [
       { $unwind: "$products" },
       {
-        $group: {
-          _id: "$products.productName",
-          productName: { $first: "$products.productName" },
-          totalAmount: { $sum: "$products.amount" },
-          totalQuantity: {
-            $sum: { $add: ["$products.salesQty", "$products.bonusQty"] }
+        $addFields: {
+          productNameClean: {
+            $trim: {
+              input: {
+                $toLower: {
+                  $replaceAll: {
+                    input: { $ifNull: ["$products.productName", ""] },
+                    find: "\n",
+                    replacement: "",
+                  },
+                },
+              },
+            },
           },
-          mrName: { $first: "$mrName" },
-          contact: { $first: "$customerName" }
-        }
+          salesQty: { $toDouble: { $ifNull: ["$products.salesQty", 0] } },
+          bonusQty: { $toDouble: { $ifNull: ["$products.bonusQty", 0] } },
+          amount: { $toDouble: { $ifNull: ["$products.amount", 0] } },
+        },
+      },
+      {
+        $addFields: {
+          lineTotalQty: { $add: ["$salesQty", "$bonusQty"] },
+        },
+      },
+      // 🔍 LOOKUP product master
+      {
+        $lookup: {
+          from: "products",
+          let: { prodName: "$productNameClean" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: [
+                    { $toLower: { $trim: { input: "$productName" } } },
+                    "$$prodName",
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+            { $project: { type: 1, _id: 0 } },
+          ],
+          as: "productInfo",
+        },
+      },
+      {
+        $addFields: {
+          productType: { $arrayElemAt: ["$productInfo.type", 0] },
+        },
+      },
+      {
+        $group: {
+          _id: "$productNameClean",
+          productName: { $first: "$productNameClean" },
+          category: { $first: "$productType" },
+          totalQuantity: { $sum: "$lineTotalQty" },
+          totalAmount: { $sum: "$amount" },
+        },
       },
       {
         $addFields: {
@@ -123,45 +229,115 @@ router.get("/export", async (req, res) => {
             $cond: [
               { $eq: ["$totalQuantity", 0] },
               0,
-              { $divide: ["$totalAmount", "$totalQuantity"] }
-            ]
-          }
-        }
+              { $divide: ["$totalAmount", "$totalQuantity"] },
+            ],
+          },
+        },
       },
-      { $sort: { productName: 1 } }
-    ]);
+      ...(search
+        ? [{ $match: { productName: { $regex: search, $options: "i" } } }]
+        : []),
+      {
+        $project: {
+          _id: 0,
+          productName: 1,
+          category: { $ifNull: ["$category", "N/A"] },
+          totalQuantity: 1,
+          totalAmount: { $round: ["$totalAmount", 2] },
+          averagePrice: { $round: ["$averagePrice", 2] },
+        },
+      },
+      { $sort: { productName: 1 } },
+    ];
+
+    const reports = await Sale.aggregate(pipeline);
 
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet("Average Price");
+    const sheet = workbook.addWorksheet("Average Price Report");
 
-    sheet.addRow([
-      "Product",
-      "MR",
-      "Customer",
-      "Qty",
-      "Amount",
-      "Avg Price"
-    ]).font = { bold: true };
+    const headers = [
+      "Product Name",
+      "Category",
+      "Total Quantity",
+      "Amount ($)",
+      "Average Price ($)",
+    ];
 
-    reports.forEach(r => {
-      sheet.addRow([
-        r.productName,
-        r.mrName || "Office",
-        r.contact || "-",
-        r.totalQuantity,
-        r.totalAmount.toFixed(2),
-        r.averagePrice.toFixed(2)
+    const headerRow = sheet.addRow(headers);
+    headerRow.font = { bold: true, size: 12 };
+    headerRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF4472C4" },
+    };
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.height = 25;
+
+    reports.forEach((r) => {
+      const row = sheet.addRow([
+        r.productName || "N/A",
+        r.category || "N/A",
+        r.totalQuantity || 0,
+        r.totalAmount || 0,
+        r.averagePrice || 0,
       ]);
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
     });
+
+    const totalAmount = reports.reduce(
+      (sum, r) => sum + (r.totalAmount || 0),
+      0,
+    );
+    const totalQty = reports.reduce(
+      (sum, r) => sum + (r.totalQuantity || 0),
+      0,
+    );
+    const overallAvg = totalQty > 0 ? totalAmount / totalQty : 0;
+
+    sheet.addRow([]);
+    const summaryRow = sheet.addRow([
+      "",
+      "TOTAL:",
+      totalQty,
+      `$${totalAmount.toFixed(2)}`,
+      `$${overallAvg.toFixed(2)}`,
+    ]);
+    summaryRow.font = { bold: true };
+    summaryRow.eachCell((cell) => {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
+      };
+    });
+
+    sheet.columns = [
+      { width: 30 },
+      { width: 20 },
+      { width: 15 },
+      { width: 18 },
+      { width: 18 },
+    ];
+    sheet.getColumn(3).numFmt = "#,##0.00";
+    sheet.getColumn(4).numFmt = '"$"#,##0.00';
+    sheet.getColumn(5).numFmt = '"$"#,##0.00';
+
+    const fileName = search
+      ? `average_price_report_${search.replace(/[^a-z0-9]/gi, "_")}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      : `average_price_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      "Content-Disposition",
-      "attachment; filename=average_price.xlsx"
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     await workbook.xlsx.write(res);
     res.end();

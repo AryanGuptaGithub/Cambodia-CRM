@@ -67,8 +67,7 @@ import SaleSummaryReport from "./routers/reports/SaleSummary.js";
 import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js";
 import outstanding from "./routers/sale/outstanding.js";
 import averagePrice from "./routers/reports/averagePrice.js";
-import mrAdvanceRoutes from './routers/hrm/mrAdvance.js';
-
+import mrAdvanceRoutes from "./routers/hrm/mrAdvance.js";
 
 // Import StockInHand routes
 import stockInHandRoutes from "./routers/reports/stockInHand.js";
@@ -112,7 +111,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes
+// ============================================
+// ROUTES REGISTRATION
+// ============================================
+
+// Auth Routes
 app.use("/api", authRoutes);
 
 // Master Data Routes
@@ -148,11 +151,11 @@ app.use("/api/stock-transfer-to-mr", stockTransferToMR);
 app.use("/api/stock-return", StockReturn);
 app.use("/api/order-status", orderStatus);
 
-// Stock In Hand Routes - CRITICAL FOR YOUR ERROR
+// Stock In Hand Routes
 app.use("/api/stock-in-hand", stockInHandRoutes);
 
-
-app.use('/api/hrm/mr-advance', mrAdvanceRoutes);
+// HRM Advance Routes
+app.use("/api/hrm/mr-advance", mrAdvanceRoutes);
 
 // Accounts Routes
 app.use("/api/accounts", Accounts);
@@ -163,32 +166,53 @@ app.use("/api/mr-cash", mrCash);
 app.use("/api/expense-categories", addExpenseCategary);
 app.use("/api/expenses", addExpense);
 
-// Reports Routes
+// ============================================
+// REPORTS ROUTES - IMPORTANT FOR AVERAGE PRICE
+// ============================================
+
+// Payment Reports
 app.use("/api/reports/payments", payments);
+
+// Daily Reports
 app.use("/api/reports/daily-sample", dailySample);
 app.use("/api/reports/daily-summary", dailySummary);
 app.use("/api/reports/daily-reports", dailyReports);
+
+// Sales Reports
 app.use("/api/reports/cash-sales", cashSaleReports);
 app.use("/api/reports/remittance", remittance);
 app.use("/api/reports/total-expense", totalExpense);
+
+// MR Reports
 app.use("/api/reports/mr-wise-outstanding", mrWiseOutStanding);
 app.use("/api/reports/mr-wise-sales", mrWiseSale);
+
+// Customer Reports
 app.use("/api/reports/new-customers", newCustomer);
 app.use("/api/reports/customer-retention", customerRetention);
 app.use("/api/reports/zone-wise-customers", zoneWiseCustomer);
-app.use("/api/reports/province-wise-sales", provinceWiseSaleRoutes);
-app.use("/api/reports/customer-expectation-ratio", customerExpentationRatio);
-app.use("/api/reports/stock-in-hand", stockInHand);
 app.use("/api/reports/province-wise-customers", provinceWiseCustomerRoutes);
-app.use("/api/reports/sales-and-salary", saleAndSalary);
-app.use("/api/reports/profit-and-loss", profitAndLoss);
+app.use("/api/reports/customer-expectation-ratio", customerExpentationRatio);
+
+// Geographic Reports
+app.use("/api/reports/province-wise-sales", provinceWiseSaleRoutes);
+
+// Stock Reports
+app.use("/api/reports/stock-in-hand", stockInHand);
 app.use("/api/reports/expiry-stock", expiryStockReport);
 app.use("/api/reports/product-report", productReport);
+
+// Financial Reports
+app.use("/api/reports/sales-and-salary", saleAndSalary);
+app.use("/api/reports/profit-and-loss", profitAndLoss);
 app.use("/api/reports/outstanding-collections", outstandingCollections);
 app.use("/api/reports/salary-cogs-ratio", salaryCogsRatio);
 app.use("/api/reports/operation-cost-sales-ratio", operationCostSalesRatio);
 app.use("/api/reports/operation-cost-cogs-ratio", operationCostCOGSRatio);
 app.use("/api/reports/tour-expense-sales", tourExpenseSales);
+
+// ============================================
+
 app.use("/api/reports/average-price", averagePrice);
 
 // Settings Routes
@@ -206,8 +230,24 @@ app.use("/api/hrm/mr-basic-payrolls", mrBasicPayrollRoutes);
 // Other Routes
 app.use("/api/overdue", overdue);
 
-// 404 Handler
+// ============================================
+// TEST ROUTE TO VERIFY REPORTS ARE WORKING
+// ============================================
+app.get("/api/test", (req, res) => {
+  res.json({
+    success: true,
+    message: "API is working",
+    availableEndpoints: {
+      averagePrice: "/api/reports/average-price",
+      stockInHand: "/api/stock-in-hand",
+      stockAdjustment: "/api/stock-adjustment",
+    },
+  });
+});
+
+// 404 Handler - Keep this at the end
 app.use((req, res) => {
+  console.log(`❌ 404 Not Found: ${req.method} ${req.path}`);
   res.status(404).json({
     success: false,
     message: `Route ${req.method} ${req.path} not found`,
@@ -225,4 +265,8 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(
+    `📊 Reports endpoint: http://localhost:${PORT}/api/reports/average-price`,
+  );
+  console.log(`📦 Stock endpoint: http://localhost:${PORT}/api/stock-in-hand`);
 });

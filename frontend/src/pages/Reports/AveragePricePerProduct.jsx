@@ -1,13 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  Download,
-  ChevronLeft,
-  ChevronRight,
-  Search,
-  X,
-  DollarSign,
-  Package,
-} from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Download, Search, X, DollarSign, Package, Hash } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
@@ -34,137 +26,141 @@ const AveragePricePerProduct = () => {
   });
 
   const inputRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
 
-  // Calculate serial number based on current page and items per page
-  const getSerialNumber = (index) => {
-    const itemsPerPage = 9;
-    return (pagination.currentPage - 1) * itemsPerPage + index + 1;
-  };
+  const ITEMS_PER_PAGE = 8;
 
-  const fetchAveragePriceData = async (page = 1, search = searchTerm) => {
-    setLoading(true);
-    try {
-      let params = {
-        page: page,
-        limit: 9,
-      };
-
-      if (search && search.trim() !== "") {
-        params.search = search.trim();
-      }
-
-      const response = await axios.get(
-        `${backendUrl}/api/reports/average-price`,
-        {
-          params,
-        }
-      );
-
-      const reports = response.data.reports || [];
-
-      // Process reports for table display
-      const processedReports = reports.map((report) => {
-        const avgPrice = report.averagePrice || 0;
-        return {
-          productId: report._id,
-          productName: report.productName || "N/A",
-          category: report.type || "N/A",
-          averagePrice: avgPrice,
-          sku: report.batches?.[0]?.sku || "N/A",
+  const fetchAveragePriceData = useCallback(
+    async (page = 1, search = searchTerm) => {
+      setLoading(true);
+      try {
+        let params = {
+          page: page,
+          limit: ITEMS_PER_PAGE,
         };
-      });
 
-      // Use the OVERALL average price from backend response
-      const overallAveragePrice = response.data.overallAveragePrice || 0;
-      const totalRecords = response.data.total || 0;
+        if (search && search.trim() !== "") {
+          params.search = search.trim();
+        }
 
-      setData({
-        summary: {
-          averagePrice: overallAveragePrice,
-          totalProducts: totalRecords,
-        },
-        records: processedReports,
-      });
-
-      // Use pagination data from backend response
-      const currentPage = response.data.currentPage || 1;
-      const totalPages = response.data.totalPages || 1;
-
-      setPagination({
-        currentPage: currentPage,
-        totalPages: totalPages,
-        totalRecords: totalRecords,
-        hasNext: currentPage < totalPages,
-        hasPrev: currentPage > 1,
-      });
-    } catch (error) {
-      console.error("Error fetching average price data:", error);
-
-      if (error.response?.status === 404) {
-        showToast(
-          "error",
-          "API endpoint not found. Please check backend configuration."
+        const response = await axios.get(
+          `${backendUrl}/api/reports/average-price`,
+          { params },
         );
-      } else if (error.response?.status === 400) {
-        showToast("error", "Bad request. Please check your parameters.");
-      } else {
-        showToast("error", "Failed to fetch average price data");
-      }
 
-      setData({
-        summary: {
-          averagePrice: 0,
-          totalProducts: 0,
-        },
-        records: [],
-      });
-      setPagination({
-        currentPage: 1,
-        totalPages: 1,
-        totalRecords: 0,
-        hasNext: false,
-        hasPrev: false,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+        if (response.data.success) {
+          const reports = response.data.reports || [];
+          const processedReports = reports.map((report) => ({
+            productId: report.productId,
+            productName: report.productName || "N/A",
+            category: report.category || "N/A",
+            qty: report.qty || 0,
+            amount: report.amount || 0,
+            averagePrice: report.averagePrice || 0,
+          }));
+
+          const overallAveragePrice = response.data.overallAveragePrice || 0;
+          const totalRecords = response.data.total || 0;
+          const totalProducts = response.data.totalProducts || totalRecords;
+
+          setData({
+            summary: {
+              averagePrice: overallAveragePrice,
+              totalProducts: totalProducts,
+            },
+            records: processedReports,
+          });
+
+          setPagination({
+            currentPage: response.data.currentPage || 1,
+            totalPages: response.data.totalPages || 1,
+            totalRecords: totalRecords,
+            hasNext: response.data.currentPage < response.data.totalPages,
+            hasPrev: response.data.currentPage > 1,
+          });
+        } else {
+          showToast("error", response.data.message || "Failed to fetch data");
+        }
+      } catch (error) {
+        console.error("Error fetching average price data:", error);
+        if (error.response?.status === 404) {
+          showToast("error", "API endpoint not found.");
+        } else if (error.response?.status === 400) {
+          showToast("error", "Bad request.");
+        } else if (error.response?.status === 500) {
+          showToast("error", "Server error.");
+        } else {
+          showToast("error", "Failed to fetch average price data");
+        }
+        setData({
+          summary: { averagePrice: 0, totalProducts: 0 },
+          records: [],
+        });
+        setPagination({
+          currentPage: 1,
+          totalPages: 1,
+          totalRecords: 0,
+          hasNext: false,
+          hasPrev: false,
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [searchTerm],
+  );
 
   useEffect(() => {
-    fetchAveragePriceData(1);
+    fetchAveragePriceData(1, "");
   }, []);
 
-  const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) {
-      fetchAveragePriceData(page);
-    }
-  };
+  const handlePageChange = useCallback(
+    (page) => {
+      if (
+        page >= 1 &&
+        page <= pagination.totalPages &&
+        page !== pagination.currentPage &&
+        !loading
+      ) {
+        fetchAveragePriceData(page);
+        const tableElement = document.querySelector(".overflow-x-auto");
+        if (tableElement) {
+          tableElement.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+    },
+    [
+      pagination.totalPages,
+      pagination.currentPage,
+      fetchAveragePriceData,
+      loading,
+    ],
+  );
 
   const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
+    const value = e.target.value;
+    setSearchTerm(value);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchAveragePriceData(1, value);
+    }, 500);
   };
 
   const handleClearSearch = () => {
     setSearchTerm("");
-    fetchAveragePriceData(1);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    fetchAveragePriceData(1, "");
   };
 
-  useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      fetchAveragePriceData(1, searchTerm);
-    }, 500);
-
-    return () => clearTimeout(delayDebounce);
-  }, [searchTerm]);
-
-  const handleSearch = (e) => {
+  const handleSearchKeyPress = (e) => {
     if (e.key === "Enter") {
-      fetchAveragePriceData(1);
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      fetchAveragePriceData(1, searchTerm);
     }
   };
 
@@ -172,101 +168,97 @@ const AveragePricePerProduct = () => {
     setExportLoading(true);
     try {
       let url = `${backendUrl}/api/reports/average-price/export`;
-      if (searchTerm) {
-        url += `?search=${encodeURIComponent(searchTerm)}`;
-      }
+      if (searchTerm) url += `?search=${encodeURIComponent(searchTerm)}`;
 
-      // Make request to export endpoint
-      const response = await axios.get(url, {
-        responseType: "blob", // Important for file download
-      });
-
-      // Create a download link
+      const response = await axios.get(url, { responseType: "blob" });
       const urlObject = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = urlObject;
 
-      // Get filename from content-disposition header or use default
-      const contentDisposition = response.headers["content-disposition"];
       let fileName = "average_price_report.xlsx";
-
+      const contentDisposition = response.headers["content-disposition"];
       if (contentDisposition) {
-        const fileNameMatch = contentDisposition.match(/filename="(.+)"/);
-        if (fileNameMatch && fileNameMatch.length > 1) {
-          fileName = fileNameMatch[1];
-        }
+        const match = contentDisposition.match(/filename="(.+)"/);
+        if (match && match.length > 1) fileName = match[1];
       }
-
       link.setAttribute("download", fileName);
       document.body.appendChild(link);
       link.click();
-
-      // Cleanup
       link.remove();
       window.URL.revokeObjectURL(urlObject);
-
       showToast("success", "Excel file downloaded successfully!");
     } catch (error) {
-      console.error("Error exporting to Excel:", error);
-      showToast("error", "Failed to export to Excel. Please try again.");
+      console.error("Export error:", error);
+      showToast("error", "Failed to export to Excel.");
     } finally {
       setExportLoading(false);
     }
   };
 
-  // Render Pagination Component
-  const renderPagination = () => {
-    if (pagination.totalPages <= 1) return null;
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, []);
 
-    const startItem = (pagination.currentPage - 1) * 9 + 1;
+  const renderPagination = () => {
+    if (pagination.totalPages <= 1 && !loading) return null;
+
+    const startItem = (pagination.currentPage - 1) * ITEMS_PER_PAGE + 1;
     const endItem = Math.min(
-      pagination.currentPage * 9,
-      pagination.totalRecords
+      pagination.currentPage * ITEMS_PER_PAGE,
+      pagination.totalRecords,
     );
 
     return (
-      <div className="flex items-center justify-between mt-6">
-        <div className="flex items-center gap-2">
+      <div className="flex gap-4 mt-6">
+        <div className="flex gap-2">
           <button
             onClick={() => handlePageChange(pagination.currentPage - 1)}
-            disabled={!pagination.hasPrev}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${
-              pagination.hasPrev
+            disabled={!pagination.hasPrev || loading}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
+              pagination.hasPrev && !loading
                 ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed"
             }`}
           >
             ← Prev
           </button>
-
-          {/* Page Numbers */}
           <div className="flex gap-1">
             {visiblePages.map((page, index) => (
               <button
                 key={index}
-                onClick={() =>
-                  typeof page === "number" ? handlePageChange(page) : null
+                onClick={() => {
+                  if (
+                    typeof page === "number" &&
+                    !loading &&
+                    page !== pagination.currentPage
+                  ) {
+                    handlePageChange(page);
+                  }
+                }}
+                disabled={
+                  typeof page !== "number" ||
+                  loading ||
+                  page === pagination.currentPage
                 }
-                className={`min-w-[40px] px-3 py-2 rounded-lg ${
+                className={`min-w-[40px] px-3 py-2 rounded-lg transition-colors ${
                   page === pagination.currentPage
                     ? "bg-indigo-600 text-white cursor-default"
                     : typeof page === "number"
-                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
-                    : "bg-transparent text-gray-500 cursor-default"
+                      ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                      : "bg-transparent text-gray-500 cursor-default"
                 }`}
-                disabled={typeof page !== "number"}
               >
                 {page}
               </button>
             ))}
           </div>
-
-          {/* Next Button */}
           <button
             onClick={() => handlePageChange(pagination.currentPage + 1)}
-            disabled={!pagination.hasNext}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${
-              pagination.hasNext
+            disabled={!pagination.hasNext || loading}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${
+              pagination.hasNext && !loading
                 ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
                 : "bg-gray-100 text-gray-400 cursor-not-allowed"
             }`}
@@ -279,7 +271,7 @@ const AveragePricePerProduct = () => {
   };
 
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
@@ -307,66 +299,71 @@ const AveragePricePerProduct = () => {
             <p className="text-2xl font-bold text-gray-800">
               {data.summary.totalProducts || 0}
             </p>
-            <p className="text-xs text-gray-500 mt-1">Across all pages</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Active products in stock
+            </p>
           </div>
           <Package className="w-8 h-8 text-blue-500" />
+        </div>
+      </div>
+      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+        <div className="flex justify-between items-center">
+          <div>
+            <p className="text-sm text-gray-600">Total Records</p>
+            <p className="text-2xl font-bold text-gray-800">
+              {pagination.totalRecords || 0}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">Filtered results</p>
+          </div>
+          <Hash className="w-8 h-8 text-purple-500" />
         </div>
       </div>
     </div>
   );
 
+  // --- Table with ONLY required columns (no Sr.No, no Details) ---
   const renderTableHeaders = () => (
-    <thead className="bg-gray-100 text-gray-700 border-b">
+    <thead className="bg-gray-100 text-gray-700 border-b sticky top-0">
       <tr>
-        <th className="p-3 text-sm font-medium">Sr.No</th>
+        <th className="p-3 text-sm font-medium">Sr No.</th>
         <th className="p-3 text-sm font-medium">Product Name</th>
         <th className="p-3 text-sm font-medium">Category</th>
-        <th className="p-3 text-sm font-medium">Average Price ($)</th>
+        <th className="p-3 text-sm font-medium">Avg Price ($)</th>
       </tr>
     </thead>
   );
 
-  // Render table row
   const renderTableRow = (product, index) => (
-    <tr
-      key={index}
-      className={`hover:bg-gray-50 ${
-        index === data.records.length - 1 ? "" : "border-b"
-      }`}
-    >
-      <td className="p-3">
-        <div className="text-sm text-gray-600 font-medium">
-          {getSerialNumber(index)}
-        </div>
+    <tr key={product.productId} className="hover:bg-gray-50 transition-colors">
+      <td>
+        {index +1}
       </td>
-
       <td className="p-3">
-        <div>
-          <div className="text-sm font-medium text-gray-900 capitalize">
-            {product.productName || product.name || "N/A"}
-          </div>
+        <div className="text-sm font-medium text-gray-900 capitalize">
+          {product.productName}
         </div>
       </td>
       <td className="p-3">
-        <div className="text-sm text-gray-900 capitalize">
-          {product.category || "N/A"}
-        </div>
+        <span className="text-sm text-gray-600 capitalize">
+          {product.category}
+        </span>
       </td>
-      <td className="p-3 text-sm font-semibold text-blue-600">
-        $
-        {(product.averagePrice || 0)?.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}
+ 
+      <td className="p-3">
+        <div className="text-sm font-semibold text-blue-600">
+          $
+          {(product.averagePrice || 0)?.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+        </div>
       </td>
     </tr>
   );
 
-  const getColSpan = () => 4;
-
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
         <div className="flex items-center gap-3">
           <DollarSign className="w-8 h-8 text-green-600" />
           <h1 className="text-2xl font-bold text-gray-800">
@@ -381,13 +378,12 @@ const AveragePricePerProduct = () => {
               placeholder="Search by product name..."
               value={searchTerm}
               onChange={handleSearchChange}
-              onKeyPress={handleSearch}
+              onKeyPress={handleSearchKeyPress}
               className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
             />
             <Search
               className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
               size={18}
-              onClick={() => inputRef.current?.focus()}
             />
             {searchTerm && (
               <button
@@ -398,13 +394,12 @@ const AveragePricePerProduct = () => {
               </button>
             )}
           </div>
-
           <button
             onClick={exportToExcel}
             disabled={exportLoading}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors ${
               exportLoading
-                ? "bg-green-400 text-white"
+                ? "bg-green-400 text-white cursor-not-allowed"
                 : "bg-green-600 hover:bg-green-700 text-white"
             }`}
           >
@@ -424,13 +419,14 @@ const AveragePricePerProduct = () => {
       </div>
 
       {renderSummaryCards()}
+
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow-sm text-center">
           {renderTableHeaders()}
           <tbody>
-            {loading ? (
+            {loading && data.records.length === 0 ? (
               <tr>
-                <td colSpan={getColSpan()} className="p-3 text-center">
+                <td colSpan={5} className="p-8 text-center">
                   <div className="flex justify-center items-center">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
                     <span className="ml-2">Loading...</span>
@@ -439,14 +435,11 @@ const AveragePricePerProduct = () => {
               </tr>
             ) : data.records.length > 0 ? (
               data.records.map((product, index) =>
-                renderTableRow(product, index)
+                renderTableRow(product, index),
               )
             ) : (
               <tr>
-                <td
-                  colSpan={getColSpan()}
-                  className="p-3 text-center text-gray-500"
-                >
+                <td colSpan={5} className="p-8 text-center text-gray-500">
                   No average price data found
                 </td>
               </tr>

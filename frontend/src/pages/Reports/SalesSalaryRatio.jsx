@@ -19,15 +19,15 @@ import "react-datepicker/dist/react-datepicker.css";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  The backend now returns flat numeric fields per record:
+//  Backend flat fields per record:
 //
-//    record.salary      → basic / adjusted salary
-//    record.incentive   → sum of allowances where type === "Incentive"
-//    record.allowance   → sum of all OTHER allowances (not Incentive, not Travel Allowance)
-//    record.tourExpense → sum of allowances where type === "Travel Allowance"
-//    record.totalExpense → salary + incentive + allowance + tourExpense
-//
-//  No client-side allowance parsing needed — just read the flat fields.
+//    record.salary        → basic / adjusted salary
+//    record.incentive     → allowances where type === "Incentive"
+//                           (Sales & other Incentives for Sales Team)
+//    record.allowance     → all OTHER allowances (not Incentive, not Tour Allowance)
+//    record.tourExpense   → Rent Expense - Vans + Tour Petrol Expense (expense records)
+//    record.tourAllowance → Tour Allowance (Daily Allowance to MRs / Drivers / Supervisors)
+//    record.totalExpense  → salary + incentive + allowance + tourExpense + tourAllowance
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SalesSalaryRatio = () => {
@@ -38,6 +38,9 @@ const SalesSalaryRatio = () => {
       totalExpense: 0,
       totalProfit: 0,
       ratio: 0,
+      totalTourExpense: 0,
+      totalTourAllowance: 0,
+      totalIncentive: 0,
     },
     records: [],
   });
@@ -183,6 +186,9 @@ const SalesSalaryRatio = () => {
             totalExpense: parseFloat(s.totalExpense) || 0,
             totalProfit: parseFloat(s.totalProfit) || 0,
             ratio: parseFloat(s.ratio) || 0,
+            totalTourExpense: parseFloat(s.totalTourExpense) || 0,
+            totalTourAllowance: parseFloat(s.totalTourAllowance) || 0,
+            totalIncentive: parseFloat(s.totalIncentive) || 0,
           },
           records: response.data.data?.records || [],
         });
@@ -211,6 +217,9 @@ const SalesSalaryRatio = () => {
           totalExpense: 0,
           totalProfit: 0,
           ratio: 0,
+          totalTourExpense: 0,
+          totalTourAllowance: 0,
+          totalIncentive: 0,
         },
         records: [],
       });
@@ -237,6 +246,9 @@ const SalesSalaryRatio = () => {
             totalExpense: 0,
             totalProfit: 0,
             ratio: 0,
+            totalTourExpense: 0,
+            totalTourAllowance: 0,
+            totalIncentive: 0,
           },
           records: [],
         });
@@ -576,35 +588,101 @@ const SalesSalaryRatio = () => {
         ))}
       </div>
 
-      {/* Performance legend (optional) */}
+      {/* ── Expense Breakdown Cards ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {/* Tour Expense */}
+        <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-purple-400 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm font-semibold text-gray-600">
+                Tour Expense
+              </p>
+              <p className="text-lg font-bold text-purple-600">
+                {fmt$(data.summary.totalTourExpense)}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Rent Expense - Vans · Tour Petrol Expense
+              </p>
+            </div>
+            <BarChart3 className="w-6 h-6 text-purple-400" />
+          </div>
+        </div>
+
+        {/* Tour Allowance */}
+        <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-amber-400 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm font-semibold text-gray-600">
+                Tour Allowance
+              </p>
+              <p className="text-lg font-bold text-amber-600">
+                {fmt$(data.summary.totalTourAllowance)}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Daily Allowance — MRs / Drivers / Supervisors
+              </p>
+            </div>
+            <DollarSign className="w-6 h-6 text-amber-400" />
+          </div>
+        </div>
+
+        {/* Incentive */}
+        <div className="bg-white p-4 rounded-lg shadow-md border-l-4 border-green-400 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm font-semibold text-gray-600">Incentive</p>
+              <p className="text-lg font-bold text-green-600">
+                {fmt$(data.summary.totalIncentive)}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Sales &amp; Other Incentives for Sales Team
+              </p>
+            </div>
+            <Percent className="w-6 h-6 text-green-400" />
+          </div>
+        </div>
+      </div>
+
+      {/* Performance legend */}
       <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
         <span className="font-semibold text-gray-600">
           Performance (Salary/Sale %):
         </span>
-        <span className="flex items-center gap-1">
-          <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-600 font-semibold">
-            Excellent
+        {[
+          {
+            label: "Excellent",
+            bg: "bg-green-100",
+            text: "text-green-600",
+            range: "0 – 25%",
+          },
+          {
+            label: "Positive",
+            bg: "bg-blue-100",
+            text: "text-blue-600",
+            range: "26 – 50%",
+          },
+          {
+            label: "Usual",
+            bg: "bg-amber-100",
+            text: "text-amber-600",
+            range: "51 – 100%",
+          },
+          {
+            label: "Negative",
+            bg: "bg-red-100",
+            text: "text-red-600",
+            range: "> 100%",
+          },
+        ].map(({ label, bg, text, range }) => (
+          <span key={label} className="flex items-center gap-1">
+            <span
+              className={`px-2 py-0.5 rounded-full ${bg} ${text} font-semibold`}
+            >
+              {label}
+            </span>
+            <span>{range}</span>
           </span>
-          <span>0 – 25%</span>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 font-semibold">
-            Positive
-          </span>
-          <span>26 – 50%</span>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-600 font-semibold">
-            Usual
-          </span>
-          <span>51 – 100%</span>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">
-            Negative
-          </span>
-          <span>&gt; 100%</span>
-        </span>
+        ))}
       </div>
 
       {/* ── Table ── */}
@@ -617,9 +695,25 @@ const SalesSalaryRatio = () => {
               <th className="p-3 text-sm font-medium">Sale ($)</th>
               <th className="p-3 text-sm font-medium">Profit ($)</th>
               <th className="p-3 text-sm font-medium">Salary ($)</th>
-              <th className="p-3 text-sm font-medium">Incentive ($)</th>
+              <th className="p-3 text-sm font-medium">
+                Incentive ($)
+                <div className="text-xs font-normal text-gray-500">
+                  Sales Team
+                </div>
+              </th>
               <th className="p-3 text-sm font-medium">Allowance ($)</th>
-              <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
+              <th className="p-3 text-sm font-medium">
+                Tour Expense ($)
+                <div className="text-xs font-normal text-gray-500">
+                  Vans + Petrol
+                </div>
+              </th>
+              <th className="p-3 text-sm font-medium">
+                Tour Allowance ($)
+                <div className="text-xs font-normal text-gray-500">
+                  Daily Allowance
+                </div>
+              </th>
               <th className="p-3 text-sm font-medium">Total Expense ($)</th>
               <th className="p-3 text-sm font-medium">Salary/Sale (%)</th>
               <th className="p-3 text-sm font-medium">Performance</th>
@@ -628,7 +722,7 @@ const SalesSalaryRatio = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="p-8 text-center">
+                <td colSpan={12} className="p-8 text-center">
                   <div className="flex flex-col items-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4" />
                     <span className="text-gray-600">
@@ -642,15 +736,17 @@ const SalesSalaryRatio = () => {
                 const salary = parseFloat(record.salary) || 0;
                 const incentive = parseFloat(record.incentive) || 0;
                 const allowance = parseFloat(record.allowance) || 0;
+                // Tour Expense = Rent Expense - Vans + Tour Petrol Expense
                 const tourExpense = parseFloat(record.tourExpense) || 0;
+                // Tour Allowance = Daily Allowance for MRs / Drivers / Supervisors
+                const tourAllowance = parseFloat(record.tourAllowance) || 0;
                 const profit = parseFloat(record.profit) || 0;
                 const sale = parseFloat(record.sale) || 0;
-                const totalExpense = parseFloat(record.totalExpense) || 0;
+                const totalExpense =
+                  parseFloat(record.totalExpense) ||
+                  salary + incentive + allowance + tourExpense + tourAllowance;
 
-                // Salary/Sale (%) = sale / totalExpense × 100
                 const salarySaleRatio = calcSalarySaleRatio(sale, totalExpense);
-
-                // Performance label derived from salarySaleRatio
                 const {
                   label: perfLabel,
                   textColor: perfText,
@@ -677,14 +773,20 @@ const SalesSalaryRatio = () => {
                     <td className="p-3 text-sm font-semibold text-purple-600">
                       {fmt$(salary)}
                     </td>
+                    {/* Incentive — Sales & other Incentives for Sales Team */}
                     <td className="p-3 text-sm font-semibold text-green-600">
                       {fmt$(incentive)}
                     </td>
                     <td className="p-3 text-sm font-semibold text-yellow-600">
                       {fmt$(allowance)}
                     </td>
+                    {/* Tour Expense — Rent Expense - Vans + Tour Petrol Expense */}
                     <td className="p-3 text-sm font-semibold text-red-600">
                       {fmt$(tourExpense)}
+                    </td>
+                    {/* Tour Allowance — Daily Allowance for MRs / Drivers / Supervisors */}
+                    <td className="p-3 text-sm font-semibold text-amber-600">
+                      {fmt$(tourAllowance)}
                     </td>
                     <td className="p-3 text-sm font-bold text-gray-900">
                       {fmt$(totalExpense)}
@@ -706,7 +808,7 @@ const SalesSalaryRatio = () => {
               })
             ) : (
               <tr>
-                <td colSpan={11} className="p-8 text-center">
+                <td colSpan={12} className="p-8 text-center">
                   <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
                     No data found

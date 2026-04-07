@@ -444,7 +444,6 @@ const AllowanceBreakdownModal = ({
   );
 };
 
-// Custom Date Range Modal Component
 const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
@@ -725,8 +724,7 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
           </button>
         </div>
       </div>
-
-      {/* Custom Date Range Modal */}
+      
       <CustomDateRangeModal
         isOpen={showCustomModal}
         onClose={() => setShowCustomModal(false)}

@@ -64,7 +64,7 @@ const tabLabelMap = {
   reports_mrwisesales: "MR Wise Sales",
   reports_cashsales: "Cash Sales",
   reports_outstandingcollection: "Outstanding Collection",
-  reports_totalcashoutflow: "Total Cash Outflow", // Changed from reports_totalexpense
+  reports_totalcashoutflow: "Total Cash Outflow",
   reports_remittance: "Remittance",
   reports_provincewisesale: "Province Wise Sale",
   reports_provincewisecustomer: "Province Wise Customer",
@@ -209,7 +209,7 @@ const tabService = {
       reports_mrwisesales: v(9),
       reports_cashsales: v(10),
       reports_outstandingcollection: v(11),
-      reports_totalcashoutflow: v(12), // Changed from reports_totalexpense
+      reports_totalcashoutflow: v(12),
       reports_remittance: v(13),
       reports_provincewisesale: v(14),
       reports_provincewisecustomer: v(15),
@@ -245,25 +245,49 @@ const financeReportPaths = [
   "/reportlayout/operation-cost-sales-ratio",
   "/reportlayout/tour-expense-sales-ratio",
 ];
-const reportsInHandPaths = ["/reportlayout/reports-in-hand"];
-const productReportPaths = [
-  "/reportlayout/product-performance",
-  "/reportlayout/stock-movement",
-  "/reportlayout/slow-moving-items",
-  "/reportlayout/product-profitability",
-  "/reportlayout/product-report",
-];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SIDEBAR
-// Props:
-//   isOpen        – drawer open / desktop expanded
-//   toggleSidebar – close handler (called by ✕ inside drawer OR backdrop click)
-//   isMobile      – injected by DashboardLayout; Sidebar never renders a hamburger
-// ─────────────────────────────────────────────────────────────────────────────
+
+const getUserRole = () => {
+  try {
+    // 1. Try common user object keys in localStorage
+    const possibleKeys = ["user", "auth", "userData", "currentUser"];
+    for (const key of possibleKeys) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.role) return parsed.role;
+        } catch (e) {}
+      }
+    }
+
+    // 2. Fallback: decode JWT token from localStorage
+    const token =
+      localStorage.getItem("token") || localStorage.getItem("authToken");
+    if (token) {
+      const parts = token.split(".");
+      if (parts.length === 3) {
+        const base64Url = parts[1];
+        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+        const payload = JSON.parse(atob(base64));
+        if (payload && payload.role) return payload.role;
+      }
+    }
+
+    console.warn("⚠️ No role found in localStorage or token");
+    return null;
+  } catch (error) {
+    console.error("❌ getUserRole error:", error);
+    return null;
+  }
+};
+
+// --------------------------------------------------------------
+// SIDEBAR COMPONENT
+// --------------------------------------------------------------
 function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
   const location = useLocation();
-  const show = isOpen || isMobile; // labels visible when open on desktop OR always on mobile
+  const show = isOpen || isMobile;
 
   const [activeParentMenu, setActiveParentMenu] = useState(null);
   const [activeSubMenu, setActiveSubMenu] = useState(null);
@@ -277,7 +301,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
   // Auto-close drawer on navigation (mobile only)
   useEffect(() => {
     if (isMobile && isOpen) toggleSidebar();
-  }, [location.pathname]); // eslint-disable-line
+  }, [location.pathname, isMobile, isOpen, toggleSidebar]);
 
   useEffect(() => {
     setLoading(true);
@@ -340,7 +364,6 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
           (visibleTabs[a]?.sequence || 0) - (visibleTabs[b]?.sequence || 0),
       );
 
-  // CSS helpers
   const lnk = (path) =>
     `flex items-center gap-3 p-2 rounded transition-all duration-150 ${isActive(path) ? "bg-gray-500 text-white shadow-md" : "hover:bg-gray-700 text-gray-200"}`;
   const cld = (path) =>
@@ -359,7 +382,6 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
 
   const navContent = (
     <div className="bg-gray-900 text-white flex flex-col h-full">
-      {/* Logo row + ✕ close (mobile only) */}
       <div className="h-16 flex items-center justify-between px-3 border-b border-gray-700 flex-shrink-0">
         <img
           src="/mainlogo.png"
@@ -774,7 +796,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                     "reports_mrwisesales",
                     "reports_cashsales",
                     "reports_outstandingcollection",
-                    "reports_totalcashoutflow", // Changed from reports_totalexpense
+                    "reports_totalcashoutflow",
                     "reports_remittance",
                     "reports_provincewisesale",
                     "reports_provincewisecustomer",
@@ -897,7 +919,10 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                           )}
                         </div>
                       );
-                    if (tabId === "reports_profitloss")
+                    if (tabId === "reports_profitloss") {
+                      const role = getUserRole();
+                      // Only show for super admin (exact match with space)
+                      if (role !== "super admin") return null;
                       return (
                         <Link
                           key={tabId}
@@ -908,8 +933,8 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                           <span>Profit Loss</span>
                         </Link>
                       );
+                    }
                     if (tabId === "reports_totalcashoutflow")
-                      // Changed from reports_totalexpense
                       return (
                         <Link
                           key={tabId}
@@ -1095,7 +1120,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     </div>
   );
 
-  // ── MOBILE: overlay drawer, NO hamburger rendered inside ──
+  // Mobile drawer
   if (isMobile) {
     return (
       <>
@@ -1115,7 +1140,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     );
   }
 
-  // ── DESKTOP: static sidebar ──
+  // Desktop static sidebar
   return (
     <div
       className={`bg-gray-900 text-white transition-all duration-300 flex-shrink-0 flex flex-col ${isOpen ? "w-64" : "w-16"}`}

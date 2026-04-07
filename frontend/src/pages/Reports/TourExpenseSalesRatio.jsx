@@ -18,21 +18,41 @@ import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Expense Categorization (for Tour Expense / Sales Ratio Report):
+//
+//  Tour Expense   → expense type records:
+//                     • "Rent Expense - Vans"
+//                     • "Tour Petrol Expense"
+//
+//  Tour Allowance → allowance type records:
+//                     • "Tour Allowance"
+//                     (Daily Allowance to Medical Reps, Drivers, Supervisors)
+//
+//  Incentive      → allowance type records:
+//                     • "Incentive" / "Sales and other Incentives for Sales Team"
+//
+//  totalTourCost  → Tour Expense + Tour Allowance + Incentive
+// ─────────────────────────────────────────────────────────────────────────────
+
 const TourExpenseSalesRatio = () => {
   const [data, setData] = useState({
     summary: {
-      tourExpense: 0,
+      tourExpense: 0, // Rent Expense - Vans + Tour Petrol Expense
+      tourAllowance: 0, // Tour Allowance (Daily Allowance)
+      incentive: 0, // Incentive for Sales Team
+      totalTourCost: 0, // tourExpense + tourAllowance + incentive
       totalSales: 0,
       totalProfit: 0,
       ratio: 0,
-      expenseTour: 0,
-      travelAllowance: 0,
     },
     records: [],
     totals: {
       totalSale: 0,
       totalCOG: 0,
       totalTourExpense: 0,
+      totalTourAllowance: 0,
+      totalIncentive: 0,
       totalProfit: 0,
       totalSaleCount: 0,
     },
@@ -85,7 +105,6 @@ const TourExpenseSalesRatio = () => {
 
     switch (selectedTab) {
       case "currentMonth": {
-        // Use UTC to avoid timezone shifts
         const firstDay = new Date(Date.UTC(currentYear, currentMonth, 1));
         const lastDay = new Date(Date.UTC(currentYear, currentMonth + 1, 0));
         return {
@@ -152,22 +171,35 @@ const TourExpenseSalesRatio = () => {
 
       if (response.data.success) {
         const summary = response.data.data?.summary || {};
+        const totals = response.data.data?.totals || {};
+
         setData({
           summary: {
+            // Tour Expense = Rent Expense - Vans + Tour Petrol Expense
             tourExpense: parseFloat(summary.tourExpense) || 0,
+            // Tour Allowance = Daily Allowance for MRs / Drivers / Supervisors
+            tourAllowance: parseFloat(summary.tourAllowance) || 0,
+            // Incentive = Sales and other Incentives for Sales Team
+            incentive: parseFloat(summary.incentive) || 0,
+            // Total Tour Cost = tourExpense + tourAllowance + incentive
+            totalTourCost:
+              parseFloat(summary.totalTourCost) ||
+              (parseFloat(summary.tourExpense) || 0) +
+                (parseFloat(summary.tourAllowance) || 0) +
+                (parseFloat(summary.incentive) || 0),
             totalSales: parseFloat(summary.totalSales) || 0,
             totalProfit: parseFloat(summary.totalProfit) || 0,
             ratio: parseFloat(summary.ratio) || 0,
-            expenseTour: parseFloat(summary.expenseTour) || 0,
-            travelAllowance: parseFloat(summary.travelAllowance) || 0,
           },
           records: response.data.data?.records || [],
-          totals: response.data.data?.totals || {
-            totalSale: 0,
-            totalCOG: 0,
-            totalTourExpense: 0,
-            totalProfit: 0,
-            totalSaleCount: 0,
+          totals: {
+            totalSale: parseFloat(totals.totalSale) || 0,
+            totalCOG: parseFloat(totals.totalCOG) || 0,
+            totalTourExpense: parseFloat(totals.totalTourExpense) || 0,
+            totalTourAllowance: parseFloat(totals.totalTourAllowance) || 0,
+            totalIncentive: parseFloat(totals.totalIncentive) || 0,
+            totalProfit: parseFloat(totals.totalProfit) || 0,
+            totalSaleCount: parseInt(totals.totalSaleCount) || 0,
           },
         });
         setPagination(
@@ -189,12 +221,22 @@ const TourExpenseSalesRatio = () => {
         error.response?.data?.message || "Failed to fetch data",
       );
       setData({
-        summary: { tourExpense: 0, totalSales: 0, totalProfit: 0, ratio: 0 },
+        summary: {
+          tourExpense: 0,
+          tourAllowance: 0,
+          incentive: 0,
+          totalTourCost: 0,
+          totalSales: 0,
+          totalProfit: 0,
+          ratio: 0,
+        },
         records: [],
         totals: {
           totalSale: 0,
           totalCOG: 0,
           totalTourExpense: 0,
+          totalTourAllowance: 0,
+          totalIncentive: 0,
           totalProfit: 0,
           totalSaleCount: 0,
         },
@@ -217,12 +259,22 @@ const TourExpenseSalesRatio = () => {
         fetchData(1);
       } else {
         setData({
-          summary: { tourExpense: 0, totalSales: 0, totalProfit: 0, ratio: 0 },
+          summary: {
+            tourExpense: 0,
+            tourAllowance: 0,
+            incentive: 0,
+            totalTourCost: 0,
+            totalSales: 0,
+            totalProfit: 0,
+            ratio: 0,
+          },
           records: [],
           totals: {
             totalSale: 0,
             totalCOG: 0,
             totalTourExpense: 0,
+            totalTourAllowance: 0,
+            totalIncentive: 0,
             totalProfit: 0,
             totalSaleCount: 0,
           },
@@ -427,7 +479,7 @@ const TourExpenseSalesRatio = () => {
 
   return (
     <div className="p-6">
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div className="flex items-center gap-3">
           <TrendingUp className="w-8 h-8 text-indigo-600" />
@@ -436,7 +488,8 @@ const TourExpenseSalesRatio = () => {
               Tour Expense / Sales Ratio Report
             </h1>
             <p className="text-sm text-gray-600">
-              Analyze tour expenses compared to total sales
+              Analyze tour expenses, allowances &amp; incentives against total
+              sales
             </p>
           </div>
         </div>
@@ -459,7 +512,7 @@ const TourExpenseSalesRatio = () => {
         </button>
       </div>
 
-      {/* Date Filter Tabs */}
+      {/* ── Date Filter Tabs ── */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-3">
           {tabs.map(({ key, label }) => (
@@ -485,12 +538,15 @@ const TourExpenseSalesRatio = () => {
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* ── Summary Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        {/* Card 1 — Tour Expense (Vans + Petrol) */}
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
-              <p className="text-sm text-gray-600">Tour Expense</p>
+              <p className="text-sm text-gray-600 font-semibold">
+                Tour Expense
+              </p>
               <div className="text-2xl font-bold text-gray-800">
                 {loading ? (
                   <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
@@ -499,46 +555,65 @@ const TourExpenseSalesRatio = () => {
                 )}
               </div>
               <div className="text-xs text-gray-500 mt-1 space-y-0.5">
-                <p>Expense: {formatCurrency(data.summary.expenseTour || 0)}</p>
-                <p>
-                  Travel Allowance:{" "}
-                  {formatCurrency(data.summary.travelAllowance || 0)}
-                </p>
+                <p className="text-blue-600 font-medium">Rent Expense - Vans</p>
+                <p className="text-blue-600 font-medium">Tour Petrol Expense</p>
               </div>
             </div>
             <MapPin className="w-8 h-8 text-blue-500" />
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
+        {/* Card 2 — Tour Allowance */}
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-amber-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
-              <p className="text-sm text-gray-600">Total Sales</p>
+              <p className="text-sm text-gray-600 font-semibold">
+                Tour Allowance
+              </p>
               <div className="text-2xl font-bold text-gray-800">
                 {loading ? (
                   <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
                 ) : (
-                  formatCurrency(data.summary.totalSales)
+                  formatCurrency(data.summary.tourAllowance)
                 )}
               </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {data.totals.totalSaleCount} invoices
+              <p className="text-xs text-amber-600 font-medium mt-1">
+                Daily Allowance (MRs / Drivers / Supervisors)
               </p>
             </div>
-            <DollarSign className="w-8 h-8 text-green-500" />
+            <DollarSign className="w-8 h-8 text-amber-500" />
           </div>
         </div>
 
+        {/* Card 3 — Incentive */}
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600 font-semibold">Incentive</p>
+              <div className="text-2xl font-bold text-gray-800">
+                {loading ? (
+                  <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+                ) : (
+                  formatCurrency(data.summary.incentive)
+                )}
+              </div>
+              <p className="text-xs text-green-600 font-medium mt-1">
+                Sales &amp; Other Incentives for Sales Team
+              </p>
+            </div>
+            <BarChart3 className="w-8 h-8 text-green-500" />
+          </div>
+        </div>
+
+        {/* Card 4 — Tour Expense / Sales Ratio */}
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 font-semibold">
                 Tour Expense / Sales Ratio
               </p>
               <div
-                className={`text-2xl font-bold mt-1 ${getRatioColor(
-                  data.summary.ratio,
-                )}`}
+                className={`text-2xl font-bold mt-1 ${getRatioColor(data.summary.ratio)}`}
               >
                 {loading ? (
                   <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
@@ -547,41 +622,89 @@ const TourExpenseSalesRatio = () => {
                 )}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                {formatPercentage(data.summary.ratio * 100)}
+                {formatPercentage(data.summary.ratio * 100)} of Total Sales
               </p>
             </div>
             <Percent className="w-8 h-8 text-purple-500" />
           </div>
         </div>
+      </div>
 
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
+      {/* ── Extra Summary Row ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Total Sales</p>
+              <p className="text-lg font-bold text-gray-800">
+                {formatCurrency(data.summary.totalSales)}
+              </p>
+              <p className="text-xs text-gray-500">
+                {data.totals.totalSaleCount} invoices
+              </p>
+            </div>
+            <DollarSign className="w-5 h-5 text-gray-400" />
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Total Tour Cost</p>
+              <p className="text-lg font-bold text-gray-800">
+                {formatCurrency(data.summary.totalTourCost)}
+              </p>
+              <p className="text-xs text-gray-500">
+                Expense + Allowance + Incentive
+              </p>
+            </div>
+            <MapPin className="w-5 h-5 text-gray-400" />
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-sm text-gray-600">Profit</p>
-              <div className="text-2xl font-bold text-gray-800">
-                {loading ? (
-                  <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-                ) : (
-                  formatCurrency(data.summary.totalProfit)
-                )}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-lg font-bold text-green-600">
+                {formatCurrency(data.summary.totalProfit)}
+              </p>
+              <p className="text-xs text-gray-500">
                 COGS: {formatCurrency(data.totals.totalCOG)}
               </p>
             </div>
-            <BarChart3 className="w-8 h-8 text-orange-500" />
+            <BarChart3 className="w-5 h-5 text-gray-400" />
           </div>
         </div>
       </div>
 
-      {/* Table — NO Date column */}
+      {/* ── Table ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3 text-sm font-medium">Sr.No</th>
               <th className="p-3 text-sm font-medium">Sale ($)</th>
-              <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
+              {/* Tour Expense = Rent Expense - Vans + Tour Petrol Expense */}
+              <th className="p-3 text-sm font-medium">
+                Tour Expense ($)
+                <div className="text-xs font-normal text-gray-500">
+                  Vans + Petrol
+                </div>
+              </th>
+              {/* Tour Allowance = Daily Allowance for MRs/Drivers/Supervisors */}
+              <th className="p-3 text-sm font-medium">
+                Tour Allowance ($)
+                <div className="text-xs font-normal text-gray-500">
+                  Daily Allowance
+                </div>
+              </th>
+              {/* Incentive = Sales & other Incentives for Sales Team */}
+              <th className="p-3 text-sm font-medium">
+                Incentive ($)
+                <div className="text-xs font-normal text-gray-500">
+                  Sales Team
+                </div>
+              </th>
+              <th className="p-3 text-sm font-medium">Total Tour Cost ($)</th>
               <th className="p-3 text-sm font-medium">Percentage (%)</th>
               <th className="p-3 text-sm font-medium">Profit ($)</th>
             </tr>
@@ -589,7 +712,7 @@ const TourExpenseSalesRatio = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="p-8 text-center">
+                <td colSpan={8} className="p-8 text-center">
                   <div className="flex flex-col items-center justify-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
                     <span className="text-gray-600">Loading data...</span>
@@ -600,43 +723,79 @@ const TourExpenseSalesRatio = () => {
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
-              data.records.map((record, index) => (
-                <tr
-                  key={index}
-                  className={`hover:bg-gray-50 ${
-                    index === data.records.length - 1 ? "" : "border-b"
-                  }`}
-                >
-                  <td className="p-3 text-sm text-gray-600 font-medium">
-                    {getSerialNumber(index)}
-                  </td>
-                  <td className="p-3 text-sm font-semibold text-blue-600">
-                    {formatCurrency(record.sale)}
-                  </td>
-                  <td className="p-3 text-sm font-semibold text-purple-600">
-                    {formatCurrency(record.tourExpense)}
-                  </td>
-                  <td className="p-3">
-                    <span
-                      className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                        record.percentage < 10
-                          ? "bg-green-100 text-green-800"
-                          : record.percentage < 20
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {formatPercentage(record.percentage)}
-                    </span>
-                  </td>
-                  <td className="p-3 text-sm font-semibold text-green-600">
-                    {formatCurrency(record.profit)}
-                  </td>
-                </tr>
-              ))
+              data.records.map((record, index) => {
+                // Read flat fields from backend
+                const tourExpense = parseFloat(record.tourExpense) || 0; // Vans + Petrol
+                const tourAllowance = parseFloat(record.tourAllowance) || 0; // Daily Allowance
+                const incentive = parseFloat(record.incentive) || 0; // Sales Incentive
+                const totalTourCost =
+                  parseFloat(record.totalTourCost) ||
+                  tourExpense + tourAllowance + incentive;
+                const sale = parseFloat(record.sale) || 0;
+                const profit = parseFloat(record.profit) || 0;
+                const percentage = parseFloat(record.percentage) || 0;
+
+                return (
+                  <tr
+                    key={index}
+                    className={`hover:bg-gray-50 ${
+                      index === data.records.length - 1 ? "" : "border-b"
+                    }`}
+                  >
+                    <td className="p-3 text-sm text-gray-600 font-medium">
+                      {getSerialNumber(index)}
+                    </td>
+
+                    {/* Sale */}
+                    <td className="p-3 text-sm font-semibold text-blue-600">
+                      {formatCurrency(sale)}
+                    </td>
+
+                    {/* Tour Expense = Rent Expense - Vans + Tour Petrol Expense */}
+                    <td className="p-3 text-sm font-semibold text-purple-600">
+                      {formatCurrency(tourExpense)}
+                    </td>
+
+                    {/* Tour Allowance = Daily Allowance */}
+                    <td className="p-3 text-sm font-semibold text-amber-600">
+                      {formatCurrency(tourAllowance)}
+                    </td>
+
+                    {/* Incentive = Sales Team Incentives */}
+                    <td className="p-3 text-sm font-semibold text-green-600">
+                      {formatCurrency(incentive)}
+                    </td>
+
+                    {/* Total Tour Cost */}
+                    <td className="p-3 text-sm font-bold text-gray-900">
+                      {formatCurrency(totalTourCost)}
+                    </td>
+
+                    {/* Percentage */}
+                    <td className="p-3">
+                      <span
+                        className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                          percentage < 10
+                            ? "bg-green-100 text-green-800"
+                            : percentage < 20
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-red-100 text-red-800"
+                        }`}
+                      >
+                        {formatPercentage(percentage)}
+                      </span>
+                    </td>
+
+                    {/* Profit */}
+                    <td className="p-3 text-sm font-semibold text-green-600">
+                      {formatCurrency(profit)}
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
-                <td colSpan={5} className="p-8 text-center">
+                <td colSpan={8} className="p-8 text-center">
                   <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
                     No data found
@@ -656,7 +815,7 @@ const TourExpenseSalesRatio = () => {
 
       {renderPagination()}
 
-      {/* Custom Filter Modal */}
+      {/* ── Custom Filter Modal ── */}
       {showCustomFilter && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
           <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg">

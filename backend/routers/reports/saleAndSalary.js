@@ -62,14 +62,12 @@ const normalizeNameInJS = (name) => {
 
 // ─── metric calculators ───────────────────────────────────────────────────────
 // Salary/Sale (%) = Sale / Total Expense × 100
-// Example: sale=$3000, totalExpense=$2100 → 3000/2100×100 = 142.86%
 const calculateSalarySaleRatio = (sale, totalExpense) => {
   if (totalExpense === 0) return 0;
   return (sale / totalExpense) * 100;
 };
 
 // Performance (%) = Profit / Sale × 100
-// Example: sale=$3000, profit=$900 → 900/3000×100 = 30%
 const calculatePerformance = (profit, sale) => {
   if (sale === 0) return 0;
   return (profit / sale) * 100;
@@ -251,14 +249,14 @@ const fetchSalesSalaryData = async (params) => {
 
   // ── payroll aggregation ──────────────────────────────────────────────────
   //
-  //  KEY FIX: Allowances are stored as an array in payroll.allowances[].
-  //  We must $unwind the array and $group-by type to correctly sum:
+  //  Sales & Salary report uses ONLY:
+  //    salary    → effectiveSalary (adjustedBasicSalary or basicSalary)
+  //    incentive → allowances[type === "Incentive"]
+  //    allowance → all OTHER allowances (NOT Incentive, NOT Travel Allowance,
+  //                NOT Tour Allowance)
   //
-  //    Incentive ($)    → allowances where type === "Incentive"
-  //    Tour Expense ($) → allowances where type === "Travel Allowance"
-  //    Allowance ($)    → all OTHER allowances (not Incentive, not Travel Allowance)
-  //
-  //  Using $cond + $filter inside $group to bucket each type.
+  //  Travel Allowance and Tour Allowance are EXCLUDED here — they belong
+  //  only to the Tour Expense / Sales Ratio report.
   // ─────────────────────────────────────────────────────────────────────────
   let payrollAggregate = [];
   const allStaffIds = allStaffMembers.map(
@@ -301,14 +299,10 @@ const fetchSalesSalaryData = async (params) => {
       }
     }
 
-    // ── Aggregate allowances from the array correctly ──────────────────────
-    // We use $reduce to walk through each payroll's allowances array and
-    // conditionally accumulate into three buckets based on the type string.
     payrollAggregate = await Payroll.aggregate([
       { $match: payrollMatchConditions },
       {
         $addFields: {
-          // For current-month payrolls show adjustedBasicSalary; for previous show basicSalary
           effectiveSalary: {
             $cond: {
               if: {
@@ -321,11 +315,13 @@ const fetchSalesSalaryData = async (params) => {
               else: "$basicSalary",
             },
           },
-          // Sum allowances by type bucket using $reduce
+          // ── Two buckets only: incentive + other ──────────────────────────
+          // Travel Allowance & Tour Allowance are intentionally EXCLUDED
+          // — they are only counted in the Tour Expense report.
           allowanceBuckets: {
             $reduce: {
               input: { $ifNull: ["$allowances", []] },
-              initialValue: { incentive: 0, travelAllowance: 0, other: 0 },
+              initialValue: { incentive: 0, other: 0 },
               in: {
                 incentive: {
                   $cond: {
@@ -348,27 +344,8 @@ const fetchSalesSalaryData = async (params) => {
                     else: "$$value.incentive",
                   },
                 },
-                travelAllowance: {
-                  $cond: {
-                    if: {
-                      $eq: [
-                        {
-                          $toLower: {
-                            $trim: { input: { $ifNull: ["$$this.type", ""] } },
-                          },
-                        },
-                        "travel allowance",
-                      ],
-                    },
-                    then: {
-                      $add: [
-                        "$$value.travelAllowance",
-                        { $ifNull: ["$$this.amount", 0] },
-                      ],
-                    },
-                    else: "$$value.travelAllowance",
-                  },
-                },
+                // "other" = everything EXCEPT incentive, travel allowance,
+                //           tour allowance
                 other: {
                   $cond: {
                     if: {
@@ -397,6 +374,18 @@ const fetchSalesSalaryData = async (params) => {
                             "travel allowance",
                           ],
                         },
+                        {
+                          $ne: [
+                            {
+                              $toLower: {
+                                $trim: {
+                                  input: { $ifNull: ["$$this.type", ""] },
+                                },
+                              },
+                            },
+                            "tour allowance",
+                          ],
+                        },
                       ],
                     },
                     then: {
@@ -416,14 +405,10 @@ const fetchSalesSalaryData = async (params) => {
       {
         $group: {
           _id: "$employeeId",
-          // Sum of effective salary (adjusted for current-month, basic for previous)
           salary: { $sum: "$effectiveSalary" },
-          // Incentive allowances only
           incentive: { $sum: "$allowanceBuckets.incentive" },
-          // Travel Allowance → Tour Expense column
-          tourExpense: { $sum: "$allowanceBuckets.travelAllowance" },
-          // All other allowances
           allowance: { $sum: "$allowanceBuckets.other" },
+          // tourExpense and tourAllowance intentionally NOT included here
           payrollCount: { $sum: 1 },
         },
       },
@@ -436,21 +421,15 @@ const fetchSalesSalaryData = async (params) => {
       totalSalary: acc.totalSalary + (parseFloat(p.salary) || 0),
       totalIncentive: acc.totalIncentive + (parseFloat(p.incentive) || 0),
       totalAllowance: acc.totalAllowance + (parseFloat(p.allowance) || 0),
-      totalTourExpense: acc.totalTourExpense + (parseFloat(p.tourExpense) || 0),
     }),
-    {
-      totalSalary: 0,
-      totalIncentive: 0,
-      totalAllowance: 0,
-      totalTourExpense: 0,
-    },
+    { totalSalary: 0, totalIncentive: 0, totalAllowance: 0 },
   );
 
+  // totalExpense = salary + incentive + allowance  (NO tour fields)
   const totalExpenseFromAllRecords =
     totalPayrollSummary.totalSalary +
     totalPayrollSummary.totalIncentive +
-    totalPayrollSummary.totalAllowance +
-    totalPayrollSummary.totalTourExpense;
+    totalPayrollSummary.totalAllowance;
 
   const ratio =
     totalSalesFromAllRecords > 0
@@ -495,10 +474,10 @@ const fetchSalesSalaryData = async (params) => {
     const salary = parseFloat(payroll.salary) || 0;
     const incentive = parseFloat(payroll.incentive) || 0;
     const allowance = parseFloat(payroll.allowance) || 0;
-    const tourExpense = parseFloat(payroll.tourExpense) || 0;
+    // No tourExpense / tourAllowance in this report
     const sale = parseFloat(record.sale) || 0;
     const profit = parseFloat(record.profit) || 0;
-    const totalExpense = salary + incentive + allowance + tourExpense;
+    const totalExpense = salary + incentive + allowance;
 
     return {
       srDate: record.lastSaleDate || "",
@@ -509,7 +488,6 @@ const fetchSalesSalaryData = async (params) => {
       salary,
       incentive,
       allowance,
-      tourExpense,
       totalExpense,
       salarySaleRatio: parseFloat(
         calculateSalarySaleRatio(sale, totalExpense).toFixed(2),
@@ -530,8 +508,7 @@ const fetchSalesSalaryData = async (params) => {
       const salary = parseFloat(payroll.salary) || 0;
       const incentive = parseFloat(payroll.incentive) || 0;
       const allowance = parseFloat(payroll.allowance) || 0;
-      const tourExpense = parseFloat(payroll.tourExpense) || 0;
-      const totalExpense = salary + incentive + allowance + tourExpense;
+      const totalExpense = salary + incentive + allowance;
       const staffEntry = allStaffMembers.find(
         (s) => s._id.toString() === staffId,
       );
@@ -544,7 +521,6 @@ const fetchSalesSalaryData = async (params) => {
         salary,
         incentive,
         allowance,
-        tourExpense,
         totalExpense,
         salarySaleRatio: 0,
         performance: 0,
@@ -582,13 +558,11 @@ router.get("/", async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     console.error("Error in sales salary ratio:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch sales salary ratio data",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch sales salary ratio data",
+      error: error.message,
+    });
   }
 });
 
@@ -612,12 +586,8 @@ router.get("/export", async (req, res) => {
       { header: "Sale ($)", key: "sale", width: 15 },
       { header: "Profit ($)", key: "profit", width: 15 },
       { header: "Salary ($)", key: "salary", width: 15 },
-      // Incentive = allowances[type==="Incentive"]
       { header: "Incentive ($)", key: "incentive", width: 15 },
-      // Allowance = all allowances except Incentive & Travel Allowance
       { header: "Allowance ($)", key: "allowance", width: 15 },
-      // Tour Expense = allowances[type==="Travel Allowance"]
-      { header: "Tour Expense ($)", key: "tourExpense", width: 15 },
       { header: "Total Expense ($)", key: "totalExpense", width: 15 },
       { header: "Salary/Sale (%)", key: "salarySaleRatio", width: 15 },
       { header: "Performance (%)", key: "performance", width: 15 },
@@ -643,7 +613,6 @@ router.get("/export", async (req, res) => {
         salary: parseFloat(rec.salary) || 0,
         incentive: parseFloat(rec.incentive) || 0,
         allowance: parseFloat(rec.allowance) || 0,
-        tourExpense: parseFloat(rec.tourExpense) || 0,
         totalExpense: parseFloat(rec.totalExpense) || 0,
         salarySaleRatio: parseFloat(rec.salarySaleRatio) || 0,
         performance: parseFloat(rec.performance) || 0,
@@ -656,7 +625,6 @@ router.get("/export", async (req, res) => {
         "salary",
         "incentive",
         "allowance",
-        "tourExpense",
         "totalExpense",
       ].forEach((c) => {
         row.getCell(c).numFmt = "$#,##0.00";

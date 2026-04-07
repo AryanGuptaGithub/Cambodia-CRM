@@ -121,7 +121,7 @@ const SalesChart = ({ data = [] }) => {
   );
 };
 
-// ─── Mobile Dashboard — same real data as desktop, app-style layout ───────────
+// ─── Mobile Dashboard ────────────────────────────────────────────────────────
 const MobileDashboard = ({
   salesData,
   stockData,
@@ -135,8 +135,6 @@ const MobileDashboard = ({
   onTabChange,
 }) => {
   const userName = localStorage.getItem("username") || "User";
-
-  // Build last-7-days chart — use dailySales if present, else zeros
   const weeklyData = useMemo(() => {
     const today = new Date();
     return Array.from({ length: 7 }, (_, i) => {
@@ -147,7 +145,6 @@ const MobileDashboard = ({
     });
   }, [salesData]);
 
-  // Real stat values from the same data hooks as desktop
   const statCards = [
     {
       label: "Customers",
@@ -155,7 +152,6 @@ const MobileDashboard = ({
       icon: Users,
       color: "#3b82f6",
       bg: "#eff6ff",
-      subColor: null,
     },
     {
       label: "Stocks",
@@ -188,41 +184,23 @@ const MobileDashboard = ({
   ];
 
   const quickActions = [
-    { label: "Customers", icon: Users, tab: "Customers", color: "#3b82f6" },
-    { label: "New Sale", icon: ShoppingCart, tab: "Sales", color: "#3b82f6" },
-    {
-      label: "Products",
-      icon: Package,
-      tab: "Stock in Hands",
-      color: "#3b82f6",
-    },
-    { label: "Returns", icon: RotateCcw, tab: "Returns", color: "#3b82f6" },
-    {
-      label: "Payroll",
-      icon: DollarSign,
-      tab: "Total Payroll",
-      color: "#3b82f6",
-    },
-    {
-      label: "Attendance",
-      icon: Calendar,
-      tab: "Attendance",
-      color: "#3b82f6",
-    },
-    { label: "Stocks", icon: Package, tab: "Stock in Hands", color: "#3b82f6" },
+    { label: "Customers", icon: Users, tab: "Customers" },
+    { label: "New Sale", icon: ShoppingCart, tab: "Sales" },
+    { label: "Products", icon: Package, tab: "Stock in Hands" },
+    { label: "Returns", icon: RotateCcw, tab: "Returns" },
+    { label: "Payroll", icon: DollarSign, tab: "Total Payroll" },
+    { label: "Attendance", icon: Calendar, tab: "Attendance" },
+    { label: "Stocks", icon: Package, tab: "Stock in Hands" },
     {
       label: "Cash & Credit",
       icon: CreditCard,
       tab: "Credit Sale Cash Not Receive",
-      color: "#3b82f6",
     },
   ];
-
   const outOfStockCount = stockData?.outOfStockCount ?? 0;
 
   return (
     <div className="flex flex-col bg-[#F0F4FF] min-h-full pb-8">
-      {/* Greeting card */}
       <div className="mx-4 mt-4 mb-4">
         <div className="bg-white rounded-2xl px-5 py-4 shadow-sm">
           <p className="text-base font-semibold text-gray-800">
@@ -233,8 +211,6 @@ const MobileDashboard = ({
           </p>
         </div>
       </div>
-
-      {/* Stat cards 2×2 */}
       <div className="grid grid-cols-2 gap-3 px-4 mb-4">
         {statCards.map((card) => {
           const Icon = card.icon;
@@ -271,8 +247,6 @@ const MobileDashboard = ({
           );
         })}
       </div>
-
-      {/* Stock alert */}
       {outOfStockCount > 0 && (
         <div className="mx-4 mb-4">
           <div className="bg-red-50 border-l-4 border-red-400 rounded-xl px-4 py-3 flex items-center gap-3">
@@ -288,10 +262,6 @@ const MobileDashboard = ({
           </div>
         </div>
       )}
-
-
-
-      {/* Quick actions */}
       <div className="mx-4">
         <p className="text-base font-bold text-gray-800 mb-3">Quick Actions</p>
         <div className="grid grid-cols-2 gap-3">
@@ -317,8 +287,6 @@ const MobileDashboard = ({
           })}
         </div>
       </div>
-
-      {/* Sync status */}
       <div className="flex items-center justify-center gap-2 mt-6">
         <span className="text-sm text-gray-500">Sync Status:</span>
         <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
@@ -328,11 +296,131 @@ const MobileDashboard = ({
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DATE FILTER MODAL
+// CRITICAL: defined OUTSIDE Dashboard so it is never re-mounted on re-render.
+// All values come in as props — no closure over Dashboard state.
+// ─────────────────────────────────────────────────────────────────────────────
+const DateFilterModal = ({
+  isOpen,
+  cardLabel,
+  startDate,
+  endDate,
+  onStartDateChange,
+  onEndDateChange,
+  onApply,
+  onClose,
+}) => {
+  if (!isOpen || !cardLabel) return null;
+
+  return (
+    // Backdrop — click does nothing (no onClose here intentionally)
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Modal card — all clicks stay inside */}
+      <div
+        className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md mx-auto"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-base sm:text-lg font-semibold flex items-center gap-2">
+            <Calendar className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+            <span className="truncate">Custom Date – {cardLabel}</span>
+          </h3>
+          <button
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="text-gray-500 hover:text-gray-700 flex-shrink-0 ml-2"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Start Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Start Date
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              max={endDate || undefined}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                onStartDateChange(e.target.value);
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            />
+          </div>
+
+          {/* End Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              End Date
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate || undefined}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onFocus={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                onEndDateChange(e.target.value);
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4">
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onApply();
+              }}
+              disabled={!startDate || !endDate}
+              className={`px-4 py-2 text-sm font-medium text-white rounded-md cursor-pointer ${
+                !startDate || !endDate
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
+            >
+              Apply Filter
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── Main Dashboard ────────────────────────────────────────────────────────────
 const Dashboard = () => {
   const navigate = useNavigate();
-
-  // Get isMobile from layout context
   let isMobile = false;
   try {
     const ctx = useOutletContext();
@@ -360,7 +448,6 @@ const Dashboard = () => {
 
   const [activeTab, setActiveTab] = useState("Sales");
   const [previousActiveTab, setPreviousActiveTab] = useState("Sales");
-
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
@@ -409,14 +496,13 @@ const Dashboard = () => {
 
   const dateRanges = useMemo(() => getDateRanges(), []);
   const prevMonthRanges = useMemo(() => getPreviousMonthRanges(), []);
-
   const [user] = useState({ name: "User", role: "User", initials: "U" });
 
-  // Custom date filter states
+  // ======================= DATE FILTER STATE =======================
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [selectedCardForFilter, setSelectedCardForFilter] = useState(null);
-  const [customStartDate, setCustomStartDate] = useState("");
-  const [customEndDate, setCustomEndDate] = useState("");
+  const [modalStartDate, setModalStartDate] = useState("");
+  const [modalEndDate, setModalEndDate] = useState("");
   const [isCustomDateActive, setIsCustomDateActive] = useState({
     "Total Sales": false,
     Outstanding: false,
@@ -432,50 +518,40 @@ const Dashboard = () => {
     "Pending Collection": { start: "", end: "" },
   });
 
-  useEffect(() => {
-    const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    const s = firstDay.toISOString().split("T")[0];
-    const e = lastDay.toISOString().split("T")[0];
-    setCustomStartDate(s);
-    setCustomEndDate(e);
-    setCustomDateRanges({
-      "Total Sales": { start: s, end: e },
-      Outstanding: { start: s, end: e },
-      "Total Expense": { start: s, end: e },
-      "Total Payroll": { start: s, end: e },
-      "Pending Collection": { start: s, end: e },
-    });
-  }, []);
-
-  const handleDateFilterClick = (cardId) => {
+  const handleDateFilterClick = (cardId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setSelectedCardForFilter(cardId);
     const saved = customDateRanges[cardId];
     if (saved?.start && saved?.end) {
-      setCustomStartDate(saved.start);
-      setCustomEndDate(saved.end);
+      setModalStartDate(saved.start);
+      setModalEndDate(saved.end);
     } else {
       const today = new Date();
-      setCustomStartDate(
-        new Date(today.getFullYear(), today.getMonth(), 1)
-          .toISOString()
-          .split("T")[0],
-      );
-      setCustomEndDate(
-        new Date(today.getFullYear(), today.getMonth() + 1, 0)
-          .toISOString()
-          .split("T")[0],
-      );
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      setModalStartDate(firstDay.toISOString().split("T")[0]);
+      setModalEndDate(lastDay.toISOString().split("T")[0]);
     }
     setShowDateFilter(true);
   };
 
+  const handleCloseDateFilter = () => {
+    setShowDateFilter(false);
+    setSelectedCardForFilter(null);
+  };
+
   const handleApplyDateFilter = () => {
-    if (!selectedCardForFilter || !customStartDate || !customEndDate) return;
+    if (!selectedCardForFilter || !modalStartDate || !modalEndDate) return;
+    if (modalStartDate > modalEndDate) {
+      alert("Start date cannot be after end date");
+      return;
+    }
     setCustomDateRanges((prev) => ({
       ...prev,
-      [selectedCardForFilter]: { start: customStartDate, end: customEndDate },
+      [selectedCardForFilter]: { start: modalStartDate, end: modalEndDate },
     }));
     setIsCustomDateActive((prev) => ({
       ...prev,
@@ -484,26 +560,32 @@ const Dashboard = () => {
     switch (selectedCardForFilter) {
       case "Total Sales":
         setActiveSalesSubTab("Custom");
-        fetchSalesTableData("Custom", customStartDate, customEndDate);
+        fetchSalesTableData("Custom", modalStartDate, modalEndDate);
         break;
       case "Total Expense":
         setActiveExpenseSubTab("Custom");
-        fetchExpenseTableData("Custom", customStartDate, customEndDate);
+        fetchExpenseTableData("Custom", modalStartDate, modalEndDate);
         break;
       case "Total Payroll":
         setActivePayrollSubTab("Custom");
-        fetchPayrollTableData("Custom", customStartDate, customEndDate);
+        fetchPayrollTableData("Custom", modalStartDate, modalEndDate);
         break;
       case "Pending Collection":
         setActivePendingCollectionSubTab("Custom");
-        fetchCreditSaleTableData("Custom", customStartDate, customEndDate);
+        fetchCreditSaleTableData("Custom", modalStartDate, modalEndDate);
+        break;
+      default:
         break;
     }
     setShowDateFilter(false);
+    setSelectedCardForFilter(null);
   };
 
   const handleClearDateFilter = (cardId, e) => {
-    e.stopPropagation();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setIsCustomDateActive((prev) => ({ ...prev, [cardId]: false }));
     setCustomDateRanges((prev) => ({
       ...prev,
@@ -526,59 +608,11 @@ const Dashboard = () => {
         setActivePendingCollectionSubTab("Month");
         fetchCreditSaleTableData("Month");
         break;
+      default:
+        break;
     }
   };
-
-  const handleSalesSubTabChange = (subTab) => {
-    setActiveSalesSubTab(subTab);
-    if (isSalesMonthOnly && subTab !== "Month") setIsSalesMonthOnly(false);
-    if (activeTab === "Sales") {
-      if (subTab === "Custom") {
-        if (!isCustomDateActive["Total Sales"]) return;
-        fetchSalesTableData("Custom");
-      } else {
-        setIsCustomDateActive((p) => ({ ...p, "Total Sales": false }));
-        fetchSalesTableData(subTab);
-      }
-    }
-  };
-  const handleStockSubTabChange = (subTab) => setActiveStockSubTab(subTab);
-  const handleExpenseSubTabChange = (subTab) => {
-    setActiveExpenseSubTab(subTab);
-    if (activeTab === "Expenses") {
-      if (subTab === "Custom") {
-        if (!isCustomDateActive["Total Expense"]) return;
-        fetchExpenseTableData("Custom");
-      } else {
-        setIsCustomDateActive((p) => ({ ...p, "Total Expense": false }));
-        fetchExpenseTableData(subTab);
-      }
-    }
-  };
-  const handlePayrollSubTabChange = (subTab) => {
-    setActivePayrollSubTab(subTab);
-    if (activeTab === "Total Payroll") {
-      if (subTab === "Custom") {
-        if (!isCustomDateActive["Total Payroll"]) return;
-        fetchPayrollTableData("Custom");
-      } else {
-        setIsCustomDateActive((p) => ({ ...p, "Total Payroll": false }));
-        fetchPayrollTableData(subTab);
-      }
-    }
-  };
-  const handlePendingCollectionSubTabChange = (subTab) => {
-    setActivePendingCollectionSubTab(subTab);
-    if (activeTab === "Credit Sale Cash Not Receive") {
-      if (subTab === "Custom") {
-        if (!isCustomDateActive["Pending Collection"]) return;
-        fetchCreditSaleTableData("Custom");
-      } else {
-        setIsCustomDateActive((p) => ({ ...p, "Pending Collection": false }));
-        fetchCreditSaleTableData(subTab);
-      }
-    }
-  };
+  // ======================= END DATE FILTER STATE =======================
 
   const fetchSalesTableData = async (period, startDateParam, endDateParam) => {
     try {
@@ -885,26 +919,16 @@ const Dashboard = () => {
     if (newTab !== "Sales") setIsSalesMonthOnly(false);
     switch (newTab) {
       case "Sales":
-        setIsSalesMonthOnly(false);
-        setActiveSalesSubTab(
-          isCustomDateActive["Total Sales"] ? "Custom" : "Today",
-        );
         fetchSalesTableData(
           isCustomDateActive["Total Sales"] ? "Custom" : "Today",
         );
         break;
       case "Total Payroll":
-        setActivePayrollSubTab(
-          isCustomDateActive["Total Payroll"] ? "Custom" : "Prev Month",
-        );
         fetchPayrollTableData(
           isCustomDateActive["Total Payroll"] ? "Custom" : "Prev Month",
         );
         break;
       case "Expenses":
-        setActiveExpenseSubTab(
-          isCustomDateActive["Total Expense"] ? "Custom" : "Month",
-        );
         fetchExpenseTableData(
           isCustomDateActive["Total Expense"] ? "Custom" : "Month",
         );
@@ -925,8 +949,65 @@ const Dashboard = () => {
       case "Company Balance":
         fetchCompanyBalance();
         break;
+      default:
+        break;
     }
   };
+
+  const handleSalesSubTabChange = (subTab) => {
+    setActiveSalesSubTab(subTab);
+    if (isSalesMonthOnly && subTab !== "Month") setIsSalesMonthOnly(false);
+    if (activeTab === "Sales") {
+      if (subTab === "Custom") {
+        if (!isCustomDateActive["Total Sales"]) return;
+        fetchSalesTableData("Custom");
+      } else {
+        setIsCustomDateActive((p) => ({ ...p, "Total Sales": false }));
+        fetchSalesTableData(subTab);
+      }
+    }
+  };
+
+  const handleExpenseSubTabChange = (subTab) => {
+    setActiveExpenseSubTab(subTab);
+    if (activeTab === "Expenses") {
+      if (subTab === "Custom") {
+        if (!isCustomDateActive["Total Expense"]) return;
+        fetchExpenseTableData("Custom");
+      } else {
+        setIsCustomDateActive((p) => ({ ...p, "Total Expense": false }));
+        fetchExpenseTableData(subTab);
+      }
+    }
+  };
+
+  const handlePayrollSubTabChange = (subTab) => {
+    setActivePayrollSubTab(subTab);
+    if (activeTab === "Total Payroll") {
+      if (subTab === "Custom") {
+        if (!isCustomDateActive["Total Payroll"]) return;
+        fetchPayrollTableData("Custom");
+      } else {
+        setIsCustomDateActive((p) => ({ ...p, "Total Payroll": false }));
+        fetchPayrollTableData(subTab);
+      }
+    }
+  };
+
+  const handlePendingCollectionSubTabChange = (subTab) => {
+    setActivePendingCollectionSubTab(subTab);
+    if (activeTab === "Credit Sale Cash Not Receive") {
+      if (subTab === "Custom") {
+        if (!isCustomDateActive["Pending Collection"]) return;
+        fetchCreditSaleTableData("Custom");
+      } else {
+        setIsCustomDateActive((p) => ({ ...p, "Pending Collection": false }));
+        fetchCreditSaleTableData(subTab);
+      }
+    }
+  };
+
+  const handleStockSubTabChange = (subTab) => setActiveStockSubTab(subTab);
 
   useEffect(() => {
     const init = async () => {
@@ -955,10 +1036,11 @@ const Dashboard = () => {
       if (sd.getFullYear() !== ed.getFullYear()) opts.year = "numeric";
       return `${sd.toLocaleDateString("en-US", opts)} – ${ed.toLocaleDateString("en-US", opts)}`;
     };
-    const getCustomText = (t) => {
-      if (!isCustomDateActive[t] || !customDateRanges[t]) return null;
-      return fmtRange(customDateRanges[t].start, customDateRanges[t].end);
-    };
+    const getCustomText = (t) =>
+      isCustomDateActive[t] && customDateRanges[t]?.start
+        ? fmtRange(customDateRanges[t].start, customDateRanges[t].end)
+        : null;
+
     if (activeTab === "Company Balance") return <CompanyBalancePanel />;
     switch (activeTab) {
       case "Sales":
@@ -1028,71 +1110,6 @@ const Dashboard = () => {
     }
   };
 
-  const DateFilterModal = () => {
-    if (!showDateFilter || !selectedCardForFilter) return null;
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4">
-        <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md mx-auto">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-base sm:text-lg font-semibold flex items-center gap-2">
-              <Calendar className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-              <span className="truncate">
-                Custom Date – {selectedCardForFilter}
-              </span>
-            </h3>
-            <button
-              onClick={() => setShowDateFilter(false)}
-              className="text-gray-500 hover:text-gray-700 flex-shrink-0 ml-2"
-            >
-              <X size={20} />
-            </button>
-          </div>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Start Date
-              </label>
-              <input
-                type="date"
-                value={customStartDate}
-                onChange={(e) => setCustomStartDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                max={customEndDate || undefined}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                End Date
-              </label>
-              <input
-                type="date"
-                value={customEndDate}
-                onChange={(e) => setCustomEndDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                min={customStartDate || undefined}
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-4">
-              <button
-                onClick={() => setShowDateFilter(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleApplyDateFilter}
-                disabled={!customStartDate || !customEndDate}
-                className={`px-4 py-2 text-sm font-medium text-white rounded-md cursor-pointer ${!customStartDate || !customEndDate ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
-              >
-                Apply Filter
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const mergedExpenseData = {
     ...(expenseData || {}),
     monthlyExpense: expenseSummary.monthlyExpense,
@@ -1101,7 +1118,6 @@ const Dashboard = () => {
     customExpenseTotal: expenseSummary.customExpenseTotal,
   };
 
-  // ── MOBILE: show app-style layout with real data ───────────────────────────
   if (isMobile) {
     return (
       <>
@@ -1117,7 +1133,6 @@ const Dashboard = () => {
           onNavigate={(route) => navigate(route)}
           onTabChange={handleParentTabChange}
         />
-        {/* Shared modals still work on mobile */}
         <ProductsModal
           showModal={showProductsModal}
           onClose={() => setShowProductsModal(false)}
@@ -1135,7 +1150,6 @@ const Dashboard = () => {
     );
   }
 
-  // ── DESKTOP: original layout completely unchanged ──────────────────────────
   return (
     <div className="p-3 sm:p-4 md:p-6">
       <DashboardHeader user={user} />
@@ -1174,7 +1188,19 @@ const Dashboard = () => {
           onCurrentMonthSaleClick={handleCurrentMonthSaleClick}
         />
       </div>
-      <DateFilterModal />
+
+      {/* DateFilterModal is now a stable external component — never re-mounts */}
+      <DateFilterModal
+        isOpen={showDateFilter}
+        cardLabel={selectedCardForFilter}
+        startDate={modalStartDate}
+        endDate={modalEndDate}
+        onStartDateChange={setModalStartDate}
+        onEndDateChange={setModalEndDate}
+        onApply={handleApplyDateFilter}
+        onClose={handleCloseDateFilter}
+      />
+
       <div className="w-full overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
         <SubTabs
           activeTab={activeTab}
@@ -1198,6 +1224,7 @@ const Dashboard = () => {
           forceSalesMonthOnly={isSalesMonthOnly}
         />
       </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mt-2">
         <div className="order-1 lg:order-2 lg:col-span-2 min-w-0 overflow-x-auto">
           {renderMainTable()}
@@ -1232,6 +1259,7 @@ const Dashboard = () => {
           />
         </div>
       </div>
+
       <ProductsModal
         showModal={showProductsModal}
         onClose={() => setShowProductsModal(false)}

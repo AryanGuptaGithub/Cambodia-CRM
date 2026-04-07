@@ -19,6 +19,51 @@ import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import LoadingOverlay from "../../components/Loading";
 
+// ----------------------------------------------------------------------
+// 🔐 Robust role detection (same logic as in Sidebar)
+// ----------------------------------------------------------------------
+const getUserRole = () => {
+  try {
+    // 1. Try common user object keys in localStorage
+    const possibleKeys = ["user", "auth", "userData", "currentUser"];
+    for (const key of possibleKeys) {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.role) return parsed.role;
+        } catch (e) {}
+      }
+    }
+
+    // 2. Fallback: decode JWT token from localStorage
+    const token =
+      localStorage.getItem("token") || localStorage.getItem("authToken");
+    if (token) {
+      const parts = token.split(".");
+      if (parts.length === 3) {
+        const base64Url = parts[1];
+        const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+        const payload = JSON.parse(atob(base64));
+        if (payload && payload.role) return payload.role;
+      }
+    }
+
+    console.warn("⚠️ No role found in localStorage or token");
+    return null;
+  } catch (error) {
+    console.error("❌ getUserRole error:", error);
+    return null;
+  }
+};
+
+// Hook to provide auth info (can be extended later)
+const useAuth = () => {
+  const role = getUserRole();
+  return { user: { role } };
+};
+// ----------------------------------------------------------------------
+
 const saleSummaryPerPage = 7;
 
 // Helper function to format numbers to 2 decimal places
@@ -45,38 +90,40 @@ const SaleSummary = () => {
   const inputRef = useRef(null);
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+  // Get current user role using robust detection
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === "super admin"; // Only super admin sees profit
+
   // Fetch sales records based on date range
   useEffect(() => {
     const fetchSalesRecords = async () => {
-      // For combine tab, require date range
-      if (selectedTab === "combine" && (!customDateRange.startDate || !customDateRange.endDate)) {
+      if (
+        selectedTab === "combine" &&
+        (!customDateRange.startDate || !customDateRange.endDate)
+      ) {
         return;
       }
-
       setIsLoading(true);
       try {
         let url = `${backendUrl}/api/sales-summary/summary`;
-        
-        // For combine tab, add date params
-        if (selectedTab === "combine" && customDateRange.startDate && customDateRange.endDate) {
+        if (
+          selectedTab === "combine" &&
+          customDateRange.startDate &&
+          customDateRange.endDate
+        ) {
           const params = new URLSearchParams({
-            startDate: customDateRange.startDate.toISOString().split('T')[0],
-            endDate: customDateRange.endDate.toISOString().split('T')[0]
+            startDate: customDateRange.startDate.toISOString().split("T")[0],
+            endDate: customDateRange.endDate.toISOString().split("T")[0],
           });
           url += `?${params.toString()}`;
-        }
-        // For daily tab, fetch all data without date filter initially
-        else if (selectedTab === "daily") {
-          // Fetch all data for daily view
+        } else if (selectedTab === "daily") {
           url += `?${new URLSearchParams({
-            startDate: "2000-01-01", // Very old date to get all data
-            endDate: new Date().toISOString().split('T')[0] // Today's date
+            startDate: "2000-01-01",
+            endDate: new Date().toISOString().split("T")[0],
           }).toString()}`;
         }
-
         const response = await fetch(url);
         const data = await response.json();
-        
         if (data.success) {
           setSummaryData(data.data || []);
         } else {
@@ -91,21 +138,23 @@ const SaleSummary = () => {
         setIsLoading(false);
       }
     };
-
     fetchSalesRecords();
-  }, [customDateRange.startDate, customDateRange.endDate, selectedTab]);
+  }, [
+    customDateRange.startDate,
+    customDateRange.endDate,
+    selectedTab,
+    backendUrl,
+  ]);
 
   // Calculate aggregated data for daily view
   const calculateDailySummary = () => {
     const dailyMap = {};
-    
-    summaryData.forEach(record => {
-      const date = new Date(record.recordingDate).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
+    summaryData.forEach((record) => {
+      const date = new Date(record.recordingDate).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
       });
-      
       if (!dailyMap[date]) {
         dailyMap[date] = {
           date,
@@ -113,80 +162,69 @@ const SaleSummary = () => {
           totalSales: 0,
           totalQuantity: 0,
           totalAmount: 0,
-          totalProfit: 0
+          totalProfit: 0,
         };
       }
-      
-      record.products.forEach(product => {
-        const productName = product.productName || 'Unknown Product';
+      record.products.forEach((product) => {
+        const productName = product.productName || "Unknown Product";
         const normalizedName = productName.toLowerCase().trim();
-        
         if (!dailyMap[date].products.has(normalizedName)) {
           dailyMap[date].products.set(normalizedName, {
-            productName: productName, // Keep original name
+            productName: productName,
             salesQuantity: 0,
             bonusQuantity: 0,
             totalQuantity: 0,
             amount: 0,
-            profit: 0
+            profit: 0,
           });
         }
-        
         const existing = dailyMap[date].products.get(normalizedName);
         existing.salesQuantity += product.salesQty || 0;
         existing.bonusQuantity += product.bonusQty || 0;
         existing.totalQuantity += product.totalQty || 0;
         existing.amount += product.netSellingAmount || 0;
         existing.profit += product.profitLoss || 0;
-        
         dailyMap[date].totalSales += product.netSellingAmount || 0;
         dailyMap[date].totalQuantity += product.totalQty || 0;
         dailyMap[date].totalAmount += product.netSellingAmount || 0;
         dailyMap[date].totalProfit += product.profitLoss || 0;
       });
     });
-    
-    // Convert Map to array of objects and flatten for pagination
     const allRows = [];
-    Object.values(dailyMap).forEach(day => {
-      Array.from(day.products.values()).forEach(product => {
+    Object.values(dailyMap).forEach((day) => {
+      Array.from(day.products.values()).forEach((product) => {
         allRows.push({
           ...product,
           date: day.date,
-          // Format quantities to 2 decimal places
           salesQuantity: parseFloat(product.salesQuantity.toFixed(2)),
           bonusQuantity: parseFloat(product.bonusQuantity.toFixed(2)),
           totalQuantity: parseFloat(product.totalQuantity.toFixed(2)),
           amount: parseFloat(product.amount.toFixed(2)),
-          profit: parseFloat(product.profit.toFixed(2))
+          profit: parseFloat(product.profit.toFixed(2)),
         });
       });
     });
-    
     return allRows;
   };
 
   // Calculate aggregated data for combine view
   const calculateCombineSummary = () => {
     const productMap = new Map();
-    
-    summaryData.forEach(record => {
-      record.products.forEach(product => {
-        const productName = product.productName || 'Unknown Product';
+    summaryData.forEach((record) => {
+      record.products.forEach((product) => {
+        const productName = product.productName || "Unknown Product";
         const normalizedName = productName.toLowerCase().trim();
-        
         if (!productMap.has(normalizedName)) {
           productMap.set(normalizedName, {
-            productName: productName, // Keep original name (first occurrence)
+            productName: productName,
             normalizedName,
             salesQuantity: 0,
             bonusQuantity: 0,
             totalQuantity: 0,
             amount: 0,
-            profit: 0
+            profit: 0,
           });
         }
-        
         const existing = productMap.get(normalizedName);
         existing.salesQuantity += product.salesQty || 0;
         existing.bonusQuantity += product.bonusQty || 0;
@@ -195,17 +233,14 @@ const SaleSummary = () => {
         existing.profit += product.profitLoss || 0;
       });
     });
-    
-    // Convert Map to array, sort by product name, and format quantities
     return Array.from(productMap.values())
-      .map(product => ({
+      .map((product) => ({
         ...product,
-        // Format quantities to 2 decimal places
         salesQuantity: parseFloat(product.salesQuantity.toFixed(2)),
         bonusQuantity: parseFloat(product.bonusQuantity.toFixed(2)),
         totalQuantity: parseFloat(product.totalQuantity.toFixed(2)),
         amount: parseFloat(product.amount.toFixed(2)),
-        profit: parseFloat(product.profit.toFixed(2))
+        profit: parseFloat(product.profit.toFixed(2)),
       }))
       .sort((a, b) => a.productName.localeCompare(b.productName));
   };
@@ -213,17 +248,14 @@ const SaleSummary = () => {
   // Get data based on selected tab
   const getFilteredData = useMemo(() => {
     let data = [];
-    
     if (selectedTab === "daily") {
       data = calculateDailySummary();
     } else if (selectedTab === "combine") {
       data = calculateCombineSummary();
     }
-    
-    // Apply search filter
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
-      data = data.filter(item => {
+      data = data.filter((item) => {
         if (selectedTab === "daily") {
           return (
             item.date?.toLowerCase().includes(search) ||
@@ -234,64 +266,61 @@ const SaleSummary = () => {
         }
       });
     }
-    
     return data;
   }, [summaryData, selectedTab, searchTerm]);
 
   // Pagination logic
   const totalPages = Math.ceil(getFilteredData.length / saleSummaryPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
-  
-  // Get current page data
   const currentData = getFilteredData.slice(
     (currentPage - 1) * saleSummaryPerPage,
-    currentPage * saleSummaryPerPage
+    currentPage * saleSummaryPerPage,
   );
 
-  // Calculate totals for summary cards
+  // Calculate totals for summary cards (profit only calculated but may be hidden)
   const calculateTotals = () => {
     let totalSales = 0;
     let totalQuantity = 0;
     let totalProfit = 0;
     let totalProducts = 0;
-    
+
     if (selectedTab === "daily") {
       const dailyData = calculateDailySummary();
-      dailyData.forEach(product => {
+      dailyData.forEach((product) => {
         totalSales += product.amount || 0;
         totalQuantity += product.totalQuantity || 0;
         totalProfit += product.profit || 0;
       });
-      // Count unique product-date combinations
-      const uniqueCombos = new Set(dailyData.map(item => `${item.productName}-${item.date}`));
+      const uniqueCombos = new Set(
+        dailyData.map((item) => `${item.productName}-${item.date}`),
+      );
       totalProducts = uniqueCombos.size;
     } else if (selectedTab === "combine") {
       const combineData = calculateCombineSummary();
-      combineData.forEach(product => {
+      combineData.forEach((product) => {
         totalSales += product.amount || 0;
         totalQuantity += product.totalQuantity || 0;
         totalProfit += product.profit || 0;
       });
       totalProducts = combineData.length;
     }
-    
-    return { 
-      totalSales: parseFloat(totalSales.toFixed(2)), 
-      totalQuantity: parseFloat(totalQuantity.toFixed(2)), 
-      totalProfit: parseFloat(totalProfit.toFixed(2)), 
-      totalProducts 
+
+    return {
+      totalSales: parseFloat(totalSales.toFixed(2)),
+      totalQuantity: parseFloat(totalQuantity.toFixed(2)),
+      totalProfit: parseFloat(totalProfit.toFixed(2)),
+      totalProducts,
     };
   };
 
   const totals = calculateTotals();
 
-  // Handle export to Excel
+  // Handle export to Excel (unchanged)
   const handleExportToExcel = async () => {
     if (getFilteredData.length === 0) {
       showToast("warning", "No data found to export");
       return;
     }
-
     setExportLoading(true);
     try {
       const response = await axios.get(
@@ -299,26 +328,29 @@ const SaleSummary = () => {
         {
           params: {
             tab: selectedTab,
-            startDate: selectedTab === "combine" && customDateRange.startDate
-              ? customDateRange.startDate.toISOString().split('T')[0]
-              : "2000-01-01", // Default start date for daily
-            endDate: selectedTab === "combine" && customDateRange.endDate
-              ? customDateRange.endDate.toISOString().split('T')[0]
-              : new Date().toISOString().split('T')[0], // Today for daily
+            startDate:
+              selectedTab === "combine" && customDateRange.startDate
+                ? customDateRange.startDate.toISOString().split("T")[0]
+                : "2000-01-01",
+            endDate:
+              selectedTab === "combine" && customDateRange.endDate
+                ? customDateRange.endDate.toISOString().split("T")[0]
+                : new Date().toISOString().split("T")[0],
           },
           responseType: "blob",
-        }
+        },
       );
-
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `sales-summary-${selectedTab}-${new Date().toISOString().split('T')[0]}.xlsx`);
+      link.setAttribute(
+        "download",
+        `sales-summary-${selectedTab}-${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-
       showToast("success", "Excel report downloaded successfully");
     } catch (error) {
       console.error("Error exporting to Excel:", error);
@@ -332,7 +364,7 @@ const SaleSummary = () => {
     }
   };
 
-  // Handle custom date filter
+  // Date filter handlers
   const handleCustomDateChange = (name, date) => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   };
@@ -342,21 +374,16 @@ const SaleSummary = () => {
       showToast("warning", "Please select both start and end dates");
       return;
     }
-
     if (customDateRange.startDate > customDateRange.endDate) {
       showToast("warning", "Start date cannot be after end date");
       return;
     }
-
     setShowDateFilter(false);
     setCurrentPage(1);
   };
 
   const handleClearFilters = () => {
-    setCustomDateRange({
-      startDate: null,
-      endDate: null,
-    });
+    setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
     setCurrentPage(1);
     if (selectedTab === "combine") {
@@ -368,10 +395,8 @@ const SaleSummary = () => {
     setSelectedTab(tab);
     setCurrentPage(1);
     if (tab === "combine") {
-      // Open date filter modal when switching to combine tab
       setShowDateFilter(true);
     } else {
-      // For daily tab, no date filter needed
       setCustomDateRange({ startDate: null, endDate: null });
       setShowDateFilter(false);
     }
@@ -379,8 +404,10 @@ const SaleSummary = () => {
 
   const handleCloseDateFilterModal = () => {
     setShowDateFilter(false);
-    // If user closes modal while on combine tab without selecting dates, switch to daily
-    if (selectedTab === "combine" && (!customDateRange.startDate || !customDateRange.endDate)) {
+    if (
+      selectedTab === "combine" &&
+      (!customDateRange.startDate || !customDateRange.endDate)
+    ) {
       setSelectedTab("daily");
     }
   };
@@ -390,7 +417,11 @@ const SaleSummary = () => {
   };
 
   const getActiveFilterDisplay = () => {
-    if (selectedTab === "combine" && customDateRange.startDate && customDateRange.endDate) {
+    if (
+      selectedTab === "combine" &&
+      customDateRange.startDate &&
+      customDateRange.endDate
+    ) {
       const start = formatDateToReadable(customDateRange.startDate);
       const end = formatDateToReadable(customDateRange.endDate);
       return `${start} - ${end}`;
@@ -400,7 +431,9 @@ const SaleSummary = () => {
     return "Select Date Range";
   };
 
-  // Render summary cards
+  // ----------------------------------------------------------------------
+  // Render summary cards – hide Total Profit for non-super-admin
+  // ----------------------------------------------------------------------
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
@@ -408,7 +441,8 @@ const SaleSummary = () => {
           <div>
             <p className="text-sm text-gray-600">Total Sales</p>
             <p className="text-2xl font-bold text-gray-800">
-              ${totals.totalSales.toLocaleString(undefined, {
+              $
+              {totals.totalSales.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}
@@ -437,23 +471,26 @@ const SaleSummary = () => {
           <Package className="w-8 h-8 text-green-500" />
         </div>
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Total Profit</p>
-            <p className="text-2xl font-bold text-gray-800">
-              ${totals.totalProfit.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {getActiveFilterDisplay()}
-            </p>
+      {isSuperAdmin && (
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Total Profit</p>
+              <p className="text-2xl font-bold text-gray-800">
+                $
+                {totals.totalProfit.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {getActiveFilterDisplay()}
+              </p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-purple-500" />
           </div>
-          <TrendingUp className="w-8 h-8 text-purple-500" />
         </div>
-      </div>
+      )}
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
@@ -462,8 +499,8 @@ const SaleSummary = () => {
               {totals.totalProducts.toLocaleString()}
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              {selectedTab === "combine" 
-                ? "Unique Products (Case-insensitive)" 
+              {selectedTab === "combine"
+                ? "Unique Products (Case-insensitive)"
                 : "Product-Day Combinations"}
             </p>
           </div>
@@ -473,7 +510,9 @@ const SaleSummary = () => {
     </div>
   );
 
-  // Render table headers based on selected tab
+  // ----------------------------------------------------------------------
+  // Table headers – conditionally include Profit column
+  // ----------------------------------------------------------------------
   const renderTableHeaders = () => {
     if (selectedTab === "daily") {
       return (
@@ -486,7 +525,9 @@ const SaleSummary = () => {
             <th className="p-3 text-sm font-medium">Bonus Qty</th>
             <th className="p-3 text-sm font-medium">Total Qty</th>
             <th className="p-3 text-sm font-medium">Amount ($)</th>
-            <th className="p-3 text-sm font-medium">Profit ($)</th>
+            {isSuperAdmin && (
+              <th className="p-3 text-sm font-medium">Profit ($)</th>
+            )}
           </tr>
         </thead>
       );
@@ -500,24 +541,27 @@ const SaleSummary = () => {
             <th className="p-3 text-sm font-medium">Bonus Qty</th>
             <th className="p-3 text-sm font-medium">Total Qty</th>
             <th className="p-3 text-sm font-medium">Amount ($)</th>
-            <th className="p-3 text-sm font-medium">Profit ($)</th>
+            {isSuperAdmin && (
+              <th className="p-3 text-sm font-medium">Profit ($)</th>
+            )}
           </tr>
         </thead>
       );
     }
   };
 
-  // Render table rows based on selected tab
+  // ----------------------------------------------------------------------
+  // Table rows – conditionally render profit cell
+  // ----------------------------------------------------------------------
   const renderTableRows = () => {
     return currentData.map((item, index) => {
       const isLastRow = index === currentData.length - 1;
-      
       if (selectedTab === "daily") {
         return (
           <tr
             key={`${item.date}-${item.productName}-${index}`}
             className="hover:bg-gray-50"
-            style={{ borderBottom: isLastRow ? 'none' : '1px solid #e5e7eb' }}
+            style={{ borderBottom: isLastRow ? "none" : "1px solid #e5e7eb" }}
           >
             <td className="p-3">
               <div className="text-sm text-gray-600 font-medium">
@@ -542,9 +586,11 @@ const SaleSummary = () => {
             <td className="p-3 text-sm font-semibold text-green-600">
               ${formatNumber(item.amount)}
             </td>
-            <td className="p-3 text-sm font-semibold text-blue-600">
-              ${formatNumber(item.profit)}
-            </td>
+            {isSuperAdmin && (
+              <td className="p-3 text-sm font-semibold text-blue-600">
+                ${formatNumber(item.profit)}
+              </td>
+            )}
           </tr>
         );
       } else {
@@ -552,7 +598,7 @@ const SaleSummary = () => {
           <tr
             key={`${item.productName}-${index}`}
             className="hover:bg-gray-50"
-            style={{ borderBottom: isLastRow ? 'none' : '1px solid #e5e7eb' }}
+            style={{ borderBottom: isLastRow ? "none" : "1px solid #e5e7eb" }}
           >
             <td className="p-3">
               <div className="text-sm text-gray-600 font-medium">
@@ -574,19 +620,20 @@ const SaleSummary = () => {
             <td className="p-3 text-sm font-semibold text-green-600">
               ${formatNumber(item.amount)}
             </td>
-            <td className="p-3 text-sm font-semibold text-blue-600">
-              ${formatNumber(item.profit)}
-            </td>
+            {isSuperAdmin && (
+              <td className="p-3 text-sm font-semibold text-blue-600">
+                ${formatNumber(item.profit)}
+              </td>
+            )}
           </tr>
         );
       }
     });
   };
 
-  // Render pagination
+  // Pagination component
   const renderPagination = () => {
     if (totalPages <= 1) return null;
-
     return (
       <div className="mt-4 p-5 flex gap-2">
         <button
@@ -596,24 +643,16 @@ const SaleSummary = () => {
         >
           ← Prev
         </button>
-
         {visiblePages.map((p, index) => (
           <button
             key={index}
             onClick={() => typeof p === "number" && setCurrentPage(p)}
             disabled={p === "..."}
-            className={`px-4 py-2 rounded ${
-              p === "..."
-                ? "bg-gray-200 cursor-not-allowed"
-                : currentPage === p
-                ? "bg-indigo-600 text-white cursor-pointer"
-                : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-            }`}
+            className={`px-4 py-2 rounded ${p === "..." ? "bg-gray-200 cursor-not-allowed" : currentPage === p ? "bg-indigo-600 text-white cursor-pointer" : "bg-gray-200 hover:bg-gray-300 cursor-pointer"}`}
           >
             {p}
           </button>
         ))}
-
         <button
           onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
           disabled={currentPage === totalPages}
@@ -625,7 +664,6 @@ const SaleSummary = () => {
     );
   };
 
-  // Handle icon click for search input
   const handleIconClick = () => {
     inputRef.current?.focus();
     inputRef.current?.classList.add("highlight");
@@ -635,6 +673,15 @@ const SaleSummary = () => {
   if (isLoading && currentData.length === 0) {
     return <LoadingOverlay text="Loading sales summary..." />;
   }
+
+  // Dynamic colSpan for empty state
+  const getEmptyColSpan = () => {
+    if (selectedTab === "daily") {
+      return isSuperAdmin ? 8 : 7;
+    } else {
+      return isSuperAdmin ? 7 : 6;
+    }
+  };
 
   return (
     <div className="p-6">
@@ -652,7 +699,6 @@ const SaleSummary = () => {
               </p>
             </div>
           </div>
-
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
             <div className="relative">
               <Search
@@ -672,7 +718,6 @@ const SaleSummary = () => {
                 className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
               />
             </div>
-
             <button
               onClick={handleExportToExcel}
               disabled={exportLoading || getFilteredData.length === 0}
@@ -698,26 +743,17 @@ const SaleSummary = () => {
           <div className="flex flex-wrap gap-2 mb-4">
             <button
               onClick={() => handleTabChange("daily")}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-                selectedTab === "daily"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
+              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "daily" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
             >
               Daily Summary
             </button>
             <button
               onClick={() => handleTabChange("combine")}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-                selectedTab === "combine"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
+              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "combine" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
             >
               Combine Summary
             </button>
           </div>
-
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <Filter size={16} />
             <span>Active Filter: </span>
@@ -737,10 +773,7 @@ const SaleSummary = () => {
             <tbody>
               {currentData.length === 0 ? (
                 <tr>
-                  <td 
-                    colSpan={selectedTab === "daily" ? 8 : 7} 
-                    className="p-8 text-center"
-                  >
+                  <td colSpan={getEmptyColSpan()} className="p-8 text-center">
                     <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">
                       No data found
@@ -748,9 +781,11 @@ const SaleSummary = () => {
                     <p className="text-gray-500 max-w-md mx-auto">
                       {searchTerm
                         ? `No sales data found for "${searchTerm}". Try a different search term.`
-                        : selectedTab === "combine" && (!customDateRange.startDate || !customDateRange.endDate)
-                        ? "Please select a date range to view combine summary"
-                        : "No sales data available."}
+                        : selectedTab === "combine" &&
+                            (!customDateRange.startDate ||
+                              !customDateRange.endDate)
+                          ? "Please select a date range to view combine summary"
+                          : "No sales data available."}
                     </p>
                   </td>
                 </tr>
@@ -759,13 +794,12 @@ const SaleSummary = () => {
               )}
             </tbody>
           </table>
-
-          {/* Pagination */}
           {currentData.length > 0 && totalPages > 1 && renderPagination()}
         </div>
 
-        {/* Date Filter Modal - Only for Combine Summary */}
-        {showDateFilter && selectedTab === "combine" &&
+        {/* Date Filter Modal */}
+        {showDateFilter &&
+          selectedTab === "combine" &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
               <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg">
@@ -780,7 +814,6 @@ const SaleSummary = () => {
                     <X size={20} />
                   </button>
                 </div>
-
                 <div className="space-y-4 mb-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -788,7 +821,9 @@ const SaleSummary = () => {
                     </label>
                     <DatePicker
                       selected={customDateRange.startDate}
-                      onChange={(date) => handleCustomDateChange("startDate", date)}
+                      onChange={(date) =>
+                        handleCustomDateChange("startDate", date)
+                      }
                       selectsStart
                       startDate={customDateRange.startDate}
                       endDate={customDateRange.endDate}
@@ -799,14 +834,15 @@ const SaleSummary = () => {
                       required
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       End Date <span className="text-red-500">*</span>
                     </label>
                     <DatePicker
                       selected={customDateRange.endDate}
-                      onChange={(date) => handleCustomDateChange("endDate", date)}
+                      onChange={(date) =>
+                        handleCustomDateChange("endDate", date)
+                      }
                       selectsEnd
                       startDate={customDateRange.startDate}
                       endDate={customDateRange.endDate}
@@ -819,7 +855,6 @@ const SaleSummary = () => {
                     />
                   </div>
                 </div>
-
                 <div className="flex justify-between gap-3">
                   <button
                     onClick={handleClearFilters}
@@ -844,7 +879,7 @@ const SaleSummary = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>
