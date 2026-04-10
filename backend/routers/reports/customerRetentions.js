@@ -1,6 +1,6 @@
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
-import Customer from "../../models/master/customer.js"; // adjust path as needed
+import Customer from "../../models/master/customer.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
@@ -23,108 +23,156 @@ function capitalizeFirstLetter(str) {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
-function buildDateFilter(period, startDate, endDate) {
+// ─────────────────────────────────────────────────────────────────────────────
+// buildDateFilter — returns { start, end } for the selected period
+// Uses UTC to avoid timezone drift
+// ─────────────────────────────────────────────────────────────────────────────
+function buildDateRange(period, startDate, endDate) {
   const now = new Date();
-  const yr = now.getFullYear();
-  const mo = now.getMonth();
+  const yr = now.getUTCFullYear();
+  const mo = now.getUTCMonth(); // 0-based
+  const day = now.getUTCDate();
 
-  const dayStart = (d) => {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    return x;
-  };
-  const dayEnd = (d) => {
-    const x = new Date(d);
-    x.setHours(23, 59, 59, 999);
-    return x;
-  };
+  const utcStart = (y, m, d) => new Date(Date.UTC(y, m, d, 0, 0, 0, 0));
+  const utcEnd = (y, m, d) => new Date(Date.UTC(y, m, d, 23, 59, 59, 999));
 
   switch (period) {
     case "today":
-      return { invoiceDate: { $gte: dayStart(now), $lte: dayEnd(now) } };
+      return { start: utcStart(yr, mo, day), end: utcEnd(yr, mo, day) };
 
     case "month":
     case "currentMonth": {
-      const first = new Date(yr, mo, 1);
-      const last = new Date(yr, mo + 1, 0);
-      return { invoiceDate: { $gte: dayStart(first), $lte: dayEnd(last) } };
+      // First day of current month → today
+      return { start: utcStart(yr, mo, 1), end: utcEnd(yr, mo, day) };
     }
 
     case "jan_feb":
     case "janToPreviousMonth": {
+      // Jan 1 of current year → last day of previous month
       if (mo === 0) {
+        // Jan: go to prev year full
         return {
-          invoiceDate: {
-            $gte: dayStart(new Date(yr - 1, 0, 1)),
-            $lte: dayEnd(new Date(yr - 1, 11, 31)),
-          },
+          start: utcStart(yr - 1, 0, 1),
+          end: utcEnd(yr - 1, 11, 31),
         };
       }
+      const lastDayPrevMonth = new Date(Date.UTC(yr, mo, 0)); // day 0 = last of prev month
       return {
-        invoiceDate: {
-          $gte: dayStart(new Date(yr, 0, 1)),
-          $lte: dayEnd(new Date(yr, mo, 0)),
-        },
+        start: utcStart(yr, 0, 1),
+        end: utcEnd(
+          lastDayPrevMonth.getUTCFullYear(),
+          lastDayPrevMonth.getUTCMonth(),
+          lastDayPrevMonth.getUTCDate(),
+        ),
       };
     }
 
     case "last_month": {
-      const first = new Date(yr, mo - 1, 1);
-      const last = new Date(yr, mo, 0);
-      return { invoiceDate: { $gte: dayStart(first), $lte: dayEnd(last) } };
+      const firstOfLastMonth = new Date(Date.UTC(yr, mo - 1, 1));
+      const lastOfLastMonth = new Date(Date.UTC(yr, mo, 0));
+      return {
+        start: utcStart(
+          firstOfLastMonth.getUTCFullYear(),
+          firstOfLastMonth.getUTCMonth(),
+          1,
+        ),
+        end: utcEnd(
+          lastOfLastMonth.getUTCFullYear(),
+          lastOfLastMonth.getUTCMonth(),
+          lastOfLastMonth.getUTCDate(),
+        ),
+      };
     }
 
     case "last_year": {
-      const first = new Date(yr - 1, 0, 1);
-      const last = new Date(yr - 1, 11, 31);
-      return { invoiceDate: { $gte: dayStart(first), $lte: dayEnd(last) } };
+      return {
+        start: utcStart(yr - 1, 0, 1),
+        end: utcEnd(yr - 1, 11, 31),
+      };
     }
 
     case "custom": {
-      if (!startDate || !endDate) return {};
+      if (!startDate || !endDate) return null;
+      const [sy, sm, sd] = startDate.split("-").map(Number);
+      const [ey, em, ed] = endDate.split("-").map(Number);
       return {
-        invoiceDate: {
-          $gte: dayStart(new Date(startDate)),
-          $lte: dayEnd(new Date(endDate)),
-        },
+        start: new Date(Date.UTC(sy, sm - 1, sd, 0, 0, 0, 0)),
+        end: new Date(Date.UTC(ey, em - 1, ed, 23, 59, 59, 999)),
       };
     }
 
     case "all":
     default:
-      return {};
+      return null; // no date restriction
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AGGREGATION — groups by mrName, then by customer within each MR
-// FIX: Total Customers = customers with ≥1 order
-//      Retained Customers = customers with ≥2 orders (repeat only)
-// ─────────────────────────────────────────────────────────────────────────────
-function buildMRPipeline(period, startDate, endDate, search) {
-  const dateFilter = buildDateFilter(period, startDate, endDate);
+function buildDateFilter(period, startDate, endDate) {
+  const range = buildDateRange(period, startDate, endDate);
+  if (!range) return {};
+  return { invoiceDate: { $gte: range.start, $lte: range.end } };
+}
 
-  const matchQuery = {
-    ...dateFilter,
+// ─────────────────────────────────────────────────────────────────────────────
+// CORE LOGIC
+//
+// Definitions:
+//   period = the selected date window
+//
+//   "New Customers" (called "Retained" in UI per your spec) =
+//       customers whose FIRST EVER purchase falls within the selected period.
+//       i.e. first purchase date >= period start
+//
+//   "Existing Customers" =
+//       customers who had at least one purchase BEFORE the period start.
+//       (they appear in the period too, but their first purchase is before it)
+//
+//   Total Customers (in period) = all unique customers who bought in period
+//       = New + Existing
+//
+//   Retention Rate = New in Period / Existing (before period)
+//       e.g. 15 new / 33 existing = 45.45%
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * For a given date range, find:
+ *   - all customers who purchased in the period (totalCustomers)
+ *   - of those, which ones had their FIRST EVER purchase in this period (newInPeriod)
+ *   - of those, which ones had purchases BEFORE this period (existingCustomers)
+ *   - retentionRate = newInPeriod / existingCustomers * 100
+ *
+ * @param {Date|null} periodStart
+ * @param {Date|null} periodEnd
+ * @param {string|null} mrNameFilter
+ * @param {string} search
+ */
+async function computeRetentionData(
+  periodStart,
+  periodEnd,
+  mrNameFilter = null,
+  search = "",
+) {
+  // Step 1: Get all customers who purchased in this period
+  const periodMatchQuery = {
     isReturn: { $ne: true },
     isExchange: { $ne: true },
   };
+  if (periodStart && periodEnd) {
+    periodMatchQuery.invoiceDate = { $gte: periodStart, $lte: periodEnd };
+  }
+  if (mrNameFilter) periodMatchQuery.mrName = mrNameFilter;
+  if (search && search.trim()) {
+    periodMatchQuery.$or = [
+      { customerName: { $regex: search.trim(), $options: "i" } },
+      { customerCode: { $regex: search.trim(), $options: "i" } },
+      { mrName: { $regex: search.trim(), $options: "i" } },
+    ];
+  }
 
-  const searchFilter =
-    search && search.trim()
-      ? {
-          $or: [
-            { customerName: { $regex: search.trim(), $options: "i" } },
-            { customerCode: { $regex: search.trim(), $options: "i" } },
-            { mrName: { $regex: search.trim(), $options: "i" } },
-          ],
-        }
-      : null;
-
-  const pipeline = [
-    { $match: { ...matchQuery, ...(searchFilter || {}) } },
-
-    // Group by customer first — count total orders per customer
+  // Get unique customers in period + their order count in period
+  const periodCustomers = await SaleSummary.aggregate([
+    { $match: periodMatchQuery },
     {
       $group: {
         _id: "$customerCode",
@@ -132,139 +180,262 @@ function buildMRPipeline(period, startDate, endDate, search) {
         customerCode: { $first: "$customerCode" },
         customerId: { $first: "$customerId" },
         mrName: { $first: "$mrName" },
-        totalOrders: { $sum: 1 },
-        firstPurchaseDate: { $min: "$invoiceDate" },
-        lastPurchaseDate: { $max: "$invoiceDate" },
-      },
-    },
-
-    // A customer is "retained" only if they have 2+ orders
-    {
-      $addFields: {
-        isRetained: { $gte: ["$totalOrders", 2] },
-      },
-    },
-
-    // Group by MR name
-    {
-      $group: {
-        _id: "$mrName",
-        mrName: { $first: "$mrName" },
-        // Total customers = ALL unique customers (1+ orders)
-        totalCustomers: { $sum: 1 },
-        // Retained = only those with 2+ orders
-        retainedCustomers: {
-          $sum: { $cond: ["$isRetained", 1, 0] },
-        },
-        customers: {
+        ordersInPeriod: { $sum: 1 },
+        totalAmountInPeriod: { $sum: "$totalAmount" },
+        firstPurchaseDateInPeriod: { $min: "$invoiceDate" },
+        lastPurchaseDateInPeriod: { $max: "$invoiceDate" },
+        invoices: {
           $push: {
-            customerId: "$customerId",
-            customerName: "$customerName",
-            customerCode: "$customerCode",
-            mrName: "$mrName",
-            totalOrders: "$totalOrders",
-            firstPurchaseDate: "$firstPurchaseDate",
-            lastPurchaseDate: "$lastPurchaseDate",
-            isRetained: "$isRetained",
+            invoiceNumber: "$invoiceNumber",
+            invoiceDate: "$invoiceDate",
+            totalAmount: "$totalAmount",
+            paymentStatus: "$paymentStatus",
+            saleType: "$saleType",
           },
-        },
-      },
-    },
-
-    {
-      $addFields: {
-        retentionRate: {
-          $cond: [
-            { $eq: ["$totalCustomers", 0] },
-            0,
-            {
-              $multiply: [
-                { $divide: ["$retainedCustomers", "$totalCustomers"] },
-                100,
-              ],
-            },
-          ],
-        },
-      },
-    },
-    { $sort: { retentionRate: -1, totalCustomers: -1 } },
-  ];
-
-  return pipeline;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUMMARY
-// Total Customers = unique customers with ≥1 order
-// Retained Customers = unique customers with ≥2 orders
-// New Customers = unique customers with exactly 1 order
-// ─────────────────────────────────────────────────────────────────────────────
-async function getSummary(period, startDate, endDate) {
-  const dateFilter = buildDateFilter(period, startDate, endDate);
-
-  const result = await SaleSummary.aggregate([
-    {
-      $match: {
-        ...dateFilter,
-        isReturn: { $ne: true },
-        isExchange: { $ne: true },
-      },
-    },
-    // Count orders per customer
-    { $group: { _id: "$customerCode", totalOrders: { $sum: 1 } } },
-    {
-      $group: {
-        _id: null,
-        totalCustomers: { $sum: 1 },
-        // Retained = 2+ orders
-        retainedCustomers: {
-          $sum: { $cond: [{ $gte: ["$totalOrders", 2] }, 1, 0] },
-        },
-        // New = exactly 1 order
-        newCustomers: {
-          $sum: { $cond: [{ $eq: ["$totalOrders", 1] }, 1, 0] },
-        },
-      },
-    },
-    {
-      $project: {
-        totalCustomers: 1,
-        retainedCustomers: 1,
-        newCustomers: 1,
-        retentionRate: {
-          $cond: [
-            { $eq: ["$totalCustomers", 0] },
-            0,
-            {
-              $multiply: [
-                { $divide: ["$retainedCustomers", "$totalCustomers"] },
-                100,
-              ],
-            },
-          ],
         },
       },
     },
   ]);
 
-  const raw = result[0] || {
-    totalCustomers: 0,
-    retainedCustomers: 0,
-    newCustomers: 0,
-    retentionRate: 0,
-  };
+  if (periodCustomers.length === 0) {
+    return {
+      customers: [],
+      totalCustomers: 0,
+      newInPeriod: 0,
+      existingCustomers: 0,
+      retentionRate: 0,
+    };
+  }
+
+  // Step 2: For each customer, find their absolute first purchase date across ALL time
+  const customerCodes = periodCustomers.map((c) => c._id).filter(Boolean);
+
+  const allTimeFirstPurchase = await SaleSummary.aggregate([
+    {
+      $match: {
+        customerCode: { $in: customerCodes },
+        isReturn: { $ne: true },
+        isExchange: { $ne: true },
+      },
+    },
+    {
+      $group: {
+        _id: "$customerCode",
+        absoluteFirstPurchase: { $min: "$invoiceDate" },
+        absoluteLastPurchase: { $max: "$invoiceDate" },
+        totalOrdersAllTime: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const firstPurchaseMap = {};
+  allTimeFirstPurchase.forEach((r) => {
+    firstPurchaseMap[r._id] = {
+      absoluteFirstPurchase: r.absoluteFirstPurchase,
+      absoluteLastPurchase: r.absoluteLastPurchase,
+      totalOrdersAllTime: r.totalOrdersAllTime,
+    };
+  });
+
+  // Step 3: Classify each customer
+  // isNewInPeriod = their absolute first purchase is >= periodStart (they never bought before)
+  // isExisting    = they had purchases before the period start
+  const enrichedCustomers = periodCustomers.map((c) => {
+    const allTime = firstPurchaseMap[c._id] || {};
+    const absFirst =
+      allTime.absoluteFirstPurchase || c.firstPurchaseDateInPeriod;
+
+    let isNewInPeriod = true;
+    if (periodStart && absFirst) {
+      // If their very first purchase is before the period, they're "existing"
+      isNewInPeriod = new Date(absFirst) >= periodStart;
+    }
+
+    return {
+      ...c,
+      absoluteFirstPurchase: absFirst,
+      absoluteLastPurchase: allTime.absoluteLastPurchase,
+      totalOrdersAllTime: allTime.totalOrdersAllTime || c.ordersInPeriod,
+      isNewInPeriod, // true = new customer (first purchase is in this period)
+      isExisting: !isNewInPeriod, // true = was already a customer before period
+    };
+  });
+
+  const totalCustomers = enrichedCustomers.length;
+  const newInPeriod = enrichedCustomers.filter((c) => c.isNewInPeriod).length;
+  const existingCustomers = totalCustomers - newInPeriod;
+
+  // Retention Rate = New customers acquired in period / Existing customers before period
+  // Per your spec: 15 new / 33 existing = 45.45%
+  const retentionRate =
+    existingCustomers > 0
+      ? parseFloat(((newInPeriod / existingCustomers) * 100).toFixed(2))
+      : newInPeriod > 0
+        ? 100 // all new, no existing → 100% acquisition
+        : 0;
 
   return {
-    totalCustomers: raw.totalCustomers,
-    retainedCustomers: raw.retainedCustomers,
-    newCustomers: raw.newCustomers,
-    retentionRate: parseFloat((raw.retentionRate || 0).toFixed(2)),
+    customers: enrichedCustomers,
+    totalCustomers,
+    newInPeriod,
+    existingCustomers,
+    retentionRate,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CUSTOMER DETAIL MODAL — fetch all sales + customer info for a specific
-// customer or all customers (filtered by retained/all)
+// BUILD MR-LEVEL PIPELINE using the same logic
+// ─────────────────────────────────────────────────────────────────────────────
+async function buildMRData(period, startDate, endDate, search = "") {
+  const range = buildDateRange(period, startDate, endDate);
+  const periodStart = range?.start || null;
+  const periodEnd = range?.end || null;
+
+  // Step 1: Get all purchases in period grouped by MR then customer
+  const periodMatchQuery = {
+    isReturn: { $ne: true },
+    isExchange: { $ne: true },
+  };
+  if (periodStart && periodEnd) {
+    periodMatchQuery.invoiceDate = { $gte: periodStart, $lte: periodEnd };
+  }
+  if (search && search.trim()) {
+    periodMatchQuery.$or = [
+      { customerName: { $regex: search.trim(), $options: "i" } },
+      { mrName: { $regex: search.trim(), $options: "i" } },
+      { customerCode: { $regex: search.trim(), $options: "i" } },
+    ];
+  }
+
+  // Group by MR → customer
+  const mrCustomerGroups = await SaleSummary.aggregate([
+    { $match: periodMatchQuery },
+    {
+      $group: {
+        _id: { mrName: "$mrName", customerCode: "$customerCode" },
+        mrName: { $first: "$mrName" },
+        customerName: { $first: "$customerName" },
+        customerCode: { $first: "$customerCode" },
+        customerId: { $first: "$customerId" },
+        ordersInPeriod: { $sum: 1 },
+        firstPurchaseDateInPeriod: { $min: "$invoiceDate" },
+        lastPurchaseDateInPeriod: { $max: "$invoiceDate" },
+      },
+    },
+  ]);
+
+  if (mrCustomerGroups.length === 0) return [];
+
+  // Step 2: Get all-time first purchase for each customer
+  const customerCodes = [
+    ...new Set(mrCustomerGroups.map((r) => r.customerCode).filter(Boolean)),
+  ];
+
+  const allTimeData = await SaleSummary.aggregate([
+    {
+      $match: {
+        customerCode: { $in: customerCodes },
+        isReturn: { $ne: true },
+        isExchange: { $ne: true },
+      },
+    },
+    {
+      $group: {
+        _id: "$customerCode",
+        absoluteFirstPurchase: { $min: "$invoiceDate" },
+      },
+    },
+  ]);
+
+  const firstPurchaseMap = {};
+  allTimeData.forEach((r) => {
+    firstPurchaseMap[r._id] = r.absoluteFirstPurchase;
+  });
+
+  // Step 3: Classify each customer as new or existing per MR
+  // Then group by MR
+  const mrMap = new Map();
+
+  mrCustomerGroups.forEach((row) => {
+    const mrName = row.mrName || "Unknown";
+    const absFirst =
+      firstPurchaseMap[row.customerCode] || row.firstPurchaseDateInPeriod;
+
+    let isNewInPeriod = true;
+    if (periodStart && absFirst) {
+      isNewInPeriod = new Date(absFirst) >= periodStart;
+    }
+
+    if (!mrMap.has(mrName)) {
+      mrMap.set(mrName, {
+        mrName,
+        customers: [],
+        totalCustomers: 0,
+        newInPeriod: 0,
+        existingCustomers: 0,
+      });
+    }
+
+    const mrData = mrMap.get(mrName);
+    mrData.totalCustomers++;
+    if (isNewInPeriod) mrData.newInPeriod++;
+    else mrData.existingCustomers++;
+
+    mrData.customers.push({
+      customerCode: row.customerCode,
+      customerName: row.customerName,
+      customerId: row.customerId,
+      mrName: row.mrName,
+      ordersInPeriod: row.ordersInPeriod,
+      firstPurchaseDate: row.firstPurchaseDateInPeriod,
+      lastPurchaseDate: row.lastPurchaseDateInPeriod,
+      absoluteFirstPurchase: absFirst,
+      isNewInPeriod,
+      isExisting: !isNewInPeriod,
+    });
+  });
+
+  // Step 4: Compute retention rate per MR and convert to array
+  const result = Array.from(mrMap.values()).map((mr) => {
+    const retentionRate =
+      mr.existingCustomers > 0
+        ? parseFloat(((mr.newInPeriod / mr.existingCustomers) * 100).toFixed(2))
+        : mr.newInPeriod > 0
+          ? 100
+          : 0;
+    return { ...mr, retentionRate };
+  });
+
+  // Sort by retentionRate desc, then totalCustomers desc
+  result.sort(
+    (a, b) =>
+      b.retentionRate - a.retentionRate || b.totalCustomers - a.totalCustomers,
+  );
+
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OVERALL SUMMARY
+// ─────────────────────────────────────────────────────────────────────────────
+async function getSummary(period, startDate, endDate) {
+  const result = await computeRetentionData(
+    buildDateRange(period, startDate, endDate)?.start || null,
+    buildDateRange(period, startDate, endDate)?.end || null,
+  );
+  return {
+    totalCustomers: result.totalCustomers,
+    retainedCustomers: result.newInPeriod, // "Retained" in UI = new in period
+    newCustomers: result.newInPeriod,
+    existingCustomers: result.existingCustomers,
+    retentionRate: result.retentionRate,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CUSTOMER DETAIL MODAL ENDPOINT
+// filterType="all"      → all customers who bought in period
+// filterType="retained" → only new-in-period customers
 // ─────────────────────────────────────────────────────────────────────────────
 router.get("/customer-details", async (req, res) => {
   try {
@@ -272,62 +443,35 @@ router.get("/customer-details", async (req, res) => {
       period = "all",
       startDate,
       endDate,
-      filterType = "all", // "all" | "retained"
+      filterType = "all",
       mrName,
     } = req.query;
 
-    const dateFilter = buildDateFilter(period, startDate, endDate);
+    const range = buildDateRange(period, startDate, endDate);
+    const periodStart = range?.start || null;
+    const periodEnd = range?.end || null;
 
-    const matchQuery = {
-      ...dateFilter,
-      isReturn: { $ne: true },
-      isExchange: { $ne: true },
-    };
+    const result = await computeRetentionData(
+      periodStart,
+      periodEnd,
+      mrName || null,
+    );
 
-    if (mrName) matchQuery.mrName = mrName;
-
-    // Get all sales grouped by customer
-    const customerGroups = await SaleSummary.aggregate([
-      { $match: matchQuery },
-      {
-        $group: {
-          _id: "$customerCode",
-          customerName: { $first: "$customerName" },
-          customerCode: { $first: "$customerCode" },
-          customerId: { $first: "$customerId" },
-          mrName: { $first: "$mrName" },
-          totalOrders: { $sum: 1 },
-          totalAmount: { $sum: "$totalAmount" },
-          firstPurchaseDate: { $min: "$invoiceDate" },
-          lastPurchaseDate: { $max: "$invoiceDate" },
-          invoices: {
-            $push: {
-              invoiceNumber: "$invoiceNumber",
-              invoiceDate: "$invoiceDate",
-              totalAmount: "$totalAmount",
-              paymentStatus: "$paymentStatus",
-              saleType: "$saleType",
-            },
-          },
-        },
-      },
-      {
-        $addFields: {
-          isRetained: { $gte: ["$totalOrders", 2] },
-        },
-      },
-    ]);
-
-    // Filter based on filterType
-    let filtered = customerGroups;
+    let filtered = result.customers;
     if (filterType === "retained") {
-      filtered = customerGroups.filter((c) => c.isRetained);
+      // "retained" in the modal means "new customers acquired in this period"
+      filtered = result.customers.filter((c) => c.isNewInPeriod);
     }
-    // "all" includes everyone (both new and retained)
+    // "all" → every customer who bought in period
 
-    // Enrich with Customer collection data
+    // Sort: new-in-period first, then by ordersInPeriod desc
+    filtered.sort((a, b) => {
+      if (b.isNewInPeriod !== a.isNewInPeriod) return b.isNewInPeriod ? 1 : -1;
+      return b.ordersInPeriod - a.ordersInPeriod;
+    });
+
+    // Enrich with Customer collection
     const customerIds = filtered.map((c) => c.customerId).filter(Boolean);
-
     let customerMap = {};
     if (customerIds.length > 0) {
       const customers = await Customer.find(
@@ -362,19 +506,17 @@ router.get("/customer-details", async (req, res) => {
         address: custInfo?.address || "N/A",
         customerNumber: custInfo?.customerNumber || "N/A",
         typeOfBusiness: custInfo?.typeOfBusiness || "N/A",
-        totalOrders: c.totalOrders,
-        totalAmount: c.totalAmount,
-        firstPurchaseDate: c.firstPurchaseDate,
-        lastPurchaseDate: c.lastPurchaseDate,
-        isRetained: c.isRetained,
+        totalOrders: c.ordersInPeriod,
+        totalAmount: c.totalAmountInPeriod || 0,
+        firstPurchaseDate:
+          c.firstPurchaseDateInPeriod || c.absoluteFirstPurchase,
+        lastPurchaseDate: c.lastPurchaseDateInPeriod || c.absoluteLastPurchase,
+        absoluteFirstPurchase: c.absoluteFirstPurchase,
+        isRetained: c.isNewInPeriod, // UI calls new-in-period "retained"
+        isNewInPeriod: c.isNewInPeriod,
+        isExisting: c.isExisting,
         invoices: c.invoices || [],
       };
-    });
-
-    // Sort: retained first, then by totalOrders desc
-    enriched.sort((a, b) => {
-      if (b.isRetained !== a.isRetained) return b.isRetained ? 1 : -1;
-      return b.totalOrders - a.totalOrders;
     });
 
     res.json({ success: true, data: enriched, total: enriched.length });
@@ -385,7 +527,7 @@ router.get("/customer-details", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BASE HANDLER
+// BASE HANDLER (shared by monthly & annual routes)
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleGetRequest(req, res, defaultPeriod) {
   try {
@@ -401,40 +543,38 @@ async function handleGetRequest(req, res, defaultPeriod) {
     const pageNum = Math.max(1, parseInt(page, 10));
     const limitNum = Math.max(1, parseInt(limit, 10));
 
-    const basePipeline = buildMRPipeline(period, startDate, endDate, search);
-
-    const [countResult, records, summary] = await Promise.all([
-      SaleSummary.aggregate([...basePipeline, { $count: "total" }]),
-      SaleSummary.aggregate([
-        ...basePipeline,
-        { $skip: (pageNum - 1) * limitNum },
-        { $limit: limitNum },
-      ]),
+    const [allMRRecords, summary] = await Promise.all([
+      buildMRData(period, startDate, endDate, search),
       getSummary(period, startDate, endDate),
     ]);
 
-    const totalRecords = countResult[0]?.total || 0;
+    const totalRecords = allMRRecords.length;
     const totalPages = Math.ceil(totalRecords / limitNum);
+    const paginatedRecords = allMRRecords.slice(
+      (pageNum - 1) * limitNum,
+      pageNum * limitNum,
+    );
 
     res.json({
       success: true,
       data: {
         summary,
-        records: records.map((r) => ({
-          _id: r._id,
-          mrName: r.mrName || r._id || "N/A",
+        records: paginatedRecords.map((r) => ({
+          _id: r.mrName,
+          mrName: r.mrName || "N/A",
           totalCustomers: r.totalCustomers || 0,
-          retainedCustomers: r.retainedCustomers || 0,
-          retentionRate: parseFloat((r.retentionRate || 0).toFixed(2)),
+          retainedCustomers: r.newInPeriod || 0, // UI label "Retained" = new in period
+          existingCustomers: r.existingCustomers || 0,
+          retentionRate: r.retentionRate || 0,
           customers: (r.customers || []).map((c) => ({
             customerId: c.customerId,
             customerName: c.customerName || "N/A",
             customerCode: c.customerCode || "",
             mrName: c.mrName || "",
-            totalOrders: c.totalOrders || 0,
+            totalOrders: c.ordersInPeriod || 0,
             firstPurchaseDate: c.firstPurchaseDate || null,
             lastPurchaseDate: c.lastPurchaseDate || null,
-            isRetained: c.isRetained,
+            isRetained: c.isNewInPeriod,
           })),
         })),
       },
@@ -452,6 +592,9 @@ async function handleGetRequest(req, res, defaultPeriod) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORT HANDLER
+// ─────────────────────────────────────────────────────────────────────────────
 async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
   try {
     const {
@@ -462,15 +605,13 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
     } = req.query;
 
     const [records, summary] = await Promise.all([
-      SaleSummary.aggregate(
-        buildMRPipeline(period, startDate, endDate, search),
-      ),
+      buildMRData(period, startDate, endDate, search),
       getSummary(period, startDate, endDate),
     ]);
 
     const workbook = new ExcelJS.Workbook();
 
-    // Summary Sheet
+    // ── Summary Sheet ──
     const summarySheet = workbook.addWorksheet("Summary");
     summarySheet.mergeCells("A1:E1");
     const titleCell = summarySheet.getCell("A1");
@@ -488,18 +629,27 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
       };
       cell.alignment = { horizontal: "center" };
     });
-    summarySheet.addRow(["Total Customers", summary.totalCustomers]);
-    summarySheet.addRow(["Retained Customers", summary.retainedCustomers]);
-    summarySheet.addRow(["New Customers", summary.newCustomers]);
     summarySheet.addRow([
-      "Retention Rate",
+      "Total Customers (in period)",
+      summary.totalCustomers,
+    ]);
+    summarySheet.addRow([
+      "New Customers (first purchase in period)",
+      summary.newCustomers,
+    ]);
+    summarySheet.addRow([
+      "Existing Customers (bought before period)",
+      summary.existingCustomers,
+    ]);
+    summarySheet.addRow([
+      "Retention Rate (New / Existing × 100)",
       `${summary.retentionRate?.toFixed(2) || 0}%`,
     ]);
     summarySheet.addRow(["Period", period]);
     summarySheet.addRow(["Generated On", new Date().toLocaleString()]);
-    summarySheet.columns.forEach((col) => (col.width = 25));
+    summarySheet.columns.forEach((col) => (col.width = 35));
 
-    // Details Sheet
+    // ── Details Sheet ──
     const detailsSheet = workbook.addWorksheet("Details");
     detailsSheet.mergeCells("A1:I1");
     const detailsTitle = detailsSheet.getCell("A1");
@@ -512,10 +662,10 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
       "MR Name",
       "Customer Name",
       "Customer Code",
-      "Total Orders",
-      "First Purchase",
-      "Last Purchase",
-      "Status",
+      "Orders in Period",
+      "First Purchase (all time)",
+      "Last Purchase (in period)",
+      "Type",
       "MR Retention Rate",
     ]);
     detailsHeaderRow.eachCell((cell) => {
@@ -536,27 +686,27 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
           mr.mrName || "N/A",
           capitalizeFirstLetter(customer.customerName),
           customer.customerCode || "N/A",
-          customer.totalOrders || 0,
-          formatDateForExcel(customer.firstPurchaseDate),
+          customer.ordersInPeriod || 0,
+          formatDateForExcel(customer.absoluteFirstPurchase),
           formatDateForExcel(customer.lastPurchaseDate),
-          customer.isRetained ? "Retained" : "New",
+          customer.isNewInPeriod ? "New in Period" : "Existing",
           `${(mr.retentionRate || 0).toFixed(1)}%`,
         ]);
 
-        const statusCell = row.getCell(8);
-        if (customer.isRetained) {
-          statusCell.font = { bold: true, color: { argb: "166534" } };
-          statusCell.fill = {
+        const typeCell = row.getCell(8);
+        if (customer.isNewInPeriod) {
+          typeCell.font = { bold: true, color: { argb: "1E3A5F" } };
+          typeCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "DBEAFE" },
+          };
+        } else {
+          typeCell.font = { bold: true, color: { argb: "166534" } };
+          typeCell.fill = {
             type: "pattern",
             pattern: "solid",
             fgColor: { argb: "DCFCE7" },
-          };
-        } else {
-          statusCell.font = { bold: true, color: { argb: "991B1B" } };
-          statusCell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "FEE2E2" },
           };
         }
       });
@@ -568,12 +718,10 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
         const len = cell.value ? cell.value.toString().length : 10;
         if (len > maxLen) maxLen = len;
       });
-      col.width = Math.min(maxLen + 2, 30);
+      col.width = Math.min(maxLen + 2, 35);
     });
 
-    const fileName = `${sheetTitle.replace(/ /g, "_")}_${period}_${new Date()
-      .toISOString()
-      .slice(0, 10)}.xlsx`;
+    const fileName = `${sheetTitle.replace(/ /g, "_")}_${period}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -599,11 +747,13 @@ router.get("/export", (req, res) =>
   handleExportRequest(req, res, "all", "Customer Retention Rate"),
 );
 
-// Legacy routes
-router.get("/monthly", (req, res) => handleGetRequest(req, res, "last_month"));
+// Monthly — default period is current month
+router.get("/monthly", (req, res) => handleGetRequest(req, res, "month"));
 router.get("/monthly/export", (req, res) =>
-  handleExportRequest(req, res, "last_month", "Monthly Customer Repeat Rate"),
+  handleExportRequest(req, res, "month", "Monthly Customer Repeat Rate"),
 );
+
+// Annual — default period is last year
 router.get("/annual", (req, res) => handleGetRequest(req, res, "last_year"));
 router.get("/annual/export", (req, res) =>
   handleExportRequest(req, res, "last_year", "Annual Customer Repeat Rate"),

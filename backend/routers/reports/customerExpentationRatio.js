@@ -1,240 +1,336 @@
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
+import DailySampleReport from "../../models/reports/dailysample.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-// FIXED: Changed from '/customer-product-acceptance-rate' to '/'
-// GET endpoint for paginated data
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const normalizeProductName = (name) => {
+  if (!name) return "";
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[^\w\s]/g, "")
+    .trim();
+};
+
+/**
+ * buildDateQuery — returns a MongoDB date range object for the `date` field
+ */
+function buildSampleDateQuery(period, month, year, startDate, endDate) {
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1;
+  const currentYear = currentDate.getFullYear();
+
+  const filterMonth = month ? parseInt(month) : currentMonth;
+  const filterYear = year ? parseInt(year) : currentYear;
+
+  if (period === "custom" && startDate && endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    return { $gte: start, $lte: end };
+  }
+
+  if (period === "month") {
+    const start = new Date(filterYear, filterMonth - 1, 1);
+    const end = new Date(filterYear, filterMonth, 0, 23, 59, 59, 999);
+    return { $gte: start, $lte: end };
+  }
+
+  if (period === "year") {
+    const start = new Date(filterYear, 0, 1);
+    const end = new Date(filterYear, 11, 31, 23, 59, 59, 999);
+    return { $gte: start, $lte: end };
+  }
+
+  return null;
+}
+
+/**
+ * Core data builder.
+ * Now properly flattens products from DailySampleReport and counts each product line as 1 sample unit.
+ */
+async function buildAcceptanceData({
+  period,
+  month,
+  year,
+  startDate,
+  endDate,
+  search = "",
+}) {
+  const dateRange = buildSampleDateQuery(
+    period,
+    month,
+    year,
+    startDate,
+    endDate,
+  );
+
+  // 1. Fetch samples in period
+  const sampleDateQuery = dateRange ? { date: dateRange } : {};
+  const samples = await DailySampleReport.find(sampleDateQuery)
+    .sort({ date: 1 })
+    .lean();
+
+  if (samples.length === 0) {
+    return {
+      summary: {
+        totalCustomers: 0,
+        totalSamples: 0,
+        totalAccepted: 0,
+        totalRejected: 0,
+        acceptanceRate: 0,
+      },
+      records: [],
+      totalRecords: 0,
+    };
+  }
+
+  // 2. Fetch all sales in the same date period
+  const saleDateQuery = dateRange ? { invoiceDate: dateRange } : {};
+  const sales = await SaleSummary.find(saleDateQuery)
+    .select(
+      "products invoiceDate invoiceNumber customerId customerCode customerName",
+    )
+    .lean();
+
+  // 3. Index sales by (customerCode | normalizedProductName)
+  const salesIndex = new Map(); // key: `${customerCode}|${productNorm}`
+
+  for (const sale of sales) {
+    if (!sale.products?.length) continue;
+    const saleDate = new Date(sale.invoiceDate);
+    if (isNaN(saleDate.getTime())) continue;
+
+    for (const prod of sale.products) {
+      if (!prod.productName) continue;
+      const productNorm = normalizeProductName(prod.productName);
+      const key = `${sale.customerCode}|${productNorm}`;
+      if (!salesIndex.has(key)) salesIndex.set(key, []);
+      salesIndex.get(key).push({
+        date: saleDate,
+        totalQty: (prod.salesQty || 0) + (prod.bonusQty || 0),
+        invoiceNumber: sale.invoiceNumber,
+      });
+    }
+  }
+
+  // 4. Flatten samples: each product inside a sample becomes a separate entry
+  //    Also store the original product details (like sample date, MR name, etc.) for the modal
+  const flattenedSamples = [];
+  for (const sample of samples) {
+    const customerCode = sample.customerCode || "";
+    const customerName = sample.customerName || "N/A";
+    const sampleDate = new Date(sample.date);
+    const mrName = sample.mrName || "";
+    const remark = sample.remark || "";
+
+    const productsArray = sample.products || [];
+    for (const product of productsArray) {
+      const productName = product.productName || "Unknown";
+      const productNorm = normalizeProductName(productName);
+      // Each product line counts as 1 sample unit (change to product.totalQty if you need sum)
+      const sampleQty = 1;
+
+      flattenedSamples.push({
+        customerCode,
+        customerName,
+        productName,
+        productNorm,
+        sampleDate,
+        sampleQty,
+        mrName,
+        remark,
+        sampleId: sample._id,
+        originalQty: product.totalQty || 0,
+      });
+    }
+  }
+
+  if (flattenedSamples.length === 0) {
+    return {
+      summary: {
+        totalCustomers: 0,
+        totalSamples: 0,
+        totalAccepted: 0,
+        totalRejected: 0,
+        acceptanceRate: 0,
+      },
+      records: [],
+      totalRecords: 0,
+    };
+  }
+
+  // 5. Group by customer + product and evaluate acceptance
+  const grouped = new Map(); // key: `${customerCode}|${productNorm}`
+  const customerSet = new Set();
+
+  for (const item of flattenedSamples) {
+    const {
+      customerCode,
+      customerName,
+      productName,
+      productNorm,
+      sampleDate,
+      sampleQty,
+      mrName,
+      remark,
+      sampleId,
+      originalQty,
+    } = item;
+    customerSet.add(customerCode || customerName);
+
+    const saleKey = `${customerCode}|${productNorm}`;
+    const matchingSales = (salesIndex.get(saleKey) || []).filter(
+      (s) => s.date >= sampleDate,
+    );
+    const totalOrderQty = matchingSales.reduce((sum, s) => sum + s.totalQty, 0);
+    const isAccepted = totalOrderQty > 0;
+
+    const groupKey = `${customerCode}|${productNorm}`;
+    if (!grouped.has(groupKey)) {
+      grouped.set(groupKey, {
+        customerCode,
+        customerName,
+        productName,
+        totalSamples: 0,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        sampleDetails: [], // store details for modal
+      });
+    }
+    const g = grouped.get(groupKey);
+    g.totalSamples += sampleQty;
+    if (isAccepted) g.acceptedCount += sampleQty;
+    else g.rejectedCount += sampleQty;
+
+    // Store sample details for modal (only store first few? keep all for now)
+    g.sampleDetails.push({
+      date: sampleDate,
+      mrName,
+      remark,
+      quantity: originalQty,
+      sampleId,
+    });
+  }
+
+  // 6. Build records array
+  let records = Array.from(grouped.values()).map((g) => ({
+    customerCode: g.customerCode,
+    customerName: g.customerName,
+    productName: g.productName,
+    totalProducts: g.totalSamples,
+    acceptedCount: g.acceptedCount,
+    rejectedCount: g.rejectedCount,
+    acceptanceRate:
+      g.totalSamples > 0
+        ? parseFloat(((g.acceptedCount / g.totalSamples) * 100).toFixed(2))
+        : 0,
+    sampleDetails: g.sampleDetails,
+  }));
+
+  // 7. Apply search filter
+  if (search.trim()) {
+    const q = search.toLowerCase();
+    records = records.filter(
+      (r) =>
+        r.customerName?.toLowerCase().includes(q) ||
+        r.customerCode?.toLowerCase().includes(q) ||
+        r.productName?.toLowerCase().includes(q),
+    );
+  }
+
+  // 8. Sort
+  records.sort((a, b) => {
+    const cn = (a.customerName || "").localeCompare(b.customerName || "");
+    if (cn !== 0) return cn;
+    return (a.productName || "").localeCompare(b.productName || "");
+  });
+
+  // 9. Summary
+  const totalSamples = records.reduce((s, r) => s + r.totalProducts, 0);
+  const totalAccepted = records.reduce((s, r) => s + r.acceptedCount, 0);
+  const totalRejected = records.reduce((s, r) => s + r.rejectedCount, 0);
+  const acceptanceRate =
+    totalSamples > 0
+      ? parseFloat(((totalAccepted / totalSamples) * 100).toFixed(2))
+      : 0;
+
+  return {
+    summary: {
+      totalCustomers: customerSet.size,
+      totalSamples,
+      totalAccepted,
+      totalRejected,
+      acceptanceRate,
+    },
+    records,
+    totalRecords: records.length,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET / — paginated data
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 7;
-    const search = req.query.search?.trim() || "";
+    const {
+      period = "month",
+      month,
+      year,
+      startDate,
+      endDate,
+      search = "",
+      page = 1,
+      limit = 7,
+    } = req.query;
 
-    // 🔍 Build match query
-    const matchQuery = {};
-    if (search) {
-      matchQuery.$or = [
-        { "customerDetails.name": { $regex: search, $options: "i" } },
-        { "customerDetails.customerCode": { $regex: search, $options: "i" } },
-        { mrName: { $regex: search, $options: "i" } },
-        { "products.productName": { $regex: search, $options: "i" } },
-      ];
-    }
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const limitNum = Math.max(1, parseInt(limit, 10));
 
-    // 🧮 Main aggregation pipeline (customer + product wise)
-    const pipeline = [
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerDetails",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      { $match: matchQuery },
-      {
-        $unwind: {
-          path: "$products",
-          preserveNullAndEmptyArrays: false,
-        },
-      },
-      {
-        $group: {
-          _id: {
-            customerCode: "$customerCode",
-            customerName: "$customerDetails.name",
-            productName: "$products.productName",
-          },
-          totalSales: { $sum: 1 },
-          acceptedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, "$products.totalQty", 0]
-            },
-          },
-          rejectedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", false] }, "$products.totalQty", 0]
-            },
-          },
-          totalDecisions: {
-            $sum: {
-              $cond: [
-                { $in: ["$products.isProductAccept", [true, false]] },
-                1,
-                0
-              ]
-            },
-          },
-          acceptedDecisions: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, 1, 0]
-            },
-          },
-          rejectedDecisions: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", false] }, 1, 0]
-            },
-          },
-        },
-      },
-      {
-        $addFields: {
-          acceptanceRate: {
-            $cond: [
-              { $eq: ["$totalDecisions", 0] },
-              0,
-              {
-                $multiply: [
-                  { $divide: ["$acceptedDecisions", "$totalDecisions"] },
-                  100,
-                ],
-              },
-            ],
-          },
-          totalQty: { $add: ["$acceptedQty", "$rejectedQty"] }
-        },
-      },
-      {
-        $project: {
-          customerCode: "$_id.customerCode",
-          customerName: { $ifNull: ["$_id.customerName", "N/A"] },
-          productName: { 
-            $ifNull: ["$_id.productName", "Unknown Product"]
-          },
-          totalProducts: "$totalQty",
-          acceptedCount: "$acceptedQty",
-          rejectedCount: "$rejectedQty",
-          acceptanceRate: { $round: ["$acceptanceRate", 2] },
-          _id: 0,
-        },
-      },
-      { $sort: { customerName: 1, productName: 1 } },
-    ];
-    
-    // 📊 Get total record count
-    const countPipeline = [...pipeline, { $count: "total" }];
-    const countResult = await SaleSummary.aggregate(countPipeline);
-    const totalRecords = countResult.length > 0 ? countResult[0].total : 0;
-    const totalPages = Math.ceil(totalRecords / limit);
-    
-    // 📄 Apply pagination
-    const paginatedPipeline = [...pipeline, { $skip: (page - 1) * limit }, { $limit: limit }];
-    const records = await SaleSummary.aggregate(paginatedPipeline);
-    
-    // 🧾 Global Summary
-    const summaryPipeline = [
-      { $unwind: "$products" },
-      {
-        $group: {
-          _id: null,
-          totalCustomers: { $addToSet: "$customerCode" },
-          totalQty: { $sum: "$products.totalQty" },
-          totalAcceptedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, "$products.totalQty", 0]
-            },
-          },
-          totalRejectedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", false] }, "$products.totalQty", 0]
-            },
-          },
-          totalDecisions: {
-            $sum: {
-              $cond: [
-                { $in: ["$products.isProductAccept", [true, false]] },
-                1,
-                0
-              ]
-            },
-          },
-          acceptedDecisions: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, 1, 0]
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          totalCustomers: { $size: "$totalCustomers" },
-          totalProducts: "$totalQty",
-          totalAccepted: "$totalAcceptedQty",
-          totalRejected: "$totalRejectedQty",
-          acceptanceRate: {
-            $cond: [
-              { $eq: ["$totalDecisions", 0] },
-              0,
-              {
-                $multiply: [
-                  { $divide: ["$acceptedDecisions", "$totalDecisions"] },
-                  100,
-                ],
-              },
-            ],
-          },
-        },
-      },
-    ];
+    const { summary, records, totalRecords } = await buildAcceptanceData({
+      period,
+      month,
+      year,
+      startDate,
+      endDate,
+      search,
+    });
 
-    const summaryResult = await SaleSummary.aggregate(summaryPipeline);
-    
-    const summary =
-      summaryResult.length > 0
-        ? summaryResult[0]
-        : {
-            totalCustomers: 0,
-            totalProducts: 0,
-            totalAccepted: 0,
-            totalRejected: 0,
-            acceptanceRate: 0,
-          };
-    
-    // ✅ Format response records
-    const formattedRecords = records.map((record, index) => ({
-      srNo: index + 1 + (page - 1) * limit,
-      customerCode: record.customerCode,
-      customerName: record.customerName,
-      productName: record.productName || "Unknown Product",
-      totalProducts: record.totalProducts,
-      acceptedCount: record.acceptedCount,
-      rejectedCount: record.rejectedCount,
-      acceptanceRate: record.acceptanceRate,
+    const totalPages = Math.ceil(totalRecords / limitNum);
+    const paginatedRecs = records.slice(
+      (pageNum - 1) * limitNum,
+      pageNum * limitNum,
+    );
+
+    // Add srNo
+    const formattedRecords = paginatedRecs.map((r, idx) => ({
+      srNo: (pageNum - 1) * limitNum + idx + 1,
+      ...r,
     }));
-    
-    // ✅ Send response
-    const response = {
+
+    res.status(200).json({
       success: true,
       data: {
-        summary: {
-          totalCustomers: summary.totalCustomers,
-          totalProducts: summary.totalProducts,
-          totalAccepted: summary.totalAccepted,
-          totalRejected: summary.totalRejected,
-          acceptanceRate: parseFloat(summary.acceptanceRate.toFixed(2)),
-        },
+        summary,
         records: formattedRecords,
       },
       pagination: {
-        currentPage: page,
+        currentPage: pageNum,
         totalPages,
         totalRecords,
-        hasNext: page < totalPages,
-        hasPrev: page > 1,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
       },
-    };
-    
-    res.status(200).json(response);
-    
+    });
   } catch (error) {
+    console.error("❌ Acceptance rate error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while fetching acceptance rate data",
@@ -243,543 +339,195 @@ router.get("/", async (req, res) => {
   }
 });
 
-// FIXED: Changed from '/customer-product-acceptance-rate/export' to '/export'
-// Export to Excel endpoint
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /export — Excel download (all records, no pagination)
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/export", async (req, res) => {
   try {
-    const search = req.query.search?.trim() || "";
-    const matchQuery = {};
+    const {
+      period = "month",
+      month,
+      year,
+      startDate,
+      endDate,
+      search = "",
+    } = req.query;
 
-    if (search) {
-      matchQuery.$or = [
-        { "customerDetails.name": { $regex: search, $options: "i" } },
-        { "customerDetails.customerCode": { $regex: search, $options: "i" } },
-        { mrName: { $regex: search, $options: "i" } },
-        { "products.productName": { $regex: search, $options: "i" } },
-      ];
-    }
+    const { summary, records } = await buildAcceptanceData({
+      period,
+      month,
+      year,
+      startDate,
+      endDate,
+      search,
+    });
 
-    // First, get the summary data
-    const summaryPipeline = [
-      { $unwind: "$products" },
-      {
-        $group: {
-          _id: null,
-          totalCustomers: { $addToSet: "$customerCode" },
-          totalQty: { $sum: "$products.totalQty" },
-          totalAcceptedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, "$products.totalQty", 0]
-            },
-          },
-          totalRejectedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", false] }, "$products.totalQty", 0]
-            },
-          },
-          totalDecisions: {
-            $sum: {
-              $cond: [
-                { $in: ["$products.isProductAccept", [true, false]] },
-                1,
-                0
-              ]
-            },
-          },
-          acceptedDecisions: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, 1, 0]
-            },
-          },
-        },
-      },
-    ];
+    // Build filter label
+    const filterLabel = (() => {
+      if (period === "custom" && startDate && endDate)
+        return `${startDate} to ${endDate}`;
+      if (period === "year") return `Year ${year || new Date().getFullYear()}`;
+      const m = month ? parseInt(month) : new Date().getMonth() + 1;
+      const y = year ? parseInt(year) : new Date().getFullYear();
+      return `${new Date(y, m - 1, 1).toLocaleString("default", { month: "long" })} ${y}`;
+    })();
 
-    const summaryResult = await SaleSummary.aggregate(summaryPipeline);
-    const summary = summaryResult.length > 0 ? summaryResult[0] : {
-      totalCustomers: 0,
-      totalQty: 0,
-      totalAcceptedQty: 0,
-      totalRejectedQty: 0,
-      totalDecisions: 0,
-      acceptedDecisions: 0,
-    };
-
-    // Calculate acceptance rate
-    const acceptanceRate = summary.totalDecisions > 0 
-      ? (summary.acceptedDecisions / summary.totalDecisions * 100).toFixed(2)
-      : 0;
-
-    // Get all records without pagination
-    const pipeline = [
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerDetails",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      { $match: matchQuery },
-      {
-        $unwind: {
-          path: "$products",
-          preserveNullAndEmptyArrays: false,
-        },
-      },
-      {
-        $group: {
-          _id: {
-            customerCode: "$customerCode",
-            customerName: "$customerDetails.name",
-            productName: "$products.productName",
-          },
-          totalSales: { $sum: 1 },
-          acceptedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, "$products.totalQty", 0]
-            },
-          },
-          rejectedQty: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", false] }, "$products.totalQty", 0]
-            },
-          },
-          totalDecisions: {
-            $sum: {
-              $cond: [
-                { $in: ["$products.isProductAccept", [true, false]] },
-                1,
-                0
-              ]
-            },
-          },
-          acceptedDecisions: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", true] }, 1, 0]
-            },
-          },
-          rejectedDecisions: {
-            $sum: {
-              $cond: [{ $eq: ["$products.isProductAccept", false] }, 1, 0]
-            },
-          },
-        },
-      },
-      {
-        $addFields: {
-          acceptanceRate: {
-            $cond: [
-              { $eq: ["$totalDecisions", 0] },
-              0,
-              {
-                $multiply: [
-                  { $divide: ["$acceptedDecisions", "$totalDecisions"] },
-                  100,
-                ],
-              },
-            ],
-          },
-          totalQty: { $add: ["$acceptedQty", "$rejectedQty"] }
-        },
-      },
-      {
-        $project: {
-          customerCode: "$_id.customerCode",
-          customerName: { $ifNull: ["$_id.customerName", "N/A"] },
-          productName: { 
-            $ifNull: ["$_id.productName", "Unknown Product"]
-          },
-          totalProducts: "$totalQty",
-          acceptedCount: "$acceptedQty",
-          rejectedCount: "$rejectedQty",
-          acceptanceRate: { $round: ["$acceptanceRate", 2] },
-          _id: 0,
-        },
-      },
-      { $sort: { customerName: 1, productName: 1 } },
-    ];
-
-    const records = await SaleSummary.aggregate(pipeline);
-
-    // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Customer Product Acceptance Rate');
+    const worksheet = workbook.addWorksheet("Customer Product Acceptance Rate");
 
-    // Add title
-    const titleRow = worksheet.addRow(['Customer Product Acceptance Rate Report']);
-    titleRow.font = { bold: true, size: 16 };
-    titleRow.alignment = { horizontal: 'center' };
-    worksheet.mergeCells('A1:H1');
-    worksheet.addRow([]); // Empty row
+    // Title
+    worksheet.mergeCells("A1:H1");
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = `Customer Product Acceptance Rate — ${filterLabel}`;
+    titleCell.font = { bold: true, size: 16 };
+    titleCell.alignment = { horizontal: "center" };
+    worksheet.addRow([]);
 
-    // Add summary section header
-    const summaryHeader = worksheet.addRow(['SUMMARY']);
-    summaryHeader.font = { bold: true, size: 14, color: { argb: 'FF0000FF' } };
-    summaryHeader.alignment = { horizontal: 'center' };
-    worksheet.mergeCells('A3:H3');
-    worksheet.addRow([]); // Empty row
+    // Summary section
+    const summaryHeaderRow = worksheet.addRow(["SUMMARY"]);
+    summaryHeaderRow.font = {
+      bold: true,
+      size: 13,
+      color: { argb: "FF4F46E5" },
+    };
+    worksheet.mergeCells(
+      `A${summaryHeaderRow.number}:H${summaryHeaderRow.number}`,
+    );
+    worksheet.addRow([]);
 
-    // Add summary data
-    const summaryLabels = [
-      'Total Customers', 'Total Products', 'Accepted Quantity', 
-      'Rejected Quantity', 'Acceptance Rate'
+    const summaryData = [
+      ["Total Customers", summary.totalCustomers],
+      ["Total Samples", summary.totalSamples],
+      ["Accepted Samples", summary.totalAccepted],
+      ["Rejected Samples", summary.totalRejected],
+      ["Acceptance Rate", `${summary.acceptanceRate?.toFixed(2) || 0}%`],
+      ["Period", filterLabel],
+      ["Generated On", new Date().toLocaleString()],
     ];
-    
-    const summaryValues = [
-      summary.totalCustomers ? summary.totalCustomers.length : 0,
-      summary.totalQty || 0,
-      summary.totalAcceptedQty || 0,
-      summary.totalRejectedQty || 0,
-      parseFloat(acceptanceRate),
-    ];
-
-    // Create a table-like summary
-    for (let i = 0; i < summaryLabels.length; i++) {
-      const row = worksheet.addRow([summaryLabels[i], summaryValues[i]]);
+    for (const [label, value] of summaryData) {
+      const row = worksheet.addRow([label, value]);
       row.getCell(1).font = { bold: true };
-      row.getCell(2).numFmt = i === 4 ? '0.00"%"' : '#,##0';
     }
 
-    worksheet.addRow([]); // Empty row
-    worksheet.addRow([]); // Empty row
+    worksheet.addRow([]);
+    worksheet.addRow([]);
 
-    // Add data section header
-    const dataHeader = worksheet.addRow(['DETAILED DATA']);
-    dataHeader.font = { bold: true, size: 14, color: { argb: 'FF0000FF' } };
-    dataHeader.alignment = { horizontal: 'center' };
-    worksheet.mergeCells('A' + (worksheet.rowCount) + ':H' + (worksheet.rowCount));
-    worksheet.addRow([]); // Empty row
+    // Detail section header
+    const detailHeaderRow = worksheet.addRow(["DETAILED DATA"]);
+    detailHeaderRow.font = {
+      bold: true,
+      size: 13,
+      color: { argb: "FF4F46E5" },
+    };
+    worksheet.mergeCells(
+      `A${detailHeaderRow.number}:H${detailHeaderRow.number}`,
+    );
+    worksheet.addRow([]);
 
-    // Define columns for detailed data
-    const headerRow = worksheet.addRow([
-      'Sr. No.',
-      'Customer Code',
-      'Customer Name',
-      'Product Name',
-      'Total Quantity',
-      'Accepted Quantity',
-      'Rejected Quantity',
-      'Acceptance Rate %'
+    // Column headers
+    const colHeaderRow = worksheet.addRow([
+      "Sr. No.",
+      "Customer Code",
+      "Customer Name",
+      "Product Name",
+      "Total Samples",
+      "Accepted",
+      "Rejected",
+      "Acceptance Rate %",
     ]);
-    
-    headerRow.font = { bold: true };
-    headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
-    headerRow.eachCell((cell) => {
+    colHeaderRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    colHeaderRow.eachCell((cell) => {
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F81BD" },
       };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
       cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
       };
     });
 
-    // Add data rows
+    // Data rows
     records.forEach((record, index) => {
-      const dataRow = worksheet.addRow([
+      const row = worksheet.addRow([
         index + 1,
-        record.customerCode,
-        record.customerName,
-        record.productName,
+        record.customerCode || "N/A",
+        record.customerName || "N/A",
+        record.productName || "N/A",
         record.totalProducts,
         record.acceptedCount,
         record.rejectedCount,
-        record.acceptanceRate
+        record.acceptanceRate,
       ]);
-      
-      // Add borders to data rows
-      dataRow.eachCell((cell) => {
+      row.eachCell((cell) => {
         cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
         };
       });
+
+      // Colour-code acceptance rate
+      const rateCell = row.getCell(8);
+      const rate = record.acceptanceRate;
+      if (rate >= 75) {
+        rateCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFC6EFCE" },
+        };
+        rateCell.font = { bold: true, color: { argb: "FF006100" } };
+      } else if (rate >= 40) {
+        rateCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFFEB9C" },
+        };
+        rateCell.font = { bold: true, color: { argb: "FF9C6500" } };
+      } else {
+        rateCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFFC7CE" },
+        };
+        rateCell.font = { bold: true, color: { argb: "FF9C0006" } };
+      }
     });
 
-    // Format columns
-    worksheet.getColumn(1).width = 10;  // Sr. No.
-    worksheet.getColumn(2).width = 20;  // Customer Code
-    worksheet.getColumn(3).width = 30;  // Customer Name
-    worksheet.getColumn(4).width = 30;  // Product Name
-    worksheet.getColumn(5).width = 15;  // Total Quantity
-    worksheet.getColumn(6).width = 18;  // Accepted Quantity
-    worksheet.getColumn(7).width = 18;  // Rejected Quantity
-    worksheet.getColumn(8).width = 18;  // Acceptance Rate
-    
-    // Format numeric columns
-    worksheet.getColumn(5).numFmt = '#,##0';
-    worksheet.getColumn(6).numFmt = '#,##0';
-    worksheet.getColumn(7).numFmt = '#,##0';
+    // Column widths
+    worksheet.getColumn(1).width = 10;
+    worksheet.getColumn(2).width = 18;
+    worksheet.getColumn(3).width = 30;
+    worksheet.getColumn(4).width = 30;
+    worksheet.getColumn(5).width = 15;
+    worksheet.getColumn(6).width = 15;
+    worksheet.getColumn(7).width = 15;
+    worksheet.getColumn(8).width = 18;
+
+    worksheet.getColumn(5).numFmt = "#,##0";
+    worksheet.getColumn(6).numFmt = "#,##0";
+    worksheet.getColumn(7).numFmt = "#,##0";
     worksheet.getColumn(8).numFmt = '0.00"%"';
 
-    // Set response headers
+    const fileName = `customer_product_acceptance_rate_${new Date().toISOString().split("T")[0]}.xlsx`;
     res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="customer_product_acceptance_rate_${new Date().toISOString().split('T')[0]}.xlsx"`
-    );
-
-    // Write workbook to response
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     await workbook.xlsx.write(res);
     res.end();
-
   } catch (error) {
-    console.error('Export error:', error);
+    console.error("❌ Export error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to export data to Excel",
       error: error.message,
-    });
-  }
-});
-
-// ===== Annual Repeat Rate Export =====
-router.get("/annual/export", async (req, res) => {
-  try {
-    const { search = "", period = "last_year" } = req.query;
-
-    // Date filter for last year
-    let dateFilter = {};
-    if (period === "last_year") {
-      const now = new Date();
-      const firstDayOfLastYear = new Date(now.getFullYear() - 1, 0, 1);
-      const lastDayOfLastYear = new Date(now.getFullYear() - 1, 11, 31);
-      dateFilter = {
-        invoiceDate: {
-          $gte: firstDayOfLastYear,
-          $lte: lastDayOfLastYear,
-        },
-      };
-    }
-
-    // Search filter
-    let searchCondition = {};
-    if (search.trim() !== "") {
-      const regex = new RegExp(search.trim(), "i");
-      searchCondition = {
-        $or: [
-          { "customerDetails.name": regex },
-          { "customerDetails.customerCode": regex },
-          { mrName: regex },
-        ],
-      };
-    }
-
-    // Main aggregation pipeline (no pagination)
-    const pipeline = [
-      { $match: { ...dateFilter, ...searchCondition } },
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerDetails",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
-        $group: {
-          _id: "$customerCode",
-          customerName: { $first: "$customerDetails.name" },
-          customerCode: { $first: "$customerCode" },
-          totalPurchases: { $sum: 1 },
-          firstPurchaseDate: { $min: "$invoiceDate" },
-          lastPurchaseDate: { $max: "$invoiceDate" },
-          totalAmount: { $sum: "$totalAmount" },
-        },
-      },
-      {
-        $addFields: {
-          isRepeatCustomer: {
-            $cond: { if: { $gte: ["$totalPurchases", 2] }, then: true, else: false },
-          },
-        },
-      },
-      { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
-    ];
-
-    const records = await SaleSummary.aggregate(pipeline);
-
-    // Summary statistics
-    const summaryPipeline = [
-      { $match: { ...dateFilter, ...searchCondition } },
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerDetails",
-        },
-      },
-      {
-        $group: {
-          _id: "$customerCode",
-          totalPurchases: { $sum: 1 },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalCustomers: { $sum: 1 },
-          repeatCustomers: {
-            $sum: { $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0] },
-          },
-          newCustomers: {
-            $sum: { $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0] },
-          },
-        },
-      },
-      {
-        $project: {
-          totalCustomers: 1,
-          repeatCustomers: 1,
-          newCustomers: 1,
-          repeatRate: {
-            $cond: [
-              { $eq: ["$totalCustomers", 0] },
-              0,
-              {
-                $multiply: [
-                  { $divide: ["$repeatCustomers", "$totalCustomers"] },
-                  100,
-                ],
-              },
-            ],
-          },
-        },
-      },
-    ];
-
-    const summaryResult = await SaleSummary.aggregate(summaryPipeline);
-    const summary = summaryResult[0] || {
-      totalCustomers: 0,
-      repeatCustomers: 0,
-      newCustomers: 0,
-      repeatRate: 0,
-    };
-
-    // Helper to pad customer code
-    const padCode = (code) => {
-      if (!code) return "N/A";
-      return String(code).padStart(5, '0');
-    };
-
-    // Create Excel workbook
-    const workbook = new ExcelJS.Workbook();
-
-    // Summary Sheet
-    const summarySheet = workbook.addWorksheet("Summary");
-    summarySheet.mergeCells("A1:E1");
-    const titleCell = summarySheet.getCell("A1");
-    titleCell.value = "Annual Customer Repeat Rate - Summary";
-    titleCell.font = { size: 16, bold: true };
-    titleCell.alignment = { horizontal: "center" };
-
-    summarySheet.addRow([]);
-    const summaryHeaders = ["Metric", "Value"];
-    const summaryHeaderRow = summarySheet.addRow(summaryHeaders);
-    summaryHeaderRow.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF4F81BD" },
-      };
-      cell.alignment = { horizontal: "center" };
-    });
-
-    summarySheet.addRow(["Total Customers", summary.totalCustomers]);
-    summarySheet.addRow(["Repeat Customers", summary.repeatCustomers]);
-    summarySheet.addRow(["New Customers", summary.newCustomers]);
-    summarySheet.addRow(["Repeat Rate", `${summary.repeatRate?.toFixed(2) || 0}%`]);
-    summarySheet.addRow(["Generated On", new Date().toLocaleString()]);
-
-    summarySheet.columns.forEach((col) => (col.width = 25));
-
-    // Details Sheet
-    const detailsSheet = workbook.addWorksheet("Details");
-    detailsSheet.mergeCells("A1:G1");
-    const detailsTitle = detailsSheet.getCell("A1");
-    detailsTitle.value = "Annual Customer Repeat Rate - Details";
-    detailsTitle.font = { size: 16, bold: true };
-    detailsTitle.alignment = { horizontal: "center" };
-
-    detailsSheet.addRow([]);
-    const detailsHeaders = [
-      "Sr.No",
-      "Customer Code",
-      "Customer Name",
-      "Total Purchases",
-      "First Purchase",
-      "Last Purchase",
-      "Status",
-    ];
-    const detailsHeaderRow = detailsSheet.addRow(detailsHeaders);
-    detailsHeaderRow.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "FF4F81BD" },
-      };
-      cell.alignment = { horizontal: "center" };
-    });
-
-    records.forEach((record, idx) => {
-      detailsSheet.addRow([
-        idx + 1,
-        padCode(record.customerCode),                // padded code
-        record.customerName || "N/A",
-        record.totalPurchases || 0,
-        record.firstPurchaseDate
-          ? new Date(record.firstPurchaseDate).toLocaleDateString()
-          : "N/A",
-        record.lastPurchaseDate
-          ? new Date(record.lastPurchaseDate).toLocaleDateString()
-          : "N/A",
-        record.isRepeatCustomer ? "Repeat" : "One-Time",
-      ]);
-    });
-
-    detailsSheet.columns.forEach((col) => (col.width = 20));
-
-    // Send response
-    const fileName = `Annual_Repeat_Rate_${Date.now()}.xlsx`;
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
-    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-
-    await workbook.xlsx.write(res);
-    res.end();
-  } catch (error) {
-    console.error("❌ Error exporting annual repeat rate:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to export annual repeat rate",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });

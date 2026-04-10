@@ -68,6 +68,7 @@ import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js";
 import outstanding from "./routers/sale/outstanding.js";
 import averagePrice from "./routers/reports/averagePrice.js";
 import mrAdvanceRoutes from "./routers/hrm/mrAdvance.js";
+import customerRepeateRate from "./routers/reports/customerRepeatRate.js";
 
 // Import StockInHand routes
 import stockInHandRoutes from "./routers/reports/stockInHand.js";
@@ -190,6 +191,7 @@ app.use("/api/reports/mr-wise-sales", mrWiseSale);
 // Customer Reports
 app.use("/api/reports/new-customers", newCustomer);
 app.use("/api/reports/customer-retention", customerRetention);
+app.use("/api/reports/customer-repeate", customerRepeateRate);
 app.use("/api/reports/zone-wise-customers", zoneWiseCustomer);
 app.use("/api/reports/province-wise-customers", provinceWiseCustomerRoutes);
 app.use("/api/reports/customer-expectation-ratio", customerExpentationRatio);

@@ -12,6 +12,7 @@ import {
   BarChart3,
   Target,
   Calendar,
+  DollarSign,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -23,9 +24,10 @@ const CustomerRetentionRate = () => {
   const [data, setData] = useState({
     summary: {
       totalCustomers: 0,
-      retainedCustomers: 0,
+      newCustomers: 0,
+      existingCustomers: 0,
       retentionRate: 0,
-      repeatCustomers: 0,
+      totalSalesAmount: 0,
     },
     records: [],
   });
@@ -42,30 +44,20 @@ const CustomerRetentionRate = () => {
   const [expandedZones, setExpandedZones] = useState(new Set());
 
   const inputRef = useRef(null);
-
   const visiblePages = useVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
-
   const itemsPerPage = 7;
 
-  // Calculate if export should be disabled
-  const isExportDisabled = exporting || loading || data.records.length === 0;
+  const getSerialNumber = (index) =>
+    (pagination.currentPage - 1) * itemsPerPage + index + 1;
 
-  const getSerialNumber = (index) => {
-    return (pagination.currentPage - 1) * itemsPerPage + index + 1;
-  };
-
-  // Toggle zone expansion
   const toggleZoneExpansion = (zoneId) => {
     setExpandedZones((prev) => {
       const newSet = new Set(prev);
-      if (newSet.has(zoneId)) {
-        newSet.delete(zoneId);
-      } else {
-        newSet.add(zoneId);
-      }
+      if (newSet.has(zoneId)) newSet.delete(zoneId);
+      else newSet.add(zoneId);
       return newSet;
     });
   };
@@ -73,32 +65,23 @@ const CustomerRetentionRate = () => {
   const fetchRetentionData = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
-      let params = {
-        page: page,
-        limit: itemsPerPage,
-      };
-
-      if (search && search.trim() !== "") {
-        params.search = search.trim();
-      }
-
+      const params = { page, limit: itemsPerPage };
+      if (search && search.trim()) params.search = search.trim();
       const response = await axios.get(
-        `${backendUrl}/api/reports/customer-retention`,
-        {
-          params,
-        }
+        `${backendUrl}/api/reports/customer-repeate`,
+        { params },
       );
-    
       setData(
         response.data.data || {
           summary: {
             totalCustomers: 0,
-            retainedCustomers: 0,
+            newCustomers: 0,
+            existingCustomers: 0,
             retentionRate: 0,
-            repeatCustomers: 0,
+            totalSalesAmount: 0,
           },
           records: [],
-        }
+        },
       );
       setPagination(
         response.data.pagination || {
@@ -107,19 +90,18 @@ const CustomerRetentionRate = () => {
           totalRecords: 0,
           hasNext: false,
           hasPrev: false,
-        }
+        },
       );
     } catch (error) {
-      console.error("Error fetching customer retention data:", error);
+      console.error(error);
       showToast("error", "Failed to fetch customer retention data");
-
-      // Reset data on error
       setData({
         summary: {
           totalCustomers: 0,
-          retainedCustomers: 0,
+          newCustomers: 0,
+          existingCustomers: 0,
           retentionRate: 0,
-          repeatCustomers: 0,
+          totalSalesAmount: 0,
         },
         records: [],
       });
@@ -138,153 +120,62 @@ const CustomerRetentionRate = () => {
   useEffect(() => {
     fetchRetentionData(1);
   }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => fetchRetentionData(1, searchTerm), 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) {
-      fetchRetentionData(page);
-    }
+    if (page >= 1 && page <= pagination.totalPages) fetchRetentionData(page);
   };
-
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-  };
-
   const handleClearSearch = () => {
     setSearchTerm("");
     fetchRetentionData(1);
   };
-
-  // Debounced search effect
-  useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      fetchRetentionData(1, searchTerm);
-    }, 500);
-
-    return () => clearTimeout(delayDebounce);
-  }, [searchTerm]);
-
-  const handleSearch = (e) => {
-    if (e.key === "Enter") {
-      fetchRetentionData(1);
-    }
+  const handleSearchKey = (e) => {
+    if (e.key === "Enter") fetchRetentionData(1);
   };
 
   const exportToExcel = async () => {
-    // Prevent export if there are no records
     if (data.records.length === 0) {
       showToast("warning", "No records to export");
       return;
     }
-
     setExporting(true);
     try {
       const params = {};
-
-      if (searchTerm && searchTerm.trim() !== "") {
-        params.search = searchTerm.trim();
-      }
-
-      // Create URL with query parameters
+      if (searchTerm.trim()) params.search = searchTerm.trim();
       const queryString = new URLSearchParams(params).toString();
-      const exportUrl = `${backendUrl}/api/reports/customer-retention/export?${queryString}`;
-
-      // Use axios with responseType 'blob' for file download
-      const response = await axios.get(exportUrl, {
-        responseType: 'blob',
-      });
-
-      // Create download link
+      const response = await axios.get(
+        `${backendUrl}/api/reports/customer-repeate/export?${queryString}`,
+        { responseType: "blob" },
+      );
       const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      const fileName = `Customer_Retention_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
-
+      const link = document.createElement("a");
       link.href = url;
-      link.setAttribute('download', fileName);
+      link.setAttribute(
+        "download",
+        `Customer_Retention_Report_${new Date().toISOString().split("T")[0]}.xlsx`,
+      );
       document.body.appendChild(link);
       link.click();
       link.remove();
-
       showToast("success", "Excel report downloaded successfully!");
     } catch (error) {
-      console.error("Error exporting to Excel:", error);
+      console.error(error);
       showToast("error", "Failed to download Excel report");
     } finally {
       setExporting(false);
     }
   };
 
-  // Render Pagination Component - Only show when there are records and more than one page
-  const renderPagination = () => {
-    if (data.records.length === 0 || pagination.totalPages <= 1) return null;
-
-    return (
-      <div className="flex items-center justify-start gap-2 mt-6">
-        <button
-          onClick={() => handlePageChange(pagination.currentPage - 1)}
-          disabled={!pagination.hasPrev || loading}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasPrev && !loading
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
-        >
-          <ChevronLeft size={16} />
-          Prev
-        </button>
-
-        {/* Page Numbers */}
-        <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
-            <button
-              key={index}
-              onClick={() =>
-                typeof page === "number" && !loading ? handlePageChange(page) : null
-              }
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number" && !loading
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
-              }`}
-              disabled={typeof page !== "number" || loading}
-            >
-              {page}
-            </button>
-          ))}
-        </div>
-
-        {/* Next Button */}
-        <button
-          onClick={() => handlePageChange(pagination.currentPage + 1)}
-          disabled={!pagination.hasNext || loading}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasNext && !loading
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
-        >
-          Next
-          <ChevronRight size={16} />
-        </button>
-      </div>
-    );
-  };
-
-  // Loading Spinner Component
-  const LoadingSpinner = () => (
-    <div className="flex justify-center items-center py-8">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-    </div>
-  );
-
-  // FIXED: Summary Cards - No <div> inside <p>
+  // Summary Cards (4 cards)
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Total Customers</p>
+            <p className="text-sm text-gray-600">Total Customers (All Time)</p>
             {loading ? (
               <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
             ) : (
@@ -299,178 +190,148 @@ const CustomerRetentionRate = () => {
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Retained Customers</p>
+            <p className="text-sm text-gray-600">
+              Existing Customers (Before Jan 1)
+            </p>
             {loading ? (
               <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
             ) : (
               <p className="text-2xl font-bold text-gray-800">
-                {data.summary.retainedCustomers?.toLocaleString() || 0}
+                {data.summary.existingCustomers?.toLocaleString() || 0}
               </p>
             )}
           </div>
-          <Repeat className="w-8 h-8 text-blue-500" />
+          <Users className="w-8 h-8 text-blue-500" />
         </div>
       </div>
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+        <div className="flex justify-between items-center">
+          <div>
+            <p className="text-sm text-gray-600">New Customers (YTD)</p>
+            {loading ? (
+              <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+            ) : (
+              <p className="text-2xl font-bold text-gray-800">
+                {data.summary.newCustomers?.toLocaleString() || 0}
+              </p>
+            )}
+          </div>
+          <TrendingUp className="w-8 h-8 text-purple-500" />
+        </div>
+      </div>
+      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
             <p className="text-sm text-gray-600">Retention Rate</p>
             {loading ? (
               <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
             ) : (
-              <p className="text-2xl font-bold text-gray-800">
-                {`${data.summary.retentionRate?.toFixed(1) || 0}%`}
-              </p>
+              <p className="text-2xl font-bold text-gray-800">{`${data.summary.retentionRate?.toFixed(1) || 0}%`}</p>
             )}
           </div>
-          <BarChart3 className="w-8 h-8 text-purple-500" />
-        </div>
-      </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Repeat Customers</p>
-            {loading ? (
-              <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-            ) : (
-              <p className="text-2xl font-bold text-gray-800">
-                {data.summary.repeatCustomers?.toLocaleString() || 0}
-              </p>
-            )}
-          </div>
-          <Target className="w-8 h-8 text-orange-500" />
+          <BarChart3 className="w-8 h-8 text-orange-500" />
         </div>
       </div>
     </div>
   );
 
-  // Render zone header row - Fixed border-b for 7th row
+  // Zone header row
   const renderZoneHeader = (record, index) => {
-    const isLastRowOnPage = (index + 1) % itemsPerPage === 0 || index + 1 === data.records.length;
-    const zoneId = record._id || `zone-${index}`; // Use _id instead of zoneId
-
+    const isLastRowOnPage =
+      (index + 1) % itemsPerPage === 0 || index + 1 === data.records.length;
+    const zoneId = record.zoneId;
     return (
       <tr
-        key={`zone-${zoneId}-${index}`} // Add index to ensure uniqueness
-        className={`bg-gray-50 hover:bg-gray-100 ${
-          isLastRowOnPage ? "" : "border-b"
-        }`}
+        key={`zone-${zoneId}`}
+        className={`bg-gray-50 hover:bg-gray-100 ${isLastRowOnPage ? "" : "border-b"}`}
       >
-        <td className="p-3">
-          <div className="text-sm text-gray-600 font-medium">
-            {getSerialNumber(index)}
-          </div>
+        <td className="p-3 text-sm text-gray-600 font-medium">
+          {getSerialNumber(index)}
         </td>
-        <td className="p-3">
-          <div className="text-sm text-gray-600 font-medium">
-            {record.zoneName || "N/A"}
-          </div>
+        <td className="p-3 text-sm text-gray-600 font-medium">
+          {record.zoneName || "N/A"}
         </td>
-        <td className="p-3">
-          <div className="text-sm text-gray-600 font-medium">
-            {record.totalCustomers?.toLocaleString() || 0}
-          </div>
+        <td className="p-3 text-sm text-gray-600">
+          {record.totalCustomers?.toLocaleString() || 0}
         </td>
-        <td className="p-3">
-          <div className="text-sm font-semibold text-blue-600">
-            {record.retainedCustomers?.toLocaleString() || 0}
-          </div>
+        <td className="p-3 text-sm font-semibold text-blue-600">
+          {record.newCustomers?.toLocaleString() || 0}
         </td>
-        <td className="p-3">
-          <div className="text-sm font-semibold text-green-600">
-            {record.retentionRate?.toFixed(1) || 0}%
-          </div>
+        <td className="p-3 text-sm font-semibold text-green-600">
+          {record.retentionRate?.toFixed(1) || 0}%
+        </td>
+        <td className="p-3 text-sm text-gray-700">
+          $
+          {(record.totalSalesAmount || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+          })}
         </td>
         <td className="p-3 text-center">
-          <div className="flex justify-center">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleZoneExpansion(zoneId);
-              }}
-              disabled={loading}
-              className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs cursor-pointer ${
-                expandedZones.has(zoneId)
-                  ? "bg-indigo-600 hover:bg-indigo-700 text-white"
-                  : "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              <Users size={14} />
-              {expandedZones.has(zoneId)
-                ? "Hide Details"
-                : "View Details"}
-            </button>
-          </div>
+          <button
+            onClick={() => toggleZoneExpansion(zoneId)}
+            disabled={loading}
+            className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs cursor-pointer ${
+              expandedZones.has(zoneId)
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700"
+            } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            <Users size={14} />{" "}
+            {expandedZones.has(zoneId) ? "Hide Details" : "View Details"}
+          </button>
         </td>
       </tr>
     );
   };
 
-  // Render customer rows for expanded zone - Fixed border-b for last customer row
+  // Customer rows for expanded zone
   const renderCustomerRows = (record, zoneIndex) => {
-    const zoneId = record._id || `zone-${zoneIndex}`; // Use _id instead of zoneId
-    const shouldShowCustomers = expandedZones.has(zoneId);
-
+    const zoneId = record.zoneId;
     if (
-      !shouldShowCustomers ||
+      !expandedZones.has(zoneId) ||
       !record.customers ||
       record.customers.length === 0
-    ) {
-      return []; // Return empty array instead of null
-    }
+    )
+      return [];
 
-    return record.customers.map((customer, customerIndex) => {
-      const isLastCustomerRow = customerIndex === record.customers.length - 1;
+    return record.customers.map((customer, custIndex) => {
+      const isLastCustomerRow = custIndex === record.customers.length - 1;
       const isLastZoneRow = zoneIndex === data.records.length - 1;
-
       return (
         <tr
-          key={`customer-${customer.customerId || customer.customerCode || `customer-${zoneIndex}-${customerIndex}`}`} // Fallback keys
-          className={`bg-white hover:bg-gray-50 ${
-            isLastCustomerRow && isLastZoneRow ? "" : "border-b"
-          }`}
+          key={`cust-${customer.customerId || custIndex}`}
+          className={`bg-white hover:bg-gray-50 ${isLastCustomerRow && isLastZoneRow ? "" : "border-b"}`}
         >
           <td className="p-3"></td>
           <td className="p-3 pl-8">
             <div className="flex items-start gap-3">
-              <div className="flex-shrink-0">
-                <User className="w-4 h-4 text-gray-400 mt-1" />
-              </div>
-              <div className="flex-1">
+              <User className="w-4 h-4 text-gray-400 mt-1 flex-shrink-0" />
+              <div>
                 <div className="text-sm font-medium text-gray-900 capitalize">
                   {customer.customerName || "N/A"}
                 </div>
                 <div className="text-xs text-gray-500 mt-1 space-y-1">
-                  {customer.customerCode && (
-                    <div>Code: {customer.customerCode}</div>
-                  )}
-                  {customer.typeOfBusiness && (
-                    <div>Business: {customer.typeOfBusiness}</div>
-                  )}
-                  {customer.medicalRepName && (
-                    <div>MR: {customer.medicalRepName}</div>
-                  )}
+                  <div>Code: {customer.customerCode || "N/A"}</div>
+                  <div>MR: {customer.mrName || "N/A"}</div>
+                  <div>Business: {customer.typeOfBusiness || "N/A"}</div>
                 </div>
               </div>
             </div>
           </td>
-          <td className="p-3">
-            <div className="text-sm text-gray-600">
-              {customer.totalSales || 0} sales
-            </div>
+          <td className="p-3 text-sm text-gray-600">
+            {customer.totalOrdersAllTime || 0}
           </td>
-          <td className="p-3">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <Calendar size={14} />
-              {customer.firstPurchaseDate ?
-                new Date(customer.firstPurchaseDate).toLocaleDateString() : "N/A"}
-            </div>
+          <td className="p-3 text-sm text-blue-600">
+            {customer.periodOrders || 0}
           </td>
-          <td className="p-3">
-            <div className="text-sm text-gray-600">
-              {customer.lastPurchaseDate ?
-                new Date(customer.lastPurchaseDate).toLocaleDateString() : "N/A"}
-            </div>
+          <td className="p-3 text-sm text-green-600">
+            {customer.isNew ? "New" : "Existing"}
+          </td>
+          <td className="p-3 text-sm text-gray-700">
+            $
+            {(customer.totalSalesAmountAllTime || 0).toLocaleString(undefined, {
+              minimumFractionDigits: 2,
+            })}
           </td>
           <td className="p-3"></td>
         </tr>
@@ -484,70 +345,48 @@ const CustomerRetentionRate = () => {
         <th className="p-3 text-sm font-medium">Sr.No</th>
         <th className="p-3 text-sm font-medium">Zone Name / Customer Name</th>
         <th className="p-3 text-sm font-medium">Total Customers</th>
-        <th className="p-3 text-sm font-medium">Retained Customers</th>
+        <th className="p-3 text-sm font-medium">New Customers (YTD)</th>
         <th className="p-3 text-sm font-medium">Retention Rate</th>
+        <th className="p-3 text-sm font-medium">Total Sales (All Time)</th>
         <th className="p-3 text-sm font-medium">Action</th>
       </tr>
     </thead>
   );
 
-  // Get column span
-  const getColSpan = () => 6;
-
-  // Helper function to render table rows without empty text nodes
   const renderTableRows = () => {
     if (loading) {
       return (
         <tr>
-          <td colSpan={getColSpan()} className="p-0">
-            <LoadingSpinner />
+          <td colSpan={7} className="p-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
           </td>
         </tr>
       );
     }
-
     if (data.records.length === 0) {
       return (
         <tr>
-          <td
-            colSpan={getColSpan()}
-            className="p-3 text-center text-gray-500"
-          >
+          <td colSpan={7} className="p-3 text-center text-gray-500">
             No customer retention data found
           </td>
         </tr>
       );
     }
-
-    // Build all rows including zone headers and customer rows
-    const allRows = [];
-    data.records.forEach((record, index) => {
-      const zoneId = record._id || `zone-${index}`;
-
-      // Add zone header row
-      allRows.push(
-        <React.Fragment key={`zone-header-${zoneId}-${index}`}>
-          {renderZoneHeader(record, index)}
-        </React.Fragment>
-      );
-
-      // Add customer rows if zone is expanded
-      const customerRows = renderCustomerRows(record, index);
-      if (customerRows && customerRows.length > 0) {
-        allRows.push(...customerRows);
-      }
+    const rows = [];
+    data.records.forEach((record, idx) => {
+      rows.push(renderZoneHeader(record, idx));
+      rows.push(...renderCustomerRows(record, idx));
     });
-
-    return allRows;
+    return rows;
   };
 
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <Repeat className="w-8 h-8 text-blue-600" />
           <h1 className="text-2xl font-bold text-gray-800">
-            Customer Retention/Repeat Rate
+            Customer Retention Rate (Year-to-Date)
           </h1>
         </div>
         <div className="flex items-center gap-3">
@@ -557,40 +396,34 @@ const CustomerRetentionRate = () => {
               type="text"
               placeholder="Search by zone, customer, MR..."
               value={searchTerm}
-              onChange={handleSearchChange}
-              onKeyPress={handleSearch}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyPress={handleSearchKey}
               disabled={loading}
-              className={`pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64 ${
-                loading ? "bg-gray-100 cursor-not-allowed" : ""
-              }`}
+              className={`pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 w-64 ${loading ? "bg-gray-100" : ""}`}
             />
             <Search
               className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
               size={18}
-              onClick={() => !loading && inputRef.current?.focus()}
             />
             {searchTerm && !loading && (
               <button
                 onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 <X size={16} />
               </button>
             )}
           </div>
-
           <button
             onClick={exportToExcel}
-            disabled={isExportDisabled}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
-              isExportDisabled
-                ? "bg-gray-400 text-white cursor-not-allowed opacity-70"
+            disabled={exporting || data.records.length === 0}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md ${
+              exporting || data.records.length === 0
+                ? "bg-gray-400 cursor-not-allowed"
                 : "bg-green-600 hover:bg-green-700 text-white"
             }`}
-            title={data.records.length === 0 ? "No records to export" : "Export to Excel"}
           >
-            <Download size={18} />
-            {exporting ? "Exporting..." : "Export Excel"}
+            <Download size={18} /> {exporting ? "Exporting..." : "Export Excel"}
           </button>
         </div>
       </div>
@@ -600,13 +433,48 @@ const CustomerRetentionRate = () => {
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           {renderTableHeaders()}
-          <tbody>
-            {renderTableRows()}
-          </tbody>
+          <tbody>{renderTableRows()}</tbody>
         </table>
       </div>
 
-      {!loading && renderPagination()}
+      {!loading && pagination.totalPages > 1 && (
+        <div className="flex items-center justify-start gap-2 mt-6">
+          <button
+            onClick={() => handlePageChange(pagination.currentPage - 1)}
+            disabled={!pagination.hasPrev}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          >
+            <ChevronLeft size={16} /> Prev
+          </button>
+          <div className="flex gap-1">
+            {visiblePages.map((page, i) => (
+              <button
+                key={i}
+                onClick={() =>
+                  typeof page === "number" && handlePageChange(page)
+                }
+                disabled={typeof page !== "number"}
+                className={`min-w-[40px] px-3 py-2 rounded-lg ${
+                  page === pagination.currentPage
+                    ? "bg-indigo-600 text-white"
+                    : typeof page === "number"
+                      ? "bg-gray-200 hover:bg-gray-300"
+                      : "bg-transparent text-gray-500"
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => handlePageChange(pagination.currentPage + 1)}
+            disabled={!pagination.hasNext}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          >
+            Next <ChevronRight size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

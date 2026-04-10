@@ -769,4 +769,7 @@ router.post("/import", async (req, res) => {
   }
 });
 
+// GET /api/reports/in-hand/product/:productName
+
+
 export default router;

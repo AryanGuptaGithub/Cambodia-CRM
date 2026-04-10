@@ -12,9 +12,7 @@ import {
   Search,
   X,
   Users,
-  Repeat,
   BarChart3,
-  Target,
   Calendar,
   UserCheck,
   UserPlus,
@@ -73,7 +71,7 @@ const CustomerDetailModal = ({
           params.startDate = customStartDate;
           params.endDate = customEndDate;
         }
-        if (mrName) params.mrName = mrName; // filter by specific MR
+        if (mrName) params.mrName = mrName;
         const res = await axios.get(
           `${backendUrl}/api/reports/customer-retention/customer-details`,
           { params },
@@ -182,7 +180,7 @@ const CustomerDetailModal = ({
                     Orders
                   </th>
                   <th className="p-3 text-center text-gray-600 font-semibold">
-                    Status
+                    Type
                   </th>
                   <th className="p-3 text-left text-gray-600 font-semibold">
                     First Purchase
@@ -218,17 +216,19 @@ const CustomerDetailModal = ({
                       </td>
                       <td className="p-3 text-center">
                         {c.isRetained ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                            <UserCheck size={11} /> Retained
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                            <UserPlus size={11} /> New in Period
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
-                            <UserPlus size={11} /> New
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                            <UserCheck size={11} /> Existing
                           </span>
                         )}
                       </td>
                       <td className="p-3 text-gray-600 text-xs">
-                        {formatDate(c.firstPurchaseDate)}
+                        {formatDate(
+                          c.absoluteFirstPurchase || c.firstPurchaseDate,
+                        )}
                       </td>
                       <td className="p-3 text-gray-600 text-xs">
                         {formatDate(c.lastPurchaseDate)}
@@ -305,9 +305,11 @@ const AnnualCustomerRepeatRate = () => {
       retainedCustomers: 0,
       retentionRate: 0,
       newCustomers: 0,
+      existingCustomers: 0,
     },
     records: [],
   };
+
   const [data, setData] = useState(emptyData);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -319,7 +321,9 @@ const AnnualCustomerRepeatRate = () => {
     hasNext: false,
     hasPrev: false,
   });
-  const [period, setPeriod] = useState("last_year");
+
+  // ✅ Default = current month (for annual view, use current month as starting point)
+  const [period, setPeriod] = useState("month");
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const [showCustomPicker, setShowCustomPicker] = useState(false);
@@ -509,11 +513,12 @@ const AnnualCustomerRepeatRate = () => {
           </div>
         </div>
 
+        {/* Period Tabs */}
         <div className="flex flex-wrap items-center gap-3 mb-4">
           {[
             { id: "today", label: "Today" },
             { id: "all", label: "All Records" },
-            { id: "month", label: "This Month" },
+            { id: "month", label: `This Month` },
             { id: "last_year", label: `Last Year (${getPrevYearLabel()})` },
             { id: "jan_feb", label: `Jan – Now (${getCurrentYearLabel()})` },
           ].map((tab) => (
@@ -577,7 +582,7 @@ const AnnualCustomerRepeatRate = () => {
               onClick={() => {
                 setCustomStartDate("");
                 setCustomEndDate("");
-                setPeriod("all");
+                setPeriod("month");
                 setShowCustomPicker(false);
               }}
               className="mt-5 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm cursor-pointer"
@@ -590,7 +595,7 @@ const AnnualCustomerRepeatRate = () => {
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
           <button
-            onClick={() => openModal("all", null, "All Customers")}
+            onClick={() => openModal("all", null, "All Customers in Period")}
             className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 text-left hover:shadow-lg hover:scale-[1.02] transition-all group cursor-pointer"
           >
             <div className="flex justify-between items-center">
@@ -605,7 +610,10 @@ const AnnualCustomerRepeatRate = () => {
                     summary.totalCustomers
                   )}
                 </div>
-                <div className="text-xs text-green-600 mt-1 opacity-0 group-hover:opacity-100 transition">
+                <div className="text-xs text-gray-400 mt-1">
+                  New + Existing in period
+                </div>
+                <div className="text-xs text-green-600 mt-0.5 opacity-0 group-hover:opacity-100 transition">
                   Click to view all →
                 </div>
               </div>
@@ -615,14 +623,14 @@ const AnnualCustomerRepeatRate = () => {
 
           <button
             onClick={() =>
-              openModal("retained", null, "Retained Customers (2+ Orders)")
+              openModal("retained", null, "New Customers in Period")
             }
             className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 text-left hover:shadow-lg hover:scale-[1.02] transition-all group cursor-pointer"
           >
             <div className="flex justify-between items-center">
               <div>
                 <div className="text-sm text-gray-600 group-hover:text-blue-700 transition">
-                  Retained Customers
+                  New Customers
                 </div>
                 <div className="text-2xl font-bold text-gray-800">
                   {loading ? (
@@ -631,15 +639,38 @@ const AnnualCustomerRepeatRate = () => {
                     summary.retainedCustomers
                   )}
                 </div>
-                <div className="text-xs text-blue-600 mt-1 opacity-0 group-hover:opacity-100 transition">
-                  Click to view retained →
+                <div className="text-xs text-gray-400 mt-1">
+                  First purchase in this period
+                </div>
+                <div className="text-xs text-blue-600 mt-0.5 opacity-0 group-hover:opacity-100 transition">
+                  Click to view →
                 </div>
               </div>
-              <Repeat className="w-8 h-8 text-blue-500" />
+              <UserPlus className="w-8 h-8 text-blue-500" />
             </div>
           </button>
 
           <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500">
+            <div className="flex justify-between items-center">
+              <div>
+                <div className="text-sm text-gray-600">Existing Customers</div>
+                <div className="text-2xl font-bold text-gray-800">
+                  {loading ? (
+                    <div className="h-8 w-20 bg-gray-200 rounded animate-pulse" />
+                  ) : (
+                    (summary.existingCustomers ??
+                    summary.totalCustomers - summary.retainedCustomers)
+                  )}
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Bought before this period
+                </div>
+              </div>
+              <UserCheck className="w-8 h-8 text-purple-500" />
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500">
             <div className="flex justify-between items-center">
               <div>
                 <div className="text-sm text-gray-600">Retention Rate</div>
@@ -650,24 +681,11 @@ const AnnualCustomerRepeatRate = () => {
                     `${summary.retentionRate?.toFixed(2) || 0}%`
                   )}
                 </div>
-              </div>
-              <BarChart3 className="w-8 h-8 text-purple-500" />
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500">
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="text-sm text-gray-600">New Customers</div>
-                <div className="text-2xl font-bold text-gray-800">
-                  {loading ? (
-                    <div className="h-8 w-20 bg-gray-200 rounded animate-pulse" />
-                  ) : (
-                    summary.newCustomers
-                  )}
+                <div className="text-xs text-gray-400 mt-1">
+                  New / Existing × 100
                 </div>
               </div>
-              <Target className="w-8 h-8 text-orange-500" />
+              <BarChart3 className="w-8 h-8 text-orange-500" />
             </div>
           </div>
         </div>
@@ -682,22 +700,33 @@ const AnnualCustomerRepeatRate = () => {
                 <th className="p-3 text-sm font-medium">
                   Total Customers
                   <div className="text-xs text-gray-400 font-normal leading-tight">
-                    click badge to view
+                    click to view
                   </div>
                 </th>
                 <th className="p-3 text-sm font-medium">
-                  Retained Customers
+                  New in Period
                   <div className="text-xs text-gray-400 font-normal leading-tight">
-                    click badge to view
+                    click to view
                   </div>
                 </th>
-                <th className="p-3 text-sm font-medium">Retention Rate (%)</th>
+                <th className="p-3 text-sm font-medium">
+                  Existing
+                  <div className="text-xs text-gray-400 font-normal leading-tight">
+                    before period
+                  </div>
+                </th>
+                <th className="p-3 text-sm font-medium">
+                  Retention Rate
+                  <div className="text-xs text-gray-400 font-normal leading-tight">
+                    New / Existing %
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center">
+                  <td colSpan={6} className="p-8 text-center">
                     <div className="flex justify-center items-center gap-2">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
                       <span className="text-gray-500">Loading...</span>
@@ -716,8 +745,6 @@ const AnnualCustomerRepeatRate = () => {
                     <td className="p-3 text-sm font-medium text-gray-900 capitalize text-left">
                       {mr.mrName || "—"}
                     </td>
-
-                    {/* Total Customers badge — click → all customers for this MR */}
                     <td className="p-3">
                       <button
                         onClick={() =>
@@ -733,24 +760,26 @@ const AnnualCustomerRepeatRate = () => {
                         {mr.totalCustomers || 0}
                       </button>
                     </td>
-
-                    {/* Retained Customers badge — click → retained only for this MR */}
                     <td className="p-3">
                       <button
                         onClick={() =>
                           openModal(
                             "retained",
                             mr.mrName,
-                            `${mr.mrName || "MR"} — Retained Customers`,
+                            `${mr.mrName || "MR"} — New Customers`,
                           )
                         }
-                        title={`View retained customers for ${mr.mrName}`}
-                        className="inline-flex items-center justify-center min-w-[36px] h-8 bg-green-50 text-green-700 font-bold text-sm rounded-full px-3 hover:bg-green-200 hover:scale-110 transition-all cursor-pointer ring-1 ring-green-200"
+                        title={`View new customers for ${mr.mrName}`}
+                        className="inline-flex items-center justify-center min-w-[36px] h-8 bg-blue-50 text-blue-700 font-bold text-sm rounded-full px-3 hover:bg-blue-200 hover:scale-110 transition-all cursor-pointer ring-1 ring-blue-200"
                       >
                         {mr.retainedCustomers || 0}
                       </button>
                     </td>
-
+                    <td className="p-3">
+                      <span className="inline-flex items-center justify-center min-w-[36px] h-8 bg-green-50 text-green-700 font-bold text-sm rounded-full px-3 ring-1 ring-green-200">
+                        {mr.existingCustomers || 0}
+                      </span>
+                    </td>
                     <td className="p-3 text-sm font-semibold text-gray-800">
                       {mr.retentionRate?.toFixed(2) ?? 0}%
                     </td>
@@ -758,7 +787,7 @@ const AnnualCustomerRepeatRate = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="p-10 text-center text-gray-400">
+                  <td colSpan={6} className="p-10 text-center text-gray-400">
                     {period === "custom" && (!customStartDate || !customEndDate)
                       ? "Please select start and end dates"
                       : "No MR data found for selected filter"}

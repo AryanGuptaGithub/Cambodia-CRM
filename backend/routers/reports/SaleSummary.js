@@ -4,40 +4,55 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
+// Helper: parse UTC date (start of day)
+const parseUTCDate = (dateStr) => {
+  if (!dateStr) return null;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+};
+
+// Helper: build invoiceDate filter from startDate/endDate (YYYY-MM-DD)
+const buildInvoiceDateFilter = (startDate, endDate) => {
+  const filter = {};
+  if (startDate) {
+    filter.$gte = parseUTCDate(startDate);
+  }
+  if (endDate) {
+    const end = parseUTCDate(endDate);
+    end.setUTCHours(23, 59, 59, 999);
+    filter.$lte = end;
+  }
+  return Object.keys(filter).length ? { invoiceDate: filter } : {};
+};
+
 // Get sales summary for the frontend component
 router.get("/summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
+    const dateFilter = buildInvoiceDateFilter(startDate, endDate);
+    const query = dateFilter;
 
-    // Build query
-    const query = {};
-    
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      query.recordingDate = { $gte: start, $lte: end };
-    }
-
-    // Get all sales invoices
-    const allSalesInvoices = await SaleSummary.find(query)
-      .sort({ recordingDate: -1 });
-
-    // Process data for frontend with correct field mappings
-    const processedData = allSalesInvoices.map(invoice => {
-      const products = (invoice.products || []).map(product => {
-        const salesQty = product.quantity || product.salesQty || product.qty || 0;
+    console.log('values of query', query);
+    const allSalesInvoices = await SaleSummary.find(query).sort({
+      invoiceDate: -1,
+    });
+     console.log('valueso f allSalesInvoices', allSalesInvoices);
+    const processedData = allSalesInvoices.map((invoice) => {
+      const products = (invoice.products || []).map((product) => {
+        const salesQty =
+          product.quantity || product.salesQty || product.qty || 0;
         const bonusQty = product.bonusQty || product.bonusQuantity || 0;
-        const totalPrice = product.totalPrice || product.amount || product.netSellingAmount || 0;
+        const totalPrice =
+          product.totalPrice || product.amount || product.netSellingAmount || 0;
         const profit = product.profit || product.profitLoss || 0;
         const sellingPrice = product.sellingPrice || 0;
         const costPrice = product.costPrice || 0;
-        const productName = product.productName || 'Unknown Product';
+        const productName = product.productName || "Unknown Product";
 
         return {
           productId: product.productId || product._id,
           productName,
-          normalizedProductName: productName.toLowerCase().trim(), // Add normalized name
+          normalizedProductName: productName.toLowerCase().trim(),
           salesQty,
           bonusQty,
           totalQty: salesQty + bonusQty,
@@ -45,19 +60,20 @@ router.get("/summary", async (req, res) => {
           totalPrice,
           netSellingAmount: totalPrice,
           profitLoss: profit,
-          costPrice
+          costPrice,
         };
       });
 
       return {
         _id: invoice._id,
         recordingDate: invoice.recordingDate,
-        customerName: invoice.customerName || 'Walk-in Customer',
-        invoiceNo: invoice.invoiceNumber || invoice.invoiceNo || 'N/A',
+        invoiceDate: invoice.invoiceDate,
+        customerName: invoice.customerName || "Walk-in Customer",
+        invoiceNo: invoice.invoiceNumber || invoice.invoiceNo || "N/A",
         paymentStatus: invoice.paymentStatus,
         totalAmount: invoice.totalAmount,
         totalProfitLoss: invoice.totalProfitLoss || 0,
-        products
+        products,
       };
     });
 
@@ -68,16 +84,15 @@ router.get("/summary", async (req, res) => {
       count: processedData.length,
       filters: {
         startDate: startDate || null,
-        endDate: endDate || null
-      }
+        endDate: endDate || null,
+      },
     });
-
   } catch (error) {
     console.error("❌ Error fetching sales summary:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
       message: "Failed to fetch sales summary",
-      error: error.message 
+      error: error.message,
     });
   }
 });
@@ -86,19 +101,11 @@ router.get("/summary", async (req, res) => {
 router.get("/aggregated", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
+    const dateFilter = buildInvoiceDateFilter(startDate, endDate);
+    const query = dateFilter;
 
-    const query = {};
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      query.recordingDate = { $gte: start, $lte: end };
-    }
-
-    // First get all sales data
     const salesInvoices = await SaleSummary.find(query);
 
-    // Process data to combine case-insensitive product names
     const productMap = new Map();
     let totalInvoices = 0;
     let totalSalesAmount = 0;
@@ -106,18 +113,20 @@ router.get("/aggregated", async (req, res) => {
     let totalProductsSold = 0;
     let totalBonusQty = 0;
 
-    salesInvoices.forEach(invoice => {
+    salesInvoices.forEach((invoice) => {
       totalInvoices++;
       totalSalesAmount += invoice.totalAmount || 0;
       totalProfit += invoice.totalProfitLoss || 0;
 
-      (invoice.products || []).forEach(product => {
-        const productName = product.productName || 'Unknown Product';
+      (invoice.products || []).forEach((product) => {
+        const productName = product.productName || "Unknown Product";
         const normalizedName = productName.toLowerCase().trim();
-        
-        const salesQty = product.quantity || product.salesQty || product.qty || 0;
+
+        const salesQty =
+          product.quantity || product.salesQty || product.qty || 0;
         const bonusQty = product.bonusQty || 0;
-        const totalPrice = product.totalPrice || product.amount || product.netSellingAmount || 0;
+        const totalPrice =
+          product.totalPrice || product.amount || product.netSellingAmount || 0;
         const profit = product.profit || product.profitLoss || 0;
 
         totalProductsSold += salesQty;
@@ -125,13 +134,13 @@ router.get("/aggregated", async (req, res) => {
 
         if (!productMap.has(normalizedName)) {
           productMap.set(normalizedName, {
-            productName: productName, // Keep original name (first occurrence)
+            productName: productName,
             normalizedName,
             salesQuantity: 0,
             bonusQuantity: 0,
             totalQuantity: 0,
             amount: 0,
-            profit: 0
+            profit: 0,
           });
         }
 
@@ -152,76 +161,75 @@ router.get("/aggregated", async (req, res) => {
       totalBonusQty,
       totalQty: totalProductsSold + totalBonusQty,
       uniqueProducts: productMap.size,
-      productMap: Array.from(productMap.values()) // For debugging/other uses
+      productMap: Array.from(productMap.values()),
     };
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
-
   } catch (error) {
     console.error("❌ Error fetching aggregated summary:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch aggregated summary",
-      error: error.message
+      error: error.message,
     });
   }
 });
 
-// Export Excel - Fixed to combine case-insensitive products
+// Export Excel
 router.get("/export", async (req, res) => {
   try {
     const { startDate, endDate, tab } = req.query;
+    const dateFilter = buildInvoiceDateFilter(startDate, endDate);
+    const query = dateFilter;
 
-    const query = {};
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      query.recordingDate = { $gte: start, $lte: end };
-    }
-
-    // Get sales data
-    const salesInvoices = await SaleSummary.find(query)
-      .sort({ recordingDate: -1 });
+    const salesInvoices = await SaleSummary.find(query).sort({
+      invoiceDate: -1,
+    });
 
     let exportData = [];
-    
+
     if (tab === "daily") {
-      // Group by date
       const dailyMap = {};
-      salesInvoices.forEach(invoice => {
-        const date = new Date(invoice.recordingDate).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit'
-        });
-        
+      salesInvoices.forEach((invoice) => {
+        const date = invoice.invoiceDate
+          ? new Date(invoice.invoiceDate).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            })
+          : "Unknown Date";
+
         if (!dailyMap[date]) {
           dailyMap[date] = { date, products: new Map() };
         }
-        
-        (invoice.products || []).forEach(product => {
-          const productName = product.productName || 'Unknown Product';
+
+        (invoice.products || []).forEach((product) => {
+          const productName = product.productName || "Unknown Product";
           const normalizedName = productName.toLowerCase().trim();
-          const salesQty = product.quantity || product.salesQty || product.qty || 0;
+          const salesQty =
+            product.quantity || product.salesQty || product.qty || 0;
           const bonusQty = product.bonusQty || 0;
-          const totalPrice = product.totalPrice || product.amount || product.netSellingAmount || 0;
+          const totalPrice =
+            product.totalPrice ||
+            product.amount ||
+            product.netSellingAmount ||
+            0;
           const profit = product.profit || product.profitLoss || 0;
-          
+
           if (!dailyMap[date].products.has(normalizedName)) {
             dailyMap[date].products.set(normalizedName, {
-              productName: productName, // Keep original name
+              productName: productName,
               salesQuantity: 0,
               bonusQuantity: 0,
               totalQuantity: 0,
               amount: 0,
-              profit: 0
+              profit: 0,
             });
           }
-          
+
           const existing = dailyMap[date].products.get(normalizedName);
           existing.salesQuantity += salesQty;
           existing.bonusQuantity += bonusQty;
@@ -230,10 +238,9 @@ router.get("/export", async (req, res) => {
           existing.profit += profit;
         });
       });
-      
-      // Flatten the data
-      Object.values(dailyMap).forEach(day => {
-        Array.from(day.products.values()).forEach(product => {
+
+      Object.values(dailyMap).forEach((day) => {
+        Array.from(day.products.values()).forEach((product) => {
           exportData.push({
             Date: day.date,
             "Product Name": product.productName,
@@ -241,33 +248,37 @@ router.get("/export", async (req, res) => {
             "Bonus Qty": product.bonusQuantity,
             "Total Qty": product.totalQuantity,
             "Amount ($)": product.amount.toFixed(2),
-            "Profit ($)": product.profit.toFixed(2)
+            "Profit ($)": product.profit.toFixed(2),
           });
         });
       });
     } else if (tab === "combine") {
-      // Combine all products (case-insensitive)
       const productMap = new Map();
-      salesInvoices.forEach(invoice => {
-        (invoice.products || []).forEach(product => {
-          const productName = product.productName || 'Unknown Product';
+      salesInvoices.forEach((invoice) => {
+        (invoice.products || []).forEach((product) => {
+          const productName = product.productName || "Unknown Product";
           const normalizedName = productName.toLowerCase().trim();
-          const salesQty = product.quantity || product.salesQty || product.qty || 0;
+          const salesQty =
+            product.quantity || product.salesQty || product.qty || 0;
           const bonusQty = product.bonusQty || 0;
-          const totalPrice = product.totalPrice || product.amount || product.netSellingAmount || 0;
+          const totalPrice =
+            product.totalPrice ||
+            product.amount ||
+            product.netSellingAmount ||
+            0;
           const profit = product.profit || product.profitLoss || 0;
-          
+
           if (!productMap.has(normalizedName)) {
             productMap.set(normalizedName, {
-              productName: productName, // Keep the original name (first occurrence)
+              productName: productName,
               salesQuantity: 0,
               bonusQuantity: 0,
               totalQuantity: 0,
               amount: 0,
-              profit: 0
+              profit: 0,
             });
           }
-          
+
           const existing = productMap.get(normalizedName);
           existing.salesQuantity += salesQty;
           existing.bonusQuantity += bonusQty;
@@ -276,16 +287,15 @@ router.get("/export", async (req, res) => {
           existing.profit += profit;
         });
       });
-      
-      // Convert to array for export
-      Array.from(productMap.values()).forEach(product => {
+
+      Array.from(productMap.values()).forEach((product) => {
         exportData.push({
           "Product Name": product.productName,
           "Sales Qty": product.salesQuantity,
           "Bonus Qty": product.bonusQuantity,
           "Total Qty": product.totalQuantity,
           "Amount ($)": product.amount.toFixed(2),
-          "Profit ($)": product.profit.toFixed(2)
+          "Profit ($)": product.profit.toFixed(2),
         });
       });
     }
@@ -293,29 +303,33 @@ router.get("/export", async (req, res) => {
     if (exportData.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "No data found to export"
+        message: "No data found to export",
       });
     }
 
-    // Generate Excel
-    const XLSX = await import('xlsx');
+    const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Sales Summary");
-    
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=sales-summary-${new Date().toISOString().split('T')[0]}.xlsx`);
-    
-    res.send(buffer);
 
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=sales-summary-${new Date().toISOString().split("T")[0]}.xlsx`,
+    );
+
+    res.send(buffer);
   } catch (error) {
     console.error("❌ Error exporting sales summary:", error);
     res.status(500).json({
       success: false,
       message: "Failed to export sales summary",
-      error: error.message
+      error: error.message,
     });
   }
 });

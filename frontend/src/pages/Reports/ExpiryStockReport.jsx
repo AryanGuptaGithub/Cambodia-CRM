@@ -139,6 +139,11 @@ const ExpiryStockReport = () => {
     fetchExpiryStockData(1, newFilter, searchTerm);
   };
 
+const capitalizeFirstLetter = (str) => {
+  if (!str || typeof str !== 'string') return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+};
+
   const handlePageChange = (newPage) => {
     if (newPage >= 1 && newPage <= data.pagination.pages) {
       setCurrentPage(newPage);
@@ -939,7 +944,7 @@ const ExpiryStockReport = () => {
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
-                          {item.productName}-({item.type})
+                          {capitalizeFirstLetter(item.productName)}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">

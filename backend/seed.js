@@ -1,113 +1,100 @@
 import { MongoClient } from 'mongodb';
 
 const uri = "mongodb+srv://admin:ni6tP5N63U0Yxvdr@cluster0.2qjjhh8.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-
 const client = new MongoClient(uri);
+
+// Collection names
+const MR_STOCK_COLLECTION = "stockinmrhands";
+const PRODUCT_STOCK_COLLECTION = "reportinhands";
 
 async function run() {
   try {
     await client.connect();
     const db = client.db("test");
-    const collection = db.collection("reportinhands"); // 👈 change if your collection name is different
 
-    const expiryStockResult = await collection.aggregate([
-      // Step 1: Filter batches with expiryDate and boxes > 0
-      {
-        $addFields: {
-          expiryBatches: {
-            $filter: {
-              input: "$batches",
-              as: "batch",
-              cond: {
-                $and: [
-                  { $gt: ["$$batch.expiryDate", null] },  // has expiryDate
-                  { $gt: ["$$batch.boxes", 0] }            // stock > 0
-                ]
-              }
-            }
+    // ------------------- 1. STOCK IN MR HANDS -------------------
+    const mrCollection = db.collection(MR_STOCK_COLLECTION);
+    const mrDocs = await mrCollection.find({}).toArray();
+
+    console.log("=".repeat(90));
+    console.log("📦 STOCK IN MR HANDS");
+    console.log("=".repeat(90));
+
+    let totalMrValue = 0;
+
+    if (mrDocs.length === 0) {
+      console.log("No MR stock records found.");
+    } else {
+      mrDocs.forEach((doc, idx) => {
+        const mrName = doc.mrName || doc.name || "Unknown MR";
+        const products = doc.productsInHand || [];
+        let mrTotal = 0;
+
+        for (const prod of products) {
+          let value = prod.amount;
+          if (value === undefined || value === null) {
+            const qty = prod.quantity || 0;
+            const lc = prod.lc || 0;
+            value = qty * lc;
           }
+          mrTotal += value;
         }
-      },
-      // Step 2: Calculate boxes * lc for each expiry batch, then sum
-      {
-        $addFields: {
-          totalExpiryStockAmount: {
-            $sum: {
-              $map: {
-                input: "$expiryBatches",
-                as: "batch",
-                in: { $multiply: ["$$batch.boxes", "$$batch.lc"] }
-              }
-            }
-          },
-          totalExpiryBoxes: {
-            $sum: "$expiryBatches.boxes"
-          }
-        }
-      },
-      // Step 3: Only show products that have expiry stock
-      {
-        $match: {
-          totalExpiryStockAmount: { $gt: 0 }
-        }
-      },
-      // Step 4: Sort by highest expiry stock amount
-      {
-        $sort: { totalExpiryStockAmount: -1 }
-      },
-      // Step 5: Return only needed fields
-      {
-        $project: {
-          _id: 1,
-          productName: 1,
-          supplierName: 1,
-          type: 1,
-          status: 1,
-          totalExpiryBoxes: 1,
-          totalExpiryStockAmount: { $round: ["$totalExpiryStockAmount", 2] }
-        }
-      }
-    ]).toArray();
 
-    // Grand total across all products
-    const grandTotal = expiryStockResult.reduce(
-      (sum, p) => sum + p.totalExpiryStockAmount, 0
-    );
-    const grandTotalBoxes = expiryStockResult.reduce(
-      (sum, p) => sum + p.totalExpiryBoxes, 0
-    );
+        totalMrValue += mrTotal;
 
-    console.log("=".repeat(90));
-    console.log("📦 EXPIRY STOCK REPORT — (boxes × lc) per Product");
-    console.log("=".repeat(90));
-    console.log(
-      "Rank | Product Name                    | Supplier                  | Boxes     | Amount"
-    );
-    console.log("-".repeat(90));
+        console.log(`\nMR #${idx + 1} : ${mrName}`);
+        console.log(`   Products : ${products.length}`);
+        console.log(`   Value    : $${mrTotal.toFixed(2)}`);
+      });
+    }
 
-    let rank = 1;
-    expiryStockResult.forEach((p) => {
-      const name = (p.productName || "Unknown").substring(0, 30).padEnd(30);
-      const supplier = (p.supplierName || "Unknown").substring(0, 24).padEnd(24);
-      console.log(
-        `${rank.toString().padStart(2)}   | ${name}  | ${supplier}  | ${p.totalExpiryBoxes.toString().padStart(8)} | $${p.totalExpiryStockAmount.toFixed(2).padStart(10)}`
-      );
-      rank++;
-    });
+    console.log(`\n💰 TOTAL VALUE (MR HANDS) : $${totalMrValue.toFixed(2)}`);
 
-    console.log("-".repeat(90));
-    console.log(
-      `${"GRAND TOTAL".padStart(2).padEnd(60)}  | ${grandTotalBoxes.toString().padStart(8)} | $${grandTotal.toFixed(2).padStart(10)}`
-    );
-    console.log("=".repeat(90));
-    console.log(`\n✅ Total Products with Expiry Stock: ${expiryStockResult.length}`);
-    console.log(`📦 Total Expiry Boxes: ${grandTotalBoxes.toLocaleString()}`);
-    console.log(`💰 Grand Total Expiry Amount (boxes × lc): $${grandTotal.toFixed(2)}`);
+    // ------------------- 2. REPORT IN HANDS (Product Stock) -------------------
+    const productCollection = db.collection(PRODUCT_STOCK_COLLECTION);
+    const productDocs = await productCollection.find({}).toArray();
+
+    console.log("\n" + "=".repeat(90));
+    console.log("📦 REPORT IN HANDS (Product Stock)");
     console.log("=".repeat(90));
 
+    let totalProductValue = 0;
+
+    if (productDocs.length === 0) {
+      console.log("No product stock records found.");
+    } else {
+      productDocs.forEach((doc, idx) => {
+        // Prefer totalAmount, otherwise compute from batches
+        let productTotal = doc.totalAmount;
+        if (productTotal === undefined || productTotal === null) {
+          // Fallback: sum of amount from each batch
+          const batches = doc.batches || [];
+          productTotal = batches.reduce((sum, batch) => sum + (batch.amount || 0), 0);
+        }
+
+        totalProductValue += productTotal;
+
+        const productName = doc.productName || `Product #${idx + 1}`;
+        console.log(`\n${productName} :`);
+        console.log(`   Total stock value : $${productTotal.toFixed(2)}`);
+        if (doc.batches && doc.batches.length) {
+          console.log(`   Batches : ${doc.batches.length}`);
+        }
+      });
+    }
+
+    console.log(`\n💰 TOTAL VALUE (Product Stock) : $${totalProductValue.toFixed(2)}`);
+
+    // ------------------- 3. GRAND TOTAL -------------------
+    console.log("\n" + "=".repeat(90));
+    console.log(`🏆 GRAND TOTAL (MR Hands + Product Stock) : $${(totalMrValue + totalProductValue).toFixed(2)}`);
+    console.log("=".repeat(90));
+
+  } catch (error) {
+    console.error("❌ Error:", error);
   } finally {
     await client.close();
   }
 }
 
-run().catch(console.dir);
+run();

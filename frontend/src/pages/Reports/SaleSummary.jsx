@@ -24,7 +24,6 @@ import LoadingOverlay from "../../components/Loading";
 // ----------------------------------------------------------------------
 const getUserRole = () => {
   try {
-    // 1. Try common user object keys in localStorage
     const possibleKeys = ["user", "auth", "userData", "currentUser"];
     for (const key of possibleKeys) {
       const raw = localStorage.getItem(key);
@@ -36,7 +35,6 @@ const getUserRole = () => {
       }
     }
 
-    // 2. Fallback: decode JWT token from localStorage
     const token =
       localStorage.getItem("token") || localStorage.getItem("authToken");
     if (token) {
@@ -57,16 +55,23 @@ const getUserRole = () => {
   }
 };
 
-// Hook to provide auth info (can be extended later)
 const useAuth = () => {
   const role = getUserRole();
   return { user: { role } };
 };
 // ----------------------------------------------------------------------
 
+// ✅ NEW HELPER: Format Date as YYYY-MM-DD in LOCAL timezone
+const formatLocalDate = (date) => {
+  if (!date) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const saleSummaryPerPage = 7;
 
-// Helper function to format numbers to 2 decimal places
 const formatNumber = (num) => {
   if (num === null || num === undefined) return "0.00";
   const number = typeof num === "number" ? num : parseFloat(num);
@@ -89,10 +94,8 @@ const SaleSummary = () => {
 
   const inputRef = useRef(null);
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
-  // Get current user role using robust detection
   const { user } = useAuth();
-  const isSuperAdmin = user?.role === "super admin"; // Only super admin sees profit
+  const isSuperAdmin = user?.role === "super admin";
 
   // Fetch sales records based on date range
   useEffect(() => {
@@ -112,14 +115,14 @@ const SaleSummary = () => {
           customDateRange.endDate
         ) {
           const params = new URLSearchParams({
-            startDate: customDateRange.startDate.toISOString().split("T")[0],
-            endDate: customDateRange.endDate.toISOString().split("T")[0],
+            startDate: formatLocalDate(customDateRange.startDate), // ✅ FIXED
+            endDate: formatLocalDate(customDateRange.endDate), // ✅ FIXED
           });
           url += `?${params.toString()}`;
         } else if (selectedTab === "daily") {
           url += `?${new URLSearchParams({
             startDate: "2000-01-01",
-            endDate: new Date().toISOString().split("T")[0],
+            endDate: formatLocalDate(new Date()), // ✅ today in local
           }).toString()}`;
         }
         const response = await fetch(url);
@@ -146,15 +149,19 @@ const SaleSummary = () => {
     backendUrl,
   ]);
 
-  // Calculate aggregated data for daily view
+  // ✅ Calculate daily summary – grouped by invoiceDate (not recordingDate)
   const calculateDailySummary = () => {
     const dailyMap = {};
     summaryData.forEach((record) => {
-      const date = new Date(record.recordingDate).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      });
+      // Use invoiceDate instead of recordingDate
+      const date = record.invoiceDate
+        ? new Date(record.invoiceDate).toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          })
+        : "Unknown Date";
+
       if (!dailyMap[date]) {
         dailyMap[date] = {
           date,
@@ -207,7 +214,6 @@ const SaleSummary = () => {
     return allRows;
   };
 
-  // Calculate aggregated data for combine view
   const calculateCombineSummary = () => {
     const productMap = new Map();
     summaryData.forEach((record) => {
@@ -245,7 +251,6 @@ const SaleSummary = () => {
       .sort((a, b) => a.productName.localeCompare(b.productName));
   };
 
-  // Get data based on selected tab
   const getFilteredData = useMemo(() => {
     let data = [];
     if (selectedTab === "daily") {
@@ -269,7 +274,6 @@ const SaleSummary = () => {
     return data;
   }, [summaryData, selectedTab, searchTerm]);
 
-  // Pagination logic
   const totalPages = Math.ceil(getFilteredData.length / saleSummaryPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentData = getFilteredData.slice(
@@ -277,7 +281,6 @@ const SaleSummary = () => {
     currentPage * saleSummaryPerPage,
   );
 
-  // Calculate totals for summary cards (profit only calculated but may be hidden)
   const calculateTotals = () => {
     let totalSales = 0;
     let totalQuantity = 0;
@@ -315,7 +318,6 @@ const SaleSummary = () => {
 
   const totals = calculateTotals();
 
-  // Handle export to Excel (unchanged)
   const handleExportToExcel = async () => {
     if (getFilteredData.length === 0) {
       showToast("warning", "No data found to export");
@@ -330,12 +332,12 @@ const SaleSummary = () => {
             tab: selectedTab,
             startDate:
               selectedTab === "combine" && customDateRange.startDate
-                ? customDateRange.startDate.toISOString().split("T")[0]
+                ? formatLocalDate(customDateRange.startDate) // ✅ FIXED
                 : "2000-01-01",
             endDate:
               selectedTab === "combine" && customDateRange.endDate
-                ? customDateRange.endDate.toISOString().split("T")[0]
-                : new Date().toISOString().split("T")[0],
+                ? formatLocalDate(customDateRange.endDate) // ✅ FIXED
+                : formatLocalDate(new Date()), // ✅ today in local
           },
           responseType: "blob",
         },
@@ -345,7 +347,7 @@ const SaleSummary = () => {
       link.href = url;
       link.setAttribute(
         "download",
-        `sales-summary-${selectedTab}-${new Date().toISOString().split("T")[0]}.xlsx`,
+        `sales-summary-${selectedTab}-${formatLocalDate(new Date())}.xlsx`,
       );
       document.body.appendChild(link);
       link.click();
@@ -364,7 +366,6 @@ const SaleSummary = () => {
     }
   };
 
-  // Date filter handlers
   const handleCustomDateChange = (name, date) => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   };
@@ -432,7 +433,7 @@ const SaleSummary = () => {
   };
 
   // ----------------------------------------------------------------------
-  // Render summary cards – hide Total Profit for non-super-admin
+  // Render
   // ----------------------------------------------------------------------
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -510,9 +511,6 @@ const SaleSummary = () => {
     </div>
   );
 
-  // ----------------------------------------------------------------------
-  // Table headers – conditionally include Profit column
-  // ----------------------------------------------------------------------
   const renderTableHeaders = () => {
     if (selectedTab === "daily") {
       return (
@@ -550,9 +548,6 @@ const SaleSummary = () => {
     }
   };
 
-  // ----------------------------------------------------------------------
-  // Table rows – conditionally render profit cell
-  // ----------------------------------------------------------------------
   const renderTableRows = () => {
     return currentData.map((item, index) => {
       const isLastRow = index === currentData.length - 1;
@@ -631,7 +626,6 @@ const SaleSummary = () => {
     });
   };
 
-  // Pagination component
   const renderPagination = () => {
     if (totalPages <= 1) return null;
     return (
@@ -674,7 +668,6 @@ const SaleSummary = () => {
     return <LoadingOverlay text="Loading sales summary..." />;
   }
 
-  // Dynamic colSpan for empty state
   const getEmptyColSpan = () => {
     if (selectedTab === "daily") {
       return isSuperAdmin ? 8 : 7;

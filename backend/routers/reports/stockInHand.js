@@ -5,30 +5,24 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
+// ==========================================
+// Helper functions
+// ==========================================
 const filterReportsWithBatches = (reports) =>
   reports.filter((r) => Array.isArray(r.batches) && r.batches.length > 0);
 
-// ==========================================
-// Helper: CIF value of expired/near-expiry batches for a product
-// ==========================================
-const getProductExpiryValue = (batches) => {
+// Filter batches that are not expired (expiryDate >= today)
+const getNonExpiredBatches = (batches) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  let val = 0;
-  (batches || []).forEach((batch) => {
-    if (!batch.expiryDate) return;
+  return batches.filter((batch) => {
+    if (!batch.expiryDate) return true; // No expiry date → treat as valid
     const expiry = new Date(batch.expiryDate);
     expiry.setHours(0, 0, 0, 0);
-    const diffDays = Math.ceil((expiry - today) / (1000 * 3600 * 24));
-    if (diffDays <= 0) val += (batch.boxes || 0) * (batch.lc || 0);
+    return expiry >= today;
   });
-  return val;
 };
 
-// ==========================================
-// Utility: build combined product map
-// ReportInHand (warehouse) + StockInMRHand (MR hands)
-// ==========================================
 const buildCombinedProductMap = async (searchFilter = null) => {
   let warehouseQuery = {};
   if (searchFilter)
@@ -45,7 +39,14 @@ const buildCombinedProductMap = async (searchFilter = null) => {
     if (!name) continue;
     const key = name.toLowerCase();
 
-    const realBatches = report.batches.filter(
+    // Filter only non‑expired batches
+    const nonExpiredBatches = getNonExpiredBatches(report.batches);
+    if (nonExpiredBatches.length === 0) {
+      // No usable stock – skip or keep with zero values? We'll keep with zero.
+    }
+
+    // Use only non‑expired batches for calculations
+    const realBatches = nonExpiredBatches.filter(
       (b) => b.adjustmentType === "batch" || !b.adjustmentType,
     );
     const totalBatchBoxes = realBatches.reduce((s, b) => s + (b.boxes || 0), 0);
@@ -55,57 +56,39 @@ const buildCombinedProductMap = async (searchFilter = null) => {
     );
     const avgLC = totalBatchBoxes > 0 ? totalBatchLC / totalBatchBoxes : 0;
 
-    // ✅ AFTER — warehouseAmount and all totals reflect only usable (non-expired) stock
-    const warehouseBoxes = report.totalBoxes || 0;
-    const warehouseAmount = report.totalAmount || 0;
+    const warehouseBoxes = totalBatchBoxes; // Only non‑expired boxes
+    const warehouseAmount = realBatches.reduce(
+      (s, b) => s + (b.amount || 0),
+      0,
+    );
     const warehouseDeductions = report.totalMrSaleDeductions || 0;
     const warehouseNetAmount = warehouseAmount - warehouseDeductions;
 
-    const expiryValue = getProductExpiryValue(report.batches);
-
-    // Subtract expired stock boxes too
-    const expiredBoxes = (() => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      return (report.batches || []).reduce((sum, b) => {
-        if (!b.expiryDate) return sum;
-        const exp = new Date(b.expiryDate);
-        exp.setHours(0, 0, 0, 0);
-        return Math.ceil((exp - today) / (1000 * 3600 * 24)) <= 0
-          ? sum + (b.boxes || 0)
-          : sum;
-      }, 0);
-    })();
-
-    const usableBoxes = warehouseBoxes - expiredBoxes;
-    const usableAmount = warehouseAmount - expiryValue; // gross usable
-    const usableNetAmount = warehouseNetAmount - expiryValue; // net usable
-
     productMap.set(key, {
       productName: name,
-      warehouseBoxes: usableBoxes, // ← expired boxes removed
-      warehouseAmount: parseFloat(usableAmount.toFixed(2)), // ← expired value removed
+      warehouseBoxes,
+      warehouseAmount: parseFloat(warehouseAmount.toFixed(2)),
       warehouseDeductions,
-      warehouseNetAmount: parseFloat(usableNetAmount.toFixed(2)),
-      expiryValue: parseFloat(expiryValue.toFixed(2)),
-      netUsableAmount: parseFloat(usableNetAmount.toFixed(2)),
+      warehouseNetAmount: parseFloat(warehouseNetAmount.toFixed(2)),
+      netUsableAmount: parseFloat(warehouseNetAmount.toFixed(2)),
       lc: avgLC,
-      status: report.status || "In Stock",
+      status:
+        report.status || (warehouseBoxes === 0 ? "Out of Stock" : "In Stock"),
       minStockLevel: report.minStockLevel || 0,
       averagePrice: report.averagePrice || 0,
-      batches: report.batches,
+      batches: nonExpiredBatches, // store only non‑expired batches
       type: report.type || "",
       mrBoxes: 0,
       mrAmount: 0,
       mrBreakdown: [],
-      totalBoxes: usableBoxes, // ← starts with usable warehouse boxes
-      totalAmount: parseFloat(usableAmount.toFixed(2)),
+      totalBoxes: warehouseBoxes,
+      totalAmount: parseFloat(warehouseAmount.toFixed(2)),
       totalDeductions: warehouseDeductions,
-      totalNetAmount: parseFloat(usableNetAmount.toFixed(2)),
+      totalNetAmount: parseFloat(warehouseNetAmount.toFixed(2)),
     });
   }
 
-  // MR hand stock
+  // MR hand stock (no expiry filtering for MR stock, as that’s a different business rule)
   const mrStockDocs = await StockInMRHand.find({});
   for (const mrDoc of mrStockDocs) {
     const mrName = mrDoc.mrName || "Unknown MR";
@@ -133,10 +116,9 @@ const buildCombinedProductMap = async (searchFilter = null) => {
           warehouseAmount: 0,
           warehouseDeductions: 0,
           warehouseNetAmount: 0,
-          expiryValue: 0,
           netUsableAmount: 0,
           lc,
-          status: "In Stock",
+          status: "Out of Stock",
           minStockLevel: 0,
           averagePrice: 0,
           batches: [],
@@ -174,15 +156,18 @@ const buildCombinedProductMap = async (searchFilter = null) => {
       entry.totalBoxes = entry.warehouseBoxes + entry.mrBoxes;
       entry.totalAmount = entry.warehouseAmount + entry.mrAmount;
       entry.totalNetAmount = entry.warehouseNetAmount + entry.mrAmount;
+
+      // Update status based on total boxes (warehouse + MR)
+      if (entry.totalBoxes === 0) entry.status = "Out of Stock";
+      else if (entry.totalBoxes < (entry.minStockLevel || 0))
+        entry.status = "Low Stock";
+      else entry.status = "In Stock";
     }
   }
 
   return productMap;
 };
 
-// ==========================================
-// Utility: compute summary
-// ==========================================
 const computeSummary = (products) =>
   products.reduce(
     (acc, p) => {
@@ -192,8 +177,6 @@ const computeSummary = (products) =>
       acc.totalWarehouseAmount += p.warehouseAmount;
       acc.totalWarehouseDeductions += p.warehouseDeductions || 0;
       acc.totalWarehouseNetAmount += p.warehouseNetAmount || 0;
-      acc.totalExpiryValue += p.expiryValue || 0; // sum of expiry stock CIF values
-      acc.totalNetUsableAmount += p.netUsableAmount || 0; // warehouse net MINUS expiry
       acc.totalMrAmount += p.mrAmount;
       acc.totalAmount += p.totalAmount;
       acc.totalNetAmount += p.totalNetAmount;
@@ -206,13 +189,47 @@ const computeSummary = (products) =>
       totalWarehouseAmount: 0,
       totalWarehouseDeductions: 0,
       totalWarehouseNetAmount: 0,
-      totalExpiryValue: 0,
-      totalNetUsableAmount: 0, // ← $208,463.92 - $9,201.16 = $199,262.76
       totalMrAmount: 0,
       totalAmount: 0,
       totalNetAmount: 0,
     },
   );
+
+// ==========================================
+// GET /api/stock-in-hand/product/:productName
+// ==========================================
+router.get("/product/:productName", async (req, res) => {
+  try {
+    const { productName } = req.params;
+    const report = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") },
+    }).lean();
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found in stock",
+      });
+    }
+    const nonExpiredBatches = getNonExpiredBatches(report.batches || []);
+    const totalBoxes = nonExpiredBatches.reduce(
+      (s, b) => s + (b.boxes || 0),
+      0,
+    );
+    res.json({
+      success: true,
+      data: {
+        totalBoxes,
+        batches: nonExpiredBatches,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching product stock:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
 
 // ==========================================
 // GET /api/stock-in-hand/combined-stock
@@ -319,10 +336,7 @@ router.get("/mr-stock-summary", async (req, res) => {
 });
 
 // ==========================================
-// GET /api/stock-in-hand
-// ✅ KEY ENDPOINT — used by dashboard "Stock in Hands" card
-// totalStockValue = warehouseNetAmount − expiryValue
-// e.g. $208,463.92 − $9,201.16 = $199,262.76
+// GET /api/stock-in-hand (main dashboard endpoint)
 // ==========================================
 router.get("/", async (req, res) => {
   try {
@@ -351,23 +365,16 @@ router.get("/", async (req, res) => {
       success: true,
       count: allProducts.length,
       total: allProducts.length,
-      // Warehouse
       totalBoxes: summary.totalWarehouseBoxes,
       totalAmount: summary.totalWarehouseAmount,
       totalDeductions: summary.totalWarehouseDeductions,
       totalNetAmount: summary.totalWarehouseNetAmount,
-      // ✅ Expiry breakdown shown on dashboard
-      totalExpiryValue: parseFloat(summary.totalExpiryValue.toFixed(2)),
-      // ✅ THIS is what "Stock in Hands" card shows = $199,262.76
-      totalStockValue: parseFloat(summary.totalNetUsableAmount.toFixed(2)),
-      // MR
+      totalStockValue: parseFloat(summary.totalWarehouseNetAmount.toFixed(2)),
       totalMrBoxes: summary.totalMrBoxes,
       totalMrAmount: summary.totalMrAmount,
-      // Grand combined
       grandTotalBoxes: summary.totalBoxes,
       grandTotalAmount: summary.totalAmount,
       grandTotalNetAmount: summary.totalNetAmount,
-      // Status counts
       inStockCount,
       lowStockCount,
       criticalCount,
@@ -398,9 +405,9 @@ router.get("/average-price/export", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Stock Report");
 
-    worksheet.mergeCells("A1:M1");
+    worksheet.mergeCells("A1:L1");
     const titleCell = worksheet.getCell("A1");
-    titleCell.value = "Combined Stock In Hand Report";
+    titleCell.value = "Combined Stock In Hand Report (Non‑expired Only)";
     titleCell.font = { bold: true, size: 16 };
     titleCell.alignment = { horizontal: "center" };
 
@@ -416,12 +423,17 @@ router.get("/average-price/export", async (req, res) => {
 
     const $ = (n) =>
       `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    addRow("Warehouse Boxes:", summary.totalWarehouseBoxes.toLocaleString());
+    addRow(
+      "Warehouse Boxes (non‑expired):",
+      summary.totalWarehouseBoxes.toLocaleString(),
+    );
     addRow("MR Boxes:", summary.totalMrBoxes.toLocaleString());
     addRow("Grand Total Boxes:", summary.totalBoxes.toLocaleString());
-    addRow("Warehouse Net Amount:", $(summary.totalWarehouseNetAmount));
-    addRow("Expiry Stock Value:", $(summary.totalExpiryValue));
-    addRow("Net Usable Value:", $(summary.totalNetUsableAmount));
+    addRow(
+      "Warehouse Net Amount (non‑expired):",
+      $(summary.totalWarehouseNetAmount),
+    );
+    addRow("Net Usable Value:", $(summary.totalWarehouseNetAmount));
     addRow("MR Amount:", $(summary.totalMrAmount));
     currentRow++;
 
@@ -434,8 +446,6 @@ router.get("/average-price/export", async (req, res) => {
       "WH Amount ($)",
       "WH Deductions ($)",
       "WH Net ($)",
-      "Expiry Value ($)",
-      "Net Usable ($)",
       "MR Boxes",
       "MR Amount ($)",
       "Total Boxes",
@@ -465,16 +475,12 @@ router.get("/average-price/export", async (req, res) => {
       row.getCell(6).numFmt = "$#,##0.00";
       row.getCell(7).value = p.warehouseNetAmount || 0;
       row.getCell(7).numFmt = "$#,##0.00";
-      row.getCell(8).value = p.expiryValue || 0;
-      row.getCell(8).numFmt = "$#,##0.00";
-      row.getCell(9).value = p.netUsableAmount || 0;
+      row.getCell(8).value = p.mrBoxes || 0;
+      row.getCell(9).value = p.mrAmount || 0;
       row.getCell(9).numFmt = "$#,##0.00";
-      row.getCell(10).value = p.mrBoxes || 0;
-      row.getCell(11).value = p.mrAmount || 0;
+      row.getCell(10).value = p.totalBoxes || 0;
+      row.getCell(11).value = p.averagePrice || 0;
       row.getCell(11).numFmt = "$#,##0.00";
-      row.getCell(12).value = p.totalBoxes || 0;
-      row.getCell(13).value = p.averagePrice || 0;
-      row.getCell(13).numFmt = "$#,##0.00";
     });
 
     worksheet.columns = [
@@ -485,8 +491,6 @@ router.get("/average-price/export", async (req, res) => {
       { width: 18 },
       { width: 18 },
       { width: 18 },
-      { width: 16 },
-      { width: 16 },
       { width: 12 },
       { width: 16 },
       { width: 12 },
@@ -526,7 +530,7 @@ router.get("/average-price/export", async (req, res) => {
 });
 
 // ==========================================
-// GET /api/stock-in-hand/efficient  (paginated)
+// GET /api/stock-in-hand/efficient (paginated)
 // ==========================================
 router.get("/efficient", async (req, res) => {
   try {
@@ -550,8 +554,7 @@ router.get("/efficient", async (req, res) => {
       totalAmount: summary.totalWarehouseAmount,
       totalDeductions: summary.totalWarehouseDeductions,
       totalNetAmount: summary.totalWarehouseNetAmount,
-      totalExpiryValue: parseFloat(summary.totalExpiryValue.toFixed(2)),
-      totalStockValue: parseFloat(summary.totalNetUsableAmount.toFixed(2)),
+      totalStockValue: parseFloat(summary.totalWarehouseNetAmount.toFixed(2)),
       totalMrBoxes: summary.totalMrBoxes,
       totalMrAmount: summary.totalMrAmount,
       grandTotalBoxes: summary.totalBoxes,
@@ -571,7 +574,7 @@ router.get("/efficient", async (req, res) => {
 });
 
 // ==========================================
-// GET /api/stock-in-hand/all  (no pagination)
+// GET /api/stock-in-hand/all (no pagination)
 // ==========================================
 router.get("/all", async (req, res) => {
   try {
@@ -589,8 +592,7 @@ router.get("/all", async (req, res) => {
       totalAmount: summary.totalWarehouseAmount,
       totalDeductions: summary.totalWarehouseDeductions,
       totalNetAmount: summary.totalWarehouseNetAmount,
-      totalExpiryValue: parseFloat(summary.totalExpiryValue.toFixed(2)),
-      totalStockValue: parseFloat(summary.totalNetUsableAmount.toFixed(2)),
+      totalStockValue: parseFloat(summary.totalWarehouseNetAmount.toFixed(2)),
       totalMrBoxes: summary.totalMrBoxes,
       totalMrAmount: summary.totalMrAmount,
       grandTotalBoxes: summary.totalBoxes,
@@ -665,8 +667,7 @@ router.get("/summary/total-boxes", async (req, res) => {
         warehouseAmount: summary.totalWarehouseAmount,
         warehouseDeductions: summary.totalWarehouseDeductions,
         warehouseNetAmount: summary.totalWarehouseNetAmount,
-        totalExpiryValue: parseFloat(summary.totalExpiryValue.toFixed(2)),
-        totalStockValue: parseFloat(summary.totalNetUsableAmount.toFixed(2)),
+        totalStockValue: parseFloat(summary.totalWarehouseNetAmount.toFixed(2)),
         mrBoxes: summary.totalMrBoxes,
         mrAmount: summary.totalMrAmount,
         totalBoxes: summary.totalBoxes,
@@ -700,11 +701,18 @@ router.get("/:id", async (req, res) => {
         message: "Report not found or has no batches",
       });
 
+    const nonExpiredBatches = getNonExpiredBatches(report.batches);
     const productName = report.productName?.trim();
-    const warehouseAmount = report.totalAmount || 0;
+    const warehouseAmount = nonExpiredBatches.reduce(
+      (s, b) => s + (b.amount || 0),
+      0,
+    );
     const warehouseDeductions = report.totalMrSaleDeductions || 0;
     const warehouseNetAmount = warehouseAmount - warehouseDeductions;
-    const expiryValue = getProductExpiryValue(report.batches);
+    const warehouseBoxes = nonExpiredBatches.reduce(
+      (s, b) => s + (b.boxes || 0),
+      0,
+    );
 
     const mrStockDocs = await StockInMRHand.find({});
     const mrBreakdown = [];
@@ -740,18 +748,16 @@ router.get("/:id", async (req, res) => {
       report: {
         ...report.toObject(),
         netAmount: warehouseNetAmount,
-        warehouseBoxes: report.totalBoxes || 0,
+        warehouseBoxes,
         warehouseAmount,
         warehouseDeductions,
         warehouseNetAmount,
-        expiryValue: parseFloat(expiryValue.toFixed(2)),
-        netUsableAmount: parseFloat(
-          (warehouseNetAmount - expiryValue).toFixed(2),
-        ),
+        netUsableAmount: parseFloat(warehouseNetAmount.toFixed(2)),
+        batches: nonExpiredBatches, // show only non‑expired batches
         mrBoxes,
         mrAmount,
         mrBreakdown,
-        totalBoxes: (report.totalBoxes || 0) + mrBoxes,
+        totalBoxes: warehouseBoxes + mrBoxes,
         totalAmount: warehouseAmount + mrAmount,
         totalNetAmount: warehouseNetAmount + mrAmount,
       },
@@ -791,8 +797,7 @@ router.get("/search/:productName", async (req, res) => {
       totalAmount: summary.totalWarehouseAmount,
       totalDeductions: summary.totalWarehouseDeductions,
       totalNetAmount: summary.totalWarehouseNetAmount,
-      totalExpiryValue: parseFloat(summary.totalExpiryValue.toFixed(2)),
-      totalStockValue: parseFloat(summary.totalNetUsableAmount.toFixed(2)),
+      totalStockValue: parseFloat(summary.totalWarehouseNetAmount.toFixed(2)),
       totalMrBoxes: summary.totalMrBoxes,
       totalMrAmount: summary.totalMrAmount,
       grandTotalBoxes: summary.totalBoxes,
@@ -831,10 +836,17 @@ router.get("/supplier/:supplierName", async (req, res) => {
     const enrichedReports = await Promise.all(
       filteredReports.map(async (report) => {
         const productName = report.productName?.trim();
-        const warehouseAmount = report.totalAmount || 0;
+        const nonExpiredBatches = getNonExpiredBatches(report.batches);
+        const warehouseAmount = nonExpiredBatches.reduce(
+          (s, b) => s + (b.amount || 0),
+          0,
+        );
         const warehouseDeductions = report.totalMrSaleDeductions || 0;
         const warehouseNetAmount = warehouseAmount - warehouseDeductions;
-        const expiryValue = getProductExpiryValue(report.batches);
+        const warehouseBoxes = nonExpiredBatches.reduce(
+          (s, b) => s + (b.boxes || 0),
+          0,
+        );
 
         const mrStockDocs = await StockInMRHand.find({});
         const mrBreakdown = [];
@@ -861,18 +873,16 @@ router.get("/supplier/:supplierName", async (req, res) => {
         return {
           ...report.toObject(),
           netAmount: warehouseNetAmount,
-          warehouseBoxes: report.totalBoxes || 0,
+          warehouseBoxes,
           warehouseAmount,
           warehouseDeductions,
           warehouseNetAmount,
-          expiryValue: parseFloat(expiryValue.toFixed(2)),
-          netUsableAmount: parseFloat(
-            (warehouseNetAmount - expiryValue).toFixed(2),
-          ),
+          netUsableAmount: parseFloat(warehouseNetAmount.toFixed(2)),
+          batches: nonExpiredBatches,
           mrBoxes,
           mrAmount,
           mrBreakdown,
-          totalBoxes: (report.totalBoxes || 0) + mrBoxes,
+          totalBoxes: warehouseBoxes + mrBoxes,
           totalAmount: warehouseAmount + mrAmount,
           totalNetAmount: warehouseNetAmount + mrAmount,
         };
