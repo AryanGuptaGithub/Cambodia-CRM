@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+// pages/Reports/TourExpenseSalesRatio.jsx
+import React, { useState, useEffect, useCallback } from "react";
 import {
   TrendingUp,
   DollarSign,
@@ -10,6 +11,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Users,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -18,30 +20,13 @@ import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Expense Categorization (for Tour Expense / Sales Ratio Report):
-//
-//  Tour Expense   → expense type records:
-//                     • "Rent Expense - Vans"
-//                     • "Tour Petrol Expense"
-//
-//  Tour Allowance → allowance type records:
-//                     • "Tour Allowance"
-//                     (Daily Allowance to Medical Reps, Drivers, Supervisors)
-//
-//  Incentive      → allowance type records:
-//                     • "Incentive" / "Sales and other Incentives for Sales Team"
-//
-//  totalTourCost  → Tour Expense + Tour Allowance + Incentive
-// ─────────────────────────────────────────────────────────────────────────────
-
 const TourExpenseSalesRatio = () => {
   const [data, setData] = useState({
     summary: {
-      tourExpense: 0, // Rent Expense - Vans + Tour Petrol Expense
-      tourAllowance: 0, // Tour Allowance (Daily Allowance)
-      incentive: 0, // Incentive for Sales Team
-      totalTourCost: 0, // tourExpense + tourAllowance + incentive
+      tourExpense: 0,
+      tourAllowance: 0,
+      incentive: 0,
+      totalTourCost: 0,
       totalSales: 0,
       totalProfit: 0,
       ratio: 0,
@@ -74,31 +59,30 @@ const TourExpenseSalesRatio = () => {
     hasPrev: false,
   });
 
-  const itemsPerPage = 7;
+  // ── MR Filter state ──
+  const [viewMode, setViewMode] = useState("overall"); // "overall" | "mrWise"
+  const [mrList, setMrList] = useState([]);
+  const [mrListLoading, setMrListLoading] = useState(false);
+  const [selectedMrId, setSelectedMrId] = useState(""); // "" = all MRs
 
+  const itemsPerPage = 7;
   const getSerialNumber = (index) =>
     (pagination.currentPage - 1) * itemsPerPage + index + 1;
-
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
-
   const getCurrentYear = () => new Date().getFullYear();
-
   const getPreviousMonthName = () => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
     return d.toLocaleString("default", { month: "long" });
   };
-
   const getJanToPreviousMonthDisplay = () => {
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-    if (currentMonth === 0) return `Jan - Dec ${currentYear - 1}`;
-    return `Jan - ${getPreviousMonthName()} ${currentYear}`;
+    if (now.getMonth() === 0) return `Jan - Dec ${now.getFullYear() - 1}`;
+    return `Jan - ${getPreviousMonthName()} ${now.getFullYear()}`;
   };
 
-  const getDateRange = () => {
+  const getDateRange = useCallback(() => {
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
@@ -143,155 +127,114 @@ const TourExpenseSalesRatio = () => {
       default:
         return { startDate: null, endDate: null, displayDate: "All Records" };
     }
-  };
+  }, [selectedTab, customDateRange]);
 
-  const fetchData = async (page = 1) => {
-    setLoading(true);
+  // ── Fetch MR list for dropdown ──
+  const fetchMRList = useCallback(async () => {
+    setMrListLoading(true);
     try {
-      const dateRange = getDateRange();
-
-      if (
-        selectedTab === "custom" &&
-        (!customDateRange.startDate || !customDateRange.endDate)
-      ) {
-        setLoading(false);
-        return;
-      }
-
-      const params = { page, limit: itemsPerPage, dateFilter: selectedTab };
-      if (selectedTab !== "all") {
-        if (dateRange.startDate) params.startDate = dateRange.startDate;
-        if (dateRange.endDate) params.endDate = dateRange.endDate;
-      }
-
-      const response = await axios.get(
-        `${backendUrl}/api/reports/tour-expense-sales`,
-        { params },
+      const res = await axios.get(
+        `${backendUrl}/api/reports/tour-expense-sales/mr-list`,
       );
-
-      if (response.data.success) {
-        const summary = response.data.data?.summary || {};
-        const totals = response.data.data?.totals || {};
-
-        setData({
-          summary: {
-            // Tour Expense = Rent Expense - Vans + Tour Petrol Expense
-            tourExpense: parseFloat(summary.tourExpense) || 0,
-            // Tour Allowance = Daily Allowance for MRs / Drivers / Supervisors
-            tourAllowance: parseFloat(summary.tourAllowance) || 0,
-            // Incentive = Sales and other Incentives for Sales Team
-            incentive: parseFloat(summary.incentive) || 0,
-            // Total Tour Cost = tourExpense + tourAllowance + incentive
-            totalTourCost:
-              parseFloat(summary.totalTourCost) ||
-              (parseFloat(summary.tourExpense) || 0) +
-                (parseFloat(summary.tourAllowance) || 0) +
-                (parseFloat(summary.incentive) || 0),
-            totalSales: parseFloat(summary.totalSales) || 0,
-            totalProfit: parseFloat(summary.totalProfit) || 0,
-            ratio: parseFloat(summary.ratio) || 0,
-          },
-          records: response.data.data?.records || [],
-          totals: {
-            totalSale: parseFloat(totals.totalSale) || 0,
-            totalCOG: parseFloat(totals.totalCOG) || 0,
-            totalTourExpense: parseFloat(totals.totalTourExpense) || 0,
-            totalTourAllowance: parseFloat(totals.totalTourAllowance) || 0,
-            totalIncentive: parseFloat(totals.totalIncentive) || 0,
-            totalProfit: parseFloat(totals.totalProfit) || 0,
-            totalSaleCount: parseInt(totals.totalSaleCount) || 0,
-          },
-        });
-        setPagination(
-          response.data.pagination || {
-            currentPage: 1,
-            totalPages: 1,
-            totalRecords: 0,
-            hasNext: false,
-            hasPrev: false,
-          },
-        );
-      } else {
-        throw new Error(response.data.message || "Failed to fetch data");
-      }
-    } catch (error) {
-      console.error("Error fetching tour expense data:", error);
-      showToast(
-        "error",
-        error.response?.data?.message || "Failed to fetch data",
-      );
-      setData({
-        summary: {
-          tourExpense: 0,
-          tourAllowance: 0,
-          incentive: 0,
-          totalTourCost: 0,
-          totalSales: 0,
-          totalProfit: 0,
-          ratio: 0,
-        },
-        records: [],
-        totals: {
-          totalSale: 0,
-          totalCOG: 0,
-          totalTourExpense: 0,
-          totalTourAllowance: 0,
-          totalIncentive: 0,
-          totalProfit: 0,
-          totalSaleCount: 0,
-        },
-      });
-      setPagination({
-        currentPage: 1,
-        totalPages: 1,
-        totalRecords: 0,
-        hasNext: false,
-        hasPrev: false,
-      });
+      if (res.data.success) setMrList(res.data.data || []);
+    } catch (err) {
+      console.error("Error fetching MR list:", err);
     } finally {
-      setLoading(false);
+      setMrListLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchMRList();
+  }, [fetchMRList]);
+
+  // ── Fetch main data ──
+  const fetchData = useCallback(
+    async (page = 1) => {
+      setLoading(true);
+      try {
+        const dateRange = getDateRange();
+        if (
+          selectedTab === "custom" &&
+          (!customDateRange.startDate || !customDateRange.endDate)
+        ) {
+          setLoading(false);
+          return;
+        }
+
+        const params = {
+          page,
+          limit: itemsPerPage,
+          dateFilter: selectedTab,
+          viewMode,
+        };
+        if (selectedTab !== "all") {
+          if (dateRange.startDate) params.startDate = dateRange.startDate;
+          if (dateRange.endDate) params.endDate = dateRange.endDate;
+        }
+        if (selectedMrId) params.mrId = selectedMrId;
+
+        const response = await axios.get(
+          `${backendUrl}/api/reports/tour-expense-sales`,
+          { params },
+        );
+
+        if (response.data.success) {
+          const summary = response.data.data?.summary || {};
+          const totalsRaw = response.data.data?.totals || {};
+          setData({
+            summary: {
+              tourExpense: parseFloat(summary.tourExpense) || 0,
+              tourAllowance: parseFloat(summary.tourAllowance) || 0,
+              incentive: parseFloat(summary.incentive) || 0,
+              totalTourCost: parseFloat(summary.totalTourCost) || 0,
+              totalSales: parseFloat(summary.totalSales) || 0,
+              totalProfit: parseFloat(summary.totalProfit) || 0,
+              ratio: parseFloat(summary.ratio) || 0,
+            },
+            records: response.data.data?.records || [],
+            totals: {
+              totalSale: parseFloat(totalsRaw.totalSale) || 0,
+              totalCOG: parseFloat(totalsRaw.totalCOG) || 0,
+              totalTourExpense: parseFloat(totalsRaw.totalTourExpense) || 0,
+              totalTourAllowance: parseFloat(totalsRaw.totalTourAllowance) || 0,
+              totalIncentive: parseFloat(totalsRaw.totalIncentive) || 0,
+              totalProfit: parseFloat(totalsRaw.totalProfit) || 0,
+              totalSaleCount: parseInt(totalsRaw.totalSaleCount) || 0,
+            },
+          });
+          setPagination(
+            response.data.pagination || {
+              currentPage: 1,
+              totalPages: 1,
+              totalRecords: 0,
+              hasNext: false,
+              hasPrev: false,
+            },
+          );
+        } else {
+          throw new Error(response.data.message || "Failed to fetch data");
+        }
+      } catch (error) {
+        console.error("Error fetching tour expense data:", error);
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to fetch data",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [selectedTab, customDateRange, viewMode, selectedMrId, getDateRange],
+  );
 
   useEffect(() => {
     if (selectedTab === "custom") {
-      if (customDateRange.startDate && customDateRange.endDate) {
-        fetchData(1);
-      } else {
-        setData({
-          summary: {
-            tourExpense: 0,
-            tourAllowance: 0,
-            incentive: 0,
-            totalTourCost: 0,
-            totalSales: 0,
-            totalProfit: 0,
-            ratio: 0,
-          },
-          records: [],
-          totals: {
-            totalSale: 0,
-            totalCOG: 0,
-            totalTourExpense: 0,
-            totalTourAllowance: 0,
-            totalIncentive: 0,
-            totalProfit: 0,
-            totalSaleCount: 0,
-          },
-        });
-        setPagination({
-          currentPage: 1,
-          totalPages: 1,
-          totalRecords: 0,
-          hasNext: false,
-          hasPrev: false,
-        });
-      }
+      if (customDateRange.startDate && customDateRange.endDate) fetchData(1);
     } else {
       fetchData(1);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTab]);
+  }, [selectedTab, viewMode, selectedMrId]);
 
   useEffect(() => {
     if (
@@ -301,7 +244,6 @@ const TourExpenseSalesRatio = () => {
     ) {
       fetchData(1);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customDateRange.startDate, customDateRange.endDate]);
 
   const handleTabChange = (tab) => {
@@ -331,6 +273,13 @@ const TourExpenseSalesRatio = () => {
     setCustomDateRange({ startDate: null, endDate: null });
     setSelectedTab("currentMonth");
     setShowCustomFilter(false);
+    setSelectedMrId("");
+    setViewMode("overall");
+  };
+
+  const handleMRFilterChange = (mrId) => {
+    setSelectedMrId(mrId);
+    // When a specific MR is selected, switch to overall view to see that MR's combined data
   };
 
   const exportToExcel = async () => {
@@ -341,11 +290,13 @@ const TourExpenseSalesRatio = () => {
     setExportLoading(true);
     try {
       const dateRange = getDateRange();
-      const params = { dateFilter: selectedTab };
+      const params = { dateFilter: selectedTab, viewMode };
       if (selectedTab !== "all") {
         if (dateRange.startDate) params.startDate = dateRange.startDate;
         if (dateRange.endDate) params.endDate = dateRange.endDate;
       }
+      if (selectedMrId) params.mrId = selectedMrId;
+
       const response = await axios.get(
         `${backendUrl}/api/reports/tour-expense-sales/export`,
         { params, responseType: "blob" },
@@ -366,11 +317,9 @@ const TourExpenseSalesRatio = () => {
       window.URL.revokeObjectURL(url);
       showToast("success", "Excel report downloaded successfully");
     } catch (error) {
-      if (error.response?.status === 404) {
+      if (error.response?.status === 404)
         showToast("warning", "No data found for the selected filters");
-      } else {
-        showToast("error", "Failed to export Excel report");
-      }
+      else showToast("error", "Failed to export Excel report");
     } finally {
       setExportLoading(false);
     }
@@ -380,27 +329,26 @@ const TourExpenseSalesRatio = () => {
     const num = parseFloat(amount);
     return isNaN(num)
       ? "$0.00"
-      : `$${num.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}`;
+      : `$${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
-
   const formatPercentage = (value) => {
     const num = parseFloat(value);
     return isNaN(num) ? "0.00%" : `${num.toFixed(2)}%`;
   };
-
   const formatRatio = (value) => {
     const num = parseFloat(value);
     return isNaN(num) ? "0.0000" : num.toFixed(4);
   };
-
   const getRatioColor = (ratio) => {
     if (ratio <= 0.1) return "text-green-600";
     if (ratio <= 0.2) return "text-yellow-600";
     return "text-red-600";
   };
+
+  const selectedMRName = selectedMrId
+    ? mrList.find((mr) => mr._id?.toString() === selectedMrId)?.mrName ||
+      "Selected MR"
+    : null;
 
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
@@ -413,7 +361,6 @@ const TourExpenseSalesRatio = () => {
     if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1);
     const pages = [];
     for (let i = start; i <= end; i++) pages.push(i);
-
     return (
       <div className="flex items-center justify-between mt-6">
         <div className="text-sm text-gray-700">
@@ -428,11 +375,7 @@ const TourExpenseSalesRatio = () => {
           <button
             onClick={() => fetchData(pagination.currentPage - 1)}
             disabled={!pagination.hasPrev}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-              pagination.hasPrev
-                ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed"
-            }`}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
           >
             <ChevronLeft className="w-4 h-4" /> Prev
           </button>
@@ -441,11 +384,7 @@ const TourExpenseSalesRatio = () => {
               <button
                 key={page}
                 onClick={() => fetchData(page)}
-                className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                  page === pagination.currentPage
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                }`}
+                className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${page === pagination.currentPage ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300 text-gray-700"}`}
               >
                 {page}
               </button>
@@ -454,11 +393,7 @@ const TourExpenseSalesRatio = () => {
           <button
             onClick={() => fetchData(pagination.currentPage + 1)}
             disabled={!pagination.hasNext}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-              pagination.hasNext
-                ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                : "bg-gray-100 text-gray-400 cursor-not-allowed"
-            }`}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
           >
             Next <ChevronRight className="w-4 h-4" />
           </button>
@@ -476,6 +411,8 @@ const TourExpenseSalesRatio = () => {
     { key: "all", label: "All Records" },
     { key: "custom", label: "Custom Filter" },
   ];
+
+  const isMRWise = viewMode === "mrWise";
 
   return (
     <div className="p-6">
@@ -513,17 +450,13 @@ const TourExpenseSalesRatio = () => {
       </div>
 
       {/* ── Date Filter Tabs ── */}
-      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
+      <div className="bg-white p-4 rounded-xl shadow-md mb-4 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-3">
           {tabs.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => handleTabChange(key)}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
-                selectedTab === key
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
+              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm ${selectedTab === key ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
             >
               {label}
             </button>
@@ -535,12 +468,96 @@ const TourExpenseSalesRatio = () => {
           <span className="font-medium text-indigo-700">
             {getDateRange().displayDate}
           </span>
+          {selectedMRName && (
+            <>
+              <span className="text-gray-400">|</span>
+              <span className="font-medium text-purple-700">
+                MR: {selectedMRName}
+              </span>
+              <button
+                onClick={() => setSelectedMrId("")}
+                className="ml-1 text-gray-400 hover:text-red-500 cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── View Mode & MR Filter Row ── */}
+      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+          {/* View Mode toggle */}
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-indigo-600" />
+            <span className="text-sm font-medium text-gray-700">
+              View Mode:
+            </span>
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+              <button
+                onClick={() => setViewMode("overall")}
+                className={`px-4 py-1.5 text-sm transition-colors cursor-pointer ${viewMode === "overall" ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+              >
+                Overall
+              </button>
+              <button
+                onClick={() => {
+                  setViewMode("mrWise");
+                  setSelectedMrId("");
+                }}
+                className={`px-4 py-1.5 text-sm transition-colors cursor-pointer ${viewMode === "mrWise" ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}
+              >
+                MR-wise
+              </button>
+            </div>
+          </div>
+
+          {/* MR dropdown filter (shown in both modes) */}
+          <div className="flex items-center gap-2 flex-1">
+            <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
+              Filter by MR:
+            </span>
+            <select
+              value={selectedMrId}
+              onChange={(e) => handleMRFilterChange(e.target.value)}
+              disabled={mrListLoading}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white min-w-[220px] cursor-pointer"
+            >
+              <option value="">
+                {mrListLoading
+                  ? "Loading MRs..."
+                  : "All Medical Representatives"}
+              </option>
+              {mrList.map((mr) => (
+                <option key={mr._id} value={mr._id}>
+                  {mr.mrName} ({mr.count} entries,{" "}
+                  {formatCurrency(mr.totalAmount)})
+                </option>
+              ))}
+            </select>
+            {selectedMrId && (
+              <button
+                onClick={() => setSelectedMrId("")}
+                className="flex items-center gap-1 px-3 py-1.5 bg-red-100 text-red-600 rounded-lg text-sm hover:bg-red-200 transition-colors cursor-pointer"
+              >
+                <X size={14} /> Clear
+              </button>
+            )}
+          </div>
+
+          {/* MR count badge */}
+          {mrList.length > 0 && (
+            <div className="text-xs text-gray-500 whitespace-nowrap">
+              {mrList.length} MR{mrList.length !== 1 ? "s" : ""} with tour
+              expenses
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── Summary Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        {/* Card 1 — Tour Expense (Vans + Petrol) */}
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
@@ -563,7 +580,6 @@ const TourExpenseSalesRatio = () => {
           </div>
         </div>
 
-        {/* Card 2 — Tour Allowance */}
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-amber-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
@@ -585,7 +601,6 @@ const TourExpenseSalesRatio = () => {
           </div>
         </div>
 
-        {/* Card 3 — Incentive */}
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
@@ -605,7 +620,6 @@ const TourExpenseSalesRatio = () => {
           </div>
         </div>
 
-        {/* Card 4 — Tour Expense / Sales Ratio */}
         <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
@@ -680,122 +694,234 @@ const TourExpenseSalesRatio = () => {
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-sm font-medium">Sr.No</th>
-              <th className="p-3 text-sm font-medium">Sale ($)</th>
-              {/* Tour Expense = Rent Expense - Vans + Tour Petrol Expense */}
-              <th className="p-3 text-sm font-medium">
-                Tour Expense ($)
-                <div className="text-xs font-normal text-gray-500">
-                  Vans + Petrol
-                </div>
-              </th>
-              {/* Tour Allowance = Daily Allowance for MRs/Drivers/Supervisors */}
-              <th className="p-3 text-sm font-medium">
-                Tour Allowance ($)
-                <div className="text-xs font-normal text-gray-500">
-                  Daily Allowance
-                </div>
-              </th>
-              {/* Incentive = Sales & other Incentives for Sales Team */}
-              <th className="p-3 text-sm font-medium">
-                Incentive ($)
-                <div className="text-xs font-normal text-gray-500">
-                  Sales Team
-                </div>
-              </th>
-              <th className="p-3 text-sm font-medium">Total Tour Cost ($)</th>
-              <th className="p-3 text-sm font-medium">Percentage (%)</th>
-              <th className="p-3 text-sm font-medium">Profit ($)</th>
-            </tr>
+            {isMRWise ? (
+              <tr>
+                <th className="p-3 text-sm font-medium">Sr.No</th>
+                <th className="p-3 text-sm font-medium text-left">
+                  Medical Representative
+                </th>
+                <th className="p-3 text-sm font-medium">
+                  Tour Expense ($)
+                  <div className="text-xs font-normal text-gray-500">
+                    Vans + Petrol
+                  </div>
+                </th>
+                <th className="p-3 text-sm font-medium">Sale ($)</th>
+                <th className="p-3 text-sm font-medium">Percentage (%)</th>
+                <th className="p-3 text-sm font-medium">Profit ($)</th>
+                <th className="p-3 text-sm font-medium">
+                  Entries
+                  <div className="text-xs font-normal text-gray-500">Count</div>
+                </th>
+              </tr>
+            ) : (
+              <tr>
+                <th className="p-3 text-sm font-medium">Sr.No</th>
+                {/* MR Name column only visible when an MR is selected in overall mode */}
+                {selectedMrId && (
+                  <th className="p-3 text-sm font-medium text-left">
+                    Medical Representative
+                  </th>
+                )}
+                <th className="p-3 text-sm font-medium">Sale ($)</th>
+                <th className="p-3 text-sm font-medium">
+                  Tour Expense ($)
+                  <div className="text-xs font-normal text-gray-500">
+                    Vans + Petrol
+                  </div>
+                </th>
+                <th className="p-3 text-sm font-medium">
+                  Tour Allowance ($)
+                  <div className="text-xs font-normal text-gray-500">
+                    Daily Allowance
+                  </div>
+                </th>
+                <th className="p-3 text-sm font-medium">
+                  Incentive ($)
+                  <div className="text-xs font-normal text-gray-500">
+                    Sales Team
+                  </div>
+                </th>
+                <th className="p-3 text-sm font-medium">Total Tour Cost ($)</th>
+                <th className="p-3 text-sm font-medium">Percentage (%)</th>
+                <th className="p-3 text-sm font-medium">Profit ($)</th>
+              </tr>
+            )}
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="p-8 text-center">
+                <td
+                  colSpan={isMRWise ? 7 : selectedMrId ? 9 : 8}
+                  className="p-8 text-center"
+                >
                   <div className="flex flex-col items-center justify-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
                     <span className="text-gray-600">Loading data...</span>
-                    <span className="text-sm text-gray-500 mt-2">
-                      Please wait while we fetch the latest data
-                    </span>
                   </div>
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
-              data.records.map((record, index) => {
-                // Read flat fields from backend
-                const tourExpense = parseFloat(record.tourExpense) || 0; // Vans + Petrol
-                const tourAllowance = parseFloat(record.tourAllowance) || 0; // Daily Allowance
-                const incentive = parseFloat(record.incentive) || 0; // Sales Incentive
-                const totalTourCost =
-                  parseFloat(record.totalTourCost) ||
-                  tourExpense + tourAllowance + incentive;
-                const sale = parseFloat(record.sale) || 0;
-                const profit = parseFloat(record.profit) || 0;
-                const percentage = parseFloat(record.percentage) || 0;
-
-                return (
-                  <tr
-                    key={index}
-                    className={`hover:bg-gray-50 ${
-                      index === data.records.length - 1 ? "" : "border-b"
-                    }`}
-                  >
-                    <td className="p-3 text-sm text-gray-600 font-medium">
-                      {getSerialNumber(index)}
-                    </td>
-
-                    {/* Sale */}
-                    <td className="p-3 text-sm font-semibold text-blue-600">
-                      {formatCurrency(sale)}
-                    </td>
-
-                    {/* Tour Expense = Rent Expense - Vans + Tour Petrol Expense */}
-                    <td className="p-3 text-sm font-semibold text-purple-600">
-                      {formatCurrency(tourExpense)}
-                    </td>
-
-                    {/* Tour Allowance = Daily Allowance */}
-                    <td className="p-3 text-sm font-semibold text-amber-600">
-                      {formatCurrency(tourAllowance)}
-                    </td>
-
-                    {/* Incentive = Sales Team Incentives */}
-                    <td className="p-3 text-sm font-semibold text-green-600">
-                      {formatCurrency(incentive)}
-                    </td>
-
-                    {/* Total Tour Cost */}
-                    <td className="p-3 text-sm font-bold text-gray-900">
-                      {formatCurrency(totalTourCost)}
-                    </td>
-
-                    {/* Percentage */}
-                    <td className="p-3">
-                      <span
-                        className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                          percentage < 10
-                            ? "bg-green-100 text-green-800"
-                            : percentage < 20
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-red-100 text-red-800"
-                        }`}
+              <>
+                {data.records.map((record, index) => {
+                  if (isMRWise) {
+                    const tourExpense = parseFloat(record.tourExpense) || 0;
+                    const sale = parseFloat(record.sale) || 0;
+                    const profit = parseFloat(record.profit) || 0;
+                    const percentage = parseFloat(record.percentage) || 0;
+                    return (
+                      <tr
+                        key={index}
+                        className={`hover:bg-gray-50 ${index !== data.records.length - 1 ? "border-b" : ""}`}
                       >
-                        {formatPercentage(percentage)}
+                        <td className="p-3 text-sm text-gray-600 font-medium">
+                          {getSerialNumber(index)}
+                        </td>
+                        <td className="p-3 text-sm text-left">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                              <span className="text-indigo-700 text-xs font-bold">
+                                {(record.mrName || "?").charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                            <span className="font-semibold text-gray-800">
+                              {record.mrName || "Unknown MR"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-sm font-semibold text-purple-600">
+                          {formatCurrency(tourExpense)}
+                        </td>
+                        <td className="p-3 text-sm font-semibold text-blue-600">
+                          {formatCurrency(sale)}
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${percentage < 10 ? "bg-green-100 text-green-800" : percentage < 20 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800"}`}
+                          >
+                            {formatPercentage(percentage)}
+                          </span>
+                        </td>
+                        <td className="p-3 text-sm font-semibold text-green-600">
+                          {formatCurrency(profit)}
+                        </td>
+                        <td className="p-3 text-sm text-gray-600">
+                          {record.expenseCount || 0}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  // Overall mode row
+                  const tourExpense = parseFloat(record.tourExpense) || 0;
+                  const tourAllowance = parseFloat(record.tourAllowance) || 0;
+                  const incentive = parseFloat(record.incentive) || 0;
+                  const totalTourCost =
+                    parseFloat(record.totalTourCost) ||
+                    tourExpense + tourAllowance + incentive;
+                  const sale = parseFloat(record.sale) || 0;
+                  const profit = parseFloat(record.profit) || 0;
+                  const percentage = parseFloat(record.percentage) || 0;
+
+                  return (
+                    <tr
+                      key={index}
+                      className={`hover:bg-gray-50 ${index !== data.records.length - 1 ? "border-b" : ""}`}
+                    >
+                      <td className="p-3 text-sm text-gray-600 font-medium">
+                        {getSerialNumber(index)}
+                      </td>
+                      {selectedMrId && (
+                        <td className="p-3 text-sm text-left">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+                              <span className="text-purple-700 text-xs font-bold">
+                                {(selectedMRName || "?")
+                                  .charAt(0)
+                                  .toUpperCase()}
+                              </span>
+                            </div>
+                            <span className="font-semibold text-gray-800">
+                              {selectedMRName}
+                            </span>
+                          </div>
+                        </td>
+                      )}
+                      <td className="p-3 text-sm font-semibold text-blue-600">
+                        {formatCurrency(sale)}
+                      </td>
+                      <td className="p-3 text-sm font-semibold text-purple-600">
+                        {formatCurrency(tourExpense)}
+                      </td>
+                      <td className="p-3 text-sm font-semibold text-amber-600">
+                        {formatCurrency(tourAllowance)}
+                      </td>
+                      <td className="p-3 text-sm font-semibold text-green-600">
+                        {formatCurrency(incentive)}
+                      </td>
+                      <td className="p-3 text-sm font-bold text-gray-900">
+                        {formatCurrency(totalTourCost)}
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${percentage < 10 ? "bg-green-100 text-green-800" : percentage < 20 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800"}`}
+                        >
+                          {formatPercentage(percentage)}
+                        </span>
+                      </td>
+                      <td className="p-3 text-sm font-semibold text-green-600">
+                        {formatCurrency(profit)}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* MR-wise totals footer row */}
+                {isMRWise && data.records.length > 1 && (
+                  <tr className="bg-amber-50 border-t-2 border-amber-200 font-bold">
+                    <td className="p-3 text-sm" colSpan={2}>
+                      TOTAL ({data.records.length} MRs)
+                    </td>
+                    <td className="p-3 text-sm text-purple-700">
+                      {formatCurrency(
+                        data.records.reduce(
+                          (s, r) => s + (parseFloat(r.tourExpense) || 0),
+                          0,
+                        ),
+                      )}
+                    </td>
+                    <td className="p-3 text-sm text-blue-700">
+                      {formatCurrency(data.totals.totalSale)}
+                    </td>
+                    <td className="p-3 text-sm">
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                        {formatPercentage(
+                          data.totals.totalSale > 0
+                            ? (data.totals.totalTourExpense /
+                                data.totals.totalSale) *
+                                100
+                            : 0,
+                        )}
                       </span>
                     </td>
-
-                    {/* Profit */}
-                    <td className="p-3 text-sm font-semibold text-green-600">
-                      {formatCurrency(profit)}
+                    <td className="p-3 text-sm text-green-700">
+                      {formatCurrency(data.totals.totalProfit)}
+                    </td>
+                    <td className="p-3 text-sm text-gray-600">
+                      {data.records.reduce(
+                        (s, r) => s + (parseInt(r.expenseCount) || 0),
+                        0,
+                      )}
                     </td>
                   </tr>
-                );
-              })
+                )}
+              </>
             ) : (
               <tr>
-                <td colSpan={8} className="p-8 text-center">
+                <td
+                  colSpan={isMRWise ? 7 : selectedMrId ? 9 : 8}
+                  className="p-8 text-center"
+                >
                   <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
                     No data found
@@ -804,7 +930,9 @@ const TourExpenseSalesRatio = () => {
                     {selectedTab === "custom" &&
                     (!customDateRange.startDate || !customDateRange.endDate)
                       ? "Please select start and end dates to view data."
-                      : "No tour expense data available for the selected date range."}
+                      : selectedMrId
+                        ? `No tour expense data found for ${selectedMRName} in the selected period.`
+                        : "No tour expense data available for the selected date range."}
                   </p>
                 </td>
               </tr>

@@ -1,3 +1,4 @@
+// routes/reports/tourExpenseSalesRatio.js
 import express from "express";
 import Expense from "../../models/expenses/addExpense.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
@@ -6,27 +7,6 @@ import Payroll from "../../models/Hrm/Payroll.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  EXPENSE CATEGORY MAPPING
-//
-//  Tour Expense ($)      → Expense categories matching:
-//                            • "Tour Petrol Expense"
-//                            • "Province Marketing Expense"
-//                            • any category with "tour" in name
-//                            • any category with "van" in name
-//                            • remarks containing "tour"
-//                          + Travel Allowance from Payroll.allowances[]
-//                            where allowances[].type === "Travel Allowance"
-//
-//  Tour Allowance ($)    → Payroll.allowances[] where type === "Tour Allowance"
-//                          (Daily Allowance to Medical Reps / Drivers / Supervisors)
-//
-//  Incentive ($)         → Expense category: "Incentive"
-//                          (Sales and other Incentives for Sales Team)
-//
-//  totalTourCost         → Tour Expense + Tour Allowance + Incentive
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Date Range Helper (UTC) ─────────────────────────────────────────────────
 const getDateRange = (dateFilter = "currentMonth", startDate, endDate) => {
@@ -121,36 +101,27 @@ const buildPayrollPeriods = (startDate, endDate) => {
 // ─── Get expense category IDs by type ────────────────────────────────────────
 const getExpenseCategoryIds = async () => {
   try {
-    // Fetch ALL active categories once
     const allCategories = await ExpenseCategory.find({ isActive: true }).select(
       "_id category",
     );
-
-    const tourExpenseCategoryIds = []; // Tour Expense: petrol, vans, province marketing, tour-named
-    const incentiveCategoryIds = []; // Incentive: "Incentive" category
+    const tourExpenseCategoryIds = [];
+    const incentiveCategoryIds = [];
 
     for (const cat of allCategories) {
       const name = (cat.category || "").toLowerCase().trim();
-
-      // ── Incentive category ──
       if (name === "incentive") {
         incentiveCategoryIds.push(cat._id);
         continue;
       }
-
-      // ── Tour Expense categories ──
-      // Matches: "Tour Petrol Expense", "Province Marketing Expense",
-      //          any category with "tour" or "van" or "province" in the name
       if (
-        name.includes("tour") || // Tour Petrol Expense, Tour Allowance expense type
-        name.includes("van") || // Rent Expense - Vans
-        name.includes("province marketing") || // Province Marketing Expense ← NEW
-        name.includes("petrol") // any petrol expenses
+        name.includes("tour") ||
+        name.includes("van") ||
+        name.includes("province marketing") ||
+        name.includes("petrol")
       ) {
         tourExpenseCategoryIds.push(cat._id);
       }
     }
-
     return { tourExpenseCategoryIds, incentiveCategoryIds };
   } catch (err) {
     console.error("Error fetching expense categories:", err);
@@ -158,11 +129,103 @@ const getExpenseCategoryIds = async () => {
   }
 };
 
-// ─── Build single aggregated record ──────────────────────────────────────────
-const buildAggregatedRecord = async (dateRange) => {
+// ─── GET /mr-list — return all MRs who have tour expenses ────────────────────
+router.get("/mr-list", async (req, res) => {
+  try {
+    const { tourExpenseCategoryIds } = await getExpenseCategoryIds();
+
+    const mrMatch = {};
+    if (tourExpenseCategoryIds.length > 0) {
+      mrMatch.$or = [
+        { category: { $in: tourExpenseCategoryIds } },
+        { remarks: { $regex: /tour/i } },
+      ];
+    } else {
+      mrMatch.remarks = { $regex: /tour/i };
+    }
+
+    // Only expenses that have an mrId linked
+    mrMatch.mrId = { $ne: null, $exists: true };
+
+    const mrList = await Expense.aggregate([
+      { $match: mrMatch },
+      {
+        $group: {
+          _id: "$mrId",
+          mrName: { $first: "$mrName" },
+          totalAmount: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { mrName: 1 } },
+    ]);
+
+    res.json({ success: true, data: mrList });
+  } catch (error) {
+    console.error("Error fetching MR list:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ─── Build MR-wise aggregated records ────────────────────────────────────────
+const buildMRWiseRecords = async (dateRange, filterMrId = null) => {
+  const { startDate, endDate } = dateRange;
+  const { tourExpenseCategoryIds, incentiveCategoryIds } =
+    await getExpenseCategoryIds();
+
+  const expenseDateMatch = {};
+  if (startDate && endDate) {
+    expenseDateMatch.date = { $gte: startDate, $lte: endDate };
+  }
+
+  // Base tour expense match
+  const tourOrConditions = [];
+  if (tourExpenseCategoryIds.length > 0) {
+    tourOrConditions.push({ category: { $in: tourExpenseCategoryIds } });
+  }
+  tourOrConditions.push({ remarks: { $regex: /tour/i } });
+
+  const tourExpenseMatch = {
+    ...expenseDateMatch,
+    mrId: { $ne: null, $exists: true },
+    $or: tourOrConditions,
+  };
+
+  // Filter by specific MR if provided
+  if (filterMrId) {
+    tourExpenseMatch.mrId = filterMrId;
+  }
+
+  // Aggregate tour expenses grouped by MR
+  const mrTourExpenses = await Expense.aggregate([
+    { $match: tourExpenseMatch },
+    {
+      $group: {
+        _id: "$mrId",
+        mrName: { $first: "$mrName" },
+        tourExpense: { $sum: "$amount" },
+        expenseCount: { $sum: 1 },
+        expenses: {
+          $push: {
+            date: "$date",
+            amount: "$amount",
+            remarks: "$remarks",
+            category: "$category",
+          },
+        },
+      },
+    },
+    { $sort: { mrName: 1 } },
+  ]);
+
+  return mrTourExpenses;
+};
+
+// ─── Build single aggregated record (overall, optionally filtered by MR) ─────
+const buildAggregatedRecord = async (dateRange, filterMrId = null) => {
   const { startDate, endDate } = dateRange;
 
-  // ── Sales ──────────────────────────────────────────────────────────────────
+  // ── Sales ──
   const salesMatch = {};
   if (startDate && endDate) {
     salesMatch.recordingDate = { $gte: startDate, $lte: endDate };
@@ -185,7 +248,7 @@ const buildAggregatedRecord = async (dateRange) => {
   const saleCount = salesAgg[0]?.saleCount || 0;
   const totalCOG = totalSale - totalProfit;
 
-  // ── Expense category IDs ───────────────────────────────────────────────────
+  // ── Expense category IDs ──
   const { tourExpenseCategoryIds, incentiveCategoryIds } =
     await getExpenseCategoryIds();
 
@@ -194,10 +257,7 @@ const buildAggregatedRecord = async (dateRange) => {
     expenseDateMatch.date = { $gte: startDate, $lte: endDate };
   }
 
-  // ── Tour Expenses from Expense collection ──────────────────────────────────
-  //    Categories: Tour Petrol Expense, Province Marketing Expense,
-  //                Rent Expense - Vans, any with "tour"/"van"/"petrol" in name
-  //    OR remarks containing "tour"
+  // ── Tour Expenses ──
   const tourExpenseMatch = { ...expenseDateMatch };
   const tourOrConditions = [];
   if (tourExpenseCategoryIds.length > 0) {
@@ -206,16 +266,21 @@ const buildAggregatedRecord = async (dateRange) => {
   tourOrConditions.push({ remarks: { $regex: /tour/i } });
   tourExpenseMatch.$or = tourOrConditions;
 
+  // Apply MR filter if provided
+  if (filterMrId) {
+    tourExpenseMatch.mrId = filterMrId;
+  }
+
   const tourExpenseAgg = await Expense.aggregate([
     { $match: tourExpenseMatch },
     { $group: { _id: null, total: { $sum: "$amount" } } },
   ]);
   const totalExpenseTour = tourExpenseAgg[0]?.total || 0;
 
-  // ── Incentive from Expense collection ─────────────────────────────────────
-  //    Category: "Incentive" (Sales and other Incentives for Sales Team)
+  // ── Incentive from Expense ──
   let totalExpenseIncentive = 0;
-  if (incentiveCategoryIds.length > 0) {
+  if (incentiveCategoryIds.length > 0 && !filterMrId) {
+    // Incentive is not MR-specific, skip when filtering by MR
     const incentiveExpenseAgg = await Expense.aggregate([
       {
         $match: {
@@ -228,22 +293,23 @@ const buildAggregatedRecord = async (dateRange) => {
     totalExpenseIncentive = incentiveExpenseAgg[0]?.total || 0;
   }
 
-  // ── Payroll allowances ─────────────────────────────────────────────────────
+  // ── Payroll allowances ──
   const periods = buildPayrollPeriods(startDate, endDate);
   const payrollMatch = {};
   if (periods && periods.length > 0) {
     payrollMatch.period = { $in: periods };
   }
 
-  // Travel Allowance from payroll → contributes to Tour Expense
+  // Apply MR filter to payroll if filterMrId provided
+  if (filterMrId) {
+    payrollMatch.employeeId = filterMrId;
+  }
+
+  // Travel Allowance from payroll
   const travelAllowanceAgg = await Payroll.aggregate([
     { $match: payrollMatch },
     { $unwind: { path: "$allowances", preserveNullAndEmptyArrays: false } },
-    {
-      $match: {
-        "allowances.type": { $regex: /^travel allowance$/i },
-      },
-    },
+    { $match: { "allowances.type": { $regex: /^travel allowance$/i } } },
     {
       $group: {
         _id: null,
@@ -253,84 +319,57 @@ const buildAggregatedRecord = async (dateRange) => {
   ]);
   const totalTravelAllowance = travelAllowanceAgg[0]?.totalTravelAllowance || 0;
 
-  // Tour Allowance from payroll → Daily Allowance to MRs / Drivers / Supervisors
+  // Tour Allowance from payroll
   const tourAllowanceAgg = await Payroll.aggregate([
     { $match: payrollMatch },
     { $unwind: { path: "$allowances", preserveNullAndEmptyArrays: false } },
+    { $match: { "allowances.type": { $regex: /^tour allowance$/i } } },
     {
-      $match: {
-        "allowances.type": { $regex: /^tour allowance$/i },
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalTourAllowance: { $sum: "$allowances.amount" },
-      },
+      $group: { _id: null, totalTourAllowance: { $sum: "$allowances.amount" } },
     },
   ]);
   const totalTourAllowance = tourAllowanceAgg[0]?.totalTourAllowance || 0;
 
-  // Incentive from payroll allowances
-  const incentiveAllowanceAgg = await Payroll.aggregate([
-    { $match: payrollMatch },
-    { $unwind: { path: "$allowances", preserveNullAndEmptyArrays: false } },
-    {
-      $match: {
-        "allowances.type": { $regex: /^incentive$/i },
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalIncentive: { $sum: "$allowances.amount" },
-      },
-    },
-  ]);
-  const totalPayrollIncentive = incentiveAllowanceAgg[0]?.totalIncentive || 0;
+  // Incentive from payroll
+  let totalPayrollIncentive = 0;
+  if (!filterMrId) {
+    const incentiveAllowanceAgg = await Payroll.aggregate([
+      { $match: payrollMatch },
+      { $unwind: { path: "$allowances", preserveNullAndEmptyArrays: false } },
+      { $match: { "allowances.type": { $regex: /^incentive$/i } } },
+      { $group: { _id: null, totalIncentive: { $sum: "$allowances.amount" } } },
+    ]);
+    totalPayrollIncentive = incentiveAllowanceAgg[0]?.totalIncentive || 0;
+  }
 
-  // ── Combined totals ────────────────────────────────────────────────────────
-  //  Tour Expense   = expense records (tour/van/petrol/province marketing)
-  //                 + Travel Allowance from payroll
+  // ── Combined totals ──
   const totalTourExpense = totalExpenseTour + totalTravelAllowance;
-
-  //  Incentive      = Incentive expense records + Incentive payroll allowances
   const totalIncentive = totalExpenseIncentive + totalPayrollIncentive;
-
-  //  Total Tour Cost = Tour Expense + Tour Allowance + Incentive
   const totalTourCost = totalTourExpense + totalTourAllowance + totalIncentive;
-
-  // ── Ratios ─────────────────────────────────────────────────────────────────
   const ratio = totalSale > 0 ? totalTourCost / totalSale : 0;
   const percentage = totalSale > 0 ? (totalTourCost / totalSale) * 100 : 0;
 
   return {
     summary: {
-      // Tour Expense = Rent Expense-Vans + Tour Petrol Expense + Province Marketing + Travel Allowance
       tourExpense: parseFloat(totalTourExpense.toFixed(2)),
-      // Tour Allowance = Daily Allowance for MRs / Drivers / Supervisors
       tourAllowance: parseFloat(totalTourAllowance.toFixed(2)),
-      // Incentive = Sales and other Incentives for Sales Team
       incentive: parseFloat(totalIncentive.toFixed(2)),
-      // Total Tour Cost = tourExpense + tourAllowance + incentive
       totalTourCost: parseFloat(totalTourCost.toFixed(2)),
       totalSales: parseFloat(totalSale.toFixed(2)),
       totalProfit: parseFloat(totalProfit.toFixed(2)),
       ratio: parseFloat(ratio.toFixed(4)),
-      // Breakdown details for summary card subtitle
       expenseTour: parseFloat(totalExpenseTour.toFixed(2)),
       travelAllowance: parseFloat(totalTravelAllowance.toFixed(2)),
-      provinceMarketing: 0, // already included in expenseTour via category match
+      provinceMarketing: 0,
     },
     record: {
       id: 1,
       sale: parseFloat(totalSale.toFixed(2)),
       cog: parseFloat(totalCOG.toFixed(2)),
-      // Flat fields for the table row
-      tourExpense: parseFloat(totalTourExpense.toFixed(2)), // Vans + Petrol + Province Marketing + Travel Allowance
-      tourAllowance: parseFloat(totalTourAllowance.toFixed(2)), // Daily Allowance
-      incentive: parseFloat(totalIncentive.toFixed(2)), // Incentive
-      totalTourCost: parseFloat(totalTourCost.toFixed(2)), // All three combined
+      tourExpense: parseFloat(totalTourExpense.toFixed(2)),
+      tourAllowance: parseFloat(totalTourAllowance.toFixed(2)),
+      incentive: parseFloat(totalIncentive.toFixed(2)),
+      totalTourCost: parseFloat(totalTourCost.toFixed(2)),
       percentage: parseFloat(percentage.toFixed(2)),
       profit: parseFloat(totalProfit.toFixed(2)),
       invoiceCount: saleCount,
@@ -348,21 +387,116 @@ const buildAggregatedRecord = async (dateRange) => {
   };
 };
 
-// ─── GET / ────────────────────────────────────────────────────────────────────
+// ─── GET / — main report (supports ?mrId=xxx for MR-wise filter) ──────────────
 router.get("/", async (req, res) => {
   try {
-    const { dateFilter = "currentMonth", startDate, endDate } = req.query;
-    console.log(
-      "Tour Expense Route → dateFilter:",
-      dateFilter,
-      "| startDate:",
+    const {
+      dateFilter = "currentMonth",
       startDate,
-      "| endDate:",
       endDate,
-    );
+      mrId,
+      viewMode,
+    } = req.query;
 
     const dateRange = getDateRange(dateFilter, startDate, endDate);
-    const { summary, record, totals } = await buildAggregatedRecord(dateRange);
+
+    // MR-wise breakdown mode
+    if (viewMode === "mrWise") {
+      const mrRecords = await buildMRWiseRecords(dateRange, mrId || null);
+
+      // Also get overall sales for ratio calculation
+      const salesMatch = {};
+      if (dateRange.startDate && dateRange.endDate) {
+        salesMatch.recordingDate = {
+          $gte: dateRange.startDate,
+          $lte: dateRange.endDate,
+        };
+      }
+      const salesAgg = await SaleSummary.aggregate([
+        { $match: salesMatch },
+        {
+          $group: {
+            _id: null,
+            totalSale: { $sum: "$totalAmount" },
+            totalProfit: { $sum: "$totalProfitLoss" },
+            saleCount: { $sum: 1 },
+          },
+        },
+      ]);
+      const totalSale = salesAgg[0]?.totalSale || 0;
+      const totalProfit = salesAgg[0]?.totalProfit || 0;
+      const saleCount = salesAgg[0]?.saleCount || 0;
+
+      const records = mrRecords.map((mr, index) => {
+        const tourExpense = parseFloat(mr.tourExpense.toFixed(2));
+        const percentage =
+          totalSale > 0
+            ? parseFloat(((tourExpense / totalSale) * 100).toFixed(2))
+            : 0;
+        return {
+          id: index + 1,
+          mrId: mr._id,
+          mrName: mr.mrName || "Unknown MR",
+          sale: parseFloat(totalSale.toFixed(2)),
+          cog: parseFloat((totalSale - totalProfit).toFixed(2)),
+          tourExpense,
+          tourAllowance: 0, // payroll allowance not split by MR in this view
+          incentive: 0,
+          totalTourCost: tourExpense,
+          percentage,
+          profit: parseFloat(totalProfit.toFixed(2)),
+          invoiceCount: saleCount,
+          expenseCount: mr.expenseCount,
+        };
+      });
+
+      const grandTourExpense = records.reduce((s, r) => s + r.tourExpense, 0);
+      const grandPercentage =
+        totalSale > 0 ? (grandTourExpense / totalSale) * 100 : 0;
+
+      return res.json({
+        success: true,
+        data: {
+          summary: {
+            tourExpense: parseFloat(grandTourExpense.toFixed(2)),
+            tourAllowance: 0,
+            incentive: 0,
+            totalTourCost: parseFloat(grandTourExpense.toFixed(2)),
+            totalSales: parseFloat(totalSale.toFixed(2)),
+            totalProfit: parseFloat(totalProfit.toFixed(2)),
+            ratio:
+              totalSale > 0
+                ? parseFloat((grandTourExpense / totalSale).toFixed(4))
+                : 0,
+          },
+          records,
+          totals: {
+            totalSale: parseFloat(totalSale.toFixed(2)),
+            totalCOG: parseFloat((totalSale - totalProfit).toFixed(2)),
+            totalTourExpense: parseFloat(grandTourExpense.toFixed(2)),
+            totalTourAllowance: 0,
+            totalIncentive: 0,
+            totalTourCost: parseFloat(grandTourExpense.toFixed(2)),
+            totalProfit: parseFloat(totalProfit.toFixed(2)),
+            totalSaleCount: saleCount,
+          },
+        },
+        pagination: {
+          currentPage: 1,
+          totalPages: 1,
+          totalRecords: records.length,
+          hasNext: false,
+          hasPrev: false,
+        },
+      });
+    }
+
+    // Default: overall aggregated view (optionally filtered by MR)
+    const filterMrId = mrId || null;
+    const { summary, record, totals } = await buildAggregatedRecord(
+      dateRange,
+      filterMrId,
+    );
 
     res.json({
       success: true,
@@ -384,11 +518,70 @@ router.get("/", async (req, res) => {
 // ─── GET /export ──────────────────────────────────────────────────────────────
 router.get("/export", async (req, res) => {
   try {
-    const { dateFilter = "currentMonth", startDate, endDate } = req.query;
+    const {
+      dateFilter = "currentMonth",
+      startDate,
+      endDate,
+      mrId,
+      viewMode,
+    } = req.query;
     const dateRange = getDateRange(dateFilter, startDate, endDate);
-    const { summary, record, totals } = await buildAggregatedRecord(dateRange);
 
-    if (!record.sale && !record.tourExpense && !record.incentive) {
+    let records = [];
+    let summary = {};
+    let totals = {};
+    let isMRWise = viewMode === "mrWise";
+
+    if (isMRWise) {
+      const mrRecords = await buildMRWiseRecords(dateRange, mrId || null);
+      const salesMatch = {};
+      if (dateRange.startDate && dateRange.endDate) {
+        salesMatch.recordingDate = {
+          $gte: dateRange.startDate,
+          $lte: dateRange.endDate,
+        };
+      }
+      const salesAgg = await SaleSummary.aggregate([
+        { $match: salesMatch },
+        {
+          $group: {
+            _id: null,
+            totalSale: { $sum: "$totalAmount" },
+            totalProfit: { $sum: "$totalProfitLoss" },
+          },
+        },
+      ]);
+      const totalSale = salesAgg[0]?.totalSale || 0;
+      const totalProfit = salesAgg[0]?.totalProfit || 0;
+
+      records = mrRecords.map((mr, i) => ({
+        id: i + 1,
+        mrName: mr.mrName || "Unknown MR",
+        tourExpense: parseFloat(mr.tourExpense.toFixed(2)),
+        sale: parseFloat(totalSale.toFixed(2)),
+        profit: parseFloat(totalProfit.toFixed(2)),
+        percentage:
+          totalSale > 0
+            ? parseFloat(((mr.tourExpense / totalSale) * 100).toFixed(2))
+            : 0,
+        expenseCount: mr.expenseCount,
+      }));
+
+      const grandTourExpense = records.reduce((s, r) => s + r.tourExpense, 0);
+      summary = {
+        totalSales: totalSale,
+        totalProfit,
+        tourExpense: grandTourExpense,
+      };
+      totals = { totalSale, totalTourExpense: grandTourExpense, totalProfit };
+    } else {
+      const result = await buildAggregatedRecord(dateRange, mrId || null);
+      records = [result.record];
+      summary = result.summary;
+      totals = result.totals;
+    }
+
+    if (records.length === 0) {
       return res
         .status(404)
         .json({ success: false, message: "No data found for export" });
@@ -397,13 +590,15 @@ router.get("/export", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Tour Expense Sales Ratio");
 
-    // ── Title ──
-    const titleRow = worksheet.addRow(["Tour Expense / Sales Ratio Report"]);
+    const titleRow = worksheet.addRow([
+      isMRWise
+        ? "Tour Expense / Sales Ratio Report (MR-wise)"
+        : "Tour Expense / Sales Ratio Report",
+    ]);
     titleRow.font = { bold: true, size: 16 };
     titleRow.alignment = { horizontal: "center" };
-    worksheet.mergeCells("A1:I1");
+    worksheet.mergeCells(`A1:${isMRWise ? "I" : "I"}1`);
 
-    // ── Period ──
     const dateLabel =
       startDate && endDate
         ? `${startDate} to ${endDate}`
@@ -415,131 +610,134 @@ router.get("/export", async (req, res) => {
     worksheet.mergeCells("A2:I2");
     worksheet.addRow([]);
 
-    // ── Summary section ──
-    const summaryHeader = worksheet.addRow(["Summary"]);
-    summaryHeader.font = { bold: true, size: 13 };
-    worksheet.mergeCells("A4:I4");
+    if (isMRWise) {
+      // MR-wise table
+      const headerRow = worksheet.addRow([
+        "Sr.No",
+        "Medical Representative",
+        "Tour Expense ($)",
+        "Sale ($)",
+        "Percentage (%)",
+        "Profit ($)",
+        "Expense Entries",
+      ]);
+      headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      headerRow.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F46E5" },
+      };
+      headerRow.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+        wrapText: true,
+      };
+      headerRow.height = 36;
 
-    worksheet.addRow(["Total Sales", `$${summary.totalSales.toFixed(2)}`]);
-    worksheet.addRow([
-      "Tour Expense (Vans + Petrol + Province Mktg)",
-      `$${summary.expenseTour.toFixed(2)}`,
-    ]);
-    worksheet.addRow([
-      "  + Travel Allowance (Payroll)",
-      `$${summary.travelAllowance.toFixed(2)}`,
-    ]);
-    worksheet.addRow([
-      "Tour Expense Total",
-      `$${summary.tourExpense.toFixed(2)}`,
-    ]);
-    worksheet.addRow([
-      "Tour Allowance (Daily - MRs/Drivers/Supvr)",
-      `$${summary.tourAllowance.toFixed(2)}`,
-    ]);
-    worksheet.addRow([
-      "Incentive (Sales Team)",
-      `$${summary.incentive.toFixed(2)}`,
-    ]);
-    worksheet.addRow([
-      "Total Tour Cost",
-      `$${summary.totalTourCost.toFixed(2)}`,
-    ]);
-    worksheet.addRow(["Tour Cost / Sales Ratio", summary.ratio.toFixed(4)]);
-    worksheet.addRow(["Total Profit", `$${summary.totalProfit.toFixed(2)}`]);
-    worksheet.addRow([]);
+      records.forEach((record) => {
+        const row = worksheet.addRow([
+          record.id,
+          record.mrName,
+          record.tourExpense,
+          record.sale,
+          record.percentage / 100,
+          record.profit,
+          record.expenseCount,
+        ]);
+        [3, 4, 6].forEach((col) => {
+          row.getCell(col).numFmt = "$#,##0.00";
+        });
+        row.getCell(5).numFmt = "0.00%";
+      });
 
-    // ── Table header ──
-    const headerRow = worksheet.addRow([
-      "Sr.No",
-      "Sale ($)",
-      "Tour Expense ($)\nVans+Petrol+Province Mktg+Travel Allow.",
-      "Tour Allowance ($)\nDaily Allow. MRs/Drivers/Supervisors",
-      "Incentive ($)\nSales Team",
-      "Total Tour Cost ($)",
-      "Percentage (%)",
-      "Profit ($)",
-    ]);
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF4F46E5" },
-    };
-    headerRow.alignment = {
-      vertical: "middle",
-      horizontal: "center",
-      wrapText: true,
-    };
-    headerRow.height = 40;
+      const totalsRow = worksheet.addRow([
+        "TOTAL",
+        `${records.length} MRs`,
+        records.reduce((s, r) => s + r.tourExpense, 0),
+        records[0]?.sale || 0,
+        totals.totalSale > 0 ? totals.totalTourExpense / totals.totalSale : 0,
+        totals.totalProfit,
+        records.reduce((s, r) => s + r.expenseCount, 0),
+      ]);
+      totalsRow.font = { bold: true };
+      totalsRow.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFEF3C7" },
+      };
+      [3, 4, 6].forEach((col) => {
+        totalsRow.getCell(col).numFmt = "$#,##0.00";
+      });
+      totalsRow.getCell(5).numFmt = "0.00%";
 
-    // ── Data row ──
-    const row = worksheet.addRow([
-      record.id,
-      record.sale,
-      record.tourExpense,
-      record.tourAllowance,
-      record.incentive,
-      record.totalTourCost,
-      record.percentage / 100,
-      record.profit,
-    ]);
-    [2, 3, 4, 5, 6, 8].forEach((col) => {
-      row.getCell(col).numFmt = "$#,##0.00";
-    });
-    const pctCell = row.getCell(7);
-    pctCell.numFmt = "0.00%";
-    pctCell.font = {
-      color: {
-        argb:
-          record.percentage < 10
-            ? "FF16A34A"
-            : record.percentage < 20
-              ? "FFCA8A04"
-              : "FFDC2626",
-      },
-    };
+      worksheet.columns = [
+        { width: 8 },
+        { width: 25 },
+        { width: 18 },
+        { width: 15 },
+        { width: 15 },
+        { width: 15 },
+        { width: 15 },
+      ];
+    } else {
+      const record = records[0];
+      const headerRow = worksheet.addRow([
+        "Sr.No",
+        "Sale ($)",
+        "Tour Expense ($)",
+        "Tour Allowance ($)",
+        "Incentive ($)",
+        "Total Tour Cost ($)",
+        "Percentage (%)",
+        "Profit ($)",
+      ]);
+      headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      headerRow.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF4F46E5" },
+      };
+      headerRow.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+        wrapText: true,
+      };
+      headerRow.height = 40;
 
-    // ── Totals row ──
-    const totalsRow = worksheet.addRow([
-      "TOTAL",
-      totals.totalSale,
-      totals.totalTourExpense,
-      totals.totalTourAllowance,
-      totals.totalIncentive,
-      totals.totalTourCost,
-      totals.totalSale > 0 ? totals.totalTourCost / totals.totalSale : 0,
-      totals.totalProfit,
-    ]);
-    totalsRow.font = { bold: true };
-    totalsRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFFEF3C7" },
-    };
-    [2, 3, 4, 5, 6, 8].forEach((col) => {
-      totalsRow.getCell(col).numFmt = "$#,##0.00";
-    });
-    totalsRow.getCell(7).numFmt = "0.00%";
+      const row = worksheet.addRow([
+        record.id,
+        record.sale,
+        record.tourExpense,
+        record.tourAllowance,
+        record.incentive,
+        record.totalTourCost,
+        record.percentage / 100,
+        record.profit,
+      ]);
+      [2, 3, 4, 5, 6, 8].forEach((col) => {
+        row.getCell(col).numFmt = "$#,##0.00";
+      });
+      row.getCell(7).numFmt = "0.00%";
+
+      worksheet.columns = [
+        { width: 8 },
+        { width: 15 },
+        { width: 22 },
+        { width: 22 },
+        { width: 18 },
+        { width: 18 },
+        { width: 15 },
+        { width: 15 },
+      ];
+    }
 
     worksheet.addRow([]);
     const tsRow = worksheet.addRow([
-      `Report Generated: ${new Date().toLocaleString()} | Total Invoices: ${record.invoiceCount}`,
+      `Report Generated: ${new Date().toLocaleString()}`,
     ]);
     tsRow.font = { italic: true };
     tsRow.alignment = { horizontal: "center" };
     worksheet.mergeCells(`A${tsRow.number}:I${tsRow.number}`);
-
-    worksheet.columns = [
-      { width: 8 },
-      { width: 15 },
-      { width: 28 },
-      { width: 28 },
-      { width: 20 },
-      { width: 18 },
-      { width: 15 },
-      { width: 15 },
-    ];
 
     worksheet.eachRow((row) => {
       row.alignment = {

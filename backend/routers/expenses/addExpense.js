@@ -1,3 +1,4 @@
+// routes/expenses/addExpense.js  (full corrected file)
 import express from "express";
 const router = express.Router();
 import Expense from "../../models/expenses/addExpense.js";
@@ -6,14 +7,26 @@ import mongoose from "mongoose";
 import Destination from "../../models/accounts/Destination.js";
 import Transaction from "../../models/accounts/Transaction.js";
 
+// ─── Tour-related category names that require an MR selection ───────────────
+const TOUR_MR_CATEGORY_KEYWORDS = [
+  "tour allowance",
+  "tour petrol expense",
+  "province marketing expense",
+  "rent expense - vans",
+];
+
+const isTourMRCategory = (categoryName = "") => {
+  const lower = categoryName.toLowerCase().trim();
+  return TOUR_MR_CATEGORY_KEYWORDS.some((kw) => lower === kw);
+};
+
 // Helper function to convert Sr number to category ObjectId
 const convertSrToCategoryId = async (categoryValue) => {
   if (typeof categoryValue === "string" && /^\d+$/.test(categoryValue)) {
     const categories = await addExpenseCategary.find().sort({ category: 1 });
     const srNumber = parseInt(categoryValue);
     if (srNumber >= 1 && srNumber <= categories.length) {
-      const categoryId = categories[srNumber - 1]._id;
-      return categoryId;
+      return categories[srNumber - 1]._id;
     } else {
       throw new Error(
         `Invalid category Sr number: ${categoryValue}. Please select a valid category.`,
@@ -23,12 +36,8 @@ const convertSrToCategoryId = async (categoryValue) => {
   return categoryValue;
 };
 
-// Validate MongoDB ID
-const isValidObjectId = (id) => {
-  return mongoose.Types.ObjectId.isValid(id);
-};
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
-// Helper function to get date ranges for period filtering
 const getDateRangeForPeriod = (period) => {
   const currentDate = new Date();
   let startDate, endDate;
@@ -40,7 +49,6 @@ const getDateRangeForPeriod = (period) => {
       endDate = new Date(currentDate);
       endDate.setHours(23, 59, 59, 999);
       break;
-
     case "Month":
       startDate = new Date(
         currentDate.getFullYear(),
@@ -54,37 +62,26 @@ const getDateRangeForPeriod = (period) => {
       );
       endDate.setHours(23, 59, 59, 999);
       break;
-
     case "Year":
       startDate = new Date(currentDate.getFullYear(), 0, 1);
       endDate = new Date(currentDate.getFullYear(), 11, 31);
       endDate.setHours(23, 59, 59, 999);
       break;
-
     default:
       return {};
   }
 
-  return {
-    date: {
-      $gte: startDate,
-      $lte: endDate,
-    },
-  };
+  return { date: { $gte: startDate, $lte: endDate } };
 };
 
-// Get expense statistics
+// ─── GET /statistics/summary ─────────────────────────────────────────────────
 router.get("/statistics/summary", async (req, res) => {
   try {
     const { startDate, endDate, period } = req.query;
-
     let matchStage = {};
 
-    if (period) {
-      const dateRange = getDateRangeForPeriod(period);
-      matchStage = { ...matchStage, ...dateRange };
-    }
-
+    if (period)
+      matchStage = { ...matchStage, ...getDateRangeForPeriod(period) };
     if (startDate || endDate) {
       matchStage.date = matchStage.date || {};
       if (startDate) matchStage.date.$gte = new Date(startDate);
@@ -142,15 +139,17 @@ router.get("/statistics/summary", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching expense statistics:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch expense statistics",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to fetch expense statistics",
+        error: error.message,
+      });
   }
 });
 
-// Get expense categories
+// ─── GET /categories ──────────────────────────────────────────────────────────
 router.get("/categories", async (req, res) => {
   try {
     const currentDate = new Date();
@@ -163,72 +162,53 @@ router.get("/categories", async (req, res) => {
     const categories = await addExpenseCategary.find().sort({ category: 1 });
 
     const ytdExpenses = await Expense.aggregate([
-      {
-        $match: {
-          date: { $gte: yearStart, $lt: monthStart },
-        },
-      },
-      {
-        $group: {
-          _id: "$category",
-          amountUntilYear: { $sum: "$amount" },
-        },
-      },
+      { $match: { date: { $gte: yearStart, $lt: monthStart } } },
+      { $group: { _id: "$category", amountUntilYear: { $sum: "$amount" } } },
     ]);
 
     const monthlyExpenses = await Expense.aggregate([
-      {
-        $match: {
-          date: { $gte: monthStart, $lte: monthEnd },
-        },
-      },
-      {
-        $group: {
-          _id: "$category",
-          monthlyAmount: { $sum: "$amount" },
-        },
-      },
+      { $match: { date: { $gte: monthStart, $lte: monthEnd } } },
+      { $group: { _id: "$category", monthlyAmount: { $sum: "$amount" } } },
     ]);
 
     const ytdMap = new Map();
-    ytdExpenses.forEach((exp) => {
-      ytdMap.set(exp._id.toString(), exp.amountUntilYear);
-    });
+    ytdExpenses.forEach((exp) =>
+      ytdMap.set(exp._id.toString(), exp.amountUntilYear),
+    );
 
     const monthlyMap = new Map();
-    monthlyExpenses.forEach((exp) => {
-      monthlyMap.set(exp._id.toString(), exp.monthlyAmount);
-    });
+    monthlyExpenses.forEach((exp) =>
+      monthlyMap.set(exp._id.toString(), exp.monthlyAmount),
+    );
 
     const responseData = categories.map((category, index) => ({
       Sr: index + 1,
       _id: category._id,
       Category: category.category,
       Remarks: category.description,
+      // Flag so frontend can know which categories need MR
+      requiresMR: isTourMRCategory(category.category),
       "Amount Until Year (₹)": ytdMap.get(category._id.toString()) || 0,
       "Monthly Amount (₹)": monthlyMap.get(category._id.toString()) || 0,
     }));
 
-    res.json({
-      success: true,
-      data: responseData,
-      count: categories.length,
-    });
+    res.json({ success: true, data: responseData, count: categories.length });
   } catch (error) {
     console.error("Error fetching categories with expenses:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch categories with expense data",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to fetch categories with expense data",
+        error: error.message,
+      });
   }
 });
 
-// GET /api/expenses (updated to handle "All" period)
+// ─── GET / ────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
-
     let query = {};
 
     if (period === "custom" && startDate && endDate) {
@@ -237,7 +217,6 @@ router.get("/", async (req, res) => {
         $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999)),
       };
     } else if (period === "All") {
-      // No date filter – fetch all records
       query = {};
     } else if (period) {
       query = getDateRangeForPeriod(period);
@@ -249,7 +228,6 @@ router.get("/", async (req, res) => {
       .sort({ date: -1, createdAt: -1 });
 
     const currentDate = new Date();
-
     const currentMonthStart = new Date(
       currentDate.getFullYear(),
       currentDate.getMonth(),
@@ -264,7 +242,6 @@ router.get("/", async (req, res) => {
       59,
       999,
     );
-
     const currentYearStart = new Date(currentDate.getFullYear(), 0, 1);
     const currentYearEnd = new Date(
       currentDate.getFullYear(),
@@ -322,68 +299,57 @@ router.get("/", async (req, res) => {
         pendingExpense: pendingAgg[0]?.total || 0,
         approvedExpense: approvedAgg[0]?.total || 0,
         rejectedExpense: rejectedAgg[0]?.total || 0,
-        latestExpenses: latestExpenses,
+        latestExpenses,
       },
     });
   } catch (error) {
     console.error("Error fetching expenses:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch expenses",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to fetch expenses",
+        error: error.message,
+      });
   }
 });
 
-// Get single expense by ID
+// ─── GET /:id ─────────────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
-    if (!isValidObjectId(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid expense ID format",
-      });
-    }
+    if (!isValidObjectId(id))
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid expense ID format" });
 
     const expense = await Expense.findById(id)
       .populate("category", "category description")
       .populate("sourceAccount", "name");
 
-    if (!expense) {
-      return res.status(404).json({
-        success: false,
-        message: "Expense not found",
-      });
-    }
+    if (!expense)
+      return res
+        .status(404)
+        .json({ success: false, message: "Expense not found" });
 
-    res.json({
-      success: true,
-      data: expense,
-    });
+    res.json({ success: true, data: expense });
   } catch (error) {
     console.error("Error fetching expense:", error);
-
-    if (error.name === "CastError") {
-      return res.status(400).json({
+    if (error.name === "CastError")
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid expense ID format" });
+    res
+      .status(500)
+      .json({
         success: false,
-        message: "Invalid expense ID format",
+        message: "Failed to fetch expense",
+        error: error.message,
       });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch expense",
-      error: error.message,
-    });
   }
 });
 
-// =============================================================
-// Create new expense + generate transaction
-// FIX: sourceAccount in transaction stores the account NAME, not ID
-// =============================================================
+// ─── POST / ───────────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -391,7 +357,6 @@ router.post("/", async (req, res) => {
   try {
     const expenseData = req.body;
 
-    // Basic validation
     if (
       !expenseData.date ||
       !expenseData.category ||
@@ -400,24 +365,27 @@ router.post("/", async (req, res) => {
     ) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message:
-          "Date, category, amount, and source account are required fields",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message:
+            "Date, category, amount, and source account are required fields",
+        });
     }
 
     const amount = parseFloat(expenseData.amount);
     if (isNaN(amount) || amount <= 0) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Amount must be a valid positive number",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Amount must be a valid positive number",
+        });
     }
 
-    // Convert Sr number to category ID if needed
     const categoryId = await convertSrToCategoryId(expenseData.category);
     if (!isValidObjectId(categoryId)) {
       await session.abortTransaction();
@@ -427,7 +395,6 @@ router.post("/", async (req, res) => {
         .json({ success: false, message: "Invalid category ID format" });
     }
 
-    // Check if category exists
     const categoryExists = await addExpenseCategary
       .findById(categoryId)
       .session(session);
@@ -439,6 +406,17 @@ router.post("/", async (req, res) => {
         .json({ success: false, message: "Selected category does not exist" });
     }
 
+    // ── MR validation for tour-related categories ────────────────────────
+    const needsMR = isTourMRCategory(categoryExists.category);
+    if (needsMR && !expenseData.mrId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Medical Representative is required for category "${categoryExists.category}"`,
+      });
+    }
+
     if (!isValidObjectId(expenseData.sourceAccount)) {
       await session.abortTransaction();
       session.endSession();
@@ -447,7 +425,6 @@ router.post("/", async (req, res) => {
         .json({ success: false, message: "Invalid source account ID format" });
     }
 
-    // Get source account to check balance and retrieve its NAME
     const sourceAccount = await Destination.findById(
       expenseData.sourceAccount,
     ).session(session);
@@ -468,28 +445,28 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Deduct from source account
     await Destination.findByIdAndUpdate(
       expenseData.sourceAccount,
       { $inc: { totalAmount: -amount } },
       { session },
     );
 
-    // Create expense
     const newExpense = new Expense({
       ...expenseData,
       category: categoryId,
-      amount: amount,
+      amount,
+      // Save MR info only when relevant
+      mrId: needsMR && expenseData.mrId ? expenseData.mrId : null,
+      mrName: needsMR && expenseData.mrName ? expenseData.mrName : null,
     });
     let savedExpense = await newExpense.save({ session });
 
-    // ✅ Create transaction record with sourceAccount = NAME (not ID)
     const transaction = new Transaction({
       invoiceNo: "NA",
       categoryType: "withdraw",
-      sourceAccount: sourceAccount.name, // ← store the account NAME
+      sourceAccount: sourceAccount.name,
       destination: "--",
-      amount: amount,
+      amount,
       finalAmount: -amount,
       date: expenseData.date,
       remarks: expenseData.description || expenseData.remarks || "",
@@ -507,13 +484,11 @@ router.post("/", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    const successMessage = `Added expense <b>${savedExpense.category.category}</b> of <b>₹${savedExpense.amount}</b> from <b>${savedExpense.sourceAccount.name}</b> successfully`;
+    const successMessage = `Added expense <b>${savedExpense.category.category}</b> of <b>₹${savedExpense.amount}</b> from <b>${savedExpense.sourceAccount.name}</b> successfully${needsMR && expenseData.mrName ? ` for MR <b>${expenseData.mrName}</b>` : ""}`;
 
-    res.status(201).json({
-      success: true,
-      message: successMessage,
-      data: savedExpense,
-    });
+    res
+      .status(201)
+      .json({ success: true, message: successMessage, data: savedExpense });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -521,35 +496,34 @@ router.post("/", async (req, res) => {
 
     if (
       error.message.includes("Invalid category Sr number") ||
-      error.message.includes("Insufficient balance")
+      error.message.includes("Insufficient balance") ||
+      error.message.includes("Medical Representative is required")
     ) {
       return res.status(400).json({ success: false, message: error.message });
     }
-    if (error.name === "ValidationError") {
-      return res.status(400).json({
+    if (error.name === "ValidationError")
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Validation error",
+          error: error.message,
+        });
+    if (error.name === "CastError")
+      return res
+        .status(400)
+        .json({ success: false, message: `Invalid ID format: ${error.value}` });
+    res
+      .status(500)
+      .json({
         success: false,
-        message: "Validation error",
+        message: "Failed to create expense",
         error: error.message,
       });
-    }
-    if (error.name === "CastError") {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid ID format: ${error.value}`,
-      });
-    }
-    res.status(500).json({
-      success: false,
-      message: "Failed to create expense",
-      error: error.message,
-    });
   }
 });
 
-// =============================================================
-// Update expense + adjust transaction
-// FIX: sourceAccount in transaction stores the account NAME, not ID
-// =============================================================
+// ─── PUT /:id ─────────────────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -574,20 +548,24 @@ router.put("/:id", async (req, res) => {
     ) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Date, category, source account, and amount are required",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Date, category, source account, and amount are required",
+        });
     }
 
     const newAmount = parseFloat(updateData.amount);
     if (isNaN(newAmount) || newAmount <= 0) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Amount must be a valid positive number",
-      });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Amount must be a valid positive number",
+        });
     }
 
     const categoryId = await convertSrToCategoryId(updateData.category);
@@ -610,6 +588,17 @@ router.put("/:id", async (req, res) => {
         .json({ success: false, message: "Selected category does not exist" });
     }
 
+    // ── MR validation for tour-related categories ────────────────────────
+    const needsMR = isTourMRCategory(categoryExists.category);
+    if (needsMR && !updateData.mrId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Medical Representative is required for category "${categoryExists.category}"`,
+      });
+    }
+
     if (!isValidObjectId(updateData.sourceAccount)) {
       await session.abortTransaction();
       session.endSession();
@@ -630,12 +619,9 @@ router.put("/:id", async (req, res) => {
     const oldAmount = existingExpense.amount || 0;
     const oldSourceAccountId = existingExpense.sourceAccount?.toString();
     const newSourceAccountId = updateData.sourceAccount;
-
-    // We'll need the name of the new source account (if changed) for the transaction
     let newSourceAccountName = null;
     let newSourceAccountType = "bank";
 
-    // Handle account balance adjustments
     if (oldSourceAccountId !== newSourceAccountId) {
       const newSourceAccount =
         await Destination.findById(newSourceAccountId).session(session);
@@ -650,13 +636,14 @@ router.put("/:id", async (req, res) => {
       if (newSourceAccount.totalAmount < newAmount) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient balance in new source account. Available: ₹${newSourceAccount.totalAmount}, Required: ₹${newAmount}`,
-        });
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: `Insufficient balance in new source account. Available: ₹${newSourceAccount.totalAmount}, Required: ₹${newAmount}`,
+          });
       }
 
-      // Add back to old account
       if (oldSourceAccountId) {
         await Destination.findByIdAndUpdate(
           oldSourceAccountId,
@@ -664,8 +651,6 @@ router.put("/:id", async (req, res) => {
           { session },
         );
       }
-
-      // Deduct from new account
       await Destination.findByIdAndUpdate(
         newSourceAccountId,
         { $inc: { totalAmount: -newAmount } },
@@ -675,20 +660,22 @@ router.put("/:id", async (req, res) => {
       newSourceAccountName = newSourceAccount.name;
       newSourceAccountType = newSourceAccount.type || "bank";
     } else {
-      // Same account – adjust by difference
       const currentSourceAccount =
         await Destination.findById(newSourceAccountId).session(session);
       const amountDifference = newAmount - oldAmount;
 
-      if (amountDifference > 0) {
-        if (currentSourceAccount.totalAmount < amountDifference) {
-          await session.abortTransaction();
-          session.endSession();
-          return res.status(400).json({
+      if (
+        amountDifference > 0 &&
+        currentSourceAccount.totalAmount < amountDifference
+      ) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(400)
+          .json({
             success: false,
             message: `Insufficient balance. Available: ₹${currentSourceAccount.totalAmount}, Additional required: ₹${amountDifference}`,
           });
-        }
       }
 
       if (amountDifference !== 0) {
@@ -703,27 +690,26 @@ router.put("/:id", async (req, res) => {
       newSourceAccountType = currentSourceAccount.type || "bank";
     }
 
-    // Update expense
     const updatedExpense = await Expense.findByIdAndUpdate(
       id,
       {
         ...updateData,
         category: categoryId,
         amount: newAmount,
+        mrId: needsMR && updateData.mrId ? updateData.mrId : null,
+        mrName: needsMR && updateData.mrName ? updateData.mrName : null,
       },
       { new: true, runValidators: true, session },
     )
       .populate("category", "category")
       .populate("sourceAccount", "name");
 
-    // Delete old transaction
     await Transaction.deleteOne({ referenceId: id }).session(session);
 
-    // ✅ Create new transaction with sourceAccount = NAME
     const newTransaction = new Transaction({
       invoiceNo: "NA",
       categoryType: "withdraw",
-      sourceAccount: newSourceAccountName, // ← store the account NAME
+      sourceAccount: newSourceAccountName,
       destination: "--",
       amount: newAmount,
       finalAmount: -newAmount,
@@ -750,63 +736,58 @@ router.put("/:id", async (req, res) => {
 
     if (
       error.message.includes("Invalid category Sr number") ||
-      error.message.includes("Insufficient balance")
+      error.message.includes("Insufficient balance") ||
+      error.message.includes("Medical Representative is required")
     ) {
       return res.status(400).json({ success: false, message: error.message });
     }
-    if (error.name === "ValidationError") {
-      return res.status(400).json({
+    if (error.name === "ValidationError")
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Validation error",
+          error: error.message,
+        });
+    if (error.name === "CastError")
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid expense ID" });
+    res
+      .status(500)
+      .json({
         success: false,
-        message: "Validation error",
+        message: "Failed to update expense",
         error: error.message,
       });
-    }
-    if (error.name === "CastError") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid expense ID",
-      });
-    }
-    res.status(500).json({
-      success: false,
-      message: "Failed to update expense",
-      error: error.message,
-    });
   }
 });
 
-// =============================================================
-// Delete expense + remove transaction
-// =============================================================
+// ─── DELETE /:id ──────────────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { id } = req.params;
-
     if (!isValidObjectId(id)) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid expense ID",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid expense ID" });
     }
 
     const expense = await Expense.findById(id).session(session);
     if (!expense) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Expense not found",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Expense not found" });
     }
 
     const { amount, sourceAccount } = expense;
-
-    // Refund to source account
     if (sourceAccount) {
       await Destination.findByIdAndUpdate(
         sourceAccount,
@@ -815,9 +796,7 @@ router.delete("/:id", async (req, res) => {
       );
     }
 
-    // Delete associated transaction
     await Transaction.deleteOne({ referenceId: id }).session(session);
-
     const deletedExpense = await Expense.findByIdAndDelete(id, { session });
 
     await session.commitTransaction();
@@ -833,18 +812,17 @@ router.delete("/:id", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error deleting expense:", error);
-
-    if (error.name === "CastError") {
-      return res.status(400).json({
+    if (error.name === "CastError")
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid expense ID" });
+    return res
+      .status(500)
+      .json({
         success: false,
-        message: "Invalid expense ID",
+        message: "Failed to delete expense",
+        error: error.message,
       });
-    }
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete expense",
-      error: error.message,
-    });
   }
 });
 

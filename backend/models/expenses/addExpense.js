@@ -1,3 +1,4 @@
+// models/expenses/addExpense.js
 import mongoose from "mongoose";
 
 const expenseSchema = new mongoose.Schema(
@@ -15,25 +16,36 @@ const expenseSchema = new mongoose.Schema(
     remarks: {
       type: String,
       trim: true,
-      required: true, // Added required back as per your frontend validation
+      required: true,
     },
     amount: {
       type: Number,
       required: true,
-      min: 0.01, // Changed from 0 to 0.01 to ensure positive amount
+      min: 0.01,
       validate: {
-        validator: function(v) {
+        validator: function (v) {
           return v > 0;
         },
-        message: 'Amount must be greater than 0'
-      }
+        message: "Amount must be greater than 0",
+      },
     },
     sourceAccount: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Destination",
       required: true,
     },
-    // Optional fields (you can add these later)
+    // ── MR linkage (only for tour-related expense categories) ──────────────
+    mrId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "MedicalRepresentative", // adjust ref name to match your MR model
+      default: null,
+    },
+    mrName: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    // ───────────────────────────────────────────────────────────────────────
     paymentMethod: {
       type: String,
       enum: ["cash", "card", "bank transfer", "digital wallet", "other"],
@@ -60,19 +72,18 @@ const expenseSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// Index for better query performance
 expenseSchema.index({ date: -1 });
 expenseSchema.index({ category: 1 });
 expenseSchema.index({ sourceAccount: 1 });
 expenseSchema.index({ createdAt: -1 });
+expenseSchema.index({ mrId: 1 });
 
-// Pre-save middleware to ensure amount is positive
-expenseSchema.pre('save', function(next) {
+expenseSchema.pre("save", function (next) {
   if (this.amount <= 0) {
-    next(new Error('Amount must be greater than 0'));
+    next(new Error("Amount must be greater than 0"));
   } else {
     next();
   }

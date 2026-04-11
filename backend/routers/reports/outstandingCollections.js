@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import Sale from "../../models/sale/saleSummary.js";
+import Transaction from "../../models/accounts/Transaction.js"; // ✅ added
 import Customer from "../../models/master/customer.js";
 import MRCash from "../../models/accounts/MRCash.js";
 import Staff from "../../models/staffMember/staff.js";
@@ -1010,5 +1011,134 @@ async function generateEmptyExcel(res) {
   const buffer = await workbook.xlsx.writeBuffer();
   res.send(buffer);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ✅ CORRECTED: GET /api/reports/outstanding-collections/collected-all
+// Now queries Transaction model (credit collections) instead of Sale.
+// Returns invoice number, remarks, amount, destination account.
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/reports/outstanding-collections/collected-all
+// Supports: startDate, endDate, search, page, limit
+// Returns global summary (totalCollected, totalInvoices) + paginated transactions
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/collected-all", async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, startDate, endDate } = req.query;
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // ── Base query: credit collection transactions ────────────────────────
+    let baseMatch = {
+      transactionType: { $regex: /^credit collection$/i },
+    };
+
+    // ── Date filtering ────────────────────────────────────────────────────
+    if (startDate || endDate) {
+      baseMatch.date = {};
+      if (startDate) {
+        const start = parseLocalDate(startDate);
+        if (start) baseMatch.date.$gte = start;
+      }
+      if (endDate) {
+        const end = parseLocalDateEnd(endDate);
+        if (end) baseMatch.date.$lte = end;
+      }
+    }
+
+    // ── Search across invoice number or customer name ─────────────────────
+    if (search && search.trim() !== "") {
+      const s = search.trim();
+      baseMatch.$or = [
+        { invoiceNo: { $regex: s, $options: "i" } },
+        { customerName: { $regex: s, $options: "i" } },
+      ];
+    }
+
+    // ── 1. Global summary (across ALL matching documents) ─────────────────
+    const summaryAgg = await Transaction.aggregate([
+      { $match: baseMatch },
+      {
+        $group: {
+          _id: null,
+          totalCollected: { $sum: { $ifNull: ["$amount", "$finalAmount"] } },
+          uniqueInvoices: { $addToSet: "$invoiceNo" },
+        },
+      },
+      {
+        $project: {
+          totalCollected: 1,
+          totalInvoices: { $size: "$uniqueInvoices" },
+        },
+      },
+    ]);
+
+    const summary = summaryAgg.length
+      ? {
+          totalCollected: summaryAgg[0].totalCollected || 0,
+          totalInvoices: summaryAgg[0].totalInvoices || 0,
+        }
+      : { totalCollected: 0, totalInvoices: 0 };
+
+    // ── 2. Paginated data ────────────────────────────────────────────────
+    const totalCount = await Transaction.countDocuments(baseMatch);
+    const totalPages = Math.ceil(totalCount / limitNum);
+
+    const transactions = await Transaction.find(baseMatch)
+      .sort({ date: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    // ── Populate destination account names ────────────────────────────────
+    const accountIds = transactions
+      .map((t) => t.destination)
+      .filter((id) => id && mongoose.Types.ObjectId.isValid(id));
+    let accountMap = {};
+    if (accountIds.length) {
+      const Account = (await import("../../models/accounts/Account.js"))
+        .default;
+      const accounts = await Account.find({ _id: { $in: accountIds } }).lean();
+      accountMap = accounts.reduce((map, acc) => {
+        map[acc._id.toString()] = acc.name || "Unknown Account";
+        return map;
+      }, {});
+    }
+
+    const data = transactions.map((tx) => ({
+      _id: tx._id,
+      invoiceNumber: tx.invoiceNo || tx.invoiceNumber || "N/A",
+      remarks: tx.remarks || "",
+      amount: tx.amount || tx.finalAmount || 0,
+      destinationAccount:
+        accountMap[tx.destination?.toString()] || tx.destination || "N/A",
+      date: tx.date,
+      customerName: tx.customerName || "",
+    }));
+
+    return res.json({
+      success: true,
+      data,
+      summary, // ← global totals, not page‑wise
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalRecords: totalCount,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
+      count: data.length,
+    });
+  } catch (error) {
+    console.error("Error in /collected-all:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching collected invoices",
+      error: error.message,
+    });
+  }
+});
 
 export default router;

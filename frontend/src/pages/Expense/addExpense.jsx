@@ -1,11 +1,44 @@
-import React, { useCallback, useEffect, useState } from "react";
+// pages/Expenses/AddExpense.jsx
+import React, { useCallback, useEffect, useState, useMemo } from "react";
 import { Save, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { showToast } from "../../utils/toast.jsx";
+import { showToast } from "../../utils/toast";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import { fetchMRList } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ─── Categories that require an MR selection ────────────────────────────────
+const TOUR_MR_CATEGORY_NAMES = [
+  "tour allowance",
+  "tour petrol expense",
+  "province marketing expense",
+  "rent expense - vans",
+];
+
+const categoryRequiresMR = (categoryName = "") =>
+  TOUR_MR_CATEGORY_NAMES.includes(categoryName.toLowerCase().trim());
+
+// ─── Date helpers ─────────────────────────────────────────────────────────────
+const formatDateToYYYYMMDD = (date) => {
+  if (!date) return "";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseDateFromYYYYMMDD = (dateString) => {
+  if (!dateString) return null;
+  const [year, month, day] = dateString.split("-");
+  return new Date(Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day)));
+};
+
+// ─── Reusable Components ────────────────────────────────────────────────────
 const InputField = ({
   label,
   name,
@@ -82,77 +115,227 @@ const SelectField = ({
   required = false,
   placeholder = "Select an option",
   disabled = false,
-}) => {
-  const getOptionKey = (option, index) => {
-    return option.value || option._id || option.label || `option-${index}`;
-  };
+}) => (
+  <div className="flex flex-col">
+    <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
+      {label} {required && <span className="text-red-500">*</span>}
+    </label>
+    <select
+      id={name}
+      name={name}
+      value={value || ""}
+      onChange={onChange}
+      disabled={disabled}
+      className={`px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+        error ? "border-red-500" : "border-gray-300"
+      } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+    {error && <span className="text-red-500 text-xs mt-1">{error}</span>}
+  </div>
+);
 
-  return (
-    <div className="flex flex-col">
-      <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      <select
-        id={name}
-        name={name}
-        value={value || ""}
-        onChange={onChange}
-        disabled={disabled}
-        className={`px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option, index) => (
-          <option key={getOptionKey(option, index)} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      {error && <span className="text-red-500 text-xs mt-1">{error}</span>}
-    </div>
-  );
-};
-
+// ─── ADD EXPENSE COMPONENT ────────────────────────────────────────────────────
 const AddExpense = ({
+  onSuccess,
   onCancel,
   initialData = null,
   isEditing = false,
-  onSuccess,
 }) => {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    date: "",
-    amount: "",
+
+  const [form, setForm] = useState({
+    date: formatDateToYYYYMMDD(new Date()),
+    category: "", // ObjectId string
+    categoryName: "", // human-readable name (for requiresMR check)
     remarks: "",
-    expenseCategory: "",
-    sourceAccount: "",
+    amount: "",
+    sourceAccount: "", // ObjectId string
+    paymentMethod: "cash",
+    notes: "",
+    mrId: "",
+    mrName: "",
   });
+
   const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
 
-  const [categoryOptions, setCategoryOptions] = useState([]);
-  const [sourceAccountOptions, setSourceAccountOptions] = useState([]);
+  // ── Drop-down data ──
+  const [categories, setCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [accounts, setAccounts] = useState([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [mrList, setMrList] = useState([]);
+  const [mrListLoading, setMrListLoading] = useState(false);
 
+  // ── Fetch categories ──
+  useEffect(() => {
+    const load = async () => {
+      setCategoriesLoading(true);
+      try {
+        const res = await axios.get(`${backendUrl}/api/expenses/categories`);
+        if (res.data.success) setCategories(res.data.data || []);
+      } catch (err) {
+        showToast("error", "Failed to load expense categories");
+      } finally {
+        setCategoriesLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  // ── Fetch source accounts (Destinations) ──
+  useEffect(() => {
+    const load = async () => {
+      setAccountsLoading(true);
+      try {
+        const res = await axios.get(`${backendUrl}/api/accounts/destinations`);
+        if (res.data.success) setAccounts(res.data.data || []);
+      } catch (err) {
+        showToast("error", "Failed to load accounts");
+      } finally {
+        setAccountsLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  // ── Fetch MR list whenever a tour-related category is selected ──
+  const needsMR = useMemo(
+    () => categoryRequiresMR(form.categoryName),
+    [form.categoryName],
+  );
+
+  useEffect(() => {
+    if (!needsMR) return;
+    const load = async () => {
+      setMrListLoading(true);
+      try {
+        const result = await fetchMRList();
+        if (result.success) setMrList(result.data || []);
+        else showToast("error", result.error || "Failed to load MR list");
+      } catch (err) {
+        showToast("error", "Failed to load Medical Representatives");
+      } finally {
+        setMrListLoading(false);
+      }
+    };
+    load();
+  }, [needsMR]);
+
+  // Load initial data for editing
+  useEffect(() => {
+    if (initialData && isEditing) {
+      setForm({
+        date: initialData.date || formatDateToYYYYMMDD(new Date()),
+        category: initialData.category?._id || initialData.category || "",
+        categoryName: initialData.categoryName || "",
+        remarks: initialData.remarks || "",
+        amount: initialData.amount?.toString() || "",
+        sourceAccount:
+          initialData.sourceAccount?._id || initialData.sourceAccount || "",
+        paymentMethod: initialData.paymentMethod || "cash",
+        notes: initialData.notes || "",
+        mrId: initialData.mrId || "",
+        mrName: initialData.mrName || "",
+      });
+    }
+  }, [initialData, isEditing]);
+
+  // ── Dropdown options ──
+  const categoryOptions = useMemo(() => {
+    if (categoriesLoading) return [];
+    return categories.map((cat) => ({
+      value: cat._id,
+      label: cat.Category,
+      categoryName: cat.Category,
+    }));
+  }, [categories, categoriesLoading]);
+
+  const accountOptions = useMemo(() => {
+    if (accountsLoading) return [];
+    return accounts.map((acc) => ({
+      value: acc._id,
+      label: `${acc.name} ($${acc.totalAmount?.toFixed(2) ?? "0.00"})`,
+      totalAmount: acc.totalAmount || 0,
+    }));
+  }, [accounts, accountsLoading]);
+
+  const mrOptions = useMemo(() => {
+    if (mrListLoading) return [];
+    return mrList.map((mr) => ({
+      value: mr._id,
+      label: mr.medicalRepName,
+    }));
+  }, [mrList, mrListLoading]);
+
+  // Get selected account balance
   const getSelectedAccountBalance = useCallback(() => {
-    if (!formData.sourceAccount) return 0;
-    const acc = sourceAccountOptions.find(
-      (a) => a.value === formData.sourceAccount
-    );
+    if (!form.sourceAccount) return 0;
+    const acc = accountOptions.find((a) => a.value === form.sourceAccount);
     return acc ? acc.totalAmount : 0;
-  }, [formData.sourceAccount, sourceAccountOptions]);
+  }, [form.sourceAccount, accountOptions]);
 
+  // Validate amount against balance
   const validateAmountAgainstBalance = useCallback(
     (amount) => {
-      if (!formData.sourceAccount) return true;
+      if (!form.sourceAccount) return true;
       const balance = getSelectedAccountBalance();
       const amt = parseFloat(amount) || 0;
       return amt <= balance;
     },
-    [formData.sourceAccount, getSelectedAccountBalance]
+    [form.sourceAccount, getSelectedAccountBalance],
   );
+
+  // ── Handlers ──
+  const handleCategoryChange = useCallback(
+    (e) => {
+      const categoryId = e.target.value;
+      const found = categories.find((c) => c._id === categoryId);
+      const catName = found ? found.Category : "";
+      setForm((prev) => ({
+        ...prev,
+        category: categoryId,
+        categoryName: catName,
+        mrId: "",
+        mrName: "",
+      }));
+      setErrors((prev) => ({ ...prev, category: "", mrId: "" }));
+    },
+    [categories],
+  );
+
+  const handleAccountChange = useCallback((e) => {
+    const accountId = e.target.value;
+    setForm((prev) => ({ ...prev, sourceAccount: accountId }));
+    setErrors((prev) => ({ ...prev, sourceAccount: "", amount: "" }));
+  }, []);
+
+  const handleMRChange = useCallback(
+    (e) => {
+      const mrId = e.target.value;
+      const selectedMR = mrList.find((mr) => mr._id === mrId);
+      setForm((prev) => ({
+        ...prev,
+        mrId,
+        mrName: selectedMR ? selectedMR.medicalRepName : "",
+      }));
+      setErrors((prev) => ({ ...prev, mrId: "" }));
+    },
+    [mrList],
+  );
+
+  const handleInputChange = useCallback((field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => ({ ...prev, [field]: "" }));
+  }, []);
 
   const handleAmountChange = (value) => {
     const sanitized = value.replace(/[^0-9.]/g, "");
@@ -162,7 +345,7 @@ const AddExpense = ({
       const parts = sanitized.split(".");
       final = parts[0] + "." + parts.slice(1).join("");
     }
-    setFormData((prev) => ({ ...prev, amount: final }));
+    setForm((prev) => ({ ...prev, amount: final }));
     setErrors((prev) => ({ ...prev, amount: "" }));
   };
 
@@ -184,314 +367,257 @@ const AddExpense = ({
     return true;
   };
 
-  useEffect(() => {
-    if (initialData) {
-      setFormData({
-        date: initialData.date || "",
-        amount: initialData.amount?.toString() || "",
-        remarks: initialData.remarks || "",
-        expenseCategory: initialData.expenseCategory || "",
-        sourceAccount: initialData.sourceAccount || "",
-      });
-    } else {
-      const today = new Date().toISOString().split("T")[0];
-      setFormData((prev) => ({ ...prev, date: today }));
+  const handleDateChange = useCallback((date) => {
+    if (date && !isNaN(date.getTime())) {
+      setForm((prev) => ({ ...prev, date: formatDateToYYYYMMDD(date) }));
+      setErrors((prev) => ({ ...prev, date: "" }));
     }
-  }, [initialData]);
-
-  const handleInputChange = useCallback(
-    (field, value) => {
-      setFormData((prev) => ({ ...prev, [field]: value }));
-      if (errors[field]) {
-        setErrors((prev) => ({ ...prev, [field]: "" }));
-      }
-    },
-    [errors]
-  );
-
-  const handleSelectChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-      setFormData((prev) => ({ ...prev, [name]: value }));
-      if (errors[name]) {
-        setErrors((prev) => ({ ...prev, [name]: "" }));
-      }
-      if (name === "sourceAccount") {
-        setErrors((prev) => ({ ...prev, amount: "" }));
-      }
-    },
-    [errors]
-  );
-
-  // Fixed fetchDropdownOptions to handle wrapped responses
-  const fetchDropdownOptions = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Fetch expense categories
-      const catResp = await axios.get(`${backendUrl}/api/expense-categories`);
-      let categories = [];
-
-      if (catResp.data) {
-        // If response has success and data, use data; otherwise use response itself
-        let catData = catResp.data.success ? catResp.data.data : catResp.data;
-
-        if (Array.isArray(catData)) {
-          categories = catData
-            .filter((c) => c && (c.Category || c.category))
-            .map((c, index) => ({
-              value: c._id || c.id || c.Sr || `cat-${index}`,
-              label: c.Category || c.category,
-            }));
-        } else if (catData && typeof catData === "object") {
-          // If it's an object but not array, try to find an array property
-          const possibleArrays = Object.values(catData).filter(Array.isArray);
-          if (possibleArrays.length > 0) {
-            categories = possibleArrays[0]
-              .filter((c) => c && (c.Category || c.category))
-              .map((c, index) => ({
-                value: c._id || c.id || `cat-${index}`,
-                label: c.Category || c.category,
-              }));
-          } else if (catData.Category || catData.category) {
-            // Single category object
-            categories = [
-              {
-                value: catData._id || catData.id || catData.Sr || "cat-1",
-                label: catData.Category || catData.category,
-              },
-            ];
-          }
-        }
-      }
-      setCategoryOptions(categories);
-
-      // Fetch source accounts (destinations)
-      const destResp = await axios.get(
-        `${backendUrl}/api/accounts/destinations`
-      );
-      let destinations = [];
-
-      if (destResp.data) {
-        // Handle wrapped response
-        let destData = destResp.data.success ? destResp.data.data : destResp.data;
-
-        if (Array.isArray(destData)) {
-          destinations = destData
-            .filter((d) => d && d._id && d.name)
-            .map((d) => ({
-              value: d._id,
-              label: d.name,
-              totalAmount: d.totalAmount || 0,
-            }));
-        } else if (destData && typeof destData === "object") {
-          // Try to find an array inside the object
-          const possibleArrays = Object.values(destData).filter(Array.isArray);
-          if (possibleArrays.length > 0) {
-            destinations = possibleArrays[0]
-              .filter((d) => d && d._id && d.name)
-              .map((d) => ({
-                value: d._id,
-                label: d.name,
-                totalAmount: d.totalAmount || 0,
-              }));
-          } else {
-            // Maybe it's a single account object? (unlikely but safe)
-            if (destData._id && destData.name) {
-              destinations = [
-                {
-                  value: destData._id,
-                  label: destData.name,
-                  totalAmount: destData.totalAmount || 0,
-                },
-              ];
-            }
-          }
-        }
-      }
-      setSourceAccountOptions(destinations);
-    } catch (err) {
-      console.error("Error loading dropdowns:", err);
-      setError(err.message);
-      showToast("error", `Failed to load: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDropdownOptions();
   }, []);
 
-  useEffect(() => {
-    if (errors.amount) {
-      setErrors((prev) => ({ ...prev, amount: "" }));
-    }
-  }, [formData.sourceAccount]);
-
+  // ── Validation ──
   const validate = useCallback(() => {
     const newErrors = {};
 
-    if (!formData.date) {
-      newErrors.date = "Date is required";
-    }
-
-    if (!formData.amount || parseFloat(formData.amount) <= 0) {
-      newErrors.amount = "Valid amount is required";
-    } else if (isNaN(parseFloat(formData.amount))) {
-      newErrors.amount = "Amount must be a valid number";
-    } else if (!validateAmountAgainstBalance(formData.amount)) {
-      const bal = getSelectedAccountBalance();
-      newErrors.amount = `Amount exceeds available balance ($${bal})`;
-    }
-
-    if (!formData.remarks?.trim()) {
-      newErrors.remarks = "Remarks are required";
-    } else if (formData.remarks.trim().length < 3) {
+    if (!form.date) newErrors.date = "Date is required";
+    if (!form.category) newErrors.category = "Category is required";
+    if (!form.remarks?.trim()) newErrors.remarks = "Remarks are required";
+    if (form.remarks?.trim() && form.remarks.trim().length < 3) {
       newErrors.remarks = "Remarks must be at least 3 characters long";
     }
 
-    if (!formData.expenseCategory) {
-      newErrors.expenseCategory = "Expense Category is required";
+    if (
+      !form.amount ||
+      isNaN(Number(form.amount)) ||
+      Number(form.amount) <= 0
+    ) {
+      newErrors.amount = "A valid positive amount is required";
+    } else if (!validateAmountAgainstBalance(form.amount)) {
+      const bal = getSelectedAccountBalance();
+      newErrors.amount = `Amount exceeds available balance ($${bal.toFixed(2)})`;
     }
-    if (!formData.sourceAccount) {
-      newErrors.sourceAccount = "Source Account is required";
+
+    if (!form.sourceAccount)
+      newErrors.sourceAccount = "Source account is required";
+    if (needsMR && !form.mrId) {
+      newErrors.mrId = `Medical Representative is required for "${form.categoryName}"`;
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [formData, validateAmountAgainstBalance, getSelectedAccountBalance]);
+  }, [form, needsMR, validateAmountAgainstBalance, getSelectedAccountBalance]);
 
+  // Clear amount error when source account changes
+  useEffect(() => {
+    if (errors.amount) {
+      setErrors((prev) => ({ ...prev, amount: "" }));
+    }
+  }, [form.sourceAccount]);
+
+  // ── Submit ──
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (!validate()) {
+      showToast("error", "Please fix the errors before submitting");
+      return;
+    }
 
+    setSubmitting(true);
     try {
-      const amt = parseFloat(formData.amount);
-      const submitData = {
-        date: formData.date,
-        amount: amt,
-        remarks: formData.remarks.trim(),
-        category: formData.expenseCategory, // Backend expects "category" not "expenseCategory"
-        sourceAccount: formData.sourceAccount,
+      const payload = {
+        date: form.date,
+        category: form.category,
+        remarks: form.remarks.trim(),
+        amount: Number(form.amount),
+        sourceAccount: form.sourceAccount,
+        paymentMethod: form.paymentMethod,
+        notes: form.notes,
+        ...(needsMR && { mrId: form.mrId, mrName: form.mrName }),
       };
 
-      setIsSubmitting(true);
-
-      let resp;
-
+      let res;
       if (isEditing && initialData?._id) {
-        resp = await axios.put(
+        res = await axios.put(
           `${backendUrl}/api/expenses/${initialData._id}`,
-          submitData
+          payload,
         );
       } else {
-        resp = await axios.post(`${backendUrl}/api/expenses`, submitData);
+        res = await axios.post(`${backendUrl}/api/expenses`, payload);
       }
 
-      if (resp.data.success) {
-        showToast("success", resp.data.message);
+      if (res.data.success) {
+        showToast(
+          "success",
+          res.data.message || `${isEditing ? "Updated" : "Added"} successfully`,
+        );
         if (typeof onSuccess === "function") {
-          onSuccess(resp.data.data);
+          onSuccess(res.data.data);
+        }
+        if (!isEditing) {
+          setForm({
+            date: formatDateToYYYYMMDD(new Date()),
+            category: "",
+            categoryName: "",
+            remarks: "",
+            amount: "",
+            sourceAccount: "",
+            paymentMethod: "cash",
+            notes: "",
+            mrId: "",
+            mrName: "",
+          });
         }
         navigate("/expenselayout/expenses");
       } else {
-        throw new Error(resp.data.message || "Operation failed");
+        showToast("error", res.data.message || "Failed to save expense");
       }
     } catch (err) {
-      console.error("Error submitting:", err);
-      const msg =
-        err.response?.data?.message || err.message || "Failed to save expense";
-      setErrors({ submit: msg });
+      const msg = err.response?.data?.message || "Failed to save expense";
       showToast("error", msg);
+      setErrors((prev) => ({ ...prev, submit: msg }));
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
   };
 
   const selectedBal = getSelectedAccountBalance();
-  const remaining = formData.amount
-    ? selectedBal - parseFloat(formData.amount)
+  const remaining = form.amount
+    ? selectedBal - parseFloat(form.amount)
     : selectedBal;
 
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+    } else {
+      navigate("/expenselayout/expenses");
+    }
+  };
+
+  // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-transparent bg-opacity-30 flex justify-center items-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4">
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h3 className="text-xl font-semibold text-gray-800">
             {isEditing ? "Edit Expense" : "Add New Expense"}
           </h3>
           <button
-            onClick={onCancel ?? (() => navigate("/expenselayout/expenses"))}
+            onClick={handleCancel}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
-            disabled={isSubmitting}
+            disabled={submitting}
           >
             <X size={20} className="text-gray-500" />
           </button>
         </div>
+
         <div className="p-6">
           {errors.submit && (
             <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
               {errors.submit}
             </div>
           )}
-          {loading && (
+
+          {(categoriesLoading || accountsLoading) && (
             <div className="mb-4 p-3 bg-blue-100 border border-blue-400 text-blue-700 rounded">
               Loading options...
             </div>
           )}
+
           <form onSubmit={handleSubmit}>
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <InputField
-                  label="Date"
-                  name="date"
-                  type="date"
-                  value={formData.date}
-                  onChange={(e) => handleInputChange("date", e.target.value)}
-                  error={errors.date}
+                {/* Date */}
+                <div className="flex flex-col">
+                  <label className="text-sm font-medium text-gray-700 mb-1">
+                    Date <span className="text-red-500">*</span>
+                  </label>
+                  <DatePicker
+                    selected={parseDateFromYYYYMMDD(form.date)}
+                    onChange={handleDateChange}
+                    dateFormat="yyyy-MM-dd"
+                    maxDate={new Date()}
+                    className={`px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-full ${
+                      errors.date ? "border-red-500" : "border-gray-300"
+                    }`}
+                    autoComplete="off"
+                  />
+                  {errors.date && (
+                    <span className="text-red-500 text-xs mt-1">
+                      {errors.date}
+                    </span>
+                  )}
+                </div>
+
+                {/* Category */}
+                <SelectField
+                  label="Expense Category"
+                  name="category"
+                  value={form.category}
+                  onChange={handleCategoryChange}
+                  error={errors.category}
+                  options={categoryOptions}
                   required
+                  disabled={categoriesLoading}
+                  placeholder="Select Category"
                 />
+
+                {/* Medical Representative - shown only for tour-related categories */}
+                {needsMR && (
+                  <div className="md:col-span-2">
+                    <SelectField
+                      label="Medical Representative"
+                      name="mrId"
+                      value={form.mrId}
+                      onChange={handleMRChange}
+                      error={errors.mrId}
+                      options={mrOptions}
+                      required
+                      disabled={mrListLoading}
+                      placeholder="Select Medical Representative"
+                    />
+                    {form.categoryName && (
+                      <p className="text-xs text-blue-600 mt-1">
+                        MR is required for <strong>{form.categoryName}</strong>{" "}
+                        expenses
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Amount */}
                 <InputField
                   label="Amount ($)"
                   name="amount"
                   type="text"
-                  value={formData.amount}
+                  value={form.amount}
                   onChange={(e) => handleAmountChange(e.target.value)}
                   onKeyPress={handleKeyPress}
                   error={errors.amount}
-                  placeholder="0.00"
                   required
+                  placeholder="Enter amount"
                 />
-                <SelectField
-                  label="Expense Category"
-                  name="expenseCategory"
-                  value={formData.expenseCategory}
-                  onChange={handleSelectChange}
-                  error={errors.expenseCategory}
-                  options={categoryOptions}
-                  required
-                  disabled={loading}
-                />
+
+                {/* Source Account */}
                 <div className="flex flex-col">
                   <SelectField
                     label="Source Account"
                     name="sourceAccount"
-                    value={formData.sourceAccount}
-                    onChange={handleSelectChange}
+                    value={form.sourceAccount}
+                    onChange={handleAccountChange}
                     error={errors.sourceAccount}
-                    options={sourceAccountOptions}
+                    options={accountOptions}
                     required
-                    disabled={loading}
+                    disabled={accountsLoading}
+                    placeholder="Select Account"
                   />
-                  {formData.sourceAccount && (
+                  {form.sourceAccount && (
                     <div className="mt-2 space-y-1 text-xs">
                       <div className="text-gray-500">
                         Current balance:{" "}
-                        <span className="font-semibold">${selectedBal}</span>
+                        <span className="font-semibold">
+                          ${selectedBal.toFixed(2)}
+                        </span>
                       </div>
-                      {formData.amount && (
+                      {form.amount && (
                         <div
                           className={`font-semibold ${
                             remaining >= 0 ? "text-green-600" : "text-red-600"
@@ -504,11 +630,12 @@ const AddExpense = ({
                   )}
                 </div>
 
+                {/* Remarks */}
                 <div className="md:col-span-2">
                   <TextAreaField
                     label="Remarks"
                     name="remarks"
-                    value={formData.remarks}
+                    value={form.remarks}
                     onChange={(e) =>
                       handleInputChange("remarks", e.target.value)
                     }
@@ -520,31 +647,29 @@ const AddExpense = ({
                 </div>
               </div>
             </div>
+
             <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-gray-200">
               <button
                 type="submit"
-                disabled={isSubmitting || loading}
+                disabled={submitting || categoriesLoading || accountsLoading}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-lg transition-colors cursor-pointer ${
-                  isSubmitting || loading
+                  submitting || categoriesLoading || accountsLoading
                     ? "bg-green-400 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700"
                 } text-white`}
               >
                 <Save size={18} />
-                {isSubmitting
+                {submitting
                   ? "Saving..."
                   : isEditing
-                  ? "Update Expense"
-                  : "Add Expense"}
+                    ? "Update Expense"
+                    : "Add Expense"}
               </button>
               <button
                 type="button"
-                onClick={
-                  onCancel ?? (() => navigate("/expenselayout/expenses"))
-                }
-                disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600
-                 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
+                onClick={handleCancel}
+                disabled={submitting}
+                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
