@@ -774,7 +774,6 @@ const DailySample = () => {
               </th>
               <th className="p-3">MR Name</th>
               <th className="p-3">Customer</th>
-              <th className="p-3">Remark</th>
               <th className="p-3">Products</th>
               <th className="p-3">Total Qty</th>
               <th className="p-3">Action</th>
@@ -810,9 +809,7 @@ const DailySample = () => {
                         ? capitalizeFirstLetter(item.customerName)
                         : item.customerCode || "—"}
                     </td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(item.remark)}
-                    </td>
+                    
                     <td className="p-3">
                       <button
                         onClick={() => handleProductCountClick(item)}

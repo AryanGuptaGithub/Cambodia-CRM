@@ -1,7 +1,10 @@
+// routes/reports/salaryCOGSRatio.js
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Payroll from "../../models/Hrm/Payroll.js";
 import Staff from "../../models/staffMember/staff.js";
+import Expense from "../../models/expenses/addExpense.js";
+import ExpenseCategory from "../../models/expenses/addExpenseCategary.js";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 
@@ -94,6 +97,36 @@ const cogsExpr = {
   },
 };
 
+// ─── Get tour-related expense category IDs ────────────────────────────────────
+const getTourExpenseCategoryIds = async () => {
+  try {
+    const allCategories = await ExpenseCategory.find({ isActive: true }).select(
+      "_id category",
+    );
+    const tourExpenseCategoryIds = []; // Rent Expense-Vans, Tour Petrol Expense, Province Marketing
+    const tourAllowanceCategoryIds = []; // Tour Allowance
+
+    for (const cat of allCategories) {
+      const name = (cat.category || "").toLowerCase().trim();
+      if (name === "tour allowance") {
+        tourAllowanceCategoryIds.push(cat._id);
+      } else if (
+        name.includes("tour petrol") ||
+        name.includes("province marketing") ||
+        name === "rent expense - vans" ||
+        name.includes("van") ||
+        name.includes("petrol")
+      ) {
+        tourExpenseCategoryIds.push(cat._id);
+      }
+    }
+    return { tourExpenseCategoryIds, tourAllowanceCategoryIds };
+  } catch (err) {
+    console.error("Error fetching expense categories:", err);
+    return { tourExpenseCategoryIds: [], tourAllowanceCategoryIds: [] };
+  }
+};
+
 // ─── main fetch ───────────────────────────────────────────────────────────────
 const fetchSalaryCOGSData = async (params) => {
   const {
@@ -147,6 +180,48 @@ const fetchSalaryCOGSData = async (params) => {
         break;
       default:
         salesDateConditions.recordingDate = {
+          $gte: new Date(y, m, 1),
+          $lte: new Date(y, m + 1, 0),
+        };
+    }
+  }
+
+  // ── expense date filter (same range) ──────────────────────────────────────
+  const expenseDateConditions = {};
+  if (startDate && endDate) {
+    expenseDateConditions.date = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
+    };
+  } else {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    switch (dateFilter) {
+      case "today": {
+        const t = new Date();
+        t.setHours(0, 0, 0, 0);
+        const t2 = new Date(t);
+        t2.setDate(t2.getDate() + 1);
+        expenseDateConditions.date = { $gte: t, $lt: t2 };
+        break;
+      }
+      case "currentMonth":
+        expenseDateConditions.date = {
+          $gte: new Date(y, m, 1),
+          $lte: new Date(y, m + 1, 0),
+        };
+        break;
+      case "janToPreviousMonth":
+        expenseDateConditions.date =
+          m === 0
+            ? { $gte: new Date(y - 1, 0, 1), $lte: new Date(y - 1, 11, 31) }
+            : { $gte: new Date(y, 0, 1), $lte: new Date(y, m, 0) };
+        break;
+      case "all":
+        break;
+      default:
+        expenseDateConditions.date = {
           $gte: new Date(y, m, 1),
           $lte: new Date(y, m + 1, 0),
         };
@@ -251,17 +326,94 @@ const fetchSalaryCOGSData = async (params) => {
     }
   });
 
+  // ── Get tour expense category IDs ────────────────────────────────────────
+  const { tourExpenseCategoryIds, tourAllowanceCategoryIds } =
+    await getTourExpenseCategoryIds();
+
+  // ── Tour expenses from Expense collection, grouped by mrId ───────────────
+  const tourExpenseByMR = {};
+  const tourAllowanceByMR = {};
+
+  if (tourExpenseCategoryIds.length > 0) {
+    const tourExpMatchConditions = {
+      ...expenseDateConditions,
+      mrId: { $ne: null, $exists: true },
+      category: { $in: tourExpenseCategoryIds },
+    };
+    const tourExpAgg = await Expense.aggregate([
+      { $match: tourExpMatchConditions },
+      {
+        $group: {
+          _id: "$mrId",
+          totalTourExpense: { $sum: "$amount" },
+          mrName: { $first: "$mrName" },
+        },
+      },
+    ]);
+    tourExpAgg.forEach((r) => {
+      if (r._id)
+        tourExpenseByMR[r._id.toString()] = {
+          total: r.totalTourExpense,
+          mrName: r.mrName,
+        };
+    });
+  }
+
+  if (tourAllowanceCategoryIds.length > 0) {
+    const tourAllowMatchConditions = {
+      ...expenseDateConditions,
+      mrId: { $ne: null, $exists: true },
+      category: { $in: tourAllowanceCategoryIds },
+    };
+    const tourAllowAgg = await Expense.aggregate([
+      { $match: tourAllowMatchConditions },
+      {
+        $group: {
+          _id: "$mrId",
+          totalTourAllowance: { $sum: "$amount" },
+          mrName: { $first: "$mrName" },
+        },
+      },
+    ]);
+    tourAllowAgg.forEach((r) => {
+      if (r._id)
+        tourAllowanceByMR[r._id.toString()] = {
+          total: r.totalTourAllowance,
+          mrName: r.mrName,
+        };
+    });
+  }
+
+  // ── Also get expenses NOT linked to any MR for summary totals ──
+  const summaryTourExpMatchConditions = { ...expenseDateConditions };
+  const tourOrConditions = [];
+  if (tourExpenseCategoryIds.length > 0)
+    tourOrConditions.push({ category: { $in: tourExpenseCategoryIds } });
+  tourOrConditions.push({ remarks: { $regex: /tour/i } });
+  summaryTourExpMatchConditions.$or = tourOrConditions;
+
+  const [summaryTourExpAgg, summaryTourAllowAgg] = await Promise.all([
+    Expense.aggregate([
+      { $match: summaryTourExpMatchConditions },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
+    tourAllowanceCategoryIds.length > 0
+      ? Expense.aggregate([
+          {
+            $match: {
+              ...expenseDateConditions,
+              category: { $in: tourAllowanceCategoryIds },
+            },
+          },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+      : Promise.resolve([]),
+  ]);
+
+  const summaryTotalTourExpense = summaryTourExpAgg[0]?.total || 0;
+  const summaryTotalTourAllowance = summaryTourAllowAgg[0]?.total || 0;
+
   // ── payroll aggregation ───────────────────────────────────────────────────
-  //
-  //  Salary / COGS report uses ONLY:
-  //    salary    → effectiveSalary (adjustedBasicSalary for current, basicSalary for previous)
-  //    incentive → allowances[type === "Incentive"]
-  //    allowance → all OTHER allowances (NOT Incentive, NOT Travel Allowance,
-  //                NOT Tour Allowance)
-  //
-  //  Travel Allowance and Tour Allowance are EXCLUDED here — they belong
-  //  only to the Tour Expense / Sales Ratio report.
-  // ─────────────────────────────────────────────────────────────────────────
   let payrollAggregate = [];
   const allStaffIds = allStaffMembers.map(
     (s) => new mongoose.Types.ObjectId(s._id),
@@ -305,8 +457,6 @@ const fetchSalaryCOGSData = async (params) => {
 
     payrollAggregate = await Payroll.aggregate([
       { $match: payrollMatchConditions },
-
-      // Step 1: compute effectiveSalary + bucket allowances (two buckets only)
       {
         $addFields: {
           effectiveSalary: {
@@ -321,10 +471,6 @@ const fetchSalaryCOGSData = async (params) => {
               else: "$basicSalary",
             },
           },
-
-          // ── Two buckets: incentive + other ───────────────────────────────
-          // Travel Allowance and Tour Allowance are intentionally EXCLUDED
-          // — they are counted only in the Tour Expense report.
           allowanceBuckets: {
             $reduce: {
               input: { $ifNull: ["$allowances", []] },
@@ -351,8 +497,6 @@ const fetchSalaryCOGSData = async (params) => {
                     else: "$$value.incentive",
                   },
                 },
-                // "other" = everything EXCEPT incentive, travel allowance,
-                //           tour allowance
                 other: {
                   $cond: {
                     if: {
@@ -409,15 +553,12 @@ const fetchSalaryCOGSData = async (params) => {
           },
         },
       },
-
-      // Step 2: group by employee
       {
         $group: {
           _id: "$employeeId",
           salary: { $sum: "$effectiveSalary" },
           incentive: { $sum: "$allowanceBuckets.incentive" },
           allowance: { $sum: "$allowanceBuckets.other" },
-          // tourExpense intentionally NOT included
           payrollCount: { $sum: 1 },
         },
       },
@@ -434,11 +575,13 @@ const fetchSalaryCOGSData = async (params) => {
     { totalSalary: 0, totalIncentive: 0, totalAllowance: 0 },
   );
 
-  // totalExpense = salary + incentive + allowance  (NO tour fields)
+  // totalExpense = salary + incentive + allowance + tour expenses + tour allowance
   const totalExpenseFromAllRecords =
     totalPayrollSummary.totalSalary +
     totalPayrollSummary.totalIncentive +
-    totalPayrollSummary.totalAllowance;
+    totalPayrollSummary.totalAllowance +
+    summaryTotalTourExpense +
+    summaryTotalTourAllowance;
 
   const salaryCOGSRatio =
     totalCOGSFromAllRecords > 0
@@ -491,12 +634,13 @@ const fetchSalaryCOGSData = async (params) => {
     salarySaleRatio,
     totalAllowance: totalPayrollSummary.totalAllowance,
     totalIncentive: totalPayrollSummary.totalIncentive,
-    // totalTourExpense intentionally omitted from this report
+    totalTourExpense: summaryTotalTourExpense,
+    totalTourAllowance: summaryTotalTourAllowance,
     profitMargin,
     cogsPercentage,
   };
 
-  // ── join sales + payroll ──────────────────────────────────────────────────
+  // ── join sales + payroll + expenses ──────────────────────────────────────
   const payrollByStaffId = {};
   payrollAggregate.forEach((p) => {
     payrollByStaffId[p._id.toString()] = p;
@@ -524,11 +668,22 @@ const fetchSalaryCOGSData = async (params) => {
     const salary = parseFloat(payroll.salary) || 0;
     const incentive = parseFloat(payroll.incentive) || 0;
     const allowance = parseFloat(payroll.allowance) || 0;
-    // No tourExpense in this report
     const cogs = parseFloat(record.totalCOGS) || 0;
     const sales = parseFloat(record.totalSales) || 0;
     const profit = parseFloat(record.totalProfit) || 0;
-    const totalExpense = salary + incentive + allowance;
+
+    // ── Tour data from Expense collection ──
+    const mrIdFromSale = record.records?.[0]?.mrId;
+    const tourExpKey =
+      staffId || (mrIdFromSale ? mrIdFromSale.toString() : null);
+    const tourExpense = tourExpKey
+      ? tourExpenseByMR[tourExpKey]?.total || 0
+      : 0;
+    const tourAllowance = tourExpKey
+      ? tourAllowanceByMR[tourExpKey]?.total || 0
+      : 0;
+
+    const totalExpense = salary + incentive + allowance + tourExpense + tourAllowance;
 
     return {
       srDate: record.lastSaleDate || new Date(),
@@ -540,6 +695,8 @@ const fetchSalaryCOGSData = async (params) => {
       salary,
       incentive,
       allowance,
+      tourExpense,
+      tourAllowance,
       totalExpense,
       salaryCOGSRatio: cogs > 0 ? parseFloat((salary / cogs).toFixed(4)) : 0,
       expenseCOGSRatio:
@@ -564,7 +721,9 @@ const fetchSalaryCOGSData = async (params) => {
       const salary = parseFloat(payroll.salary) || 0;
       const incentive = parseFloat(payroll.incentive) || 0;
       const allowance = parseFloat(payroll.allowance) || 0;
-      const totalExpense = salary + incentive + allowance;
+      const tourExpense = tourExpenseByMR[staffId]?.total || 0;
+      const tourAllowance = tourAllowanceByMR[staffId]?.total || 0;
+      const totalExpense = salary + incentive + allowance + tourExpense + tourAllowance;
       const staffEntry = allStaffMembers.find(
         (s) => s._id.toString() === staffId,
       );
@@ -578,6 +737,8 @@ const fetchSalaryCOGSData = async (params) => {
         salary,
         incentive,
         allowance,
+        tourExpense,
+        tourAllowance,
         totalExpense,
         salaryCOGSRatio: 0,
         expenseCOGSRatio: 0,
@@ -649,7 +810,16 @@ router.get("/export", async (req, res) => {
       { header: "Salary ($)", key: "salary", width: 15 },
       { header: "Incentive ($)", key: "incentive", width: 15 },
       { header: "Allowance ($)", key: "allowance", width: 15 },
-      // Tour Expense column intentionally removed from this report
+      {
+        header: "Tour Expense ($)\nVans+Petrol+Province Mktg",
+        key: "tourExpense",
+        width: 22,
+      },
+      {
+        header: "Tour Allowance ($)\nDaily Allow. MRs/Drivers",
+        key: "tourAllowance",
+        width: 22,
+      },
       { header: "Total Expense ($)", key: "totalExpense", width: 16 },
       { header: "Salary/COGS Ratio", key: "salaryCOGSRatio", width: 15 },
       { header: "Expense/COGS Ratio", key: "expenseCOGSRatio", width: 16 },
@@ -666,7 +836,12 @@ router.get("/export", async (req, res) => {
       pattern: "solid",
       fgColor: { argb: "FF4F46E5" },
     };
-    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.alignment = {
+      vertical: "middle",
+      horizontal: "center",
+      wrapText: true,
+    };
+    headerRow.height = 40;
 
     records.forEach((rec, i) => {
       const row = ws.addRow({
@@ -679,6 +854,8 @@ router.get("/export", async (req, res) => {
         salary: parseFloat(rec.salary) || 0,
         incentive: parseFloat(rec.incentive) || 0,
         allowance: parseFloat(rec.allowance) || 0,
+        tourExpense: parseFloat(rec.tourExpense) || 0,
+        tourAllowance: parseFloat(rec.tourAllowance) || 0,
         totalExpense: parseFloat(rec.totalExpense) || 0,
         salaryCOGSRatio: parseFloat(rec.salaryCOGSRatio) || 0,
         expenseCOGSRatio: parseFloat(rec.expenseCOGSRatio) || 0,
@@ -694,6 +871,8 @@ router.get("/export", async (req, res) => {
         "salary",
         "incentive",
         "allowance",
+        "tourExpense",
+        "tourAllowance",
         "totalExpense",
       ].forEach((c) => {
         row.getCell(c).numFmt = "$#,##0.00";
@@ -720,6 +899,10 @@ router.get("/export", async (req, res) => {
       sales: summary.totalSales,
       profit: summary.totalProfit,
       salary: summary.totalSalary,
+      incentive: summary.totalIncentive,
+      allowance: summary.totalAllowance,
+      tourExpense: summary.totalTourExpense,
+      tourAllowance: summary.totalTourAllowance,
       totalExpense: summary.totalExpense,
       salaryCOGSRatio: summary.salaryCOGSRatio,
       expenseCOGSRatio: summary.expenseCOGSRatio,
@@ -730,7 +913,17 @@ router.get("/export", async (req, res) => {
       pattern: "solid",
       fgColor: { argb: "FFFEF3C7" },
     };
-    ["cogs", "sales", "profit", "salary", "totalExpense"].forEach((c) => {
+    [
+      "cogs",
+      "sales",
+      "profit",
+      "salary",
+      "incentive",
+      "allowance",
+      "tourExpense",
+      "tourAllowance",
+      "totalExpense",
+    ].forEach((c) => {
       sumRow.getCell(c).numFmt = "$#,##0.00";
     });
     ["salaryCOGSRatio", "expenseCOGSRatio"].forEach((c) => {
@@ -738,7 +931,11 @@ router.get("/export", async (req, res) => {
     });
 
     ws.columns.forEach((col) => {
-      col.alignment = { vertical: "middle", horizontal: "center" };
+      col.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+        wrapText: true,
+      };
     });
 
     const filename = `salary-cogs-ratio-${new Date().toISOString().split("T")[0]}.xlsx`;
@@ -750,13 +947,11 @@ router.get("/export", async (req, res) => {
     await workbook.xlsx.write(res);
   } catch (error) {
     console.error("Error in export:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to export data",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to export data",
+      error: error.message,
+    });
   }
 });
 

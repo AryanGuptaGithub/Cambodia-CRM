@@ -1,3 +1,4 @@
+// pages/Reports/SalaryCOGSRatio.jsx
 import React, { useState, useEffect, useRef } from "react";
 import {
   TrendingUp,
@@ -19,18 +20,6 @@ import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  The backend now returns flat numeric fields per record:
-//
-//    record.salary      → effectiveSalary
-//                          current-month  = adjustedBasicSalary (e.g. $604.31)
-//                          previous-month = basicSalary          (manually entered)
-//    record.incentive   → allowances[type==="Incentive"]
-//    record.allowance   → all allowances EXCEPT Incentive & Travel Allowance
-//    record.tourExpense → allowances[type==="Travel Allowance"]
-//    record.totalExpense → salary + incentive + allowance + tourExpense
-// ─────────────────────────────────────────────────────────────────────────────
-
 const EMPTY_SUMMARY = {
   totalSalary: 0,
   totalCOGS: 0,
@@ -43,6 +32,7 @@ const EMPTY_SUMMARY = {
   totalAllowance: 0,
   totalIncentive: 0,
   totalTourExpense: 0,
+  totalTourAllowance: 0,
   profitMargin: 0,
   cogsPercentage: 0,
 };
@@ -202,6 +192,7 @@ const SalaryCOGSRatio = () => {
             totalAllowance: parseFloat(s.totalAllowance) || 0,
             totalIncentive: parseFloat(s.totalIncentive) || 0,
             totalTourExpense: parseFloat(s.totalTourExpense) || 0,
+            totalTourAllowance: parseFloat(s.totalTourAllowance) || 0,
             profitMargin: parseFloat(s.profitMargin) || 0,
             cogsPercentage: parseFloat(s.cogsPercentage) || 0,
           },
@@ -476,7 +467,7 @@ const SalaryCOGSRatio = () => {
         </div>
       </div>
 
-      {/* ── Date tabs (Today removed) ── */}
+      {/* ── Date tabs ── */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           {[
@@ -563,7 +554,7 @@ const SalaryCOGSRatio = () => {
       </div>
 
       {/* ── Additional metrics ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {[
           {
             label: "Total Sales",
@@ -580,6 +571,11 @@ const SalaryCOGSRatio = () => {
             value: fmtRatio(data.summary.expenseCOGSRatio),
             icon: <Percent className="w-5 h-5 text-gray-400" />,
             valueClass: ratioColor(data.summary.expenseCOGSRatio),
+          },
+          {
+            label: "Total Incentive",
+            value: fmt$(data.summary.totalIncentive),
+            icon: <TrendingUp className="w-5 h-5 text-gray-400" />,
           },
         ].map(({ label, value, icon, valueClass }) => (
           <div key={label} className="bg-white p-4 rounded-lg shadow-md border">
@@ -598,9 +594,6 @@ const SalaryCOGSRatio = () => {
         ))}
       </div>
 
-      {/* ── Column legend ── */}
-
-
       {/* ── Table ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
@@ -612,14 +605,11 @@ const SalaryCOGSRatio = () => {
               <th className="p-3 text-sm font-medium">COGS ($)</th>
               <th className="p-3 text-sm font-medium">Sales ($)</th>
               <th className="p-3 text-sm font-medium">Profit ($)</th>
-              {/* Salary = effectiveSalary (adjusted for current-month) */}
               <th className="p-3 text-sm font-medium">Salary ($)</th>
-              {/* Incentive = allowances[type==="Incentive"] */}
               <th className="p-3 text-sm font-medium">Incentive ($)</th>
-              {/* Allowance = all except Incentive & Travel Allowance */}
               <th className="p-3 text-sm font-medium">Allowance ($)</th>
-              {/* Tour Expense = allowances[type==="Travel Allowance"] */}
               <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
+              <th className="p-3 text-sm font-medium">Tour Allowance ($)</th>
               <th className="p-3 text-sm font-medium">Total Expense ($)</th>
               <th className="p-3 text-sm font-medium">S/COGS Ratio</th>
               <th className="p-3 text-sm font-medium">E/COGS Ratio</th>
@@ -629,7 +619,7 @@ const SalaryCOGSRatio = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={14} className="p-8 text-center">
+                <td colSpan={15} className="p-8 text-center">
                   <div className="flex flex-col items-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4" />
                     <span className="text-gray-600">
@@ -640,15 +630,11 @@ const SalaryCOGSRatio = () => {
               </tr>
             ) : data.records.length > 0 ? (
               data.records.map((record, index) => {
-                // ── read flat fields from backend ────────────────────────────
-                // salary      = effectiveSalary (adjusted for current-month, e.g. $604.31)
-                // incentive   = "Incentive" type only
-                // allowance   = all allowances except Incentive & Travel Allowance
-                // tourExpense = "Travel Allowance" type only
                 const salary = parseFloat(record.salary) || 0;
                 const incentive = parseFloat(record.incentive) || 0;
                 const allowance = parseFloat(record.allowance) || 0;
                 const tourExpense = parseFloat(record.tourExpense) || 0;
+                const tourAllowance = parseFloat(record.tourAllowance) || 0;
                 const totalExpense = parseFloat(record.totalExpense) || 0;
 
                 return (
@@ -666,10 +652,6 @@ const SalaryCOGSRatio = () => {
                       <div className="text-sm font-medium text-gray-900 capitalize">
                         {record.mrName || "N/A"}
                       </div>
-                      <div className="text-xs text-gray-500">
-                        Sales: {record.saleCount || 0} | Customers:{" "}
-                        {record.customerCount || 0}
-                      </div>
                     </td>
                     <td className="p-3 text-sm font-semibold text-red-600">
                       {fmt$(record.cogs)}
@@ -680,32 +662,24 @@ const SalaryCOGSRatio = () => {
                     <td className="p-3 text-sm font-semibold text-green-600">
                       {fmt$(record.profit)}
                     </td>
-
-                    {/* Salary: adjusted/prorated value */}
                     <td className="p-3 text-sm font-semibold text-purple-600">
                       {fmt$(salary)}
                     </td>
-
-                    {/* Incentive: "Incentive" allowance type only */}
                     <td className="p-3 text-sm font-semibold text-green-700">
                       {fmt$(incentive)}
                     </td>
-
-                    {/* Allowance: all except Incentive & Travel Allowance */}
                     <td className="p-3 text-sm font-semibold text-yellow-600">
                       {fmt$(allowance)}
                     </td>
-
-                    {/* Tour Expense: "Travel Allowance" type only */}
                     <td className="p-3 text-sm font-semibold text-orange-600">
                       {fmt$(tourExpense)}
                     </td>
-
-                    {/* Total Expense = salary + incentive + allowance + tourExpense */}
+                    <td className="p-3 text-sm font-semibold text-pink-600">
+                      {fmt$(tourAllowance)}
+                    </td>
                     <td className="p-3 text-sm font-bold text-gray-900">
                       {fmt$(totalExpense)}
                     </td>
-
                     <td
                       className={`p-3 text-sm font-semibold ${ratioColor(record.salaryCOGSRatio)}`}
                     >
@@ -726,7 +700,7 @@ const SalaryCOGSRatio = () => {
               })
             ) : (
               <tr>
-                <td colSpan={14} className="p-8 text-center">
+                <td colSpan={15} className="p-8 text-center">
                   <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
                     No data found

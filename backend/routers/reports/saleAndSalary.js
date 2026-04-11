@@ -1,14 +1,17 @@
+// routes/reports/salesSalaryRatio.js
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Payroll from "../../models/Hrm/Payroll.js";
 import Staff from "../../models/staffMember/staff.js";
+import Expense from "../../models/expenses/addExpense.js";
+import ExpenseCategory from "../../models/expenses/addExpenseCategary.js";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import stockinmrhands from "../../models/stock/stockInMRHand.js";
 
 const router = express.Router();
 
-// ─── date/period helpers ──────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 const getYearMonthFromDate = (date) => {
   const d = new Date(date);
   return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, "0")}`;
@@ -31,7 +34,6 @@ const getPeriodsFromDateRange = (startDate, endDate) => {
   return periods;
 };
 
-// ─── name normalisation ───────────────────────────────────────────────────────
 const normalizeMrName = (name) => {
   if (!name) return "";
   let n = name
@@ -60,24 +62,46 @@ const normalizeNameInJS = (name) => {
   return n;
 };
 
-// ─── metric calculators ───────────────────────────────────────────────────────
-// Salary/Sale (%) = Sale / Total Expense × 100
-const calculateSalarySaleRatio = (sale, totalExpense) => {
-  if (totalExpense === 0) return 0;
-  return (sale / totalExpense) * 100;
-};
+const calculateSalarySaleRatio = (sale, totalExpense) =>
+  totalExpense === 0 ? 0 : (sale / totalExpense) * 100;
+const calculatePerformance = (profit, sale) =>
+  sale === 0 ? 0 : (profit / sale) * 100;
 
-// Performance (%) = Profit / Sale × 100
-const calculatePerformance = (profit, sale) => {
-  if (sale === 0) return 0;
-  return (profit / sale) * 100;
+// ─── Get tour-related expense category IDs ────────────────────────────────────
+const getTourExpenseCategoryIds = async () => {
+  try {
+    const allCategories = await ExpenseCategory.find({ isActive: true }).select(
+      "_id category",
+    );
+    const tourExpenseCategoryIds = []; // Rent Expense-Vans, Tour Petrol Expense, Province Marketing
+    const tourAllowanceCategoryIds = []; // Tour Allowance
+
+    for (const cat of allCategories) {
+      const name = (cat.category || "").toLowerCase().trim();
+      if (name === "tour allowance") {
+        tourAllowanceCategoryIds.push(cat._id);
+      } else if (
+        name.includes("tour petrol") ||
+        name.includes("province marketing") ||
+        name === "rent expense - vans" ||
+        name.includes("van") ||
+        name.includes("petrol")
+      ) {
+        tourExpenseCategoryIds.push(cat._id);
+      }
+    }
+    return { tourExpenseCategoryIds, tourAllowanceCategoryIds };
+  } catch (err) {
+    console.error("Error fetching expense categories:", err);
+    return { tourExpenseCategoryIds: [], tourAllowanceCategoryIds: [] };
+  }
 };
 
 // ─── main data function ───────────────────────────────────────────────────────
 const fetchSalesSalaryData = async (params) => {
   const {
     page = 1,
-    limit = 120,
+    limit = 7,
     search = "",
     startDate,
     endDate,
@@ -90,7 +114,7 @@ const fetchSalesSalaryData = async (params) => {
   const limitNum = isExport ? 10000 : parseInt(limit);
   const skip = isExport ? 0 : (pageNum - 1) * limitNum;
 
-  // ── build sales date filter ──────────────────────────────────────────────
+  // ── sales date filter ──────────────────────────────────────────────────────
   const salesDateConditions = {};
   if (startDate && endDate) {
     salesDateConditions.recordingDate = {
@@ -99,8 +123,8 @@ const fetchSalesSalaryData = async (params) => {
     };
   } else {
     const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth();
+    const y = now.getFullYear(),
+      m = now.getMonth();
     switch (dateFilter) {
       case "today": {
         const t = new Date();
@@ -126,6 +150,48 @@ const fetchSalesSalaryData = async (params) => {
         break;
       default:
         salesDateConditions.recordingDate = {
+          $gte: new Date(y, m, 1),
+          $lte: new Date(y, m + 1, 0),
+        };
+    }
+  }
+
+  // ── expense date filter (same range) ──────────────────────────────────────
+  const expenseDateConditions = {};
+  if (startDate && endDate) {
+    expenseDateConditions.date = {
+      $gte: new Date(startDate),
+      $lte: new Date(endDate),
+    };
+  } else {
+    const now = new Date();
+    const y = now.getFullYear(),
+      m = now.getMonth();
+    switch (dateFilter) {
+      case "today": {
+        const t = new Date();
+        t.setHours(0, 0, 0, 0);
+        const t2 = new Date(t);
+        t2.setDate(t2.getDate() + 1);
+        expenseDateConditions.date = { $gte: t, $lt: t2 };
+        break;
+      }
+      case "currentMonth":
+        expenseDateConditions.date = {
+          $gte: new Date(y, m, 1),
+          $lte: new Date(y, m + 1, 0),
+        };
+        break;
+      case "janToPreviousMonth":
+        expenseDateConditions.date =
+          m === 0
+            ? { $gte: new Date(y - 1, 0, 1), $lte: new Date(y - 1, 11, 31) }
+            : { $gte: new Date(y, 0, 1), $lte: new Date(y, m, 0) };
+        break;
+      case "all":
+        break;
+      default:
+        expenseDateConditions.date = {
           $gte: new Date(y, m, 1),
           $lte: new Date(y, m + 1, 0),
         };
@@ -247,17 +313,96 @@ const fetchSalesSalaryData = async (params) => {
     }
   });
 
+  // ── Get tour expense category IDs ────────────────────────────────────────
+  const { tourExpenseCategoryIds, tourAllowanceCategoryIds } =
+    await getTourExpenseCategoryIds();
+
+  // ── Tour expenses from Expense collection, grouped by mrId ───────────────
+  // tourExpense: Tour Petrol Expense, Province Marketing Expense, Rent Expense - Vans
+  // tourAllowance: Tour Allowance category
+  const tourExpenseByMR = {};
+  const tourAllowanceByMR = {};
+
+  if (tourExpenseCategoryIds.length > 0) {
+    const tourExpMatchConditions = {
+      ...expenseDateConditions,
+      mrId: { $ne: null, $exists: true },
+      category: { $in: tourExpenseCategoryIds },
+    };
+    const tourExpAgg = await Expense.aggregate([
+      { $match: tourExpMatchConditions },
+      {
+        $group: {
+          _id: "$mrId",
+          totalTourExpense: { $sum: "$amount" },
+          mrName: { $first: "$mrName" },
+        },
+      },
+    ]);
+    tourExpAgg.forEach((r) => {
+      if (r._id)
+        tourExpenseByMR[r._id.toString()] = {
+          total: r.totalTourExpense,
+          mrName: r.mrName,
+        };
+    });
+  }
+
+  if (tourAllowanceCategoryIds.length > 0) {
+    const tourAllowMatchConditions = {
+      ...expenseDateConditions,
+      mrId: { $ne: null, $exists: true },
+      category: { $in: tourAllowanceCategoryIds },
+    };
+    const tourAllowAgg = await Expense.aggregate([
+      { $match: tourAllowMatchConditions },
+      {
+        $group: {
+          _id: "$mrId",
+          totalTourAllowance: { $sum: "$amount" },
+          mrName: { $first: "$mrName" },
+        },
+      },
+    ]);
+    tourAllowAgg.forEach((r) => {
+      if (r._id)
+        tourAllowanceByMR[r._id.toString()] = {
+          total: r.totalTourAllowance,
+          mrName: r.mrName,
+        };
+    });
+  }
+
+  // ── Also get expenses NOT linked to any MR (no mrId) for summary totals ──
+  const summaryTourExpMatchConditions = { ...expenseDateConditions };
+  const tourOrConditions = [];
+  if (tourExpenseCategoryIds.length > 0)
+    tourOrConditions.push({ category: { $in: tourExpenseCategoryIds } });
+  tourOrConditions.push({ remarks: { $regex: /tour/i } });
+  summaryTourExpMatchConditions.$or = tourOrConditions;
+
+  const [summaryTourExpAgg, summaryTourAllowAgg] = await Promise.all([
+    Expense.aggregate([
+      { $match: summaryTourExpMatchConditions },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]),
+    tourAllowanceCategoryIds.length > 0
+      ? Expense.aggregate([
+          {
+            $match: {
+              ...expenseDateConditions,
+              category: { $in: tourAllowanceCategoryIds },
+            },
+          },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+      : Promise.resolve([]),
+  ]);
+
+  const summaryTotalTourExpense = summaryTourExpAgg[0]?.total || 0;
+  const summaryTotalTourAllowance = summaryTourAllowAgg[0]?.total || 0;
+
   // ── payroll aggregation ──────────────────────────────────────────────────
-  //
-  //  Sales & Salary report uses ONLY:
-  //    salary    → effectiveSalary (adjustedBasicSalary or basicSalary)
-  //    incentive → allowances[type === "Incentive"]
-  //    allowance → all OTHER allowances (NOT Incentive, NOT Travel Allowance,
-  //                NOT Tour Allowance)
-  //
-  //  Travel Allowance and Tour Allowance are EXCLUDED here — they belong
-  //  only to the Tour Expense / Sales Ratio report.
-  // ─────────────────────────────────────────────────────────────────────────
   let payrollAggregate = [];
   const allStaffIds = allStaffMembers.map(
     (s) => new mongoose.Types.ObjectId(s._id),
@@ -281,8 +426,8 @@ const fetchSalesSalaryData = async (params) => {
           payrollMatchConditions.period = currentPeriod;
           break;
         case "janToPreviousMonth": {
-          const y = now.getFullYear();
-          const m = now.getMonth();
+          const y = now.getFullYear(),
+            m = now.getMonth();
           const periods = [];
           if (m === 0) {
             for (let i = 1; i <= 12; i++)
@@ -315,9 +460,8 @@ const fetchSalesSalaryData = async (params) => {
               else: "$basicSalary",
             },
           },
-          // ── Two buckets only: incentive + other ──────────────────────────
-          // Travel Allowance & Tour Allowance are intentionally EXCLUDED
-          // — they are only counted in the Tour Expense report.
+          // Payroll allowance buckets — tour allowances are EXCLUDED here
+          // because they now come from the Expense collection
           allowanceBuckets: {
             $reduce: {
               input: { $ifNull: ["$allowances", []] },
@@ -344,8 +488,6 @@ const fetchSalesSalaryData = async (params) => {
                     else: "$$value.incentive",
                   },
                 },
-                // "other" = everything EXCEPT incentive, travel allowance,
-                //           tour allowance
                 other: {
                   $cond: {
                     if: {
@@ -408,7 +550,6 @@ const fetchSalesSalaryData = async (params) => {
           salary: { $sum: "$effectiveSalary" },
           incentive: { $sum: "$allowanceBuckets.incentive" },
           allowance: { $sum: "$allowanceBuckets.other" },
-          // tourExpense and tourAllowance intentionally NOT included here
           payrollCount: { $sum: 1 },
         },
       },
@@ -425,11 +566,13 @@ const fetchSalesSalaryData = async (params) => {
     { totalSalary: 0, totalIncentive: 0, totalAllowance: 0 },
   );
 
-  // totalExpense = salary + incentive + allowance  (NO tour fields)
+  // totalExpense = salary + incentive + allowance + tour expenses from Expense collection
   const totalExpenseFromAllRecords =
     totalPayrollSummary.totalSalary +
     totalPayrollSummary.totalIncentive +
-    totalPayrollSummary.totalAllowance;
+    totalPayrollSummary.totalAllowance +
+    summaryTotalTourExpense +
+    summaryTotalTourAllowance;
 
   const ratio =
     totalSalesFromAllRecords > 0
@@ -443,10 +586,13 @@ const fetchSalesSalaryData = async (params) => {
     totalSalary: parseFloat(totalPayrollSummary.totalSalary) || 0,
     totalExpense: parseFloat(totalExpenseFromAllRecords) || 0,
     totalProfit: parseFloat(totalProfitFromAllRecords) || 0,
+    totalTourExpense: parseFloat(summaryTotalTourExpense) || 0,
+    totalTourAllowance: parseFloat(summaryTotalTourAllowance) || 0,
+    totalIncentive: parseFloat(totalPayrollSummary.totalIncentive) || 0,
     ratio,
   };
 
-  // ── join sales + payroll ─────────────────────────────────────────────────
+  // ── join sales + payroll + expenses ──────────────────────────────────────
   const payrollByStaffId = {};
   payrollAggregate.forEach((p) => {
     payrollByStaffId[p._id.toString()] = p;
@@ -474,10 +620,23 @@ const fetchSalesSalaryData = async (params) => {
     const salary = parseFloat(payroll.salary) || 0;
     const incentive = parseFloat(payroll.incentive) || 0;
     const allowance = parseFloat(payroll.allowance) || 0;
-    // No tourExpense / tourAllowance in this report
+
+    // ── Tour data comes from Expense collection (matched by mrId) ──────────
+    // Try to match by staffId first, then by mrId from the sale record
+    const mrIdFromSale = record.records?.[0]?.mrId;
+    const tourExpKey =
+      staffId || (mrIdFromSale ? mrIdFromSale.toString() : null);
+    const tourExpense = tourExpKey
+      ? tourExpenseByMR[tourExpKey]?.total || 0
+      : 0;
+    const tourAllowance = tourExpKey
+      ? tourAllowanceByMR[tourExpKey]?.total || 0
+      : 0;
+
     const sale = parseFloat(record.sale) || 0;
     const profit = parseFloat(record.profit) || 0;
-    const totalExpense = salary + incentive + allowance;
+    const totalExpense =
+      salary + incentive + allowance + tourExpense + tourAllowance;
 
     return {
       srDate: record.lastSaleDate || "",
@@ -488,6 +647,8 @@ const fetchSalesSalaryData = async (params) => {
       salary,
       incentive,
       allowance,
+      tourExpense,
+      tourAllowance,
       totalExpense,
       salarySaleRatio: parseFloat(
         calculateSalarySaleRatio(sale, totalExpense).toFixed(2),
@@ -508,7 +669,10 @@ const fetchSalesSalaryData = async (params) => {
       const salary = parseFloat(payroll.salary) || 0;
       const incentive = parseFloat(payroll.incentive) || 0;
       const allowance = parseFloat(payroll.allowance) || 0;
-      const totalExpense = salary + incentive + allowance;
+      const tourExpense = tourExpenseByMR[staffId]?.total || 0;
+      const tourAllowance = tourAllowanceByMR[staffId]?.total || 0;
+      const totalExpense =
+        salary + incentive + allowance + tourExpense + tourAllowance;
       const staffEntry = allStaffMembers.find(
         (s) => s._id.toString() === staffId,
       );
@@ -521,6 +685,8 @@ const fetchSalesSalaryData = async (params) => {
         salary,
         incentive,
         allowance,
+        tourExpense,
+        tourAllowance,
         totalExpense,
         salarySaleRatio: 0,
         performance: 0,
@@ -535,9 +701,8 @@ const fetchSalesSalaryData = async (params) => {
   const totalRecords = combinedData.length;
   const totalPages = Math.ceil(totalRecords / limitNum);
 
-  if (isExport) {
+  if (isExport)
     return { success: true, data: { summary, records: combinedData } };
-  }
   return {
     success: true,
     data: { summary, records: combinedData.slice(skip, skip + limitNum) },
@@ -554,15 +719,16 @@ const fetchSalesSalaryData = async (params) => {
 // ─── GET / ────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    const result = await fetchSalesSalaryData(req.query);
-    res.status(200).json(result);
+    res.status(200).json(await fetchSalesSalaryData(req.query));
   } catch (error) {
     console.error("Error in sales salary ratio:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch sales salary ratio data",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to fetch sales salary ratio data",
+        error: error.message,
+      });
   }
 });
 
@@ -588,6 +754,16 @@ router.get("/export", async (req, res) => {
       { header: "Salary ($)", key: "salary", width: 15 },
       { header: "Incentive ($)", key: "incentive", width: 15 },
       { header: "Allowance ($)", key: "allowance", width: 15 },
+      {
+        header: "Tour Expense ($)\nVans+Petrol+Province Mktg",
+        key: "tourExpense",
+        width: 22,
+      },
+      {
+        header: "Tour Allowance ($)\nDaily Allow. MRs/Drivers",
+        key: "tourAllowance",
+        width: 22,
+      },
       { header: "Total Expense ($)", key: "totalExpense", width: 15 },
       { header: "Salary/Sale (%)", key: "salarySaleRatio", width: 15 },
       { header: "Performance (%)", key: "performance", width: 15 },
@@ -602,7 +778,12 @@ router.get("/export", async (req, res) => {
       pattern: "solid",
       fgColor: { argb: "FF4F46E5" },
     };
-    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.alignment = {
+      vertical: "middle",
+      horizontal: "center",
+      wrapText: true,
+    };
+    headerRow.height = 40;
 
     records.forEach((rec, i) => {
       const row = ws.addRow({
@@ -613,6 +794,8 @@ router.get("/export", async (req, res) => {
         salary: parseFloat(rec.salary) || 0,
         incentive: parseFloat(rec.incentive) || 0,
         allowance: parseFloat(rec.allowance) || 0,
+        tourExpense: parseFloat(rec.tourExpense) || 0,
+        tourAllowance: parseFloat(rec.tourAllowance) || 0,
         totalExpense: parseFloat(rec.totalExpense) || 0,
         salarySaleRatio: parseFloat(rec.salarySaleRatio) || 0,
         performance: parseFloat(rec.performance) || 0,
@@ -625,6 +808,8 @@ router.get("/export", async (req, res) => {
         "salary",
         "incentive",
         "allowance",
+        "tourExpense",
+        "tourAllowance",
         "totalExpense",
       ].forEach((c) => {
         row.getCell(c).numFmt = "$#,##0.00";
@@ -655,14 +840,12 @@ router.get("/export", async (req, res) => {
       sale: summary.totalSales,
       profit: summary.totalProfit,
       salary: summary.totalSalary,
+      tourExpense: summary.totalTourExpense,
+      tourAllowance: summary.totalTourAllowance,
       totalExpense: summary.totalExpense,
       salarySaleRatio:
         summary.totalSales > 0
           ? (summary.totalSales / summary.totalExpense) * 100
-          : 0,
-      performance:
-        summary.totalSales > 0
-          ? (summary.totalProfit / summary.totalSales) * 100
           : 0,
     });
     sumRow.font = { bold: true };
@@ -671,15 +854,24 @@ router.get("/export", async (req, res) => {
       pattern: "solid",
       fgColor: { argb: "FFFEF3C7" },
     };
-    ["sale", "profit", "salary", "totalExpense"].forEach((c) => {
+    [
+      "sale",
+      "profit",
+      "salary",
+      "tourExpense",
+      "tourAllowance",
+      "totalExpense",
+    ].forEach((c) => {
       sumRow.getCell(c).numFmt = "$#,##0.00";
     });
-    ["salarySaleRatio", "performance"].forEach((c) => {
-      sumRow.getCell(c).numFmt = '0.00"%"';
-    });
+    sumRow.getCell("salarySaleRatio").numFmt = '0.00"%"';
 
     ws.columns.forEach((col) => {
-      col.alignment = { vertical: "middle", horizontal: "center" };
+      col.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+        wrapText: true,
+      };
     });
 
     const filename = `sales-salary-ratio-${new Date().toISOString().split("T")[0]}.xlsx`;
