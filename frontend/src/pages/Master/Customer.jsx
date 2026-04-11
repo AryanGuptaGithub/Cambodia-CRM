@@ -74,6 +74,15 @@ function capitalizeFirstLetter(str) {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+};
+
 const formatDateToYYYYMMDD = (date) => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) return "";
   const year = date.getFullYear();
@@ -124,14 +133,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
   });
   const [errors, setErrors] = useState({});
 
-  const toTitleCase = (str) => {
-    if (!str) return "";
-    return str
-      .toLowerCase()
-      .split(" ")
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(" ");
-  };
   const toLowerCase = (str) => (str ? str.toLowerCase() : "");
 
   const handleChange = useCallback(
@@ -191,7 +192,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     validateForm,
     resetForm,
     setForm,
-    toTitleCase,
     toLowerCase,
   };
 };
@@ -207,7 +207,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [loadingExisting, setLoadingExisting] = useState(false);
   const [importWithCode, setImportWithCode] = useState(false);
 
-  // Helper: convert Excel serial number to YYYY-MM-DD (local date)
   const excelSerialToDateStr = (serial) => {
     const excelEpoch = new Date(1899, 11, 30);
     const date = new Date(excelEpoch.getTime() + (serial - 1) * 86400000);
@@ -219,20 +218,13 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
 
   const parseDateValue = (val) => {
     if (!val) return "";
-    if (typeof val === "number") {
-      return excelSerialToDateStr(val);
-    }
+    if (typeof val === "number") return excelSerialToDateStr(val);
     if (typeof val === "string") {
       const trimmed = val.trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-        return trimmed;
-      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
       const d = new Date(trimmed);
       if (!isNaN(d.getTime())) {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, "0");
-        const day = String(d.getDate()).padStart(2, "0");
-        return `${year}-${month}-${day}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       }
     }
     return "";
@@ -256,7 +248,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   useEffect(() => {
     if (isOpen) fetchExistingCustomers();
   }, [isOpen]);
-
   useEffect(() => {
     if (!isOpen) {
       setParsedData([]);
@@ -272,9 +263,8 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     try {
       const res = await axios.get(`${backendUrl}/api/customers?limit=10000`);
       if (res.data.ok) {
-        const customers = res.data.customers || [];
         setExistingCustomers(
-          customers.map((c) => ({
+          (res.data.customers || []).map((c) => ({
             customerNumber: c.customerNumber,
             name: c.name,
             customerCode: c.customerCode,
@@ -282,7 +272,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
         );
       }
     } catch (error) {
-      console.error("Failed to fetch existing customers", error);
       showToast(
         "error",
         "Could not load existing customers for duplicate check",
@@ -297,7 +286,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
       setDuplicateRows([]);
       return;
     }
-
     const duplicateIndices = new Set();
     const keyCount = new Map();
     parsedData.forEach((row) => {
@@ -307,7 +295,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     parsedData.forEach((row, idx) => {
       if (keyCount.get(getRowKey(row)) > 1) duplicateIndices.add(idx);
     });
-
     if (existingCustomers.length > 0) {
       const existingNumbers = new Set(
         existingCustomers
@@ -319,7 +306,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           .map((c) => c.customerCode?.trim().toLowerCase())
           .filter(Boolean),
       );
-
       parsedData.forEach((row, idx) => {
         const num = row.customerNumber?.trim().toLowerCase();
         if (num && existingNumbers.has(num)) duplicateIndices.add(idx);
@@ -329,7 +315,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
         }
       });
     }
-
     setDuplicateRows(parsedData.filter((_, idx) => duplicateIndices.has(idx)));
   }, [parsedData, existingCustomers, importWithCode]);
 
@@ -340,7 +325,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     setParseErrors([]);
     setParsedData([]);
     setDuplicateRows([]);
-
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -358,12 +342,10 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           blankrows: true,
           raw: true,
         });
-
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
-
         let headerIdx = -1;
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
           for (let j = 0; j < (rows[i]?.length || 0); j++) {
@@ -375,15 +357,12 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           }
           if (headerIdx !== -1) break;
         }
-
         if (headerIdx === -1) {
           showToast("error", "Header row not found.");
           return;
         }
-
         const headers = rows[headerIdx].map((h) => h.toString().trim());
         const dataRows = rows.slice(headerIdx + 1);
-
         const getValue = (obj, keys) => {
           for (const key of keys) {
             for (const k in obj) {
@@ -392,17 +371,14 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                 obj[k] !== undefined &&
                 obj[k] !== null &&
                 obj[k].toString().trim() !== ""
-              ) {
+              )
                 return obj[k];
-              }
             }
           }
           return "";
         };
-
         const rowErrors = [];
         const validRows = [];
-
         dataRows.forEach((row, idx) => {
           const obj = {};
           headers.forEach((h, i) => {
@@ -410,7 +386,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           });
           if (!Object.values(obj).some((v) => v.toString().trim() !== ""))
             return;
-
           const name = capitalizeFirstLetter(
             String(
               getValue(obj, [
@@ -428,17 +403,14 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
               "Contact",
             ]) || "",
           ).trim();
-
           if (!name && !customerNumber) {
             rowErrors.push(
               `Row ${headerIdx + idx + 2}: Missing name and number — skipped`,
             );
             return;
           }
-
           const rawDate = getValue(obj, ["Date", "Joining Date"]);
           const dateStr = parseDateValue(rawDate);
-
           const rowData = {
             date: dateStr,
             medicalRepName: String(
@@ -463,22 +435,18 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
               getValue(obj, ["Remark", "Notes", "Comments"]) || "",
             ).trim(),
           };
-
           if (isWithCustomerCode && importWithCode) {
             const code = String(
               getValue(obj, ["Customer Code", "Code"]) || "",
             ).trim();
             if (code) rowData.customerCode = code;
           }
-
           validRows.push(rowData);
         });
-
         if (validRows.length === 0) {
           showToast("warning", "No valid customer records found.");
           return;
         }
-
         setParsedData(validRows);
         setParseErrors(rowErrors);
         if (rowErrors.length)
@@ -487,7 +455,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             `${validRows.length} valid rows, ${rowErrors.length} skipped`,
           );
       } catch (err) {
-        console.error("Parse error:", err);
         showToast("error", "Failed to parse file: " + err.message);
       }
     };
@@ -504,7 +471,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
       showToast("warning", "No unique records to import");
       return;
     }
-
     setIsUploading(true);
     try {
       const res = await axios.post(
@@ -524,7 +490,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
         onClose(true);
       }
     } catch (err) {
-      console.error("Import error:", err);
       let msg = "Import failed";
       if (err.response?.data?.message) msg = err.response.data.message;
       else if (err.request) msg = "No response from server. Check network.";
@@ -548,10 +513,8 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
         >
           <X size={20} />
         </button>
-
         <h2 className="text-lg font-semibold mb-1">Import Customers</h2>
         {isSampleFile && <SampleExcelDownloadCustomer />}
-
         {isWithCustomerCode && (
           <div className="mb-3 flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <input
@@ -579,7 +542,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             </label>
           </div>
         )}
-
         <div className="mb-4">
           <label className="block text-gray-700 mb-2 font-medium">
             Select File
@@ -594,21 +556,18 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             <p className="text-xs text-gray-500 mt-1">📄 {fileName}</p>
           )}
         </div>
-
         {loadingExisting && (
           <div className="mb-4 text-sm text-blue-600 flex items-center gap-2">
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
             Loading existing customers for duplicate check...
           </div>
         )}
-
         {duplicateRows.length > 0 && (
           <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
               <AlertCircle size={16} className="text-red-600" />
               <span className="text-sm font-medium text-red-800">
                 {duplicateRows.length} duplicate row(s) found
-                {existingCustomers.length > 0 && " (by number or full match)"}
               </span>
             </div>
             <div className="max-h-24 overflow-y-auto text-xs text-red-700">
@@ -628,7 +587,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             </p>
           </div>
         )}
-
         {parsedData.length > 0 && (
           <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
@@ -687,7 +645,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             </div>
           </div>
         )}
-
         {parseErrors.length > 0 && (
           <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-h-28 overflow-y-auto">
             <div className="flex items-center gap-2 mb-1">
@@ -703,7 +660,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             ))}
           </div>
         )}
-
         <div className="flex justify-end mt-4 gap-3">
           <button
             onClick={() => onClose(false)}
@@ -747,6 +703,10 @@ const Customer = () => {
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
   const inputRef = useRef(null);
 
+  // Business type tab state
+  const [selectedBusinessTab, setSelectedBusinessTab] = useState("All");
+  const [businessTypeTabs, setBusinessTypeTabs] = useState([]);
+
   const [provinces, setProvinces] = useState([]);
   const [mrList, setMrList] = useState([]);
   const [zones, setZones] = useState([]);
@@ -761,7 +721,6 @@ const Customer = () => {
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const duplicateCheckTimeoutRef = useRef(null);
 
-  // Mobile view states
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -772,13 +731,11 @@ const Customer = () => {
     validateForm,
     resetForm,
     setForm,
-    toTitleCase,
     toLowerCase,
   } = useCustomerForm();
 
   const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
-  // Mobile detection
   useEffect(() => {
     const checkMobile = () => setIsMobileView(window.innerWidth < 768);
     checkMobile();
@@ -803,7 +760,7 @@ const Customer = () => {
 
   useEffect(() => {
     fetchCustomers();
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, selectedBusinessTab]);
 
   useEffect(() => {
     fetchDropdownData();
@@ -821,9 +778,18 @@ const Customer = () => {
       if (pRes.success) setProvinces(pRes.data || []);
       if (mrRes.success) setMrList(mrRes.data || []);
       if (zRes.success) setZones(zRes.data || []);
-      if (btRes.success) setBusinessTypes(btRes.data || []);
+      if (btRes.success) {
+        const types = btRes.data || [];
+        setBusinessTypes(types);
+        setBusinessTypeTabs(
+          types.map((t) => {
+            const name =
+              typeof t === "string" ? t : t.name || t.label || "Unknown";
+            return name;
+          }),
+        );
+      }
     } catch (err) {
-      console.error("Dropdown fetch error:", err);
       showToast("error", "Failed to load dropdown data");
     } finally {
       setIsDropdownsLoading(false);
@@ -833,12 +799,16 @@ const Customer = () => {
   const fetchCustomers = async () => {
     try {
       setLoading(true);
+      const params = {
+        page: currentPage,
+        limit: customersPerPage,
+        search: searchTerm,
+      };
+      if (selectedBusinessTab !== "All") {
+        params.businessType = selectedBusinessTab;
+      }
       const response = await axios.get(`${backendUrl}/api/customers`, {
-        params: {
-          page: currentPage,
-          limit: customersPerPage,
-          search: searchTerm,
-        },
+        params,
       });
       if (response.data.ok) {
         setCustomers(response.data.customers || []);
@@ -851,6 +821,11 @@ const Customer = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleTabChange = (tab) => {
+    setSelectedBusinessTab(tab);
+    setCurrentPage(1);
   };
 
   const toggleSelect = useCallback((customer) => {
@@ -1102,11 +1077,6 @@ const Customer = () => {
     setShowImportModal(false);
     if (shouldRefresh) fetchCustomers();
   };
-
-  const handleIconClick = () => {
-    inputRef.current?.focus();
-  };
-
   const handleDownloadAll = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/customers/export`, {
@@ -1123,7 +1093,6 @@ const Customer = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       showToast("error", "Failed to download customer list");
-      console.error(err);
     }
   };
 
@@ -1183,7 +1152,7 @@ const Customer = () => {
       <div className="container mx-auto">
         {/* Mobile Header */}
         {isMobileView && (
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center mb-3">
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
@@ -1248,7 +1217,7 @@ const Customer = () => {
                 <Search
                   className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                   size={16}
-                  onClick={handleIconClick}
+                  onClick={() => inputRef.current?.focus()}
                 />
                 <input
                   ref={inputRef}
@@ -1265,7 +1234,7 @@ const Customer = () => {
 
         {/* Mobile Search */}
         {isMobileView && (
-          <div className="relative m-3">
+          <div className="relative mb-3">
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
               size={16}
@@ -1281,7 +1250,69 @@ const Customer = () => {
           </div>
         )}
 
+        {/* ── Business Type Tab Filters (fixed font for mobile) ── */}
+        {businessTypeTabs.length > 0 && (
+          <div
+            className={`mb-4 ${isMobileView ? "overflow-x-auto whitespace-nowrap scrollbar-hide" : ""}`}
+          >
+            <div className="flex items-center gap-2 flex-wrap pb-1">
+              {/* "All" tab */}
+              <button
+                onClick={() => handleTabChange("All")}
+                className={`${
+                  isMobileView
+                    ? "px-3 py-1.5 rounded-lg text-[10px]"
+                    : "px-4 py-2 rounded-lg text-sm"
+                } font-medium transition whitespace-nowrap ${
+                  selectedBusinessTab === "All"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                All
+              </button>
+              {/* One tab per business type */}
+              {businessTypeTabs.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => handleTabChange(tab)}
+                  className={`${
+                    isMobileView
+                      ? "px-3 py-1.5 rounded-lg text-[10px]"
+                      : "px-4 py-2 rounded-lg text-sm"
+                  } font-medium transition whitespace-nowrap ${
+                    selectedBusinessTab === tab
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  }`}
+                >
+                  {toTitleCase(tab)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
+        {/* Active filter info */}
+        {selectedBusinessTab !== "All" && (
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-sm text-gray-500">Filtering by:</span>
+            <span className="inline-flex items-center gap-1.5 bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm font-medium">
+              {toTitleCase(selectedBusinessTab)}
+              <button
+                onClick={() => handleTabChange("All")}
+                className="hover:text-indigo-600 ml-0.5"
+              >
+                <X size={13} />
+              </button>
+            </span>
+            <span className="text-sm text-gray-400">
+              ({totalCustomers} records)
+            </span>
+          </div>
+        )}
+
+        {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1298,14 +1329,8 @@ const Customer = () => {
                     />
                   </th>
                 )}
-                <th
-                  className={`p-3 whitespace-nowrap ${
-                    isMobileView ? "text-[10px]" : "text-sm"
-                  } font-medium`}
-                >
-                  Customer Code
-                </th>
                 {[
+                  "Customer Code",
                   "Name",
                   "Business Type",
                   "MR Name",
@@ -1316,9 +1341,7 @@ const Customer = () => {
                 ].map((h) => (
                   <th
                     key={h}
-                    className={`p-3 whitespace-nowrap ${
-                      isMobileView ? "text-[10px]" : "text-sm"
-                    } font-medium`}
+                    className={`p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
                   >
                     {h}
                   </th>
@@ -1335,9 +1358,7 @@ const Customer = () => {
                 )}
                 {isMobileView && (
                   <th
-                    className={`p-3 whitespace-nowrap ${
-                      isMobileView ? "text-[10px]" : "text-sm"
-                    } font-medium`}
+                    className={`p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
                   >
                     Action
                   </th>
@@ -1349,22 +1370,22 @@ const Customer = () => {
                 <tr>
                   <td
                     colSpan={!isMobileView ? 10 : 9}
-                    className="p-4 text-center text-gray-500"
+                    className="p-8 text-center text-gray-500"
                   >
                     {loading
                       ? "Loading..."
                       : searchTerm
                         ? "No customers found matching your search."
-                        : "No customers found. Add your first customer using the 'Add New Customer' button above."}
+                        : selectedBusinessTab !== "All"
+                          ? `No customers found for business type "${toTitleCase(selectedBusinessTab)}".`
+                          : "No customers found. Add your first customer using the 'Add New Customer' button above."}
                   </td>
                 </tr>
               ) : (
                 customers.map((customer, idx) => (
                   <tr
                     key={customer._id}
-                    className={`hover:bg-gray-50 ${
-                      idx < customers.length - 1 ? "border-b" : ""
-                    }`}
+                    className={`hover:bg-gray-50 ${idx < customers.length - 1 ? "border-b" : ""}`}
                   >
                     {!isMobileView && (
                       <td className="p-3">
@@ -1376,60 +1397,44 @@ const Customer = () => {
                       </td>
                     )}
                     <td
-                      className={`p-3 ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       <span className="font-mono font-semibold text-blue-600">
                         {customer.customerCode}
                       </span>
                     </td>
                     <td
-                      className={`p-3 ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       {capitalizeFirstLetter(customer.name)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       {displayValue(customer.typeOfBusiness)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       {displayValue(customer.medicalRepName)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       {displayValue(customer.address)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       {displayValue(customer.zone)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       {displayValue(customer.province)}
                     </td>
                     <td
-                      className={`p-3 whitespace-nowrap ${
-                        isMobileView ? "text-[7px]" : "text-sm"
-                      }`}
+                      className={`p-3 whitespace-nowrap ${isMobileView ? "text-[7px]" : "text-sm"}`}
                     >
                       {customer.date
                         ? formatDateForDisplay(customer.date)
@@ -1440,11 +1445,7 @@ const Customer = () => {
                         <td className="p-3">
                           <button
                             onClick={() => handleStatusToggle(customer._id)}
-                            className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
-                              customer.enabled
-                                ? "bg-green-100 text-green-600"
-                                : "bg-gray-200 text-gray-600"
-                            }`}
+                            className={`px-3 py-1 rounded-full text-sm cursor-pointer ${customer.enabled ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-600"}`}
                           >
                             {customer.enabled ? "Enabled" : "Disabled"}
                           </button>
@@ -1495,9 +1496,7 @@ const Customer = () => {
         {/* Pagination */}
         {customers.length > 0 && totalPages > 1 && (
           <div
-            className={`mt-4 p-5 flex gap-2 ${
-              isMobileView ? "justify-center" : "justify-start"
-            }`}
+            className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center" : "justify-start"}`}
           >
             <button
               onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
@@ -1510,11 +1509,7 @@ const Customer = () => {
               <button
                 key={index}
                 onClick={() => typeof p === "number" && setCurrentPage(p)}
-                className={`px-2 md:px-4 py-2 rounded ${
-                  currentPage === p
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300"
-                }`}
+                className={`px-2 md:px-4 py-2 rounded ${currentPage === p ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
               >
                 {p}
               </button>

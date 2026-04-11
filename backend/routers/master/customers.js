@@ -620,13 +620,23 @@ router.post("/import", async (req, res) => {
 // GET all customers with pagination
 router.get("/", async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = "" } = req.query;
+    const { page = 1, limit = 10, search = "", businessType = "" } = req.query;
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
     const searchQuery = {};
+
+    // ── Business type tab filter ────────────────────────────────────────────
+    // Passed from frontend when user clicks a business type tab (not "All")
+    if (businessType && businessType.trim() && businessType.trim() !== "All") {
+      searchQuery.typeOfBusiness = {
+        $regex: new RegExp(`^${businessType.trim()}$`, "i"),
+      };
+    }
+
+    // ── Text search filter ──────────────────────────────────────────────────
     if (search && search.trim()) {
       const s = search.trim();
       searchQuery.$or = [
@@ -649,7 +659,7 @@ router.get("/", async (req, res) => {
         .sort({ customerCode: -1 })
         .skip(skip)
         .limit(limitNum),
-      generateNextCustomerCode(), // now uses numeric max, always correct
+      generateNextCustomerCode(),
     ]);
 
     res.json({

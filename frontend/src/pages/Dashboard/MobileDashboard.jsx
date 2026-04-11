@@ -38,7 +38,9 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
 const safe = (v) => (typeof v === "number" ? v : 0);
 
-
+// --------------------------------------------------------------
+// MiniRecentSales
+// --------------------------------------------------------------
 const MiniRecentSales = ({
   salesTableData = [],
   loadingSalesData = false,
@@ -110,7 +112,9 @@ const MiniRecentSales = ({
   );
 };
 
-/** Latest Expenses */
+// --------------------------------------------------------------
+// MiniRecentExpenses
+// --------------------------------------------------------------
 const MiniRecentExpenses = ({
   expenseTableData = [],
   loadingExpenseData = false,
@@ -199,7 +203,9 @@ const MiniRecentExpenses = ({
   );
 };
 
-/** Highest Overdue Amount */
+// --------------------------------------------------------------
+// MiniRecentOverdue
+// --------------------------------------------------------------
 const MiniRecentOverdue = ({
   overdueTableData = [],
   loadingOverdueData = false,
@@ -328,7 +334,9 @@ const MiniRecentOverdue = ({
   );
 };
 
-/** Low Stock Items */
+// --------------------------------------------------------------
+// MiniLowStock
+// --------------------------------------------------------------
 const MiniLowStock = ({ stockData = {} }) => {
   const items = stockData.lowStockItems?.slice(0, 5) || [];
   if (!items.length)
@@ -364,7 +372,9 @@ const MiniLowStock = ({ stockData = {} }) => {
   );
 };
 
-/** Recent Joins (Payroll tab) */
+// --------------------------------------------------------------
+// MiniRecentJoins
+// --------------------------------------------------------------
 const MiniRecentJoins = ({ mrList = [] }) => {
   const recent = useMemo(
     () =>
@@ -413,7 +423,9 @@ const MiniRecentJoins = ({ mrList = [] }) => {
   );
 };
 
-/** Credit Sale / Pending Collection panel */
+// --------------------------------------------------------------
+// MiniCreditSalePanel
+// --------------------------------------------------------------
 const MiniCreditSalePanel = ({
   creditSaleData = [],
   loadingCreditSaleData = false,
@@ -493,7 +505,9 @@ const MiniCreditSalePanel = ({
   );
 };
 
-/** Company Balance panel */
+// --------------------------------------------------------------
+// MiniCompanyBalance
+// --------------------------------------------------------------
 const MiniCompanyBalance = ({
   companyBalanceAccounts = [],
   loadingCompanyBalance = false,
@@ -603,9 +617,9 @@ const MiniCompanyBalance = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// SIDE PANEL WRAPPER — picks the right mini-component per tab
-// ─────────────────────────────────────────────────────────────
+// --------------------------------------------------------------
+// MobileSidePanel
+// --------------------------------------------------------------
 const MobileSidePanel = ({
   activeTable,
   salesTableData,
@@ -698,16 +712,15 @@ const MobileSidePanel = ({
   );
 };
 
-// ─────────────────────────────────────────────────────────────
-// MAIN MOBILE DASHBOARD
-// ─────────────────────────────────────────────────────────────
+// --------------------------------------------------------------
+// MAIN MOBILE DASHBOARD (corrected)
+// --------------------------------------------------------------
 const MobileDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
-
   const { stockData, totalPayroll, mrList } = useDashboardData();
 
-  // ── Data state ──────────────────────────────────────────────
+  // Data state
   const [todaySales, setTodaySales] = useState(0);
   const [monthlySales, setMonthlySales] = useState(0);
   const [companyBalance, setCompanyBalance] = useState(0);
@@ -717,13 +730,13 @@ const MobileDashboard = () => {
   const [dataLoading, setDataLoading] = useState(true);
   const [username, setUsername] = useState("User");
 
-  // ── UI state ────────────────────────────────────────────────
+  // UI state
   const [activeTable, setActiveTable] = useState("Sales");
   const [activeCardKey, setActiveCardKey] = useState("totalSales");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobileView, setIsMobileView] = useState(false);
 
-  // ── Table data ───────────────────────────────────────────────
+  // Table data
   const [salesTableData, setSalesTableData] = useState([]);
   const [loadingSalesData, setLoadingSalesData] = useState(false);
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
@@ -746,11 +759,10 @@ const MobileDashboard = () => {
 
   const [activeStockSubTab, setActiveStockSubTab] = useState("all");
 
-  // ── Company balance accounts (for MiniCompanyBalance) ───────
   const [companyBalanceAccounts, setCompanyBalanceAccounts] = useState([]);
   const [loadingCompanyBalance, setLoadingCompanyBalance] = useState(false);
 
-  // ── Modal ────────────────────────────────────────────────────
+  // Modal
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedMRName, setSelectedMRName] = useState("");
   const [selectedMRProducts, setSelectedMRProducts] = useState([]);
@@ -763,7 +775,7 @@ const MobileDashboard = () => {
   });
   const outOfStockCount = stockData?.outOfStockCount ?? 0;
 
-  // ── Mobile detection ─────────────────────────────────────────
+  // Mobile detection
   useEffect(() => {
     const handleResize = () => setIsMobileView(window.innerWidth < 768);
     handleResize();
@@ -771,11 +783,24 @@ const MobileDashboard = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // ✅ Body scroll lock when sidebar is open on mobile
+  useEffect(() => {
+    if (isMobileView && sidebarOpen) {
+      document.body.style.overflow = "hidden";
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isMobileView, sidebarOpen]);
+
   useEffect(() => {
     if (isMobileView && sidebarOpen) setSidebarOpen(false);
   }, [location.pathname, isMobileView]);
 
-  // ── Initial fetch ─────────────────────────────────────────────
+  // Initial fetch
   useEffect(() => {
     const init = async () => {
       setDataLoading(true);
@@ -850,7 +875,6 @@ const MobileDashboard = () => {
             ),
           );
 
-        // Pre-load Sales table data for the initial panel
         fetchSalesData("Today");
       } catch (err) {
         console.error("MobileDashboard init error:", err);
@@ -865,7 +889,7 @@ const MobileDashboard = () => {
     setCurrentPayrollTotal(totalPayroll || 0);
   }, [totalPayroll]);
 
-  // ── Fetchers ──────────────────────────────────────────────────
+  // Fetchers
   const fetchSalesData = async (period = "Today") => {
     try {
       setLoadingSalesData(true);
@@ -991,7 +1015,7 @@ const MobileDashboard = () => {
     }
   };
 
-  // ── Handlers ──────────────────────────────────────────────────
+  // Handlers
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
     setSelectedMRProducts(products);
@@ -1033,7 +1057,7 @@ const MobileDashboard = () => {
     }
   };
 
-  // ── Sub-tab pills ─────────────────────────────────────────────
+  // Sub-tab pills
   const SubTabs = ({ tabs, active, onChange }) => (
     <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar pb-1">
       {tabs.map((t) => (
@@ -1048,7 +1072,7 @@ const MobileDashboard = () => {
     </div>
   );
 
-  // ── Table renderer ────────────────────────────────────────────
+  // Table renderer
   const renderTable = () => {
     switch (activeTable) {
       case "Sales":
@@ -1163,7 +1187,6 @@ const MobileDashboard = () => {
     }
   };
 
-  // ── Cards ─────────────────────────────────────────────────────
   const cards = [
     {
       key: "totalSales",
@@ -1253,7 +1276,6 @@ const MobileDashboard = () => {
       )}
 
       <div className="flex-1 overflow-y-auto pb-8 px-4 space-y-5">
-        {/* Header */}
         <div className="bg-white rounded-2xl px-5 py-4 shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-3">
             {isMobileView && (
@@ -1276,7 +1298,6 @@ const MobileDashboard = () => {
           <span className="text-2xl">👋</span>
         </div>
 
-        {/* Stock Alert */}
         {outOfStockCount > 0 && (
           <div className="bg-red-50 border-l-4 border-red-500 rounded-xl px-4 py-3 flex items-start gap-3">
             <AlertTriangle
@@ -1292,7 +1313,6 @@ const MobileDashboard = () => {
           </div>
         )}
 
-        {/* Cards grid — unchanged layout */}
         <div className="grid grid-cols-2 gap-3">
           {cards.map((card) => (
             <button
@@ -1313,10 +1333,8 @@ const MobileDashboard = () => {
           ))}
         </div>
 
-        {/* Table */}
         <div className="mt-2">{renderTable()}</div>
 
-        {/* Side Panel content below the table */}
         <MobileSidePanel
           activeTable={activeTable}
           salesTableData={salesTableData}

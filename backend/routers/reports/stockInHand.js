@@ -6,23 +6,71 @@ import ExcelJS from "exceljs";
 const router = express.Router();
 
 // ==========================================
-// Helper functions
+// Helper: filter only non‑expired batches (expiryDate >= today)
 // ==========================================
-const filterReportsWithBatches = (reports) =>
-  reports.filter((r) => Array.isArray(r.batches) && r.batches.length > 0);
-
-// Filter batches that are not expired (expiryDate >= today)
 const getNonExpiredBatches = (batches) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return batches.filter((batch) => {
-    if (!batch.expiryDate) return true; // No expiry date → treat as valid
+    if (!batch.expiryDate) return true;
     const expiry = new Date(batch.expiryDate);
     expiry.setHours(0, 0, 0, 0);
     return expiry >= today;
   });
 };
 
+// ==========================================
+// Helper: compute signed boxes/amount from a list of batches
+// (respects "batch"/"add" as +, "remove" as -)
+// ==========================================
+const processBatches = (batches) => {
+  let boxes = 0;
+  let amount = 0;
+  let totalBatchBoxes = 0; // for LC (only positive contributions)
+  let totalBatchLC = 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const processed = [];
+
+  for (const batch of batches) {
+    // skip expired
+    if (batch.expiryDate) {
+      const expiry = new Date(batch.expiryDate);
+      expiry.setHours(0, 0, 0, 0);
+      if (expiry < today) continue;
+    }
+
+    let sign = 0;
+    const adjType = batch.adjustmentType?.toLowerCase();
+    if (adjType === "batch" || adjType === "add" || !adjType) {
+      sign = 1;
+    } else if (adjType === "remove") {
+      sign = -1;
+    } else {
+      continue; // ignore unknown types
+    }
+
+    const batchBoxes = batch.boxes || 0;
+    const batchAmount = batch.amount || 0;
+
+    boxes += batchBoxes * sign;
+    amount += batchAmount * sign;
+
+    if (sign === 1) {
+      totalBatchBoxes += batchBoxes;
+      totalBatchLC += (batch.lc || 0) * batchBoxes;
+    }
+
+    processed.push({ ...(batch.toObject?.() || batch), sign });
+  }
+
+  const avgLC = totalBatchBoxes > 0 ? totalBatchLC / totalBatchBoxes : 0;
+  return { boxes, amount, avgLC, processedBatches: processed };
+};
+
+// ==========================================
+// Build combined product map (warehouse + MR)
+// ==========================================
 const buildCombinedProductMap = async (searchFilter = null) => {
   let warehouseQuery = {};
   if (searchFilter)
@@ -39,56 +87,36 @@ const buildCombinedProductMap = async (searchFilter = null) => {
     if (!name) continue;
     const key = name.toLowerCase();
 
-    // Filter only non‑expired batches
-    const nonExpiredBatches = getNonExpiredBatches(report.batches);
-    if (nonExpiredBatches.length === 0) {
-      // No usable stock – skip or keep with zero values? We'll keep with zero.
-    }
-
-    // Use only non‑expired batches for calculations
-    const realBatches = nonExpiredBatches.filter(
-      (b) => b.adjustmentType === "batch" || !b.adjustmentType,
-    );
-    const totalBatchBoxes = realBatches.reduce((s, b) => s + (b.boxes || 0), 0);
-    const totalBatchLC = realBatches.reduce(
-      (s, b) => s + (b.lc || 0) * (b.boxes || 0),
-      0,
-    );
-    const avgLC = totalBatchBoxes > 0 ? totalBatchLC / totalBatchBoxes : 0;
-
-    const warehouseBoxes = totalBatchBoxes; // Only non‑expired boxes
-    const warehouseAmount = realBatches.reduce(
-      (s, b) => s + (b.amount || 0),
-      0,
+    const { boxes, amount, avgLC, processedBatches } = processBatches(
+      report.batches,
     );
     const warehouseDeductions = report.totalMrSaleDeductions || 0;
-    const warehouseNetAmount = warehouseAmount - warehouseDeductions;
+    const warehouseNetAmount = amount - warehouseDeductions;
 
     productMap.set(key, {
       productName: name,
-      warehouseBoxes,
-      warehouseAmount: parseFloat(warehouseAmount.toFixed(2)),
+      warehouseBoxes: boxes,
+      warehouseAmount: parseFloat(amount.toFixed(2)),
       warehouseDeductions,
       warehouseNetAmount: parseFloat(warehouseNetAmount.toFixed(2)),
       netUsableAmount: parseFloat(warehouseNetAmount.toFixed(2)),
       lc: avgLC,
-      status:
-        report.status || (warehouseBoxes === 0 ? "Out of Stock" : "In Stock"),
+      status: report.status || (boxes === 0 ? "Out of Stock" : "In Stock"),
       minStockLevel: report.minStockLevel || 0,
       averagePrice: report.averagePrice || 0,
-      batches: nonExpiredBatches, // store only non‑expired batches
+      batches: processedBatches,
       type: report.type || "",
       mrBoxes: 0,
       mrAmount: 0,
       mrBreakdown: [],
-      totalBoxes: warehouseBoxes,
-      totalAmount: parseFloat(warehouseAmount.toFixed(2)),
+      totalBoxes: boxes,
+      totalAmount: parseFloat(amount.toFixed(2)),
       totalDeductions: warehouseDeductions,
       totalNetAmount: parseFloat(warehouseNetAmount.toFixed(2)),
     });
   }
 
-  // MR hand stock (no expiry filtering for MR stock, as that’s a different business rule)
+  // MR hand stock (no adjustment types – just add positively)
   const mrStockDocs = await StockInMRHand.find({});
   for (const mrDoc of mrStockDocs) {
     const mrName = mrDoc.mrName || "Unknown MR";
@@ -157,7 +185,6 @@ const buildCombinedProductMap = async (searchFilter = null) => {
       entry.totalAmount = entry.warehouseAmount + entry.mrAmount;
       entry.totalNetAmount = entry.warehouseNetAmount + entry.mrAmount;
 
-      // Update status based on total boxes (warehouse + MR)
       if (entry.totalBoxes === 0) entry.status = "Out of Stock";
       else if (entry.totalBoxes < (entry.minStockLevel || 0))
         entry.status = "Low Stock";
@@ -168,6 +195,9 @@ const buildCombinedProductMap = async (searchFilter = null) => {
   return productMap;
 };
 
+// ==========================================
+// Compute summary totals
+// ==========================================
 const computeSummary = (products) =>
   products.reduce(
     (acc, p) => {
@@ -210,16 +240,12 @@ router.get("/product/:productName", async (req, res) => {
         message: "Product not found in stock",
       });
     }
-    const nonExpiredBatches = getNonExpiredBatches(report.batches || []);
-    const totalBoxes = nonExpiredBatches.reduce(
-      (s, b) => s + (b.boxes || 0),
-      0,
-    );
+    const { boxes, processedBatches } = processBatches(report.batches || []);
     res.json({
       success: true,
       data: {
-        totalBoxes,
-        batches: nonExpiredBatches,
+        totalBoxes: boxes,
+        batches: processedBatches,
       },
     });
   } catch (error) {
@@ -701,18 +727,12 @@ router.get("/:id", async (req, res) => {
         message: "Report not found or has no batches",
       });
 
-    const nonExpiredBatches = getNonExpiredBatches(report.batches);
+    const { boxes, amount, avgLC, processedBatches } = processBatches(
+      report.batches,
+    );
     const productName = report.productName?.trim();
-    const warehouseAmount = nonExpiredBatches.reduce(
-      (s, b) => s + (b.amount || 0),
-      0,
-    );
     const warehouseDeductions = report.totalMrSaleDeductions || 0;
-    const warehouseNetAmount = warehouseAmount - warehouseDeductions;
-    const warehouseBoxes = nonExpiredBatches.reduce(
-      (s, b) => s + (b.boxes || 0),
-      0,
-    );
+    const warehouseNetAmount = amount - warehouseDeductions;
 
     const mrStockDocs = await StockInMRHand.find({});
     const mrBreakdown = [];
@@ -748,17 +768,17 @@ router.get("/:id", async (req, res) => {
       report: {
         ...report.toObject(),
         netAmount: warehouseNetAmount,
-        warehouseBoxes,
-        warehouseAmount,
+        warehouseBoxes: boxes,
+        warehouseAmount: amount,
         warehouseDeductions,
         warehouseNetAmount,
         netUsableAmount: parseFloat(warehouseNetAmount.toFixed(2)),
-        batches: nonExpiredBatches, // show only non‑expired batches
+        batches: processedBatches,
         mrBoxes,
         mrAmount,
         mrBreakdown,
-        totalBoxes: warehouseBoxes + mrBoxes,
-        totalAmount: warehouseAmount + mrAmount,
+        totalBoxes: boxes + mrBoxes,
+        totalAmount: amount + mrAmount,
         totalNetAmount: warehouseNetAmount + mrAmount,
       },
     });
@@ -831,22 +851,14 @@ router.get("/supplier/:supplierName", async (req, res) => {
       supplierName: { $regex: supplierName, $options: "i" },
     }).sort({ createdAt: -1 });
 
-    const filteredReports = filterReportsWithBatches(warehouseReports);
-
     const enrichedReports = await Promise.all(
-      filteredReports.map(async (report) => {
+      warehouseReports.map(async (report) => {
         const productName = report.productName?.trim();
-        const nonExpiredBatches = getNonExpiredBatches(report.batches);
-        const warehouseAmount = nonExpiredBatches.reduce(
-          (s, b) => s + (b.amount || 0),
-          0,
+        const { boxes, amount, processedBatches } = processBatches(
+          report.batches,
         );
         const warehouseDeductions = report.totalMrSaleDeductions || 0;
-        const warehouseNetAmount = warehouseAmount - warehouseDeductions;
-        const warehouseBoxes = nonExpiredBatches.reduce(
-          (s, b) => s + (b.boxes || 0),
-          0,
-        );
+        const warehouseNetAmount = amount - warehouseDeductions;
 
         const mrStockDocs = await StockInMRHand.find({});
         const mrBreakdown = [];
@@ -873,17 +885,17 @@ router.get("/supplier/:supplierName", async (req, res) => {
         return {
           ...report.toObject(),
           netAmount: warehouseNetAmount,
-          warehouseBoxes,
-          warehouseAmount,
+          warehouseBoxes: boxes,
+          warehouseAmount: amount,
           warehouseDeductions,
           warehouseNetAmount,
           netUsableAmount: parseFloat(warehouseNetAmount.toFixed(2)),
-          batches: nonExpiredBatches,
+          batches: processedBatches,
           mrBoxes,
           mrAmount,
           mrBreakdown,
-          totalBoxes: warehouseBoxes + mrBoxes,
-          totalAmount: warehouseAmount + mrAmount,
+          totalBoxes: boxes + mrBoxes,
+          totalAmount: amount + mrAmount,
           totalNetAmount: warehouseNetAmount + mrAmount,
         };
       }),
@@ -907,12 +919,12 @@ router.get("/supplier/:supplierName", async (req, res) => {
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
-      total: filteredReports.length,
+      total: warehouseReports.length,
       totalBoxes: totalBoxesSum,
       totalAmount: totalAmountSum,
       totalDeductions: totalDeductionsSum,
       totalNetAmount: totalNetAmountSum,
-      totalPages: Math.ceil(filteredReports.length / limitNum),
+      totalPages: Math.ceil(warehouseReports.length / limitNum),
       currentPage: pageNum,
       reports: paginatedReports,
     });

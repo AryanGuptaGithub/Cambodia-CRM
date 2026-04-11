@@ -246,10 +246,8 @@ const financeReportPaths = [
   "/reportlayout/tour-expense-sales-ratio",
 ];
 
-
 const getUserRole = () => {
   try {
-    // 1. Try common user object keys in localStorage
     const possibleKeys = ["user", "auth", "userData", "currentUser"];
     for (const key of possibleKeys) {
       const raw = localStorage.getItem(key);
@@ -260,8 +258,6 @@ const getUserRole = () => {
         } catch (e) {}
       }
     }
-
-    // 2. Fallback: decode JWT token from localStorage
     const token =
       localStorage.getItem("token") || localStorage.getItem("authToken");
     if (token) {
@@ -273,21 +269,19 @@ const getUserRole = () => {
         if (payload && payload.role) return payload.role;
       }
     }
-
-    console.warn("⚠️ No role found in localStorage or token");
     return null;
   } catch (error) {
-    console.error("❌ getUserRole error:", error);
+    console.error("getUserRole error:", error);
     return null;
   }
 };
 
-// --------------------------------------------------------------
-// SIDEBAR COMPONENT
-// --------------------------------------------------------------
 function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
   const location = useLocation();
-  const show = isOpen || isMobile;
+
+  // On desktop, sidebar is always "shown" (controlled by width).
+  // On mobile, sidebar visibility is controlled by isOpen prop.
+  const show = isMobile ? isOpen : isOpen;
 
   const [activeParentMenu, setActiveParentMenu] = useState(null);
   const [activeSubMenu, setActiveSubMenu] = useState(null);
@@ -298,10 +292,22 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
 
   const refreshTabData = React.useCallback(() => setLastUpdate(Date.now()), []);
 
-  // Auto-close drawer on navigation (mobile only)
+  // ── Auto-close drawer on navigation (mobile only) ───────────────────────
   useEffect(() => {
     if (isMobile && isOpen) toggleSidebar();
-  }, [location.pathname, isMobile, isOpen, toggleSidebar]);
+  }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Prevent body scroll when mobile sidebar is open ─────────────────────
+  useEffect(() => {
+    if (isMobile && isOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isMobile, isOpen]);
 
   useEffect(() => {
     setLoading(true);
@@ -380,23 +386,24 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     />
   );
 
+  // ── Shared nav content ───────────────────────────────────────────────────
   const navContent = (
     <div className="bg-gray-900 text-white flex flex-col h-full">
+      {/* Header */}
       <div className="h-16 flex items-center justify-between px-3 border-b border-gray-700 flex-shrink-0">
         <img
           src="/mainlogo.png"
           alt="CRM Logo"
-          className={`${show ? "h-10" : "h-8"} object-contain`}
+          className="h-10 object-contain"
         />
-        {isMobile && (
-          <button
-            onClick={toggleSidebar}
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
-            aria-label="Close menu"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
+        {/* Close button — visible on both mobile drawer AND desktop collapsed */}
+        <button
+          onClick={toggleSidebar}
+          className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
+          aria-label="Close menu"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {loading ? (
@@ -409,7 +416,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
           {shouldShow("dashboard") && (
             <Link to="/" className={lnk("/")}>
               <Home className="w-5 h-5 flex-shrink-0" />
-              {show && <span>Dashboard</span>}
+              <span>Dashboard</span>
             </Link>
           )}
 
@@ -422,11 +429,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <Users className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Master</span>}
+                  <span>Master</span>
                 </span>
-                {show && chv(activeParentMenu === "master")}
+                {chv(activeParentMenu === "master")}
               </button>
-              {activeParentMenu === "master" && show && (
+              {activeParentMenu === "master" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {shouldShow("master_customers") && (
                     <Link
@@ -460,11 +467,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <Settings className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Settings</span>}
+                  <span>Settings</span>
                 </span>
-                {show && chv(activeParentMenu === "settings")}
+                {chv(activeParentMenu === "settings")}
               </button>
-              {activeParentMenu === "settings" && show && (
+              {activeParentMenu === "settings" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {shouldShow("settings_companyprofile") && (
                     <Link
@@ -498,11 +505,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <Package className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Product Manager</span>}
+                  <span>Product Manager</span>
                 </span>
-                {show && chv(activeParentMenu === "products")}
+                {chv(activeParentMenu === "products")}
               </button>
-              {activeParentMenu === "products" && show && (
+              {activeParentMenu === "products" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted(["products_products", "products_pricelist"]).map(
                     (id) => {
@@ -541,11 +548,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <ShoppingCart className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Purchase</span>}
+                  <span>Purchase</span>
                 </span>
-                {show && chv(activeParentMenu === "purchase")}
+                {chv(activeParentMenu === "purchase")}
               </button>
-              {activeParentMenu === "purchase" && show && (
+              {activeParentMenu === "purchase" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted([
                     "purchase_purchase",
@@ -591,11 +598,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <TrendingUp className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Sales</span>}
+                  <span>Sales</span>
                 </span>
-                {show && chv(activeParentMenu === "sales")}
+                {chv(activeParentMenu === "sales")}
               </button>
-              {activeParentMenu === "sales" && show && (
+              {activeParentMenu === "sales" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted(["sales_sale", "sales_salereturn"]).map((id) => {
                     const m = {
@@ -627,7 +634,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
           {shouldShow("stockAdjustment") && (
             <Link to="/stockadjustment" className={lnk("/stockadjustment")}>
               <ListChecks className="w-5 h-5 flex-shrink-0" />
-              {show && <span>Stock Adjustment</span>}
+              <span>Stock Adjustment</span>
             </Link>
           )}
 
@@ -635,7 +642,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
           {shouldShow("stockTransfer") && (
             <Link to="/stocktransfer" className={lnk("/stocktransfer")}>
               <Truck className="w-5 h-5 flex-shrink-0" />
-              {show && <span>Stock Transfer</span>}
+              <span>Stock Transfer</span>
             </Link>
           )}
 
@@ -648,11 +655,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <BriefcaseMedical className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>MR Carry Stock</span>}
+                  <span>MR Carry Stock</span>
                 </span>
-                {show && chv(activeParentMenu === "mrCarryStock")}
+                {chv(activeParentMenu === "mrCarryStock")}
               </button>
-              {activeParentMenu === "mrCarryStock" && show && (
+              {activeParentMenu === "mrCarryStock" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted([
                     "mrCarryStock_carrystockview",
@@ -692,11 +699,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <Landmark className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Accounts</span>}
+                  <span>Accounts</span>
                 </span>
-                {show && chv(activeParentMenu === "accounts")}
+                {chv(activeParentMenu === "accounts")}
               </button>
-              {activeParentMenu === "accounts" && show && (
+              {activeParentMenu === "accounts" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted(["accounts_cashbank", "accounts_mrcash"]).map(
                     (id) => {
@@ -735,11 +742,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <FileText className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Expense</span>}
+                  <span>Expense</span>
                 </span>
-                {show && chv(activeParentMenu === "expense")}
+                {chv(activeParentMenu === "expense")}
               </button>
-              {activeParentMenu === "expense" && show && (
+              {activeParentMenu === "expense" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted(["expense_categories", "expense_expenses"]).map(
                     (id) => {
@@ -778,11 +785,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <BarChart3 className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Reports</span>}
+                  <span>Reports</span>
                 </span>
-                {show && chv(activeParentMenu === "reports")}
+                {chv(activeParentMenu === "reports")}
               </button>
-              {activeParentMenu === "reports" && show && (
+              {activeParentMenu === "reports" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted([
                     "reports_dailyreport",
@@ -858,6 +865,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                           )}
                         </div>
                       );
+
                     if (tabId === "reports_financeReports")
                       return (
                         <div key={tabId}>
@@ -919,9 +927,9 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                           )}
                         </div>
                       );
+
                     if (tabId === "reports_profitloss") {
                       const role = getUserRole();
-                      // Only show for super admin (exact match with space)
                       if (role !== "super admin") return null;
                       return (
                         <Link
@@ -956,6 +964,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
                           <span>Stock in hands</span>
                         </Link>
                       );
+
                     const lm = {
                       reports_dailyreport: "/reportlayout/dailyreport",
                       reports_averageprice: "/reportlayout/averageprice",
@@ -1022,11 +1031,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               >
                 <span className="flex items-center gap-3">
                   <Settings className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>Settings</span>}
+                  <span>Settings</span>
                 </span>
-                {show && chv(activeParentMenu === "utility")}
+                {chv(activeParentMenu === "utility")}
               </button>
-              {activeParentMenu === "utility" && show && (
+              {activeParentMenu === "utility" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted([
                     "utility_companyprofile",
@@ -1063,11 +1072,11 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               <button onClick={() => toggleMenu("hrm")} className={drp("hrm")}>
                 <span className="flex items-center gap-3">
                   <UserCog className="w-5 h-5 flex-shrink-0" />
-                  {show && <span>HRM</span>}
+                  <span>HRM</span>
                 </span>
-                {show && chv(activeParentMenu === "hrm")}
+                {chv(activeParentMenu === "hrm")}
               </button>
-              {activeParentMenu === "hrm" && show && (
+              {activeParentMenu === "hrm" && (
                 <div className="ml-6 mt-1 space-y-1">
                   {sorted([
                     "hrm_dashboard",
@@ -1120,19 +1129,24 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     </div>
   );
 
-  // Mobile drawer
+  // ── MOBILE: slide-in drawer ──────────────────────────────────────────────
   if (isMobile) {
     return (
       <>
+        {/* Backdrop — only rendered when open */}
         {isOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-30"
+            className="fixed inset-0 bg-black bg-opacity-50 z-40"
             onClick={toggleSidebar}
             aria-hidden="true"
           />
         )}
+
+        {/* Drawer panel — always in DOM so CSS transition works */}
         <div
-          className={`fixed inset-y-0 left-0 z-40 w-64 transform transition-transform duration-300 ease-in-out ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
+          className={`fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-300 ease-in-out ${
+            isOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
         >
           {navContent}
         </div>
@@ -1140,10 +1154,12 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     );
   }
 
-  // Desktop static sidebar
+  // ── DESKTOP: static sidebar ──────────────────────────────────────────────
   return (
     <div
-      className={`bg-gray-900 text-white transition-all duration-300 flex-shrink-0 flex flex-col ${isOpen ? "w-64" : "w-16"}`}
+      className={`bg-gray-900 text-white transition-all duration-300 flex-shrink-0 flex flex-col ${
+        isOpen ? "w-64" : "w-16"
+      }`}
     >
       {navContent}
     </div>
