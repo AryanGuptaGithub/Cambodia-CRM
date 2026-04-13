@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
-import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import { getVisiblePages } from "../../utils/useVisiblePages";
 import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -45,10 +45,6 @@ const AveragePricePerProduct = () => {
 
   const inputRef = useRef(null);
   const searchTimeoutRef = useRef(null);
-  const visiblePages = useVisiblePages(
-    pagination.currentPage,
-    pagination.totalPages,
-  );
   const ITEMS_PER_PAGE = 8;
 
   const fetchAveragePriceData = useCallback(
@@ -193,51 +189,51 @@ const AveragePricePerProduct = () => {
     };
   }, []);
 
+  const visiblePages = getVisiblePages(
+    pagination.currentPage,
+    pagination.totalPages,
+  );
+
   // ── Pagination ─────────────────────────────────────────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1 && !loading) return null;
     return (
-      <div className="flex gap-2 mt-6">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
           disabled={!pagination.hasPrev || loading}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm transition-colors ${pagination.hasPrev && !loading ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           ← Prev
         </button>
-        <div className="flex gap-1">
-          {isMobileView ? (
-            <span className="px-3 py-2 text-sm text-gray-700 font-medium">
-              {pagination.currentPage} / {pagination.totalPages}
-            </span>
-          ) : (
-            visiblePages.map((page, index) => (
-              <button
-                key={index}
-                onClick={() => {
-                  if (
-                    typeof page === "number" &&
-                    !loading &&
-                    page !== pagination.currentPage
-                  )
-                    handlePageChange(page);
-                }}
-                disabled={
-                  typeof page !== "number" ||
-                  loading ||
-                  page === pagination.currentPage
-                }
-                className={`min-w-[36px] px-3 py-2 rounded-lg text-sm transition-colors ${page === pagination.currentPage ? "bg-indigo-600 text-white cursor-default" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-transparent text-gray-500 cursor-default"}`}
-              >
-                {page}
-              </button>
-            ))
-          )}
-        </div>
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
+            <button
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext || loading}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm transition-colors ${pagination.hasNext && !loading ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           Next →
         </button>
@@ -317,7 +313,7 @@ const AveragePricePerProduct = () => {
   const renderTableHeaders = () => {
     const thClass = `${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`;
     return (
-      <thead className="bg-gray-100 text-gray-700 border-b sticky top-0">
+      <thead className="bg-gray-100 text-gray-700 border-b">
         <tr>
           <th className={thClass}>Sr No.</th>
           <th className={thClass}>Product Name</th>
@@ -391,7 +387,6 @@ const AveragePricePerProduct = () => {
       {isMobileView && (
         <div className="flex justify-between items-center mb-3">
           <div className="flex items-center gap-2">
-            {/* Hamburger menu — same as Customer */}
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
@@ -404,7 +399,7 @@ const AveragePricePerProduct = () => {
             </h1>
           </div>
           <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
-             Total Records:  {pagination.totalRecords}
+            Total Records: {pagination.totalRecords}
           </div>
         </div>
       )}
@@ -463,7 +458,7 @@ const AveragePricePerProduct = () => {
         </div>
       )}
 
-      {/* ── MOBILE Search ── */}
+      {/* ── MOBILE Search (no export button on mobile) ── */}
       {isMobileView && (
         <div className="relative mb-3">
           <input
@@ -546,29 +541,6 @@ const AveragePricePerProduct = () => {
       </div>
 
       {renderPagination()}
-
-      {/* ── MOBILE bottom action bar ── */}
-      {isMobileView && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-3 z-40 shadow-lg">
-          <button
-            onClick={exportToExcel}
-            disabled={exportLoading}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition ${exportLoading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white"}`}
-          >
-            {exportLoading ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                <span>Generating...</span>
-              </>
-            ) : (
-              <>
-                <Download size={16} />
-                <span>Export Excel</span>
-              </>
-            )}
-          </button>
-        </div>
-      )}
     </div>
   );
 };

@@ -235,13 +235,15 @@ router.get("/", async (req, res) => {
     const totalItemsCount = groupedItems.length;
     const paginatedItems = groupedItems.slice(skip, skip + limitNum);
 
-    // 9. Compute filtered summary (for current page only)
+    // 9. Compute filtered summary from ALL groupedItems (NOT paginatedItems)
+    //    This ensures summary cards show totals across ALL pages, not just current page
     let filteredExpiringSoon = 0;
     let filteredNearExpiryValue = 0;
     let filteredCriticalItems = 0;
     let filteredExpiredItems = 0;
     let filteredExpiredValue = 0;
-    for (const item of paginatedItems) {
+    for (const item of groupedItems) {
+      // ✅ FIXED: was paginatedItems, now groupedItems
       if (!item.isExpired && item.daysRemaining <= 15) {
         filteredExpiringSoon += item.quantity;
         filteredNearExpiryValue += item.totalValue;
@@ -249,7 +251,7 @@ router.get("/", async (req, res) => {
       }
       if (item.isExpired) {
         filteredExpiredItems += item.quantity;
-        filteredExpiredValue += item.totalValue;
+        filteredExpiredValue += item.totalValue; // ✅ FIXED: now sums all pages
       }
     }
 
@@ -267,7 +269,7 @@ router.get("/", async (req, res) => {
         filteredNearExpiryValue: parseFloat(filteredNearExpiryValue.toFixed(2)),
         filteredCriticalItems,
         filteredExpiredItems,
-        filteredExpiredValue: parseFloat(filteredExpiredValue.toFixed(2)),
+        filteredExpiredValue: parseFloat(filteredExpiredValue.toFixed(2)), // ✅ FIXED: whole records sum
       },
       items: paginatedItems,
       pagination: {

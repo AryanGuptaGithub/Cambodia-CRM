@@ -345,7 +345,7 @@ function PriceList() {
   }, [isOpen]);
 
   return (
-    <div className="max-w-8xl p-4 md:p-6 bg-white rounded-xl relative">
+    <div className="p-4 md:p-6 bg-white rounded-xl relative pb-20 md:pb-6">
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -353,6 +353,8 @@ function PriceList() {
           isMobile={true}
         />
       )}
+      
+      {/* Mobile Header */}
       {isMobileView && (
         <div className="flex justify-between items-center mb-4">
           <button
@@ -367,42 +369,40 @@ function PriceList() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-4 mb-4">
-        {priceList.length > 0 && (
-          <div className="flex gap-2 flex-wrap">
-            {types.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setSelectedTab(tab)}
-                className={`px-3 py-1.5 rounded-lg cursor-pointer ${
-                  isMobileView ? "text-[10px] px-2 py-1" : "text-sm"
-                } ${
-                  selectedTab === tab
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 text-gray-700"
-                }`}
-              >
-                {capitalizeFirstLetter(tab)}
-              </button>
-            ))}
+      {/* Desktop: Tabs and Search Row */}
+      {!isMobileView && priceList.length > 0 && (
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+              {types.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => {
+                    setSelectedTab(tab);
+                    setCurrentPage(1);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                    selectedTab === tab
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  }`}
+                >
+                  {capitalizeFirstLetter(tab)}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-        {priceList.length > 0 && (
-          <div
-            className={`flex items-center ${isMobileView ? "flex-wrap gap-3 mt-2 w-full" : "gap-6 ml-auto"}`}
-          >
-            {!isMobileView && (
-              <>
-                <p className="text-sm md:text-base font-semibold text-gray-700 whitespace-nowrap">
-                  Total Count:{" "}
-                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs md:text-sm font-medium shadow-sm">
-                    {filteredPriceList.length}
-                  </span>
-                </p>
-                <DownloadDropdown />
-              </>
-            )}
-            <div className="relative w-full md:w-72">
+
+          {/* Right: total count + search + download */}
+          <div className="flex items-center gap-4 flex-shrink-0">
+            <p className="text-sm font-semibold text-gray-700 whitespace-nowrap">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                {filteredPriceList.length}
+              </span>
+            </p>
+            <DownloadDropdown />
+            <div className="relative w-64">
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                 size={16}
@@ -421,14 +421,71 @@ function PriceList() {
               />
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Mobile: Tabs */}
+      {isMobileView && types.length > 0 && (
+        <div className="mb-4 overflow-x-auto whitespace-nowrap scrollbar-hide">
+          <div className="flex gap-2 pb-2">
+            {types.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => {
+                  setSelectedTab(tab);
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-medium transition ${
+                  selectedTab === tab
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700"
+                }`}
+              >
+                {capitalizeFirstLetter(tab)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mobile: Search only (no download button) */}
+      {isMobileView && priceList.length > 0 && (
+        <div className="relative mb-3">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+            size={16}
+          />
+          <input
+            type="text"
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm text-sm"
+          />
+        </div>
+      )}
+
+      {/* Search Info */}
+      {searchTerm && filteredPriceList.length > 0 && (
+        <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+          <p className={`text-blue-700 ${isMobileView ? "text-xs" : "text-sm"}`}>
+            Searching for: <span className="font-semibold">"{searchTerm}"</span>
+            <span className="ml-4">
+              Found: <span className="font-bold">{filteredPriceList.length}</span> record(s)
+            </span>
+          </p>
+        </div>
+      )}
 
       {loading && (
         <div className="flex justify-center items-center p-8">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
         </div>
       )}
+      
       {error && !loading && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
           <p className="font-medium">Error: {error}</p>
@@ -441,48 +498,33 @@ function PriceList() {
         </div>
       )}
 
+      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+        <table className="min-w-[800px] md:min-w-full w-full border-collapse bg-white rounded-2xl text-center">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 Product Name
               </th>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 Type
               </th>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 Selling Price (USD)
               </th>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 LC
               </th>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 Tax Selling Price (USD)
               </th>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 Drug License
               </th>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 License Validity
               </th>
-              <th
-                className={`p-3 text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}
-              >
+              <th className={`p-2 md:p-3 text-xs md:text-sm font-medium ${isMobileView ? "text-[9px]" : ""}`}>
                 Action
               </th>
             </tr>
@@ -500,30 +542,28 @@ function PriceList() {
                   key={item._id}
                   className={`hover:bg-gray-50 ${idx + 1 < currentPriceList.length ? "border-b" : ""}`}
                 >
-                  <td className={`p-3 ${isMobileView ? "text-[9px]" : ""}`}>
-                    {capitalizeFirstLetter(item.productName) || "--"}
+                  <td className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"} capitalize`}>
+                    {item.productName || "--"}
                   </td>
-                  <td className={`p-3 ${isMobileView ? "text-[9px]" : ""}`}>
+                  <td className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"} capitalize`}>
                     {item.type || "--"}
                   </td>
-                  <td className={`p-3 ${isMobileView ? "text-[9px]" : ""}`}>
+                  <td className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"}`}>
                     {item.sellingPrice ?? "--"}
                   </td>
-                  <td className={`p-3 ${isMobileView ? "text-[9px]" : ""}`}>
+                  <td className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"}`}>
                     {item.lc ?? "--"}
                   </td>
-                  <td className={`p-3 ${isMobileView ? "text-[9px]" : ""}`}>
+                  <td className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"}`}>
                     {item.taxSellingPrice ?? "--"}
                   </td>
-                  <td className={`p-3 ${isMobileView ? "text-[9px]" : ""}`}>
+                  <td className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"}`}>
                     {item.drugLicense || "--"}
                   </td>
-                  <td className={`p-3 ${isMobileView ? "text-[9px]" : ""}`}>
+                  <td className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"}`}>
                     {formatDateToReadable(item.licenseValidityDate) || "--"}
                   </td>
-                  <td
-                    className={`p-3 flex items-center justify-center gap-2 ${isMobileView ? "gap-1" : "gap-3"}`}
-                  >
+                  <td className={`p-2 md:p-3 flex items-center justify-center gap-1 md:gap-2`}>
                     <button
                       className="text-blue-600 hover:text-blue-800 cursor-pointer p-1 rounded hover:bg-blue-50"
                       onClick={() => handleView(item)}
@@ -546,30 +586,43 @@ function PriceList() {
             )}
           </tbody>
         </table>
+
+        {/* Pagination - Fixed for mobile view like Product component */}
         {!loading && currentPriceList.length > 0 && totalPages > 1 && (
-          <div className="mt-4 p-5 flex gap-2">
+          <div className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}>
             <button
               onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
             >
               ← Prev
             </button>
-            {visiblePages.map((page) => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded cursor-pointer text-sm ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-              >
-                {page}
-              </button>
-            ))}
+            {!isMobileView ? (
+              visiblePages.map((page, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => typeof page === "number" && setCurrentPage(page)}
+                  disabled={page === "..."}
+                  className={`px-4 py-2 rounded text-sm ${
+                    page === "..."
+                      ? "bg-gray-200 cursor-not-allowed"
+                      : currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))
+            ) : (
+              <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                Page {currentPage} of {totalPages}
+              </span>
+            )}
             <button
-              onClick={() =>
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-              }
+              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
             >
               Next →
             </button>
@@ -577,7 +630,7 @@ function PriceList() {
         )}
       </div>
 
-      {/* Edit Modal (desktop only, but modal itself is fine) */}
+      {/* Edit Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
@@ -713,7 +766,7 @@ function PriceList() {
           document.body,
         )}
 
-      {/* View Modal (same as before) */}
+      {/* View Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
@@ -733,7 +786,7 @@ function PriceList() {
                     Product Name
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {capitalizeFirstLetter(form.productName) || "--"}
+                    {form.productName || "--"}
                   </p>
                 </div>
                 <div>

@@ -11,12 +11,15 @@ import {
   FileDown,
   Filter,
   Scale,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import Sidebar from "../../components/Sidebar";
+import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -59,6 +62,17 @@ const SalaryCOGSRatio = () => {
     endDate: null,
   });
   const [pagination, setPagination] = useState({ ...EMPTY_PAGINATION });
+
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const inputRef = useRef(null);
   const itemsPerPage = 7;
@@ -373,34 +387,46 @@ const SalaryCOGSRatio = () => {
         ? "text-yellow-600"
         : "text-red-600";
 
-  // ── pagination ──────────────────────────────────────────────────────────────
+  // ── pagination (mobile optimized like DailyReports) ────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
-          disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          disabled={pagination.currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           ← Prev
         </button>
-        <div className="flex gap-1">
-          {visiblePages.map((page, i) => (
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
             <button
-              key={i}
+              key={idx}
               onClick={() => typeof page === "number" && handlePageChange(page)}
-              disabled={typeof page !== "number"}
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${page === pagination.currentPage ? "bg-indigo-600 text-white" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-transparent text-gray-500 cursor-default"}`}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
             >
               {page}
             </button>
-          ))}
-        </div>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
-          disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          disabled={pagination.currentPage === pagination.totalPages}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           Next →
         </button>
@@ -408,182 +434,158 @@ const SalaryCOGSRatio = () => {
     );
   };
 
-  // ── render ──────────────────────────────────────────────────────────────────
-  return (
-    <div className="p-6">
-      {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <Scale className="w-8 h-8 text-indigo-600" />
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">
-              Salary / COGS Ratio Report
-            </h1>
-            <p className="text-sm text-gray-600">
-              Analyze salary and expense efficiency against cost of goods sold
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search MR Name..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64"
-            />
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              size={18}
-            />
-            {searchTerm && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X size={16} />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={exportToExcel}
-            disabled={exportLoading || !data.records.length}
-            className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg shadow-md min-w-[140px]"
-          >
-            {exportLoading ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                <span>Exporting...</span>
-              </>
-            ) : (
-              <>
-                <FileDown size={18} />
-                <span>Export Excel</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
+  // ── Summary cards (responsive) ──────────────────────────────────────────────
+  const renderSummaryCards = () => {
+    const cards = [
+      {
+        label: "Total Salary",
+        value: fmt$(data.summary.totalSalary),
+        sub: `${fmtPct(data.summary.salarySaleRatio * 100 || 0)} of Sales`,
+        icon: (
+          <Users
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-blue-500`}
+          />
+        ),
+        border: "border-blue-500",
+      },
+      {
+        label: "Total COGS",
+        value: fmt$(data.summary.totalCOGS),
+        sub: `${fmtPct(data.summary.cogsPercentage || 0)} of Sales`,
+        icon: (
+          <DollarSign
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-red-500`}
+          />
+        ),
+        border: "border-red-500",
+      },
+      {
+        label: "Salary/COGS",
+        value: fmtRatio(data.summary.salaryCOGSRatio),
+        sub: "Lower is better",
+        icon: (
+          <Scale
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-purple-500`}
+          />
+        ),
+        border: "border-purple-500",
+        valueClass: ratioColor(data.summary.salaryCOGSRatio),
+      },
+      {
+        label: "Profit Margin",
+        value: fmtPct(data.summary.profitMargin || 0),
+        sub: `Profit: ${fmt$(data.summary.totalProfit)}`,
+        icon: (
+          <TrendingUp
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-green-500`}
+          />
+        ),
+        border: "border-green-500",
+        valueClass: pctColor(data.summary.profitMargin),
+      },
+    ];
 
-      {/* ── Date tabs ── */}
-      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-        <div className="flex flex-wrap gap-2 mb-4">
-          {[
-            {
-              id: "currentMonth",
-              label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
-            },
-            { id: "janToPreviousMonth", label: getJanToPreviousMonthDisplay() },
-            { id: "custom", label: "Custom Filter" },
-            { id: "all", label: "All Records" },
-          ].map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => handleTabChange(id)}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === id ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Filter size={16} />
-          <span>Active Filter: </span>
-          <span className="font-medium">{getActiveFilterDisplay()}</span>
-        </div>
-      </div>
-
-      {/* ── Summary cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        {[
-          {
-            label: "Total Salary",
-            value: fmt$(data.summary.totalSalary),
-            sub: `${fmtPct(data.summary.salarySaleRatio * 100 || 0)} of Sales`,
-            icon: <Users className="w-8 h-8 text-blue-500" />,
-            border: "border-blue-500",
-          },
-          {
-            label: "Total COGS",
-            value: fmt$(data.summary.totalCOGS),
-            sub: `${fmtPct(data.summary.cogsPercentage || 0)} of Sales`,
-            icon: <DollarSign className="w-8 h-8 text-red-500" />,
-            border: "border-red-500",
-          },
-          {
-            label: "Salary/COGS Ratio",
-            value: fmtRatio(data.summary.salaryCOGSRatio),
-            sub: "Lower is better",
-            icon: <Scale className="w-8 h-8 text-purple-500" />,
-            border: "border-purple-500",
-            valueClass: ratioColor(data.summary.salaryCOGSRatio),
-          },
-          {
-            label: "Profit Margin",
-            value: fmtPct(data.summary.profitMargin || 0),
-            sub: `Profit: ${fmt$(data.summary.totalProfit)}`,
-            icon: <TrendingUp className="w-8 h-8 text-green-500" />,
-            border: "border-green-500",
-            valueClass: pctColor(data.summary.profitMargin),
-          },
-        ].map(({ label, value, sub, icon, border, valueClass }) => (
+    return (
+      <div
+        className={`grid gap-4 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-4 mb-6"}`}
+      >
+        {cards.map(({ label, value, sub, icon, border, valueClass }) => (
           <div
             key={label}
-            className={`bg-white p-6 rounded-xl shadow-md border-l-4 ${border} border border-gray-200`}
+            className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 ${border} border border-gray-200`}
           >
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-sm text-gray-600">{label}</p>
                 <p
-                  className={`text-2xl font-bold mt-1 ${valueClass || "text-gray-800"}`}
+                  className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+                >
+                  {label}
+                </p>
+                <p
+                  className={`${isMobileView ? "text-base" : "text-2xl"} font-bold mt-1 ${valueClass || "text-gray-800"}`}
                 >
                   {loading ? (
-                    <span className="block h-8 w-20 bg-gray-200 rounded animate-pulse" />
+                    <span
+                      className={`block ${isMobileView ? "h-5 w-16" : "h-8 w-20"} bg-gray-200 rounded animate-pulse`}
+                    />
                   ) : (
                     value
                   )}
                 </p>
-                <p className="text-xs text-gray-500 mt-1">{sub}</p>
+                <p
+                  className={`${isMobileView ? "text-[10px]" : "text-xs"} text-gray-500 mt-1`}
+                >
+                  {sub}
+                </p>
               </div>
               {icon}
             </div>
           </div>
         ))}
       </div>
+    );
+  };
 
-      {/* ── Additional metrics ── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        {[
-          {
-            label: "Total Sales",
-            value: fmt$(data.summary.totalSales),
-            icon: <BarChart3 className="w-5 h-5 text-gray-400" />,
-          },
-          {
-            label: "Total Expense",
-            value: fmt$(data.summary.totalExpense),
-            icon: <DollarSign className="w-5 h-5 text-gray-400" />,
-          },
-          {
-            label: "Expense/COGS Ratio",
-            value: fmtRatio(data.summary.expenseCOGSRatio),
-            icon: <Percent className="w-5 h-5 text-gray-400" />,
-            valueClass: ratioColor(data.summary.expenseCOGSRatio),
-          },
-          {
-            label: "Total Incentive",
-            value: fmt$(data.summary.totalIncentive),
-            icon: <TrendingUp className="w-5 h-5 text-gray-400" />,
-          },
-        ].map(({ label, value, icon, valueClass }) => (
-          <div key={label} className="bg-white p-4 rounded-lg shadow-md border">
+  // ── Additional metrics cards ────────────────────────────────────────────────
+  const renderAdditionalMetrics = () => {
+    const metrics = [
+      {
+        label: "Total Sales",
+        value: fmt$(data.summary.totalSales),
+        icon: (
+          <BarChart3
+            className={`${isMobileView ? "w-4 h-4" : "w-5 h-5"} text-gray-400`}
+          />
+        ),
+      },
+      {
+        label: "Total Expense",
+        value: fmt$(data.summary.totalExpense),
+        icon: (
+          <DollarSign
+            className={`${isMobileView ? "w-4 h-4" : "w-5 h-5"} text-gray-400`}
+          />
+        ),
+      },
+      {
+        label: "Expense/COGS",
+        value: fmtRatio(data.summary.expenseCOGSRatio),
+        icon: (
+          <Percent
+            className={`${isMobileView ? "w-4 h-4" : "w-5 h-5"} text-gray-400`}
+          />
+        ),
+        valueClass: ratioColor(data.summary.expenseCOGSRatio),
+      },
+      {
+        label: "Total Incentive",
+        value: fmt$(data.summary.totalIncentive),
+        icon: (
+          <TrendingUp
+            className={`${isMobileView ? "w-4 h-4" : "w-5 h-5"} text-gray-400`}
+          />
+        ),
+      },
+    ];
+
+    return (
+      <div
+        className={`grid ${isMobileView ? "grid-cols-2 gap-2 mb-4" : "grid-cols-1 md:grid-cols-4 gap-4 mb-6"}`}
+      >
+        {metrics.map(({ label, value, icon, valueClass }) => (
+          <div
+            key={label}
+            className={`bg-white ${isMobileView ? "p-2" : "p-4"} rounded-lg shadow-md border`}
+          >
             <div className="flex justify-between items-center">
               <div>
-                <div className="text-sm text-gray-600">{label}</div>
                 <div
-                  className={`text-lg font-bold ${valueClass || "text-gray-800"}`}
+                  className={`${isMobileView ? "text-[10px]" : "text-sm"} text-gray-600`}
+                >
+                  {label}
+                </div>
+                <div
+                  className={`${isMobileView ? "text-sm" : "text-lg"} font-bold ${valueClass || "text-gray-800"}`}
                 >
                   {value}
                 </div>
@@ -593,33 +595,219 @@ const SalaryCOGSRatio = () => {
           </div>
         ))}
       </div>
+    );
+  };
+
+  // ── render ──────────────────────────────────────────────────────────────────
+  return (
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <Scale className="w-5 h-5 text-indigo-600" />
+            <h1 className="text-base font-bold text-gray-800">Salary/COGS</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
+        </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <Scale className="w-8 h-8 text-indigo-600" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">
+                Salary / COGS Ratio Report
+              </h1>
+              <p className="text-sm text-gray-600">
+                Analyze salary and expense efficiency against cost of goods sold
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search MR Name..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64"
+              />
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                size={18}
+              />
+              {searchTerm && (
+                <button
+                  onClick={handleClearSearch}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={exportToExcel}
+              disabled={exportLoading || !data.records.length}
+              className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg shadow-md min-w-[140px]"
+            >
+              {exportLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                  <span>Exporting...</span>
+                </>
+              ) : (
+                <>
+                  <FileDown size={18} />
+                  <span>Export Excel</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <input
+            type="text"
+            placeholder="Search MR Name..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={handleClearSearch}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Date tabs ── */}
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}
+      >
+        <div className="flex flex-wrap gap-2 mb-3">
+          {[
+            {
+              id: "currentMonth",
+              label: isMobileView
+                ? `${getCurrentMonthName().slice(0, 3)} ${getCurrentYear()}`
+                : `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
+            },
+            {
+              id: "janToPreviousMonth",
+              label: isMobileView
+                ? getJanToPreviousMonthDisplay()
+                    .replace("January", "Jan")
+                    .replace("February", "Feb")
+                    .replace("March", "Mar")
+                : getJanToPreviousMonthDisplay(),
+            },
+            { id: "custom", label: "Custom" },
+            { id: "all", label: "All" },
+          ].map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => handleTabChange(id)}
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors ${selectedTab === id ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div
+          className={`flex items-center gap-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+        >
+          <Filter size={isMobileView ? 13 : 16} />
+          <span>Active Filter: </span>
+          <span className="font-medium">{getActiveFilterDisplay()}</span>
+        </div>
+      </div>
+
+      {renderSummaryCards()}
+      {renderAdditionalMetrics()}
 
       {/* ── Table ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[600px]" : ""}`}
+        >
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 text-sm font-medium">Sr.No</th>
-              <th className="p-3 text-sm font-medium">Date</th>
-              <th className="p-3 text-sm font-medium">MR Name</th>
-              <th className="p-3 text-sm font-medium">COGS ($)</th>
-              <th className="p-3 text-sm font-medium">Sales ($)</th>
-              <th className="p-3 text-sm font-medium">Profit ($)</th>
-              <th className="p-3 text-sm font-medium">Salary ($)</th>
-              <th className="p-3 text-sm font-medium">Incentive ($)</th>
-              <th className="p-3 text-sm font-medium">Allowance ($)</th>
-              <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
-              <th className="p-3 text-sm font-medium">Tour Allowance ($)</th>
-              <th className="p-3 text-sm font-medium">Total Expense ($)</th>
-              <th className="p-3 text-sm font-medium">S/COGS Ratio</th>
-              <th className="p-3 text-sm font-medium">E/COGS Ratio</th>
-              <th className="p-3 text-sm font-medium">Profit %</th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                #
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Date
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                MR
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                COGS
+              </th>
+              {!isMobileView && (
+                <th className="p-3 text-sm font-medium">Sales</th>
+              )}
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Salary
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                S/COGS
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Profit%
+              </th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={15} className="p-8 text-center">
+                <td colSpan={isMobileView ? 7 : 8} className="p-8 text-center">
                   <div className="flex flex-col items-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4" />
                     <span className="text-gray-600">
@@ -631,67 +819,48 @@ const SalaryCOGSRatio = () => {
             ) : data.records.length > 0 ? (
               data.records.map((record, index) => {
                 const salary = parseFloat(record.salary) || 0;
-                const incentive = parseFloat(record.incentive) || 0;
-                const allowance = parseFloat(record.allowance) || 0;
-                const tourExpense = parseFloat(record.tourExpense) || 0;
-                const tourAllowance = parseFloat(record.tourAllowance) || 0;
-                const totalExpense = parseFloat(record.totalExpense) || 0;
-
                 return (
                   <tr
                     key={`${record.mrId || record.mrName}-${index}`}
                     className={`hover:bg-gray-50 ${index === data.records.length - 1 ? "" : "border-b"}`}
                   >
-                    <td className="p-3 text-sm text-gray-600 font-medium">
+                    <td
+                      className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-gray-600 font-medium`}
+                    >
                       {getSerialNumber(index)}
                     </td>
-                    <td className="p-3 text-sm text-gray-600">
+                    <td
+                      className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-gray-600`}
+                    >
                       {formatDate(record.srDate)}
                     </td>
-                    <td className="p-3">
-                      <div className="text-sm font-medium text-gray-900 capitalize">
+                    <td className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}>
+                      <div className="font-medium text-gray-900 capitalize">
                         {record.mrName || "N/A"}
                       </div>
                     </td>
-                    <td className="p-3 text-sm font-semibold text-red-600">
+                    <td
+                      className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-semibold text-red-600`}
+                    >
                       {fmt$(record.cogs)}
                     </td>
-                    <td className="p-3 text-sm font-semibold text-blue-600">
-                      {fmt$(record.totalSales)}
-                    </td>
-                    <td className="p-3 text-sm font-semibold text-green-600">
-                      {fmt$(record.profit)}
-                    </td>
-                    <td className="p-3 text-sm font-semibold text-purple-600">
+                    {!isMobileView && (
+                      <td className="p-3 text-sm font-semibold text-blue-600">
+                        {fmt$(record.totalSales)}
+                      </td>
+                    )}
+                    <td
+                      className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-semibold text-purple-600`}
+                    >
                       {fmt$(salary)}
                     </td>
-                    <td className="p-3 text-sm font-semibold text-green-700">
-                      {fmt$(incentive)}
-                    </td>
-                    <td className="p-3 text-sm font-semibold text-yellow-600">
-                      {fmt$(allowance)}
-                    </td>
-                    <td className="p-3 text-sm font-semibold text-orange-600">
-                      {fmt$(tourExpense)}
-                    </td>
-                    <td className="p-3 text-sm font-semibold text-pink-600">
-                      {fmt$(tourAllowance)}
-                    </td>
-                    <td className="p-3 text-sm font-bold text-gray-900">
-                      {fmt$(totalExpense)}
-                    </td>
                     <td
-                      className={`p-3 text-sm font-semibold ${ratioColor(record.salaryCOGSRatio)}`}
+                      className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-semibold ${ratioColor(record.salaryCOGSRatio)}`}
                     >
                       {fmtRatio(record.salaryCOGSRatio)}
                     </td>
                     <td
-                      className={`p-3 text-sm font-semibold ${ratioColor(record.expenseCOGSRatio)}`}
-                    >
-                      {fmtRatio(record.expenseCOGSRatio)}
-                    </td>
-                    <td
-                      className={`p-3 text-sm font-semibold ${pctColor(record.profitMargin)}`}
+                      className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-semibold ${pctColor(record.profitMargin)}`}
                     >
                       {fmtPct(record.profitMargin)}
                     </td>
@@ -700,7 +869,7 @@ const SalaryCOGSRatio = () => {
               })
             ) : (
               <tr>
-                <td colSpan={15} className="p-8 text-center">
+                <td colSpan={isMobileView ? 7 : 8} className="p-8 text-center">
                   <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
                     No data found
@@ -723,80 +892,84 @@ const SalaryCOGSRatio = () => {
       {renderPagination()}
 
       {/* ── Custom Filter Modal ── */}
-      {showCustomFilter && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-gray-800">
-                Custom Filter
-              </h2>
+      {showCustomFilter &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowCustomFilter(false)}
+            />
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10 mx-4">
               <button
                 onClick={() => setShowCustomFilter(false)}
-                className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <X size={20} />
               </button>
-            </div>
-            <div className="space-y-4 mb-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Start Date
-                </label>
-                <DatePicker
-                  selected={customDateRange.startDate}
-                  onChange={(d) => handleCustomDateChange("startDate", d)}
-                  selectsStart
-                  startDate={customDateRange.startDate}
-                  endDate={customDateRange.endDate}
-                  className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholderText="Start date"
-                  dateFormat="yyyy-MM-dd"
-                  isClearable
-                />
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                Custom Filter
+              </h2>
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Start Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.startDate}
+                    onChange={(d) => handleCustomDateChange("startDate", d)}
+                    selectsStart
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholderText="Start date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.endDate}
+                    onChange={(d) => handleCustomDateChange("endDate", d)}
+                    selectsEnd
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    minDate={customDateRange.startDate}
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholderText="End date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  End Date
-                </label>
-                <DatePicker
-                  selected={customDateRange.endDate}
-                  onChange={(d) => handleCustomDateChange("endDate", d)}
-                  selectsEnd
-                  startDate={customDateRange.startDate}
-                  endDate={customDateRange.endDate}
-                  minDate={customDateRange.startDate}
-                  className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholderText="End date"
-                  dateFormat="yyyy-MM-dd"
-                  isClearable
-                />
-              </div>
-            </div>
-            <div className="flex justify-between gap-3">
-              <button
-                onClick={handleClearFilters}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-              >
-                Clear All
-              </button>
-              <div className="flex gap-3">
+              <div className="flex justify-between gap-3">
                 <button
-                  onClick={() => setShowCustomFilter(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  onClick={handleClearFilters}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
                 >
-                  Cancel
+                  Clear All
                 </button>
-                <button
-                  onClick={handleApplyCustomFilter}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Apply Filter
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowCustomFilter(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleApplyCustomFilter}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                  >
+                    Apply Filter
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

@@ -15,6 +15,7 @@ import {
   Trash2,
   Package,
   PlusSquare,
+  Menu,
 } from "lucide-react";
 import SampleExcelDownloadDailySample from "../../excels/SampleExcelDownloadDailySample";
 import ReactDOM from "react-dom";
@@ -32,13 +33,13 @@ import {
 import { useNavigate, Outlet } from "react-router-dom";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import { fetchCustomerList } from "../ProductManager/common/fetchDropdown";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const dailySamplePerPage = 10;
 
-// Helper: format date to YYYY-MM-DD
 const toYYYYMMDD = (date) => {
   if (!date) return "";
   if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
@@ -48,21 +49,20 @@ const toYYYYMMDD = (date) => {
 };
 
 // ==========================================
-// ProductDetailsModal – shows products for a daily sample
+// ProductDetailsModal
 // ==========================================
 const ProductDetailsModal = ({ isOpen, onClose, products, title }) => {
   if (!isOpen) return null;
-
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-      <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50 px-4">
+      <div className="bg-white w-full max-w-2xl p-5 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
         >
           <X size={20} />
         </button>
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
+        <h2 className="text-lg md:text-xl font-semibold text-gray-800 mb-4">
           {title} ({products?.length || 0} items)
         </h2>
         {!products || products.length === 0 ? (
@@ -107,7 +107,9 @@ const ProductDetailsModal = ({ isOpen, onClose, products, title }) => {
   );
 };
 
-// Custom hook for product suggestions (for edit modal)
+// ==========================================
+// useProductSuggestions hook
+// ==========================================
 const useProductSuggestions = (
   productsList,
   currentProducts,
@@ -147,17 +149,15 @@ const useProductSuggestions = (
     [productsList, currentProducts],
   );
 
-  const setIsOpen = (index, isOpen) => {
+  const setIsOpen = (index, isOpen) =>
     setSuggestionsList((prev) =>
       prev.map((s, i) => (i === index ? { ...s, isOpen } : s)),
     );
-  };
 
-  const setHighlightedIndex = (index, highlightedIndex) => {
+  const setHighlightedIndex = (index, highlightedIndex) =>
     setSuggestionsList((prev) =>
       prev.map((s, i) => (i === index ? { ...s, highlightedIndex } : s)),
     );
-  };
 
   const setDropdownTop = (index) => {
     const ref = inputRefs.current[index];
@@ -197,8 +197,7 @@ const useProductSuggestions = (
       case "Enter":
         e.preventDefault();
         if (suggestion.highlightedIndex >= 0) {
-          const selected = filtered[suggestion.highlightedIndex];
-          onSelect(selected.productName);
+          onSelect(filtered[suggestion.highlightedIndex].productName);
           setIsOpen(index, false);
           setHighlightedIndex(index, -1);
         }
@@ -232,6 +231,9 @@ const useProductSuggestions = (
   };
 };
 
+// ==========================================
+// DailySample Main Component
+// ==========================================
 const DailySample = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
@@ -249,7 +251,18 @@ const DailySample = () => {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const inputRef = useRef(null);
 
-  // For edit modal
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const [customerList, setCustomerList] = useState([]);
   const [customerListLoading, setCustomerListLoading] = useState(false);
   const [productsList, setProductsList] = useState([]);
@@ -273,7 +286,6 @@ const DailySample = () => {
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
-  // Fetch customers and products for edit modal
   useEffect(() => {
     const loadCustomers = async () => {
       try {
@@ -305,7 +317,6 @@ const DailySample = () => {
     fetchProducts();
   }, []);
 
-  // Filter data
   const filteredDailySamples = (dailySampleData || []).filter((item) => {
     const searchLower = searchTerm.toLowerCase();
     const productsArray = Array.isArray(item.products) ? item.products : [];
@@ -466,8 +477,7 @@ const DailySample = () => {
       }
     } catch (err) {
       console.error(err);
-      const message = err.response?.data?.message || "Failed to import";
-      showToast("error", message);
+      showToast("error", err.response?.data?.message || "Failed to import");
     } finally {
       setIsUploading(false);
     }
@@ -477,7 +487,7 @@ const DailySample = () => {
     setForm({
       ...dailySampleData,
       products: dailySampleData.products || [],
-      date: toYYYYMMDD(dailySampleData.date), // Ensure YYYY-MM-DD for date input
+      date: toYYYYMMDD(dailySampleData.date),
     });
     setIsOpen(true);
     setIsEditModalOpen(true);
@@ -554,18 +564,13 @@ const DailySample = () => {
   const toggleSelect = (sale) => {
     setSelected((prev) => {
       const exists = prev.some((c) => c === sale._id);
-      if (exists) return prev.filter((c) => c !== sale._id);
-      else return [...prev, sale._id];
+      return exists ? prev.filter((c) => c !== sale._id) : [...prev, sale._id];
     });
   };
 
   const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentDailySamples.map((s) => s._id);
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
-    }
+    if (checked) setSelected(currentDailySamples.map((s) => s._id));
+    else setSelected([]);
   };
 
   const handleIconClick = () => {
@@ -613,7 +618,6 @@ const DailySample = () => {
     const newProducts = [...editProducts];
     newProducts[idx][field] = value;
     setEditProducts(newProducts);
-    // Clear error for this field
     setEditErrors((prev) => ({ ...prev, [`${field}_${idx}`]: "" }));
   };
 
@@ -647,7 +651,6 @@ const DailySample = () => {
     onUpdate(updatedForm);
   };
 
-  // Customer dropdown options
   const customerOptions = useMemo(() => {
     if (customerList.length === 0 && !customerListLoading)
       return [{ value: "", label: "No Customers Available", disabled: true }];
@@ -661,13 +664,13 @@ const DailySample = () => {
   }, [customerList, customerListLoading]);
 
   const handleCustomerChange = (customerId) => {
-    const selected = customerList.find((c) => c._id === customerId);
-    if (selected) {
+    const sel = customerList.find((c) => c._id === customerId);
+    if (sel) {
       setForm((prev) => ({
         ...prev,
-        customerId: selected._id,
-        customerName: selected.name,
-        customerCode: selected.customerCode,
+        customerId: sel._id,
+        customerName: sel.name,
+        customerCode: sel.customerCode,
       }));
     } else {
       setForm((prev) => ({
@@ -679,7 +682,6 @@ const DailySample = () => {
     }
   };
 
-  // Product suggestions for edit modal
   const productSuggestionHook = useProductSuggestions(
     productsList,
     editProducts,
@@ -696,7 +698,7 @@ const DailySample = () => {
   }
 
   return (
-    <div className="p-6">
+    <div className={`${isMobileView ? "p-3 pb-6" : "p-6"} relative`}>
       <ProductDetailsModal
         isOpen={isProductModalOpen}
         onClose={() => setIsProductModalOpen(false)}
@@ -704,63 +706,134 @@ const DailySample = () => {
         title="Products in this Sample"
       />
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 md:gap-6">
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() => navigate("/reportlayout/dailysample/new")}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <UserPlus size={18} /> Add New Daily Sample
-          </button>
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Upload size={18} /> Import CSV
-          </button>
-          {selected.length > 0 && (
+      {/* Sidebar (mobile only) */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleDeleteSelected}
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
             >
-              <Trash2 size={18} /> Delete ({selected.length})
+              <Menu size={20} className="text-gray-700" />
             </button>
-          )}
-        </div>
-        <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6 w-full md:w-auto justify-end">
-          <p className="text-sm font-medium text-gray-700 whitespace-nowrap">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold shadow-sm">
-              {filteredDailySamples.length}
-            </span>
-          </p>
-          <div className="relative w-full md:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by Product, MR, Customer, Remark or Request #"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            />
+            <Package className="w-5 h-5 text-indigo-600" />
+            <h1 className="text-base font-bold text-gray-800">Daily Sample</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            {filteredDailySamples.length} records
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Table */}
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="pl-9 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+          />
+        </div>
+      )}
+
+      {/* 
+        ── MOBILE Action Buttons (HIDDEN - "Add New" and "Import CSV" removed) ── 
+        Only the Delete button appears when items are selected.
+      */}
+      {isMobileView && selected.length > 0 && (
+        <div className="flex gap-2 mb-3 flex-wrap">
+          <button
+            onClick={handleDeleteSelected}
+            className="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg text-xs shadow-sm"
+          >
+            <Trash2 size={14} /> Delete ({selected.length})
+          </button>
+        </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 md:gap-6">
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => navigate("/reportlayout/dailysample/new")}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <UserPlus size={18} /> Add New Daily Sample
+            </button>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <Upload size={18} /> Import CSV
+            </button>
+            {selected.length > 0 && (
+              <button
+                onClick={handleDeleteSelected}
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+              >
+                <Trash2 size={18} /> Delete ({selected.length})
+              </button>
+            )}
+          </div>
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6 w-full md:w-auto justify-end">
+            <p className="text-sm font-medium text-gray-700 whitespace-nowrap">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold shadow-sm">
+                {filteredDailySamples.length}
+              </span>
+            </p>
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by Product, MR, Customer, Remark or Request #"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Table ── */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          <thead className="bg-gray-100 text-gray-700 text-sm border-b">
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[480px]" : ""}`}
+        >
+          <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 w-10">
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium w-10`}
+              >
                 {currentDailySamples.length > 0 && (
                   <input
                     type="checkbox"
@@ -772,11 +845,31 @@ const DailySample = () => {
                   />
                 )}
               </th>
-              <th className="p-3">MR Name</th>
-              <th className="p-3">Customer</th>
-              <th className="p-3">Products</th>
-              <th className="p-3">Total Qty</th>
-              <th className="p-3">Action</th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                MR Name
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Customer
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Products
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Total Qty
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Action
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -789,60 +882,78 @@ const DailySample = () => {
                   (sum, p) => sum + (p?.totalQty || 0),
                   0,
                 );
+                const tdClass = `${isMobileView ? "p-2 text-xs" : "p-3 text-sm"}`;
                 return (
                   <tr
                     key={item._id}
                     className={`hover:bg-gray-50 ${(index + 1) % dailySamplePerPage === 0 || index + 1 === currentDailySamples.length ? "" : "border-b"}`}
                   >
-                    <td className="p-3 text-center">
+                    <td className={`${tdClass} text-center`}>
                       <input
                         type="checkbox"
                         checked={selected.includes(item._id)}
                         onChange={() => toggleSelect(item)}
                       />
                     </td>
-                    <td className="p-3">
+                    <td className={tdClass}>
                       {capitalizeFirstLetter(item.mrName)}
                     </td>
-                    <td className="p-3">
+                    <td className={tdClass}>
                       {item.customerName
                         ? capitalizeFirstLetter(item.customerName)
                         : item.customerCode || "—"}
                     </td>
-                    
-                    <td className="p-3">
+                    <td className={tdClass}>
                       <button
                         onClick={() => handleProductCountClick(item)}
-                        className="flex items-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
+                        className="flex items-center gap-1.5 bg-blue-100 text-blue-700 px-2 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto text-xs"
                         title="View Products"
                       >
-                        <Package size={16} />
+                        <Package size={isMobileView ? 13 : 16} />
                         <span className="font-medium">
                           {productsArray.length}
                         </span>
                       </button>
                     </td>
-                    <td className="p-3">{totalQty}</td>
-                    <td className="p-3 flex items-center justify-center gap-3">
+                    <td className={tdClass}>{totalQty}</td>
+                    <td
+                      className={`${tdClass} flex items-center justify-center gap-2`}
+                    >
+                      {/* View button - visible on both mobile and desktop */}
                       <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
-                        <Eye onClick={() => handleView(item)} size={18} />
+                        <Eye
+                          onClick={() => handleView(item)}
+                          size={isMobileView ? 15 : 18}
+                        />
                       </button>
-                      <button className="text-green-600 hover:text-green-800 cursor-pointer">
-                        <Edit onClick={() => editDailySample(item)} size={18} />
-                      </button>
-                      <button
-                        onClick={() => deleteDailySample(item)}
-                        className="text-red-600 hover:text-red-800 cursor-pointer"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+
+                      {/* Edit and Delete buttons - HIDDEN on mobile, visible on desktop */}
+                      {!isMobileView && (
+                        <>
+                          <button className="text-green-600 hover:text-green-800 cursor-pointer">
+                            <Edit
+                              onClick={() => editDailySample(item)}
+                              size={18}
+                            />
+                          </button>
+                          <button
+                            onClick={() => deleteDailySample(item)}
+                            className="text-red-600 hover:text-red-800 cursor-pointer"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan="7" className="text-center py-4 text-gray-500">
+                <td
+                  colSpan="6"
+                  className="text-center py-6 text-gray-500 text-sm"
+                >
                   No products match your search.
                 </td>
               </tr>
@@ -851,30 +962,47 @@ const DailySample = () => {
         </table>
       </div>
 
-      {/* Pagination */}
-      {filteredDailySamples.length > 0 && visiblePages.length > 0 && (
-        <div className="mt-4 p-5 flex justify-start gap-2">
+      {/* 
+        ── Pagination (Mobile: Daily Report style) ── 
+        On mobile: shows "Prev Page X of Y Next" like the DailyReports component.
+        On desktop: shows full pagination with page numbers.
+      */}
+      {filteredDailySamples.length > 0 && totalPages > 0 && (
+        <div
+          className={`mt-4 p-3 md:p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"} flex-wrap`}
+        >
           <button
             onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
             disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            className="px-3 py-1.5 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
           >
             Prev
           </button>
-          {visiblePages.map((page, idx) =>
-            page === "..." ? (
-              <span key={`ellipsis-${idx}`} className="px-3 py-1 text-gray-500">
-                ...
-              </span>
-            ) : (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-              >
-                {page}
-              </button>
-            ),
+          {isMobileView ? (
+            // Mobile: Simple page indicator (like DailyReports)
+            <span className="px-3 py-1.5 text-sm text-gray-700 font-medium">
+              Page {currentPage} of {totalPages}
+            </span>
+          ) : (
+            // Desktop: Full pagination with numbers
+            visiblePages.map((page, idx) =>
+              page === "..." ? (
+                <span
+                  key={`ellipsis-${idx}`}
+                  className="px-3 py-1 text-gray-500"
+                >
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                >
+                  {page}
+                </button>
+              ),
+            )
           )}
           <button
             onClick={() => {
@@ -882,24 +1010,24 @@ const DailySample = () => {
               window.scrollTo({ top: 0, behavior: "smooth" });
             }}
             disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            className="px-3 py-1.5 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
           >
             Next
           </button>
         </div>
       )}
 
-      {/* Import Modal */}
+      {/* ── Import Modal ── */}
       {showImportModal &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 px-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => {
                 if (!isUploading) setShowImportModal(false);
               }}
             />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+            <div className="bg-white w-full max-w-md p-5 rounded-xl shadow-lg relative">
               <button
                 onClick={() => {
                   if (!isUploading) setShowImportModal(false);
@@ -914,12 +1042,12 @@ const DailySample = () => {
               </h2>
               {isSampleFile && <SampleExcelDownloadDailySample />}
               <div className="mb-6">
-                <label className="block text-gray-700 mb-2">File</label>
+                <label className="block text-gray-700 mb-2 text-sm">File</label>
                 <input
                   type="file"
                   accept=".csv, .xlsx"
                   onChange={handleFileUpload}
-                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer text-sm"
                   disabled={isUploading}
                 />
               </div>
@@ -927,14 +1055,14 @@ const DailySample = () => {
                 <button
                   onClick={() => setShowImportModal(false)}
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}
+                  className={`px-4 py-2 rounded-lg text-sm cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleImport}
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-blue-400 text-white cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
+                  className={`px-4 py-2 rounded-lg text-sm cursor-pointer ${isUploading ? "bg-blue-400 text-white cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
                 >
                   {isUploading ? "Uploading…" : "Upload"}
                 </button>
@@ -944,22 +1072,22 @@ const DailySample = () => {
           document.body,
         )}
 
-      {/* Edit Modal – with editable products and customer dropdown */}
+      {/* ── Edit Modal ── */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 px-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsEditModalOpen(false)}
             />
-            <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+            <div className="bg-white w-full max-w-4xl p-5 rounded-xl shadow-lg relative overflow-y-auto max-h-[95vh]">
               <button
                 onClick={() => setIsEditModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 ✕
               </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              <h2 className="text-lg md:text-xl font-semibold text-gray-800 mb-4">
                 Edit Daily Sample Report
               </h2>
               <form
@@ -974,7 +1102,7 @@ const DailySample = () => {
                     type="date"
                     value={form.date || ""}
                     onChange={(e) => setForm({ ...form, date: e.target.value })}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm"
                     required
                   />
                 </div>
@@ -988,7 +1116,7 @@ const DailySample = () => {
                     onChange={(e) =>
                       setForm({ ...form, mrName: e.target.value })
                     }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm"
                     required
                   />
                 </div>
@@ -1025,9 +1153,9 @@ const DailySample = () => {
                     return (
                       <div
                         key={prod._tempId}
-                        className="border p-4 rounded mb-3 relative"
+                        className="border p-3 rounded mb-3 relative"
                       >
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <div className="relative flex flex-col">
                             <label className="text-sm font-medium">
                               Product Name{" "}
@@ -1071,7 +1199,7 @@ const DailySample = () => {
                                   150,
                                 )
                               }
-                              className={`w-full border rounded-md px-3 py-2 ${editErrors[`productName_${idx}`] ? "border-red-500" : "border-gray-300"}`}
+                              className={`w-full border rounded-md px-3 py-2 text-sm ${editErrors[`productName_${idx}`] ? "border-red-500" : "border-gray-300"}`}
                               placeholder="Type to search..."
                               autoComplete="off"
                             />
@@ -1108,7 +1236,7 @@ const DailySample = () => {
                                           pIdx,
                                         )
                                       }
-                                      className={`cursor-pointer px-3 py-2 ${productSuggestionHook.suggestionsList[idx].highlightedIndex === pIdx ? "bg-blue-600 text-white" : "bg-white text-gray-900 hover:bg-gray-100"}`}
+                                      className={`cursor-pointer px-3 py-2 text-sm ${productSuggestionHook.suggestionsList[idx].highlightedIndex === pIdx ? "bg-blue-600 text-white" : "bg-white text-gray-900 hover:bg-gray-100"}`}
                                     >
                                       {product.productName}
                                     </li>
@@ -1137,7 +1265,7 @@ const DailySample = () => {
                                   e.target.value,
                                 )
                               }
-                              className={`w-full border rounded-md px-3 py-2 ${editErrors[`totalQty_${idx}`] ? "border-red-500" : "border-gray-300"}`}
+                              className={`w-full border rounded-md px-3 py-2 text-sm ${editErrors[`totalQty_${idx}`] ? "border-red-500" : "border-gray-300"}`}
                             />
                             {editErrors[`totalQty_${idx}`] && (
                               <p className="text-red-500 text-xs">
@@ -1152,7 +1280,7 @@ const DailySample = () => {
                             onClick={() => removeEditProduct(idx)}
                             className="absolute top-2 right-2 text-red-500 hover:text-red-700"
                           >
-                            <Trash2 size={18} />
+                            <Trash2 size={16} />
                           </button>
                         )}
                       </div>
@@ -1173,21 +1301,21 @@ const DailySample = () => {
                     onChange={(e) =>
                       setForm({ ...form, remark: e.target.value })
                     }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm"
                   />
                 </div>
 
-                <div className="md:col-span-2 flex justify-end gap-3 mt-4">
+                <div className="md:col-span-2 flex justify-end gap-3 mt-2">
                   <button
                     type="button"
                     onClick={() => setIsEditModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg text-sm"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg"
+                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm"
                   >
                     Update
                   </button>
@@ -1198,22 +1326,22 @@ const DailySample = () => {
           document.body,
         )}
 
-      {/* View Modal – unchanged */}
+      {/* ── View Modal ── */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 px-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsViewModalOpen(false)}
             />
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+            <div className="bg-white w-full max-w-2xl p-5 rounded-xl shadow-lg relative overflow-y-auto max-h-[95vh]">
               <button
                 onClick={() => setIsViewModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <X size={20} />
               </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              <h2 className="text-lg md:text-xl font-semibold text-gray-800 mb-4">
                 View Daily Sample Report
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1221,7 +1349,7 @@ const DailySample = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Date
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm">
                     {form.date ? formatDateToReadable(form.date) : "—"}
                   </p>
                 </div>
@@ -1229,7 +1357,7 @@ const DailySample = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     MR Name
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize text-sm">
                     {form.mrName}
                   </p>
                 </div>
@@ -1237,7 +1365,7 @@ const DailySample = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Customer Name
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize text-sm">
                     {form.customerName || "—"}
                   </p>
                 </div>
@@ -1245,7 +1373,7 @@ const DailySample = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Customer Code
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm">
                     {form.customerCode || "—"}
                   </p>
                 </div>
@@ -1259,7 +1387,7 @@ const DailySample = () => {
                       setSelectedProducts(form.products || []);
                       setIsProductModalOpen(true);
                     }}
-                    className="flex items-center gap-2 bg-blue-100 text-blue-700 px-3 py-2 rounded-lg hover:bg-blue-200 transition-colors"
+                    className="flex items-center gap-2 bg-blue-100 text-blue-700 px-3 py-2 rounded-lg hover:bg-blue-200 transition-colors text-sm"
                   >
                     <Package size={16} /> View Details (
                     {form.products?.length || 0} products)
@@ -1269,15 +1397,15 @@ const DailySample = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Remark
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize text-sm">
                     {form.remark?.trim() ? form.remark : "No Remark"}
                   </p>
                 </div>
               </div>
-              <div className="mt-6 flex justify-end">
+              <div className="mt-5 flex justify-end">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Close
                 </button>

@@ -77,6 +77,7 @@ const DailyReports = () => {
     return `${year}-${month}-${day}`;
   };
 
+  // Format date as "27 Nov 2026"
   const formatDateToDisplay = (dateString) => {
     if (!dateString) return "N/A";
     if (
@@ -86,7 +87,10 @@ const DailyReports = () => {
       return dateString;
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return "N/A";
-    return `${date.getDate()} ${date.toLocaleString("default", { month: "long" })} ${date.getFullYear()}`;
+    const day = date.getDate();
+    const month = date.toLocaleString("default", { month: "short" });
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
   };
 
   const getSerialNumber = (index) =>
@@ -128,7 +132,7 @@ const DailyReports = () => {
         return {
           startDate: formatDateLocal(today),
           endDate: formatDateLocal(today),
-          displayDate: formatDateLocal(today),
+          displayDate: formatDateToDisplay(today),
         };
       case "all":
         return { startDate: null, endDate: null, displayDate: "All Records" };
@@ -424,42 +428,46 @@ const DailyReports = () => {
     return count;
   };
 
-  // ── Pagination ─────────────────────────────────────────────────────────────
+  // ── Pagination (Improved like Product component) ─────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
-          disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer text-sm ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          disabled={pagination.currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           ← Prev
         </button>
-        <div className="flex gap-1">
-          {isMobileView ? (
-            <span className="px-3 py-2 text-sm text-gray-700 font-medium">
-              {pagination.currentPage} / {pagination.totalPages}
-            </span>
-          ) : (
-            visiblePages.map((page, i) => (
-              <button
-                key={i}
-                onClick={() =>
-                  typeof page === "number" && handlePageChange(page)
-                }
-                disabled={typeof page !== "number"}
-                className={`min-w-[36px] px-3 py-2 rounded-lg cursor-pointer text-sm ${page === pagination.currentPage ? "bg-indigo-600 text-white" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-transparent text-gray-500 cursor-default"}`}
-              >
-                {page}
-              </button>
-            ))
-          )}
-        </div>
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
+            <button
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
-          disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer text-sm ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
+          disabled={pagination.currentPage === pagination.totalPages}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           Next →
         </button>
@@ -632,7 +640,12 @@ const DailyReports = () => {
     ) {
       displayDate = `${formatDateToDisplay(customDateRange.startDate)} - ${formatDateToDisplay(customDateRange.endDate)}`;
     } else if (mr.date && mr.date !== "N/A" && mr.date !== "") {
-      displayDate = formatDateToDisplay(mr.date);
+      // If the date is already formatted, use it as is, otherwise format it
+      if (mr.date.match(/^\d{1,2}\s+[A-Za-z]{3}\s+\d{4}$/)) {
+        displayDate = mr.date;
+      } else {
+        displayDate = formatDateToDisplay(mr.date);
+      }
     } else {
       displayDate = "N/A";
     }
@@ -703,11 +716,7 @@ const DailyReports = () => {
             maximumFractionDigits: 2,
           }) || "0.00"}
         </td>
-        <td className={`${tdClass} text-gray-600`}>
-          {isMobileView
-            ? displayDate.split(" ").slice(0, 2).join(" ")
-            : displayDate}
-        </td>
+        <td className={`${tdClass} text-gray-600`}>{displayDate}</td>
       </tr>
     );
   };
@@ -739,7 +748,7 @@ const DailyReports = () => {
             <h1 className="text-base font-bold text-gray-800">Daily Reports</h1>
           </div>
           <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
-           Total Records: {pagination.totalRecords}
+            Total Records: {pagination.totalRecords}
           </div>
         </div>
       )}
@@ -929,28 +938,8 @@ const DailyReports = () => {
 
       {renderPagination()}
 
-      {/* ── MOBILE bottom action bar ── */}
-      {isMobileView && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex gap-3 z-40 shadow-lg">
-          <button
-            onClick={exportToExcel}
-            disabled={exporting || data.records.length === 0}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition ${exporting || data.records.length === 0 ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white"}`}
-          >
-            {exporting ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                <span>Exporting...</span>
-              </>
-            ) : (
-              <>
-                <Download size={16} />
-                <span>Export Excel</span>
-              </>
-            )}
-          </button>
-        </div>
-      )}
+      {/* ── MOBILE bottom action bar (Export button REMOVED) ── */}
+      {/* Export button is completely removed on mobile view */}
 
       {/* ── Custom Filter Modal ── */}
       {showCustomFilter &&

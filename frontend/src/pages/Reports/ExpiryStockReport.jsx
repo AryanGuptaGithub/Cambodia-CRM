@@ -5,13 +5,14 @@ import {
   AlertTriangle,
   Package,
   DollarSign,
-  RefreshCw,
   Search,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import * as XLSX from "xlsx";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -48,6 +49,18 @@ const ExpiryStockReport = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [itemsPerPage] = useState(10);
   const inputRef = useRef(null);
+
+  // ── Mobile detection ────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+  // ────────────────────────────────────────────────────────────────────────
 
   const fetchExpiryStockData = async (
     page = currentPage,
@@ -139,10 +152,10 @@ const ExpiryStockReport = () => {
     fetchExpiryStockData(1, newFilter, searchTerm);
   };
 
-const capitalizeFirstLetter = (str) => {
-  if (!str || typeof str !== 'string') return '';
-  return str.charAt(0).toUpperCase() + str.slice(1);
-};
+  const capitalizeFirstLetter = (str) => {
+    if (!str || typeof str !== "string") return "";
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  };
 
   const handlePageChange = (newPage) => {
     if (newPage >= 1 && newPage <= data.pagination.pages) {
@@ -167,7 +180,7 @@ const capitalizeFirstLetter = (str) => {
 
   const isExportEnabled = () => data.items.length > 0;
 
-  // ─── Export to Excel ────────────────────────────────────────────────────────
+  // ─── Export to Excel ──────────────────────────────────────────────────────
   const exportToExcel = async () => {
     if (!isExportEnabled()) {
       showToast("warning", "No data to export");
@@ -198,7 +211,6 @@ const capitalizeFirstLetter = (str) => {
         return;
       }
 
-      // ✅ Export uses LC price (unitPrice from backend is now LC)
       const excelData = exportItems.map((item) => ({
         "Product Name": item.productName,
         Supplier: item.supplierName,
@@ -210,11 +222,8 @@ const capitalizeFirstLetter = (str) => {
           ? `Expired ${item.daysRemaining} days ago`
           : `${item.daysRemaining} days left`,
         "Quantity (Boxes)": item.quantity,
-        // ✅ LC price column
         "Unit Price (LC)": `$${item.unitPrice?.toFixed(4)}`,
-        // ✅ Total value is boxes × LC
         "Total Value (LC)": `$${item.totalValue?.toFixed(2)}`,
-        // Keep CIF and FOB as reference columns
         "CIF Price": `$${item.cif?.toFixed(4)}`,
         "FOB Price": `$${item.fob?.toFixed(4)}`,
         Amount: `$${item.amount?.toFixed(2)}`,
@@ -341,14 +350,12 @@ const capitalizeFirstLetter = (str) => {
       ];
 
       const ws = XLSX.utils.aoa_to_sheet(allData);
-
       ws["!merges"] = [
         { s: { r: 0, c: 0 }, e: { r: 0, c: 14 } },
         { s: { r: 1, c: 0 }, e: { r: 1, c: 14 } },
         { s: { r: 2, c: 0 }, e: { r: 2, c: 14 } },
         ...(searchTerm ? [{ s: { r: 3, c: 0 }, e: { r: 3, c: 14 } }] : []),
       ];
-
       ws["!cols"] = [
         { wch: 30 },
         { wch: 25 },
@@ -367,9 +374,11 @@ const capitalizeFirstLetter = (str) => {
         { wch: 15 },
       ];
 
-      const fileName = `expiry-stock-report-${
-        new Date().toISOString().split("T")[0]
-      }-${filter}${searchTerm ? `-search-${searchTerm.substring(0, 10)}` : ""}.xlsx`;
+      XLSX.utils.book_append_sheet(wb, ws, "Expiry Stock Report");
+
+      const fileName = `expiry-stock-report-${new Date().toISOString().split("T")[0]}-${filter}${
+        searchTerm ? `-search-${searchTerm.substring(0, 10)}` : ""
+      }.xlsx`;
       XLSX.writeFile(wb, fileName);
 
       showToast("success", "Excel file downloaded successfully");
@@ -381,10 +390,9 @@ const capitalizeFirstLetter = (str) => {
     }
   };
 
-  // ─── Summary data for Excel ─────────────────────────────────────────────────
+  // ─── Summary data for Excel ───────────────────────────────────────────────
   const prepareSummaryData = (exportData) => {
     const summaryRows = [];
-
     switch (filter) {
       case "all":
         summaryRows.push([
@@ -417,7 +425,6 @@ const capitalizeFirstLetter = (str) => {
           `$${exportData.summary.expiredValue?.toFixed(2) || "0.00"}`,
         ]);
         break;
-
       case "expired":
         summaryRows.push([
           "Expired Items:",
@@ -427,7 +434,6 @@ const capitalizeFirstLetter = (str) => {
           `$${exportData.summary.expiredValue?.toFixed(2) || "0.00"}`,
         ]);
         break;
-
       case "near-expiry":
         summaryRows.push([
           "Expiring Soon (≤15 days):",
@@ -442,7 +448,6 @@ const capitalizeFirstLetter = (str) => {
           exportData.summary.criticalItems,
         ]);
         break;
-
       case "critical":
         summaryRows.push([
           "Critical Items (≤3 days):",
@@ -452,7 +457,6 @@ const capitalizeFirstLetter = (str) => {
           `$${exportData.summary.totalNearExpiryValue?.toFixed(2) || "0.00"}`,
         ]);
         break;
-
       default:
         summaryRows.push([
           "Total Items:",
@@ -465,11 +469,10 @@ const capitalizeFirstLetter = (str) => {
           `$${exportData.summary.totalValue?.toFixed(2) || "0.00"}`,
         ]);
     }
-
     return summaryRows;
   };
 
-  // ─── Helpers ────────────────────────────────────────────────────────────────
+  // ─── Helpers ──────────────────────────────────────────────────────────────
   const getDaysRemainingColor = (item) => {
     if (item.isExpired) return "text-red-800 bg-red-100";
     if (item.daysRemaining <= 3) return "text-red-600 bg-red-50";
@@ -493,7 +496,7 @@ const capitalizeFirstLetter = (str) => {
     return <Calendar className="w-4 h-4 text-yellow-500" />;
   };
 
-  // ─── Pagination ─────────────────────────────────────────────────────────────
+  // ─── Pagination (Daily Report Style) ──────────────────────────────────────
   const renderPagination = () => {
     const { pagination } = data;
     const totalPages = pagination.pages;
@@ -501,6 +504,7 @@ const capitalizeFirstLetter = (str) => {
 
     if (totalPages <= 1) return null;
 
+    // Generate visible pages for desktop (full pagination)
     const visiblePages = [];
     const maxVisible = 5;
 
@@ -519,42 +523,54 @@ const capitalizeFirstLetter = (str) => {
     }
 
     return (
-      <div className="mt-4 p-5 flex gap-2">
+      <div
+        className={`mt-4 p-3 md:p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"} flex-wrap`}
+      >
         <button
           onClick={() => handlePageChange(currentPg - 1)}
           disabled={currentPg === 1}
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="px-3 py-1.5 md:px-4 md:py-2 text-sm bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
-          ← Prev
+          Prev
         </button>
-        {visiblePages.map((page, index) => (
-          <button
-            key={index}
-            onClick={() => typeof page === "number" && handlePageChange(page)}
-            disabled={page === "..."}
-            className={`px-4 py-2 rounded ${
-              page === "..."
-                ? "bg-gray-200 cursor-not-allowed"
-                : currentPg === page
-                  ? "bg-blue-600 text-white cursor-pointer"
-                  : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-            }`}
-          >
-            {page}
-          </button>
-        ))}
+
+        {isMobileView ? (
+          // Mobile: Simple page indicator (like Daily Reports)
+          <span className="px-3 py-1.5 text-sm text-gray-700 font-medium">
+            Page {currentPg} of {totalPages}
+          </span>
+        ) : (
+          // Desktop: Full pagination with numbers
+          visiblePages.map((page, index) => (
+            <button
+              key={index}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-3 py-1.5 md:px-4 md:py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : currentPg === page
+                    ? "bg-indigo-600 text-white cursor-pointer"
+                    : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        )}
+
         <button
           onClick={() => handlePageChange(currentPg + 1)}
           disabled={currentPg === totalPages}
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="px-3 py-1.5 md:px-4 md:py-2 text-sm bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
-          Next →
+          Next
         </button>
       </div>
     );
   };
 
-  // ─── Summary Cards ──────────────────────────────────────────────────────────
+  // ─── Summary Cards ────────────────────────────────────────────────────────
   const renderSummaryCards = () => {
     let expiringSoonValue,
       nearExpiryValue,
@@ -586,7 +602,6 @@ const capitalizeFirstLetter = (str) => {
         expiredItemsLabel = "Expired Value (LC)";
         showExpiredValue = true;
         break;
-
       case "expired":
         expiringSoonValue = 0;
         nearExpiryValue = 0;
@@ -603,7 +618,6 @@ const capitalizeFirstLetter = (str) => {
         showCritical = false;
         showExpiredValue = true;
         break;
-
       case "near-expiry":
         expiringSoonValue = data.summary.filteredExpiringSoon;
         nearExpiryValue = data.summary.filteredNearExpiryValue;
@@ -618,7 +632,6 @@ const capitalizeFirstLetter = (str) => {
         showExpired = false;
         showExpiredValue = false;
         break;
-
       case "critical":
         expiringSoonValue = 0;
         nearExpiryValue = data.summary.filteredNearExpiryValue;
@@ -634,7 +647,6 @@ const capitalizeFirstLetter = (str) => {
         showExpired = false;
         showExpiredValue = false;
         break;
-
       default:
         expiringSoonValue = data.summary.filteredExpiringSoon;
         nearExpiryValue = data.summary.filteredNearExpiryValue;
@@ -650,131 +662,114 @@ const capitalizeFirstLetter = (str) => {
     }
 
     const loadingBox = (
-      <div className="h-8 w-20 bg-gray-200 rounded animate-pulse" />
+      <div className="h-6 w-16 md:h-8 md:w-20 bg-gray-200 rounded animate-pulse" />
     );
 
+    const cardClass = `bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4`;
+    const labelClass = `${isMobileView ? "text-xs" : "text-sm"} text-gray-600`;
+    const valueClass = `${isMobileView ? "text-lg" : "text-2xl"} font-bold text-gray-800`;
+    const subClass = `text-xs text-gray-500 mt-1`;
+    const iconSize = isMobileView ? "w-6 h-6" : "w-8 h-8";
+
     return (
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-6 mb-4 md:mb-6">
         {showExpiringSoon && (
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-yellow-500">
+          <div className={`${cardClass} border-yellow-500`}>
             <div className="flex justify-between items-center">
               <div>
-                <div className="text-sm text-gray-600">{expiringSoonLabel}</div>
-                <div className="text-2xl font-bold text-gray-800">
+                <div className={labelClass}>{expiringSoonLabel}</div>
+                <div className={valueClass}>
                   {loading
                     ? loadingBox
                     : expiringSoonValue?.toLocaleString() || 0}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
+                <div className={subClass}>
                   {filter === "all"
                     ? `Total: ${data.summary.totalExpiringSoon?.toLocaleString() || 0} boxes`
-                    : "Filtered items only"}
+                    : "Filtered only"}
                 </div>
               </div>
-              <Calendar className="w-8 h-8 text-yellow-500" />
+              <Calendar className={`${iconSize} text-yellow-500`} />
             </div>
           </div>
         )}
 
         {showNearExpiry && (
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500">
+          <div className={`${cardClass} border-orange-500`}>
             <div className="flex justify-between items-center">
               <div>
-                <div className="text-sm text-gray-600">{nearExpiryLabel}</div>
-                <div className="text-2xl font-bold text-gray-800">
+                <div className={labelClass}>{nearExpiryLabel}</div>
+                <div className={valueClass}>
                   {loading
                     ? loadingBox
-                    : `$${
-                        nearExpiryValue?.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        }) || "0.00"
-                      }`}
+                    : `$${nearExpiryValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}`}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
+                <div className={subClass}>
                   {filter === "all"
-                    ? `Total: $${
-                        data.summary.totalNearExpiryValue?.toLocaleString(
-                          undefined,
-                          {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          },
-                        ) || "0.00"
-                      }`
-                    : "Filtered value only"}
+                    ? `Total: $${data.summary.totalNearExpiryValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}`
+                    : "Filtered only"}
                 </div>
               </div>
-              <DollarSign className="w-8 h-8 text-orange-500" />
+              <DollarSign className={`${iconSize} text-orange-500`} />
             </div>
           </div>
         )}
 
         {showCritical && (
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
+          <div className={`${cardClass} border-red-500`}>
             <div className="flex justify-between items-center">
               <div>
-                <div className="text-sm text-gray-600">{criticalLabel}</div>
-                <div className="text-2xl font-bold text-gray-800">
+                <div className={labelClass}>{criticalLabel}</div>
+                <div className={valueClass}>
                   {loading ? loadingBox : criticalValue?.toLocaleString() || 0}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
+                <div className={subClass}>
                   {filter === "all"
                     ? `Total: ${data.summary.criticalItems?.toLocaleString() || 0} boxes`
-                    : "Filtered items only"}
+                    : "Filtered only"}
                 </div>
               </div>
-              <AlertTriangle className="w-8 h-8 text-red-500" />
+              <AlertTriangle className={`${iconSize} text-red-500`} />
             </div>
           </div>
         )}
 
         {showExpired && (
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-gray-500">
+          <div className={`${cardClass} border-gray-500`}>
             <div className="flex justify-between items-center">
               <div>
-                <div className="text-sm text-gray-600">{expiredLabel}</div>
-                <div className="text-2xl font-bold text-gray-800">
+                <div className={labelClass}>{expiredLabel}</div>
+                <div className={valueClass}>
                   {loading ? loadingBox : expiredValue?.toLocaleString() || 0}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
+                <div className={subClass}>
                   {filter === "all"
                     ? `Total: ${data.summary.expiredItems?.toLocaleString() || 0} boxes`
-                    : "Filtered items only"}
+                    : "Filtered only"}
                 </div>
               </div>
-              <AlertTriangle className="w-8 h-8 text-gray-500" />
+              <AlertTriangle className={`${iconSize} text-gray-500`} />
             </div>
           </div>
         )}
 
         {showExpiredValue && (
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-800">
+          <div className={`${cardClass} border-red-800`}>
             <div className="flex justify-between items-center">
               <div>
-                <div className="text-sm text-gray-600">{expiredItemsLabel}</div>
-                <div className="text-2xl font-bold text-gray-800">
+                <div className={labelClass}>{expiredItemsLabel}</div>
+                <div className={valueClass}>
                   {loading
                     ? loadingBox
-                    : `$${
-                        expiredItemsValue?.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        }) || "0.00"
-                      }`}
+                    : `$${expiredItemsValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}`}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
+                <div className={subClass}>
                   {filter === "all"
-                    ? `Total: $${
-                        data.summary.expiredValue?.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        }) || "0.00"
-                      }`
-                    : "Filtered value only"}
+                    ? `Total: $${data.summary.expiredValue?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}`
+                    : "Filtered only"}
                 </div>
               </div>
-              <DollarSign className="w-8 h-8 text-red-800" />
+              <DollarSign className={`${iconSize} text-red-800`} />
             </div>
           </div>
         )}
@@ -782,110 +777,163 @@ const capitalizeFirstLetter = (str) => {
     );
   };
 
-  // ─── Filter Buttons ─────────────────────────────────────────────────────────
+  // ─── Filter Buttons ───────────────────────────────────────────────────────
   const renderFilterButtons = () => (
     <div className="flex flex-wrap gap-2 mb-4">
       {[
         {
           key: "all",
-          label: `All Items (${data.summary.totalItems || 0})`,
+          label: `All (${data.summary.totalItems || 0})`,
+          fullLabel: `All Items (${data.summary.totalItems || 0})`,
           color: "blue",
         },
         {
           key: "expired",
           label: `Expired (${data.summary.expiredItems || 0})`,
+          fullLabel: `Expired (${data.summary.expiredItems || 0})`,
           color: "red",
         },
         {
           key: "near-expiry",
-          label: `Near Expiry ≤15 days (${data.summary.totalExpiringSoon || 0})`,
+          label: `≤15 days (${data.summary.totalExpiringSoon || 0})`,
+          fullLabel: `Near Expiry ≤15 days (${data.summary.totalExpiringSoon || 0})`,
           color: "yellow",
         },
         {
           key: "critical",
-          label: `Critical ≤3 days (${data.summary.criticalItems || 0})`,
+          label: `≤3 days (${data.summary.criticalItems || 0})`,
+          fullLabel: `Critical ≤3 days (${data.summary.criticalItems || 0})`,
           color: "orange",
         },
-      ].map(({ key, label, color }) => (
+      ].map(({ key, label, fullLabel, color }) => (
         <button
           key={key}
           onClick={() => handleFilterChange(key)}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-medium transition-colors ${
             filter === key
               ? `bg-${color}-600 text-white`
               : "bg-gray-100 text-gray-700 hover:bg-gray-200"
           }`}
         >
-          {label}
+          {isMobileView ? label : fullLabel}
         </button>
       ))}
     </div>
   );
 
-  // ─── Render ─────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="w-8 h-8 text-orange-500" />
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">
-              Expiry Stock Report
-            </h1>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Values calculated using LC (Landed Cost) price
-            </p>
+    <div className={`${isMobileView ? "p-3 pb-6" : "p-6"} relative`}>
+      {/* Sidebar (mobile only) */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <AlertTriangle className="w-5 h-5 text-orange-500" />
+            <h1 className="text-base font-bold text-gray-800">Expiry Stock</h1>
+          </div>
+          <div className="bg-orange-50 text-orange-700 px-3 py-1 rounded-full text-xs font-medium">
+            {data.summary.totalItems || 0} items
           </div>
         </div>
+      )}
 
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={20}
-              onClick={handleSearchIconClick}
-            />
-            <input
-              type="text"
-              placeholder="Search product or supplier..."
-              value={searchTerm}
-              ref={inputRef}
-              onChange={handleSearchChange}
-              className="pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 w-64"
-            />
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-8 h-8 text-orange-500" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">
+                Expiry Stock Report
+              </h1>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Values calculated using LC (Landed Cost) price
+              </p>
+            </div>
           </div>
 
-          <button
-            className={`flex items-center gap-2 ${
-              !isExportEnabled() || exportLoading
-                ? "bg-gray-400 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 cursor-pointer"
-            } text-white px-4 py-2 rounded-lg shadow-md transition-colors`}
-            onClick={exportToExcel}
-            disabled={!isExportEnabled() || exportLoading}
-          >
-            <Download
-              size={18}
-              className={exportLoading ? "animate-spin" : ""}
-            />
-            {exportLoading ? "Exporting..." : "Export Excel"}
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={20}
+                onClick={handleSearchIconClick}
+              />
+              <input
+                type="text"
+                placeholder="Search product or supplier..."
+                value={searchTerm}
+                ref={inputRef}
+                onChange={handleSearchChange}
+                className="pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 w-64"
+              />
+            </div>
+
+            {/* Export button — desktop only */}
+            <button
+              className={`flex items-center gap-2 ${
+                !isExportEnabled() || exportLoading
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-700 cursor-pointer"
+              } text-white px-4 py-2 rounded-lg shadow-md transition-colors`}
+              onClick={exportToExcel}
+              disabled={!isExportEnabled() || exportLoading}
+            >
+              <Download
+                size={18}
+                className={exportLoading ? "animate-spin" : ""}
+              />
+              {exportLoading ? "Exporting..." : "Export Excel"}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <Search
+            className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            size={16}
+          />
+          <input
+            type="text"
+            placeholder="Search product or supplier..."
+            value={searchTerm}
+            ref={inputRef}
+            onChange={handleSearchChange}
+            className="pl-9 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 w-full text-sm"
+          />
+        </div>
+      )}
 
       {renderSummaryCards()}
 
       <div className="mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">
-            Stock Items Expiring Soon or Expired
-            <span className="ml-2 text-sm font-normal text-gray-600">
-              ({data.items.length} items on this page)
+        <div className="flex justify-between items-center mb-3 md:mb-4">
+          <h2
+            className={`${isMobileView ? "text-sm" : "text-lg"} font-semibold text-gray-800`}
+          >
+            {isMobileView ? "Items" : "Stock Items Expiring Soon or Expired"}
+            <span className="ml-2 text-xs md:text-sm font-normal text-gray-600">
+              ({data.items.length} on this page)
               {searchTerm && (
-                <span className="ml-2 text-blue-600">
-                  • Search: "{searchTerm}"
-                </span>
+                <span className="ml-2 text-blue-600">• "{searchTerm}"</span>
               )}
             </span>
           </h2>
@@ -895,29 +943,30 @@ const capitalizeFirstLetter = (str) => {
 
         <div className="bg-white rounded-xl shadow-md overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-center">
+            <table
+              className={`min-w-full divide-y divide-gray-200 text-center ${isMobileView ? "min-w-[480px]" : ""}`}
+            >
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 md:px-6 py-2 md:py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Product
                   </th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 md:px-6 py-2 md:py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Supplier
                   </th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 md:px-6 py-2 md:py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Expiry Date
                   </th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 md:px-6 py-2 md:py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Quantity
+                  <th className="px-3 md:px-6 py-2 md:py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Qty
                   </th>
-                  {/* ✅ Column header changed to LC */}
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 md:px-6 py-2 md:py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Unit Price (LC)
                   </th>
-                  <th className="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 md:px-6 py-2 md:py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Total Value (LC)
                   </th>
                 </tr>
@@ -929,7 +978,7 @@ const capitalizeFirstLetter = (str) => {
                       {Array.from({ length: 7 }).map((_, cellIndex) => (
                         <td
                           key={cellIndex}
-                          className="px-6 py-4 whitespace-nowrap"
+                          className="px-3 md:px-6 py-3 md:py-4 whitespace-nowrap"
                         >
                           <div className="h-4 bg-gray-200 rounded animate-pulse" />
                         </td>
@@ -942,39 +991,49 @@ const capitalizeFirstLetter = (str) => {
                       key={index}
                       className={`hover:bg-gray-50 ${item.isExpired ? "bg-red-50" : ""}`}
                     >
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
+                      <td className="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
+                        <div
+                          className={`${isMobileView ? "text-xs" : "text-sm"} font-medium text-gray-900`}
+                        >
                           {capitalizeFirstLetter(item.productName)}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td
+                        className={`px-3 md:px-6 py-2 md:py-4 whitespace-nowrap ${isMobileView ? "text-xs" : "text-sm"} text-gray-900`}
+                      >
                         {item.supplierName}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td
+                        className={`px-3 md:px-6 py-2 md:py-4 whitespace-nowrap ${isMobileView ? "text-xs" : "text-sm"} text-gray-900`}
+                      >
                         {formatDateToReadable(item.expiryDate)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 md:px-6 py-2 md:py-4 whitespace-nowrap">
                         <div className="flex items-center justify-center">
                           {getStatusIcon(item)}
                           <span
-                            className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getDaysRemainingColor(item)}`}
+                            className={`ml-1 inline-flex items-center px-2 py-0.5 rounded-full ${isMobileView ? "text-xs" : "text-xs"} font-medium ${getDaysRemainingColor(item)}`}
                           >
                             {getStatusText(item)}
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td
+                        className={`px-3 md:px-6 py-2 md:py-4 whitespace-nowrap ${isMobileView ? "text-xs" : "text-sm"} text-gray-900`}
+                      >
                         <span className="font-medium">
                           {item.quantity?.toLocaleString()}
-                        </span>{" "}
-                        boxes
+                        </span>
+                        {!isMobileView && " boxes"}
                       </td>
-                      {/* ✅ unitPrice is now LC (set by backend) */}
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td
+                        className={`px-3 md:px-6 py-2 md:py-4 whitespace-nowrap ${isMobileView ? "text-xs" : "text-sm"} text-gray-900`}
+                      >
                         ${item.unitPrice?.toFixed(4)}
                       </td>
-                      {/* ✅ totalValue is now boxes × LC (set by backend) */}
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td
+                        className={`px-3 md:px-6 py-2 md:py-4 whitespace-nowrap ${isMobileView ? "text-xs" : "text-sm"} font-medium text-gray-900`}
+                      >
                         ${item.totalValue?.toFixed(2)}
                       </td>
                     </tr>
@@ -985,8 +1044,8 @@ const capitalizeFirstLetter = (str) => {
                       colSpan="7"
                       className="px-6 py-8 text-center text-gray-500"
                     >
-                      <Package className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                      <div>
+                      <Package className="w-10 h-10 md:w-12 md:h-12 text-gray-300 mx-auto mb-2" />
+                      <div className="text-sm">
                         {searchTerm
                           ? `No items found for "${searchTerm}"`
                           : "No items found for the selected filter"}

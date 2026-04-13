@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Search,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -17,21 +18,96 @@ import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Supplier Dropdown Component (keep as is)
+// Supplier Dropdown Component (Responsive)
 const SupplierDropdown = ({
   value,
   onChange,
   options,
   placeholder = "Select supplier...",
   disabled = false,
+  isMobileView = false,
 }) => {
-  // ... (keep your existing SupplierDropdown component code) ...
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const dropdownRef = useRef(null);
+
+  const filteredOptions = options.filter((option) =>
+    option.label.toLowerCase().includes(searchTerm.toLowerCase()),
+  );
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   return (
-    <div className="relative w-full">
-      {/* Your existing SupplierDropdown JSX */}
+    <div className="relative w-full" ref={dropdownRef}>
+      <div
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full border rounded-lg px-3 py-2 cursor-pointer flex justify-between items-center ${
+          disabled ? "bg-gray-100 cursor-not-allowed" : "bg-white"
+        } ${isMobileView ? "text-sm" : "text-sm"}`}
+      >
+        <span className={!selectedOption ? "text-gray-400" : "text-gray-800"}>
+          {selectedOption ? selectedOption.label : placeholder}
+        </span>
+        <ChevronRight
+          size={16}
+          className={`transform transition-transform ${isOpen ? "rotate-90" : ""}`}
+        />
+      </div>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-20 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+          <div className="p-2 border-b sticky top-0 bg-white">
+            <input
+              type="text"
+              placeholder="Search supplier..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-3 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500">
+              No suppliers found
+            </div>
+          ) : (
+            filteredOptions.map((option) => (
+              <div
+                key={option.value}
+                onClick={() => {
+                  onChange(option.value);
+                  setIsOpen(false);
+                  setSearchTerm("");
+                }}
+                className={`px-3 py-2 cursor-pointer hover:bg-indigo-50 text-sm ${
+                  value === option.value ? "bg-indigo-100 text-indigo-700" : ""
+                }`}
+              >
+                {option.label}
+                {option.code && (
+                  <span className="text-xs text-gray-400 ml-2">
+                    ({option.code})
+                  </span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -66,8 +142,19 @@ const Remittance = () => {
     hasNext: false,
     hasPrev: false,
   });
-  const [exportLoading, setExportLoading] = useState(false); // Add export loading state
+  const [exportLoading, setExportLoading] = useState(false);
   const inputRef = useRef(null);
+
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // Supplier dropdown states
   const [supplierOptions, setSupplierOptions] = useState([]);
@@ -75,7 +162,7 @@ const Remittance = () => {
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
 
   // Fetch ALL supplier options from your API
@@ -83,16 +170,12 @@ const Remittance = () => {
     setLoadingSuppliers(true);
     try {
       const response = await axios.get(`${backendUrl}/api/suppliers`);
-
-      // Adjust based on your API response structure
       const suppliers = response.data.data || [];
-
       const options = suppliers.map((supplier) => ({
         value: supplier._id,
         label: supplier.name || "Unnamed Supplier",
         code: supplier.code,
       }));
-
       setSupplierOptions(options);
     } catch (error) {
       console.error("Error fetching suppliers:", error);
@@ -103,7 +186,6 @@ const Remittance = () => {
     }
   };
 
-  // Load ALL suppliers on component mount
   useEffect(() => {
     fetchSupplierOptions();
   }, []);
@@ -200,12 +282,10 @@ const Remittance = () => {
         };
       }
 
-      // Search by supplier name - pass search term to backend
       if (search && search.trim() !== "") {
         params.search = search.trim();
       }
 
-      // Only include supplier filter when custom tab is selected
       if (selectedTab === "custom") {
         if (filter.supplierId) {
           params.supplierId = filter.supplierId;
@@ -214,7 +294,7 @@ const Remittance = () => {
           params.search = filter.search;
         }
       }
-      
+
       const response = await axios.get(`${backendUrl}/api/reports/remittance`, {
         params,
       });
@@ -227,7 +307,7 @@ const Remittance = () => {
           totalRecords: 0,
           hasNext: false,
           hasPrev: false,
-        }
+        },
       );
     } catch (error) {
       console.error("Error fetching remittance:", error);
@@ -281,17 +361,14 @@ const Remittance = () => {
     setFilter((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Handle supplier change from dropdown
   const handleSupplierChange = (value) => {
     setFilter((prev) => ({ ...prev, supplierId: value }));
   };
 
-  // Debounced search effect for main search bar
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       fetchRemittance(1);
     }, 500);
-
     return () => clearTimeout(delayDebounce);
   }, [searchTerm]);
 
@@ -330,7 +407,7 @@ const Remittance = () => {
         startDate: null,
         endDate: null,
       });
-      setSearchTerm(""); // Clear main search when switching tabs
+      setSearchTerm("");
       fetchRemittance(1);
     }
   };
@@ -344,7 +421,7 @@ const Remittance = () => {
       startDate: null,
       endDate: null,
     });
-    setSearchTerm(""); // Clear main search
+    setSearchTerm("");
     fetchSupplierOptions();
     fetchRemittance(1);
   };
@@ -358,11 +435,14 @@ const Remittance = () => {
         selectedTab === "custom" &&
         (!dateRange.startDate || !dateRange.endDate)
       ) {
-        showToast("warning", "Please select both start and end dates for export");
+        showToast(
+          "warning",
+          "Please select both start and end dates for export",
+        );
         setExportLoading(false);
         return;
       }
-      
+
       const params = new URLSearchParams();
 
       if (dateRange.startDate) params.append("startDate", dateRange.startDate);
@@ -390,7 +470,7 @@ const Remittance = () => {
       if (dateRange.startDate && dateRange.endDate) {
         fileName = `remittance-${dateRange.startDate.replace(
           /-/g,
-          ""
+          "",
         )}-to-${dateRange.endDate.replace(/-/g, "")}`;
       } else {
         const today = new Date().toISOString().split("T")[0];
@@ -435,20 +515,18 @@ const Remittance = () => {
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
           let display = `${formatDateForDisplay(
-            customDateRange.startDate
+            customDateRange.startDate,
           )} to ${formatDateForDisplay(customDateRange.endDate)}`;
 
-          // Add supplier filter if applied
           if (filter.supplierId) {
             const selectedSupplier = supplierOptions.find(
-              (opt) => opt.value === filter.supplierId
+              (opt) => opt.value === filter.supplierId,
             );
             display += ` | Supplier: ${
               selectedSupplier?.label || filter.supplierId
             }`;
           }
 
-          // Add search filter if applied (from modal)
           if (filter.search) {
             display += ` | Search: ${filter.search}`;
           }
@@ -458,7 +536,6 @@ const Remittance = () => {
         return "Select custom dates";
 
       default:
-        // For non-custom tabs, show search term if any
         if (searchTerm) {
           return `Search: ${searchTerm}`;
         }
@@ -466,124 +543,260 @@ const Remittance = () => {
     }
   };
 
-  // Render Pagination Component
-  const renderPagination = () => {
-    if (pagination.totalPages <= 1) return null;
+  // Responsive table headers
+  const renderTableHeaders = () => {
+    const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
+    return (
+      <thead className="bg-gray-100 text-gray-700 border-b">
+        <tr>
+          <th className={thClass}>Sr.No</th>
+          <th className={thClass}>Supplier</th>
+          <th className={thClass}>Amount ($)</th>
+          <th className={thClass}>Transactions</th>
+        </tr>
+      </thead>
+    );
+  };
+
+  // Responsive summary cards
+  const renderSummaryCards = () => {
+    const cardClass = `bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4`;
+    const valueClass = `${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`;
+    const labelClass = `${isMobileView ? "text-xs" : "text-sm"} text-gray-600`;
+
+    const cards = [
+      {
+        label: "Total Remittance",
+        value: `$${(data.summary.totalRemittanceAmount || 0).toLocaleString()}`,
+        icon: (
+          <Coins
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-yellow-500`}
+          />
+        ),
+        border: "border-yellow-500",
+      },
+      {
+        label: "Total Final Amount",
+        value: `$${(data.summary.totalFinalAmount || 0).toLocaleString()}`,
+        icon: (
+          <Coins
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-blue-500`}
+          />
+        ),
+        border: "border-blue-500",
+      },
+      {
+        label: "Total Bank Charges",
+        value: `$${(data.summary.totalExchangeLoss || 0).toLocaleString()}`,
+        icon: (
+          <Building2
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-red-500`}
+          />
+        ),
+        border: "border-red-500",
+      },
+      {
+        label: "Total Records",
+        value: (data.summary.totalRecords || 0).toLocaleString(),
+        icon: (
+          <Calendar
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-green-500`}
+          />
+        ),
+        border: "border-green-500",
+      },
+    ];
 
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
+      <div
+        className={`grid gap-4 mb-6 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-4 gap-6"}`}
+      >
+        {cards.map(({ label, value, icon, border }) => (
+          <div
+            key={label}
+            className={`${cardClass} ${border} border border-gray-200`}
+          >
+            <div className="flex justify-between items-center">
+              <div>
+                <div className={labelClass}>{label}</div>
+                <div className={valueClass}>{value}</div>
+              </div>
+              {icon}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // Responsive pagination
+  const renderPagination = () => {
+    if (pagination.totalPages <= 1) return null;
+    return (
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
-          disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasPrev
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          disabled={pagination.currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          <ChevronLeft size={16} />
-          Prev
+          ← Prev
         </button>
-
-        {/* Page Numbers */}
-        <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
             <button
-              key={index}
-              onClick={() =>
-                typeof page === "number" ? handlePageChange(page) : null
-              }
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number"
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
               }`}
-              disabled={typeof page !== "number"}
             >
               {page}
             </button>
-          ))}
-        </div>
-
-        {/* Next Button */}
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
-          disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasNext
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          disabled={pagination.currentPage === pagination.totalPages}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          Next
-          <ChevronRight size={16} />
+          Next →
         </button>
       </div>
     );
   };
 
-  // Don't disable export button based on empty data
   const isExportDisabled = exportLoading || false;
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-3">
-          <Coins className="w-8 h-8 text-yellow-600" />
-          <h1 className="text-2xl font-bold text-gray-800">
-            Remittance Report
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by supplier name..."
-              value={searchTerm}
-              onChange={handleSearchChange}
-              onKeyPress={handleSearch}
-              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
-            />
-            <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-              size={18}
-              onClick={() => inputRef.current?.focus()}
-            />
-            {searchTerm && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            )}
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <Coins className="w-5 h-5 text-yellow-600" />
+            <h1 className="text-base font-bold text-gray-800">Remittance</h1>
           </div>
-
-          <button
-            onClick={exportToExcel}
-            disabled={isExportDisabled}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
-              isExportDisabled
-                ? "bg-green-700 text-white opacity-75 cursor-wait"
-                : "bg-green-600 hover:bg-green-700 text-white"
-            }`}
-            title={exportLoading ? "Exporting..." : "Export to Excel"}
-          >
-            <Download size={18} />
-            {exportLoading ? "Exporting..." : "Export Excel"}
-          </button>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Tabs */}
-      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-        <div className="flex flex-wrap gap-2 mb-4">
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3">
+            <Coins className="w-8 h-8 text-yellow-600" />
+            <h1 className="text-2xl font-bold text-gray-800">
+              Remittance Report
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by supplier name..."
+                value={searchTerm}
+                onChange={handleSearchChange}
+                onKeyPress={handleSearch}
+                className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
+              />
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                size={18}
+                onClick={() => inputRef.current?.focus()}
+              />
+              {searchTerm && (
+                <button
+                  onClick={handleClearSearch}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            <button
+              onClick={exportToExcel}
+              disabled={isExportDisabled}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+                isExportDisabled
+                  ? "bg-green-700 text-white opacity-75 cursor-wait"
+                  : "bg-green-600 hover:bg-green-700 text-white"
+              }`}
+              title={exportLoading ? "Exporting..." : "Export to Excel"}
+            >
+              <Download size={18} />
+              {exportLoading ? "Exporting..." : "Export Excel"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-4">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search supplier..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            onKeyPress={handleSearch}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={handleClearSearch}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Tabs - Responsive */}
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-6 border border-gray-200`}
+      >
+        <div
+          className={`flex flex-wrap gap-2 mb-4 ${isMobileView ? "overflow-x-auto whitespace-nowrap pb-2" : ""}`}
+        >
           <button
             onClick={() => handleTabChange("all")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors whitespace-nowrap ${
               selectedTab === "all"
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -593,116 +806,73 @@ const Remittance = () => {
           </button>
           <button
             onClick={() => handleTabChange("currentMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors whitespace-nowrap ${
               selectedTab === "currentMonth"
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
-            Current Month ({getCurrentMonthName()} {getCurrentYear()})
+            {isMobileView
+              ? `${getCurrentMonthName().slice(0, 3)} ${getCurrentYear()}`
+              : `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`}
           </button>
           <button
             onClick={() => handleTabChange("janToPreviousMonth")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors whitespace-nowrap ${
               selectedTab === "janToPreviousMonth"
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
-            {getJanToPreviousMonthRange().label}
+            {isMobileView
+              ? getJanToPreviousMonthRange().label.slice(0, 12)
+              : getJanToPreviousMonthRange().label}
           </button>
           <button
             onClick={() => handleTabChange("custom")}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors whitespace-nowrap ${
               selectedTab === "custom"
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
-            Custom Filter
+            Custom
           </button>
         </div>
 
         {/* Active Filter Display */}
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Filter size={16} />
+        <div
+          className={`flex items-center gap-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+        >
+          <Filter size={isMobileView ? 13 : 16} />
           <span>Active Filter: </span>
-          <span className="font-medium">{getActiveFilterDisplay()}</span>
-          <span className="text-gray-500 ml-2">
-            ({pagination.totalRecords} records found)
+          <span className="font-medium break-all">
+            {getActiveFilterDisplay()}
+          </span>
+          <span className="text-gray-500 ml-1">
+            ({pagination.totalRecords} records)
           </span>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-yellow-500 border border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">Total Remittance</p>
-              <p className="text-2xl font-bold text-gray-800">
-                ${(data.summary.totalRemittanceAmount || 0).toLocaleString()}
-              </p>
-            </div>
-            <Coins className="w-8 h-8 text-yellow-500" />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">Total Final Amount</p>
-              <p className="text-2xl font-bold text-gray-800">
-                ${(data.summary.totalFinalAmount || 0).toLocaleString()}
-              </p>
-            </div>
-            <Coins className="w-8 h-8 text-blue-500" />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500 border border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">Total Bank Charges</p>
-              <p className="text-2xl font-bold text-gray-800">
-                ${(data.summary.totalExchangeLoss || 0).toLocaleString()}
-              </p>
-            </div>
-            <Building2 className="w-8 h-8 text-red-500" />
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">Total Records</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {data.summary.totalRecords || 0}
-              </p>
-            </div>
-            <Calendar className="w-8 h-8 text-green-500" />
-          </div>
-        </div>
-      </div>
+      {renderSummaryCards()}
 
       {/* Data Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-sm font-medium">Sr. No.</th>
-              <th className="p-3 text-sm font-medium">Supplier</th>
-              <th className="p-3 text-sm font-medium">Amount ($)</th>
-              <th className="p-3 text-sm font-medium">
-                Supplier Wise Transactions
-              </th>
-            </tr>
-          </thead>
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[400px]" : ""}`}
+        >
+          {renderTableHeaders()}
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="4" className="p-3 text-center">
-                  Loading...
+                <td colSpan="4" className="p-6 text-center">
+                  <div className="flex justify-center items-center gap-2">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
+                    <span className={`${isMobileView ? "text-xs" : "text-sm"}`}>
+                      Loading...
+                    </span>
+                  </div>
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
@@ -713,25 +883,39 @@ const Remittance = () => {
                     index === data.records.length - 1 ? "" : "border-b"
                   }`}
                 >
-                  <td className="p-3">
-                    <div className="text-sm text-gray-600 font-medium">
-                      {(pagination.currentPage - 1) * 7 + index + 1}
-                    </div>
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-gray-600 font-medium`}
+                  >
+                    {(pagination.currentPage - 1) * 7 + index + 1}
                   </td>
-                  <td className="p-3 text-sm text-gray-900 capitalize">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-gray-900 capitalize font-medium`}
+                  >
                     {remittance.supplierName || "N/A"}
+                    {isMobileView && remittance.transactionCount && (
+                      <div className="text-[10px] text-gray-400 mt-0.5">
+                        {remittance.transactionCount} transactions
+                      </div>
+                    )}
                   </td>
-                  <td className="p-3 text-sm font-semibold text-yellow-600">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} font-semibold text-yellow-600`}
+                  >
                     ${(remittance.totalRemittanceAmount || 0).toLocaleString()}
                   </td>
-                  <td className="p-3 text-sm text-gray-900">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-gray-900`}
+                  >
                     {remittance.transactionCount || 0}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="4" className="p-3 text-center text-gray-500">
+                <td
+                  colSpan="4"
+                  className={`p-6 text-center ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
+                >
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -745,10 +929,13 @@ const Remittance = () => {
 
       {renderPagination()}
 
-      {/* Custom Filter Modal */}
+      {/* ── MOBILE bottom action bar (Export button REMOVED) ── */}
+      {/* Export button is completely removed on mobile view */}
+
+      {/* Custom Filter Modal - Responsive */}
       {showCustomFilter &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 flex justify-center items-center z-50 p-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowCustomFilter(false)}
@@ -767,7 +954,9 @@ const Remittance = () => {
               </h2>
 
               <div className="space-y-4 mb-6">
-                <div className="grid grid-cols-2 gap-4">
+                <div
+                  className={`grid ${isMobileView ? "grid-cols-1 gap-4" : "grid-cols-2 gap-4"}`}
+                >
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Start Date
@@ -780,7 +969,7 @@ const Remittance = () => {
                       selectsStart
                       startDate={customDateRange.startDate}
                       endDate={customDateRange.endDate}
-                      className="w-full border rounded-lg px-3 py-2"
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       placeholderText="Start date"
                       dateFormat="yyyy-MM-dd"
                       isClearable
@@ -800,7 +989,7 @@ const Remittance = () => {
                       startDate={customDateRange.startDate}
                       endDate={customDateRange.endDate}
                       minDate={customDateRange.startDate}
-                      className="w-full border rounded-lg px-3 py-2"
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       placeholderText="End date"
                       dateFormat="yyyy-MM-dd"
                       isClearable
@@ -823,37 +1012,28 @@ const Remittance = () => {
                         : "Select or search supplier..."
                     }
                     disabled={loadingSuppliers}
+                    isMobileView={isMobileView}
                   />
-                  {loadingSuppliers && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Loading suppliers...
-                    </p>
-                  )}
-                  {!loadingSuppliers && supplierOptions.length > 0 && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      {supplierOptions.length} suppliers available
-                    </p>
-                  )}
                 </div>
               </div>
 
               <div className="flex justify-between gap-3">
                 <button
                   onClick={handleClearFilters}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Clear All
                 </button>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setShowCustomFilter(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer text-sm"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleApplyCustomFilter}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer text-sm"
                   >
                     Apply Filter
                   </button>
@@ -861,7 +1041,7 @@ const Remittance = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

@@ -1134,7 +1134,7 @@ const Customer = () => {
     return <LoadingOverlay text="Please wait..." />;
 
   return (
-    <div className="p-4 md:p-6 relative">
+    <div className="p-4 md:p-6 relative pb-20 md:pb-6">
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -1314,7 +1314,7 @@ const Customer = () => {
 
         {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+          <table className="min-w-[800px] md:min-w-full w-full border-collapse bg-white rounded-2xl text-center">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
                 {!isMobileView && customers.length > 0 && (
@@ -1341,7 +1341,7 @@ const Customer = () => {
                 ].map((h) => (
                   <th
                     key={h}
-                    className={`p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
+                    className={`p-2 md:p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
                   >
                     {h}
                   </th>
@@ -1358,7 +1358,7 @@ const Customer = () => {
                 )}
                 {isMobileView && (
                   <th
-                    className={`p-3 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
+                    className={`p-2 whitespace-nowrap ${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
                   >
                     Action
                   </th>
@@ -1397,44 +1397,44 @@ const Customer = () => {
                       </td>
                     )}
                     <td
-                      className={`p-3 ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       <span className="font-mono font-semibold text-blue-600">
                         {customer.customerCode}
                       </span>
                     </td>
                     <td
-                      className={`p-3 ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       {capitalizeFirstLetter(customer.name)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 capitalize ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       {displayValue(customer.typeOfBusiness)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 capitalize ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       {displayValue(customer.medicalRepName)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 capitalize ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       {displayValue(customer.address)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 capitalize ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       {displayValue(customer.zone)}
                     </td>
                     <td
-                      className={`p-3 capitalize ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 capitalize ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       {displayValue(customer.province)}
                     </td>
                     <td
-                      className={`p-3 whitespace-nowrap ${isMobileView ? "text-[7px]" : "text-sm"}`}
+                      className={`p-2 md:p-3 whitespace-nowrap ${isMobileView ? "text-[8px]" : "text-sm"}`}
                     >
                       {customer.date
                         ? formatDateForDisplay(customer.date)
@@ -1476,13 +1476,13 @@ const Customer = () => {
                       </>
                     )}
                     {isMobileView && (
-                      <td className="p-3">
+                      <td className="p-2">
                         <button
                           onClick={() => handleView(customer)}
                           className="text-blue-600 hover:text-blue-800"
                           title="View"
                         >
-                          <Eye size={18} />
+                          <Eye size={16} />
                         </button>
                       </td>
                     )}
@@ -1493,31 +1493,43 @@ const Customer = () => {
           </table>
         </div>
 
-        {/* Pagination */}
+        {/* Pagination - Fixed for mobile view like Product component */}
         {customers.length > 0 && totalPages > 1 && (
           <div
-            className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center" : "justify-start"}`}
+            className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
           >
             <button
               onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
               disabled={currentPage === 1}
-              className="px-2 md:px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
             >
               ← Prev
             </button>
-            {visiblePages.map((p, index) => (
-              <button
-                key={index}
-                onClick={() => typeof p === "number" && setCurrentPage(p)}
-                className={`px-2 md:px-4 py-2 rounded ${currentPage === p ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-              >
-                {p}
-              </button>
-            ))}
+            {!isMobileView ? (
+              visiblePages.map((p, index) => (
+                <button
+                  key={index}
+                  onClick={() => typeof p === "number" && setCurrentPage(p)}
+                  className={`px-4 py-2 rounded text-sm ${
+                    p === "..."
+                      ? "bg-gray-200 cursor-not-allowed"
+                      : currentPage === p
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))
+            ) : (
+              <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                Page {currentPage} of {totalPages}
+              </span>
+            )}
             <button
               onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
               disabled={currentPage === totalPages}
-              className="px-2 md:px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
             >
               Next →
             </button>

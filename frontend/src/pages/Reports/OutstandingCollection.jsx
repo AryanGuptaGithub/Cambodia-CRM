@@ -15,6 +15,10 @@ import {
   Clock,
   FileText,
   ArrowLeft,
+  Menu,
+  TrendingUp,
+  Users,
+  DollarSign,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -22,9 +26,10 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import { getVisiblePages } from "../../utils/useVisiblePages";
 import * as XLSX from "xlsx";
 import OutstandingCollectionSampleExcelDownload from "../../excels/OutstandingCollectionSampleExcelDownload.jsx";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -252,18 +257,28 @@ const CollectedInvoicesSection = ({ onBack }) => {
     totalCollected: 0,
     totalInvoices: 0,
   });
-  const visiblePages = useVisiblePages(
+
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  const visiblePages = getVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
 
-  // Helper: format local date as YYYY-MM-DD
   const formatLocalDate = (date) => {
     if (!date) return "";
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   };
 
-  // Get current month range
   const getCurrentMonthRange = () => {
     const now = new Date();
     const y = now.getFullYear();
@@ -277,7 +292,6 @@ const CollectedInvoicesSection = ({ onBack }) => {
     };
   };
 
-  // Get Jan 1st of current year → today
   const getJanToTodayRange = () => {
     const now = new Date();
     const y = now.getFullYear();
@@ -350,7 +364,6 @@ const CollectedInvoicesSection = ({ onBack }) => {
     }
   };
 
-  // Effects
   useEffect(() => {
     fetchCollectedInvoices(1);
   }, [selectedTab]);
@@ -424,58 +437,168 @@ const CollectedInvoicesSection = ({ onBack }) => {
     }
   };
 
+  const renderPagination = () => {
+    if (pagination.totalPages <= 1) return null;
+    return (
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
+        <button
+          onClick={() => handlePageChange(pagination.currentPage - 1)}
+          disabled={!pagination.hasPrev}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          ← Prev
+        </button>
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
+            <button
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
+        <button
+          onClick={() => handlePageChange(pagination.currentPage + 1)}
+          disabled={!pagination.hasNext}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          Next →
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <div className="p-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 cursor-pointer text-sm transition-colors"
-          >
-            <ArrowLeft size={16} /> Back
-          </button>
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-4"} relative`}>
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* Mobile Header */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center">
-              <CheckCircle size={18} className="text-green-600" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">
-                Collected Invoices
-              </h1>
-              <p className="text-xs text-gray-500">
-                All payment collections recorded
-              </p>
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <button
+              onClick={onBack}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 text-gray-600 text-xs"
+            >
+              <ArrowLeft size={14} /> Back
+            </button>
+            <div className="flex items-center gap-1">
+              <CheckCircle size={16} className="text-green-600" />
+              <h1 className="text-base font-bold text-gray-800">Collected</h1>
             </div>
           </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
         </div>
-        <div className="relative flex items-center">
-          <Search size={16} className="absolute left-3 text-gray-400" />
+      )}
+
+      {/* Desktop Header */}
+      {!isMobileView && (
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onBack}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 cursor-pointer text-sm transition-colors"
+            >
+              <ArrowLeft size={16} /> Back
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center">
+                <CheckCircle size={18} className="text-green-600" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800">
+                  Collected Invoices
+                </h1>
+                <p className="text-xs text-gray-500">
+                  All payment collections recorded
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="relative flex items-center">
+            <Search size={16} className="absolute left-3 text-gray-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search invoice, customer..."
+              className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-64"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute right-2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Search */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search invoice, customer..."
-            className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-64"
+            className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-full"
           />
           {searchTerm && (
             <button
               onClick={() => setSearchTerm("")}
-              className="absolute right-2 text-gray-400 hover:text-gray-600"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400"
             >
               <X size={14} />
             </button>
           )}
         </div>
-      </div>
+      )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
+      <div
+        className={`flex items-center gap-2 mb-3 flex-wrap ${isMobileView ? "text-xs" : ""}`}
+      >
         {["all", "currentMonth", "janToToday", "custom"].map((tab) => (
           <button
             key={tab}
             onClick={() => handleTabChange(tab)}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+            className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg cursor-pointer transition-colors ${isMobileView ? "text-[10px]" : "text-sm"} ${
               selectedTab === tab
                 ? "bg-green-600 text-white"
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -484,16 +607,22 @@ const CollectedInvoicesSection = ({ onBack }) => {
             {tab === "all"
               ? "All Records"
               : tab === "currentMonth"
-                ? "Current Month"
+                ? isMobileView
+                  ? "Current Month"
+                  : "Current Month"
                 : tab === "janToToday"
-                  ? "Jan → Today"
-                  : "Custom Filter"}
+                  ? isMobileView
+                    ? "Jan→Today"
+                    : "Jan → Today"
+                  : "Custom"}
           </button>
         ))}
       </div>
 
-      <div className="flex items-center gap-2 mb-4 text-sm text-gray-600">
-        <Filter size={14} />
+      <div
+        className={`flex items-center gap-2 mb-4 ${isMobileView ? "text-[10px]" : "text-sm"} text-gray-600`}
+      >
+        <Filter size={isMobileView ? 12 : 14} />
         <span>
           Active Filter: <strong>{getActiveFilterDisplay()}</strong> (
           {pagination.totalRecords} transactions)
@@ -501,11 +630,21 @@ const CollectedInvoicesSection = ({ onBack }) => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="border border-green-300 rounded-xl p-4 flex items-center justify-between bg-green-50">
+      <div
+        className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-3 gap-4 mb-6"}`}
+      >
+        <div
+          className={`border border-green-300 rounded-xl ${isMobileView ? "p-2" : "p-4"} flex items-center justify-between bg-green-50`}
+        >
           <div>
-            <p className="text-sm text-gray-500">Total Collected</p>
-            <p className="text-2xl font-bold text-green-700">
+            <p
+              className={`${isMobileView ? "text-[9px]" : "text-sm"} text-gray-500`}
+            >
+              Total Collected
+            </p>
+            <p
+              className={`${isMobileView ? "text-sm" : "text-2xl"} font-bold text-green-700`}
+            >
               $
               {(summary.totalCollected || 0).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
@@ -513,66 +652,109 @@ const CollectedInvoicesSection = ({ onBack }) => {
               })}
             </p>
           </div>
-          <Wallet className="text-green-400" size={36} />
+          <Wallet
+            className={`${isMobileView ? "w-5 h-5" : "w-9 h-9"} text-green-400`}
+          />
         </div>
-        <div className="border border-indigo-300 rounded-xl p-4 flex items-center justify-between bg-indigo-50">
+        <div
+          className={`border border-indigo-300 rounded-xl ${isMobileView ? "p-2" : "p-4"} flex items-center justify-between bg-indigo-50`}
+        >
           <div>
-            <p className="text-sm text-gray-500">Total Transactions</p>
-            <p className="text-2xl font-bold text-indigo-700">
+            <p
+              className={`${isMobileView ? "text-[9px]" : "text-sm"} text-gray-500`}
+            >
+              Transactions
+            </p>
+            <p
+              className={`${isMobileView ? "text-sm" : "text-2xl"} font-bold text-indigo-700`}
+            >
               {pagination.totalRecords || 0}
             </p>
           </div>
-          <FileText className="text-indigo-400" size={36} />
+          <FileText
+            className={`${isMobileView ? "w-5 h-5" : "w-9 h-9"} text-indigo-400`}
+          />
         </div>
-        <div className="border border-blue-300 rounded-xl p-4 flex items-center justify-between bg-blue-50">
+        <div
+          className={`border border-blue-300 rounded-xl ${isMobileView ? "p-2" : "p-4"} flex items-center justify-between bg-blue-50 ${isMobileView ? "col-span-2" : ""}`}
+        >
           <div>
-            <p className="text-sm text-gray-500">Unique Invoices</p>
-            <p className="text-2xl font-bold text-blue-700">
+            <p
+              className={`${isMobileView ? "text-[9px]" : "text-sm"} text-gray-500`}
+            >
+              Unique Invoices
+            </p>
+            <p
+              className={`${isMobileView ? "text-sm" : "text-2xl"} font-bold text-blue-700`}
+            >
               {summary.totalInvoices || 0}
             </p>
           </div>
-          <Receipt className="text-blue-400" size={36} />
+          <Receipt
+            className={`${isMobileView ? "w-5 h-5" : "w-9 h-9"} text-blue-400`}
+          />
         </div>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 border-b">
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table
+          className={`w-full text-sm border-collapse ${isMobileView ? "min-w-[600px]" : ""}`}
+        >
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
                 Sr.No
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Invoice Number
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
+                Invoice
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Collection Date
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
+                Date
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Customer Name
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
+                Customer
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Destination / Account
+              {!isMobileView && (
+                <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                  Destination
+                </th>
+              )}
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-right font-semibold text-gray-600`}
+              >
+                Amount ($)
               </th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-600">
-                Amount Collected ($)
-              </th>
-              <th className="px-4 py-3 text-center font-semibold text-gray-600">
-                Transaction Type
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Remarks
-              </th>
+              {!isMobileView && (
+                <th className="px-4 py-3 text-center font-semibold text-gray-600">
+                  Type
+                </th>
+              )}
+              {!isMobileView && (
+                <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                  Remarks
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="text-center py-12 text-gray-400">
+                <td
+                  colSpan={isMobileView ? 5 : 8}
+                  className="text-center py-12 text-gray-400"
+                >
                   <div className="flex flex-col items-center gap-2">
-                    <div className="w-7 h-7 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm">
+                    <div className="w-6 h-6 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+                    <span className={`${isMobileView ? "text-xs" : "text-sm"}`}>
                       Loading collected invoices...
                     </span>
                   </div>
@@ -580,16 +762,16 @@ const CollectedInvoicesSection = ({ onBack }) => {
               </tr>
             ) : collections.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-14 text-gray-400">
+                <td
+                  colSpan={isMobileView ? 5 : 8}
+                  className="text-center py-14 text-gray-400"
+                >
                   <div className="flex flex-col items-center gap-3">
-                    <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center">
-                      <Receipt size={26} className="text-gray-400" />
+                    <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center">
+                      <Receipt size={24} className="text-gray-400" />
                     </div>
-                    <p className="font-medium text-gray-500">
+                    <p className="font-medium text-gray-500 text-sm">
                       No collected invoices found
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      Collections will appear here once payments are recorded
                     </p>
                   </div>
                 </td>
@@ -602,33 +784,52 @@ const CollectedInvoicesSection = ({ onBack }) => {
                     key={col._id || index}
                     className="border-b hover:bg-green-50/30 transition-colors"
                   >
-                    <td className="px-4 py-3 text-gray-500 text-sm">
+                    <td
+                      className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-gray-500`}
+                    >
                       {(pagination.currentPage - 1) * 10 + index + 1}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono font-semibold text-indigo-700 text-sm">
+                    <td
+                      className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"}`}
+                    >
+                      <span
+                        className={`font-mono font-semibold text-indigo-700 ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      >
                         {col.invoiceNumber}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 text-sm">
+                    <td
+                      className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-gray-600`}
+                    >
                       <div className="flex items-center gap-1">
-                        <Clock size={12} className="text-gray-400" />
+                        <Clock
+                          size={isMobileView ? 10 : 12}
+                          className="text-gray-400"
+                        />
                         {formatDate(col.date)}
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-800">
+                    <td
+                      className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} font-medium text-gray-800`}
+                    >
                       {col.customerName}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <Wallet size={12} className="text-indigo-400" />
-                        <span className="text-sm">
-                          {col.destinationAccount}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-bold text-green-700">
+                    {!isMobileView && (
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 text-gray-600">
+                          <Wallet size={12} className="text-indigo-400" />
+                          <span className="text-sm">
+                            {col.destinationAccount}
+                          </span>
+                        </div>
+                      </td>
+                    )}
+                    <td
+                      className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-right`}
+                    >
+                      <span
+                        className={`font-bold text-green-700 ${isMobileView ? "text-[9px]" : "text-sm"}`}
+                      >
                         $
                         {amt.toLocaleString(undefined, {
                           minimumFractionDigits: 2,
@@ -636,17 +837,21 @@ const CollectedInvoicesSection = ({ onBack }) => {
                         })}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="inline-block bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full capitalize font-medium">
-                        credit collection
-                      </span>
-                    </td>
-                    <td
-                      className="px-4 py-3 text-gray-400 text-xs italic max-w-[180px] truncate"
-                      title={col.remarks}
-                    >
-                      {col.remarks || "—"}
-                    </td>
+                    {!isMobileView && (
+                      <>
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-block bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full capitalize font-medium">
+                            credit collection
+                          </span>
+                        </td>
+                        <td
+                          className="px-4 py-3 text-gray-400 text-xs italic max-w-[180px] truncate"
+                          title={col.remarks}
+                        >
+                          {col.remarks || "—"}
+                        </td>
+                      </>
+                    )}
                   </tr>
                 );
               })
@@ -655,63 +860,13 @@ const CollectedInvoicesSection = ({ onBack }) => {
         </table>
       </div>
 
-      {/* Pagination */}
-      {pagination.totalRecords > 0 && pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 px-2">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handlePageChange(pagination.currentPage - 1)}
-              disabled={!pagination.hasPrev}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                pagination.hasPrev
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
-                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
-            >
-              ← Prev
-            </button>
-            {visiblePages.map((page, idx) => (
-              <button
-                key={idx}
-                onClick={() =>
-                  typeof page === "number" ? handlePageChange(page) : null
-                }
-                className={`min-w-[36px] px-3 py-2 rounded-lg text-sm ${
-                  page === pagination.currentPage
-                    ? "bg-green-600 text-white"
-                    : typeof page === "number"
-                      ? "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-                      : "text-gray-400 cursor-default"
-                }`}
-              >
-                {page}
-              </button>
-            ))}
-            <button
-              onClick={() => handlePageChange(pagination.currentPage + 1)}
-              disabled={!pagination.hasNext}
-              className={`px-3 py-2 rounded-lg text-sm ${
-                pagination.hasNext
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
-                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
-            >
-              Next →
-            </button>
-          </div>
-          <div className="text-sm text-gray-500">
-            Showing {(pagination.currentPage - 1) * 10 + 1}–
-            {Math.min(pagination.currentPage * 10, pagination.totalRecords)} of{" "}
-            {pagination.totalRecords}
-          </div>
-        </div>
-      )}
+      {renderPagination()}
 
       {/* Custom Date Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl w-[480px] p-6 relative">
+            <div className="bg-white rounded-xl shadow-xl w-[90%] max-w-md p-6 relative">
               <button
                 onClick={() => setShowCustomFilter(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
@@ -719,7 +874,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
                 <X size={20} />
               </button>
               <h2 className="text-lg font-bold mb-5">Select Date Range</h2>
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="space-y-4 mb-6">
                 <div>
                   <label className="block text-sm font-medium mb-1">
                     Start Date
@@ -1428,12 +1583,23 @@ const OutstandingCollection = () => {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [showAddTxModal, setShowAddTxModal] = useState(false);
 
-  const visiblePages = useVisiblePages(
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const visiblePages = getVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
 
-  // Helper functions
   const getSerialNumber = (index) =>
     (pagination.currentPage - 1) * 7 + index + 1;
 
@@ -1450,6 +1616,7 @@ const OutstandingCollection = () => {
     d.setMonth(d.getMonth() - 1);
     return d.toLocaleString("default", { month: "long" });
   };
+
   const getJanToPreviousMonthRange = () => {
     const y = getCurrentYear();
     const m = new Date().getMonth();
@@ -1669,7 +1836,12 @@ const OutstandingCollection = () => {
         });
         const rows = XLSX.utils.sheet_to_json(
           workbook.Sheets[workbook.SheetNames[0]],
-          { header: 1, defval: "", blankrows: true, raw: true },
+          {
+            header: 1,
+            defval: "",
+            blankrows: true,
+            raw: true,
+          },
         );
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
@@ -1777,48 +1949,49 @@ const OutstandingCollection = () => {
     }
   };
 
+  // ── Pagination (Improved like DailyReports component) ─────────────────────────
   const renderPagination = () => {
-    if (!pagination.totalRecords || pagination.totalPages <= 1) return null;
-    const startItem = (pagination.currentPage - 1) * 7 + 1;
-    const endItem = Math.min(
-      pagination.currentPage * 7,
-      pagination.totalRecords,
-    );
+    if (pagination.totalPages <= 1) return null;
     return (
-      <div className="flex items-center justify-between mt-4 px-2">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handlePageChange(pagination.currentPage - 1)}
-            disabled={!pagination.hasPrev}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
-          >
-            ← Prev
-          </button>
-          <div className="flex items-center gap-1">
-            {visiblePages.map((page, index) => (
-              <button
-                key={index}
-                onClick={() =>
-                  typeof page === "number" ? handlePageChange(page) : null
-                }
-                className={`min-w-[40px] px-3 py-2 rounded-lg ${page === pagination.currentPage ? "bg-indigo-600 text-white cursor-default" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-transparent text-gray-500 cursor-default"}`}
-                disabled={typeof page !== "number"}
-              >
-                {page}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => handlePageChange(pagination.currentPage + 1)}
-            disabled={!pagination.hasNext}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
-          >
-            Next →
-          </button>
-        </div>
-        <div className="text-sm text-gray-600">
-          Showing {startItem} to {endItem} of {pagination.totalRecords} records
-        </div>
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
+        <button
+          onClick={() => handlePageChange(pagination.currentPage - 1)}
+          disabled={!pagination.hasPrev}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          ← Prev
+        </button>
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
+            <button
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
+        <button
+          onClick={() => handlePageChange(pagination.currentPage + 1)}
+          disabled={!pagination.hasNext}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          Next →
+        </button>
       </div>
     );
   };
@@ -1859,179 +2032,303 @@ const OutstandingCollection = () => {
     loading || exportLoading || data.records.length === 0;
 
   return (
-    <div className="p-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <Receipt className="text-orange-500" size={28} />
-          <h1 className="text-2xl font-bold">Outstanding Collection</h1>
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-4"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <Receipt size={18} className="text-orange-500" />
+            <h1 className="text-base font-bold text-gray-800">Outstanding</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
+        </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <Receipt className="text-orange-500" size={28} />
+            <h1 className="text-2xl font-bold">Outstanding Collection</h1>
+            <button
+              onClick={() => setActiveView("collected")}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium cursor-pointer transition-colors shadow-sm"
+            >
+              <CheckCircle size={15} />
+              Collected
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowAddTxModal(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer text-sm"
+            >
+              <Plus size={16} /> Add Transaction
+            </button>
+            <div className="relative">
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") fetchOutstandingCollections(1);
+                }}
+                placeholder="Search by invoice or customer"
+                className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-60"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => {
+                    setSearchTerm("");
+                    fetchOutstandingCollections(1, "");
+                  }}
+                  className="absolute right-2 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                setShowImportModal(true);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              disabled={isUploading}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white ${isUploading ? "bg-purple-400 cursor-not-allowed" : "bg-purple-600 hover:bg-purple-700 cursor-pointer"} text-sm`}
+            >
+              <Upload size={16} />
+              {isUploading ? "Uploading..." : "Upload Excel"}
+            </button>
+            <button
+              onClick={exportToExcel}
+              disabled={isExportDisabled}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg ${isExportDisabled ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"} text-sm`}
+            >
+              <Download size={16} />
+              {exportLoading ? "Exporting..." : "Export Excel"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE: Only Collected Button (No Add Transaction or Upload Excel) ── */}
+      {isMobileView && (
+        <div className="mb-3">
           <button
             onClick={() => setActiveView("collected")}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium cursor-pointer transition-colors shadow-sm"
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-medium cursor-pointer transition-colors shadow-sm"
           >
-            <CheckCircle size={15} />
-            Collected
+            <CheckCircle size={14} />
+            View Collected Invoices
           </button>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowAddTxModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
-          >
-            <Plus size={16} /> Add New Transaction
-          </button>
-          <div className="relative flex items-center">
-            <Search
-              size={16}
-              className="absolute left-3 text-gray-400"
-              onClick={() => inputRef.current?.focus()}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") fetchOutstandingCollections(1);
-              }}
-              placeholder="Search by invoice or customer"
-              className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-60"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => {
-                  setSearchTerm("");
-                  fetchOutstandingCollections(1, "");
-                }}
-                className="absolute right-2 text-gray-400 hover:text-gray-600"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={() => {
-              setShowImportModal(true);
-              if (fileInputRef.current) fileInputRef.current.value = "";
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") fetchOutstandingCollections(1);
             }}
-            disabled={isUploading}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-white ${isUploading ? "bg-purple-400 cursor-not-allowed" : "bg-purple-600 hover:bg-purple-700 cursor-pointer"}`}
-          >
-            <Upload size={16} />
-            {isUploading ? "Uploading..." : "Upload Excel"}
-          </button>
-          <button
-            onClick={exportToExcel}
-            disabled={isExportDisabled}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${isExportDisabled ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"}`}
-          >
-            <Download size={16} />
-            {exportLoading ? "Exporting..." : "Export Excel"}
-          </button>
+            placeholder="Search by invoice or customer..."
+            className="pl-9 pr-8 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => {
+                setSearchTerm("");
+                fetchOutstandingCollections(1, "");
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
+      <div
+        className={`flex items-center gap-2 mb-3 flex-wrap ${isMobileView ? "text-[10px]" : ""}`}
+      >
         {["all", "currentMonth", "janToPreviousMonth", "custom"].map((tab) => (
           <button
             key={tab}
             onClick={() => handleTabChange(tab)}
-            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+            className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg cursor-pointer transition-colors ${isMobileView ? "text-[10px]" : "text-sm"} ${selectedTab === tab ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
           >
             {tab === "all"
-              ? "All Records"
+              ? "All"
               : tab === "currentMonth"
-                ? `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`
+                ? isMobileView
+                  ? "Current"
+                  : `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`
                 : tab === "janToPreviousMonth"
-                  ? getJanToPreviousMonthRange().label
-                  : "Custom Filter"}
+                  ? isMobileView
+                    ? "Jan→Prev"
+                    : getJanToPreviousMonthRange().label
+                  : "Custom"}
           </button>
         ))}
       </div>
 
-      <div className="flex items-center gap-2 mb-4 text-sm text-gray-600">
-        <Filter size={14} />
+      <div
+        className={`flex items-center gap-2 mb-4 ${isMobileView ? "text-[10px]" : "text-sm"} text-gray-600 flex-wrap`}
+      >
+        <Filter size={isMobileView ? 12 : 14} />
         <span>
           Active Filter: <strong>{getActiveFilterDisplay()}</strong> (
-          {pagination.totalRecords} records found)
+          {pagination.totalRecords} records)
         </span>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="border border-orange-300 rounded-xl p-4 flex items-center justify-between">
+      <div
+        className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-4 gap-4 mb-6"}`}
+      >
+        <div
+          className={`border border-orange-300 rounded-xl ${isMobileView ? "p-2" : "p-4"} flex items-center justify-between`}
+        >
           <div>
-            <p className="text-sm text-gray-500">Total Outstanding</p>
-            <p className="text-2xl font-bold">
+            <p
+              className={`${isMobileView ? "text-[9px]" : "text-sm"} text-gray-500`}
+            >
+              Total Outstanding
+            </p>
+            <p className={`${isMobileView ? "text-sm" : "text-2xl"} font-bold`}>
               ${(data.summary.totalOutstandingAmount || 0).toLocaleString()}
             </p>
           </div>
-          <Receipt className="text-orange-400" size={36} />
+          <Receipt
+            className={`${isMobileView ? "w-6 h-6" : "w-9 h-9"} text-orange-400`}
+          />
         </div>
-        <div className="border border-red-300 rounded-xl p-4 flex items-center justify-between">
+        <div
+          className={`border border-red-300 rounded-xl ${isMobileView ? "p-2" : "p-4"} flex items-center justify-between`}
+        >
           <div>
-            <p className="text-sm text-gray-500">Total Overdue</p>
-            <p className="text-2xl font-bold">
+            <p
+              className={`${isMobileView ? "text-[9px]" : "text-sm"} text-gray-500`}
+            >
+              Total Overdue
+            </p>
+            <p className={`${isMobileView ? "text-sm" : "text-2xl"} font-bold`}>
               ${(data.summary.totalOverdueAmount || 0).toLocaleString()}
             </p>
           </div>
-          <User className="text-red-400" size={36} />
+          <User
+            className={`${isMobileView ? "w-6 h-6" : "w-9 h-9"} text-red-400`}
+          />
         </div>
-        <div className="border border-gray-300 rounded-xl p-4 flex items-center justify-between">
+        <div
+          className={`border border-gray-300 rounded-xl ${isMobileView ? "p-2" : "p-4"} flex items-center justify-between ${isMobileView ? "col-span-2" : ""}`}
+        >
           <div>
-            <p className="text-sm text-gray-500">Total Invoices</p>
-            <p className="text-2xl font-bold">
+            <p
+              className={`${isMobileView ? "text-[9px]" : "text-sm"} text-gray-500`}
+            >
+              Total Invoices
+            </p>
+            <p className={`${isMobileView ? "text-sm" : "text-2xl"} font-bold`}>
               {data.summary.totalInvoices || 0}
             </p>
           </div>
-          <User className="text-blue-400" size={36} />
-        </div>
-        <div className="border border-green-300 rounded-xl p-4 flex items-center justify-between">
-          <div>
-            <p className="text-sm text-gray-500">Total Records</p>
-            <p className="text-2xl font-bold">{pagination.totalRecords || 0}</p>
-          </div>
-          <Receipt className="text-green-400" size={36} />
+          <FileText
+            className={`${isMobileView ? "w-6 h-6" : "w-9 h-9"} text-blue-400`}
+          />
         </div>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table
+          className={`w-full text-sm border-collapse ${isMobileView ? "min-w-[650px]" : ""}`}
+        >
           <thead>
             <tr className="bg-gray-50 border-b">
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
                 Sr.No
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Invoice Number
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
+                Invoice
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Invoice Date
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
+                Date
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Customer Name
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-left font-semibold text-gray-600`}
+              >
+                Customer
               </th>
-              <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                Contact
+              {!isMobileView && (
+                <th className="px-4 py-3 text-left font-semibold text-gray-600">
+                  Contact
+                </th>
+              )}
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-right font-semibold text-gray-600`}
+              >
+                Outstanding ($)
               </th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-600">
-                Total Outstanding ($)
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-right font-semibold text-gray-600`}
+              >
+                Overdue ($)
               </th>
-              <th className="px-4 py-3 text-right font-semibold text-gray-600">
-                Overdue Amount ($)
-              </th>
-              <th className="px-4 py-3 text-center font-semibold text-gray-600">
-                Overdue Days
+              <th
+                className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-center font-semibold text-gray-600`}
+              >
+                Days
               </th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={8} className="text-center py-10 text-gray-500">
-                  Loading...
+                <td
+                  colSpan={isMobileView ? 7 : 8}
+                  className="text-center py-10 text-gray-500"
+                >
+                  <div className="flex justify-center items-center gap-2">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600" />
+                    <span>Loading...</span>
+                  </div>
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
@@ -2040,47 +2337,59 @@ const OutstandingCollection = () => {
                   key={record.invoiceNumber || index}
                   className="border-b hover:bg-gray-50"
                 >
-                  <td className="px-4 py-3 text-gray-600">
+                  <td
+                    className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-gray-600`}
+                  >
                     {getSerialNumber(index)}
                   </td>
-                  <td className="px-4 py-3 font-mono text-sm font-semibold text-indigo-700">
+                  <td
+                    className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} font-mono font-semibold text-indigo-700`}
+                  >
                     {record.invoiceNumber || "N/A"}
                   </td>
-                  <td className="px-4 py-3 text-gray-600 text-sm">
+                  <td
+                    className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-gray-600`}
+                  >
                     {record.invoiceDate
                       ? formatDateToReadable(record.invoiceDate)
                       : "N/A"}
                   </td>
-                  <td className="px-4 py-3 font-medium">
+                  <td
+                    className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} font-medium`}
+                  >
                     <div>{record.customerName}</div>
-                    <div className="text-xs text-gray-400 font-mono">
-                      {record.customerCode || ""}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 text-gray-600">
-                      <Phone size={12} />
-                      {record.phone || "N/A"}
-                    </div>
-                    {record.email && record.email !== "N/A" && (
-                      <div className="flex items-center gap-1 text-gray-500 text-xs mt-1">
-                        <Mail size={12} />
-                        {record.email}
+                    {isMobileView && record.customerCode && (
+                      <div className="text-[8px] text-gray-400 font-mono">
+                        {record.customerCode}
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium">
+                  {!isMobileView && (
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1 text-gray-600">
+                        <Phone size={12} />
+                        {record.phone || "N/A"}
+                      </div>
+                    </td>
+                  )}
+                  <td
+                    className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-right font-medium`}
+                  >
                     ${(record.totalOutstandingAmount || 0).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-red-600">
+                  <td
+                    className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-right font-medium text-red-600`}
+                  >
                     ${(record.overdueAmount || 0).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 text-center">
+                  <td
+                    className={`${isMobileView ? "px-2 py-2 text-[9px]" : "px-4 py-3"} text-center`}
+                  >
                     <span
                       className={`font-medium ${record.overdueDays > 0 ? "text-red-600" : "text-green-600"}`}
                     >
                       {record.overdueDays > 0
-                        ? `${record.overdueDays} days`
+                        ? `${record.overdueDays}d`
                         : "On Time"}
                     </span>
                   </td>
@@ -2088,7 +2397,10 @@ const OutstandingCollection = () => {
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="text-center py-10 text-gray-500">
+                <td
+                  colSpan={isMobileView ? 7 : 8}
+                  className="text-center py-10 text-gray-500"
+                >
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -2112,7 +2424,7 @@ const OutstandingCollection = () => {
       {showImportModal &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl w-[480px] p-6 relative">
+            <div className="bg-white rounded-xl shadow-xl w-[90%] max-w-md p-6 relative">
               <button
                 onClick={() => {
                   setShowImportModal(false);
@@ -2185,7 +2497,7 @@ const OutstandingCollection = () => {
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-xl w-[520px] p-6 relative">
+            <div className="bg-white rounded-xl shadow-xl w-[90%] max-w-md p-6 relative">
               <button
                 onClick={() => setShowCustomFilter(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -2195,7 +2507,7 @@ const OutstandingCollection = () => {
               <h2 className="text-lg font-bold mb-5">
                 Outstanding Collection Filter
               </h2>
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="space-y-4 mb-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">
                     Start Date
@@ -2241,11 +2553,6 @@ const OutstandingCollection = () => {
                 {loadingCustomers && (
                   <p className="text-xs text-gray-400 mb-1">
                     Loading customers...
-                  </p>
-                )}
-                {!loadingCustomers && customerOptions.length > 0 && (
-                  <p className="text-xs text-gray-400 mb-1">
-                    {customerOptions.length} customers available
                   </p>
                 )}
                 <CustomerDropdown

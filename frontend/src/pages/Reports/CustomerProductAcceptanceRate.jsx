@@ -19,12 +19,14 @@ import {
   RefreshCw,
   Calendar,
   Package,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 import ReactDOM from "react-dom";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -386,7 +388,7 @@ const CustomRangeModal = ({
   );
 };
 
-// ─── Date Filter Bar ─────────────────────────────────────────────────────
+// ─── Date Filter Bar (Responsive) ─────────────────────────────────────────
 const DateFilterBar = ({
   filterMode,
   year,
@@ -399,6 +401,7 @@ const DateFilterBar = ({
   onApply,
   loading,
   filterLabel,
+  isMobileView,
 }) => {
   const recentMonths = useMemo(() => {
     const result = [];
@@ -415,47 +418,51 @@ const DateFilterBar = ({
   }, []);
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap gap-3 items-center shadow-sm">
-      {recentMonths.map((rm) => (
-        <button
-          key={`${rm.month}-${rm.year}`}
-          onClick={() => onMonthClick(rm.month, rm.year)}
-          className={`px-4 py-2 text-sm rounded-lg font-medium transition-all border ${filterMode === "month" && month === rm.month && year === rm.year ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300"}`}
-        >
-          {rm.label}
-        </button>
-      ))}
-      <div className="h-8 w-px bg-gray-200 hidden sm:block" />
-      <select
-        value={year}
-        onChange={(e) => onYearChange(Number(e.target.value))}
-        className={`border rounded-lg px-3 py-2 text-sm font-medium ${filterMode === "year" ? "border-indigo-500 text-indigo-700 bg-indigo-50" : "border-gray-300 text-gray-600"}`}
-      >
-        {YEARS.map((y) => (
-          <option key={y} value={y}>
-            {y}
-          </option>
+    <div
+      className={`bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap gap-3 items-center shadow-sm ${isMobileView ? "flex-col" : ""}`}
+    >
+      <div className={`flex flex-wrap gap-2 ${isMobileView ? "w-full" : ""}`}>
+        {recentMonths.map((rm) => (
+          <button
+            key={`${rm.month}-${rm.year}`}
+            onClick={() => onMonthClick(rm.month, rm.year)}
+            className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${filterMode === "month" && month === rm.month && year === rm.year ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300"}`}
+          >
+            {rm.label}
+          </button>
         ))}
-      </select>
-      <div className="h-8 w-px bg-gray-200 hidden sm:block" />
-      <button
-        onClick={onOpenCustom}
-        className={`flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium border ${filterMode === "custom" ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-gray-600 border-gray-200"}`}
-      >
-        <Calendar size={14} />{" "}
-        {filterMode === "custom" && startDate && endDate
-          ? filterLabel
-          : "Custom Range"}
-      </button>
+      </div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <select
+          value={year}
+          onChange={(e) => onYearChange(Number(e.target.value))}
+          className={`border rounded-lg px-3 py-1.5 text-xs font-medium ${filterMode === "year" ? "border-indigo-500 text-indigo-700 bg-indigo-50" : "border-gray-300 text-gray-600"}`}
+        >
+          {YEARS.map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={onOpenCustom}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium border ${filterMode === "custom" ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-gray-600 border-gray-200"}`}
+        >
+          <Calendar size={12} />
+          {filterMode === "custom" && startDate && endDate && !isMobileView
+            ? filterLabel
+            : "Custom"}
+        </button>
+      </div>
       <button
         onClick={onApply}
         disabled={loading}
-        className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium ml-auto"
+        className={`flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium ${isMobileView ? "w-full" : "ml-auto"}`}
       >
         {loading ? (
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
         ) : (
-          <RefreshCw size={14} />
+          <RefreshCw size={12} />
         )}{" "}
         Apply
       </button>
@@ -463,17 +470,23 @@ const DateFilterBar = ({
   );
 };
 
-// ─── Summary Card ────────────────────────────────────────────────────────
-const SummaryCard = ({ title, value, icon, borderColor }) => (
+// ─── Summary Card (Responsive) ────────────────────────────────────────────
+const SummaryCard = ({ title, value, icon, borderColor, isMobileView }) => (
   <div
-    className={`bg-white p-6 rounded-xl shadow-md border-l-4 ${borderColor}`}
+    className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 ${borderColor} border border-gray-200`}
   >
     <div className="flex justify-between items-center">
       <div>
-        <p className="text-sm text-gray-600">{title}</p>
-        <p className="text-2xl font-bold text-gray-800">{value}</p>
+        <p className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}>
+          {title}
+        </p>
+        <p
+          className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+        >
+          {value}
+        </p>
       </div>
-      {icon}
+      <div className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"}`}>{icon}</div>
     </div>
   </div>
 );
@@ -515,6 +528,17 @@ const CustomerProductAcceptanceRate = () => {
   const [isSampleModalOpen, setIsSampleModalOpen] = useState(false);
   const [selectedSampleDetails, setSelectedSampleDetails] = useState([]);
   const [selectedProductName, setSelectedProductName] = useState("");
+
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const inputRef = useRef(null);
   const itemsPerPage = 7;
@@ -728,8 +752,122 @@ const CustomerProductAcceptanceRate = () => {
     setIsSampleModalOpen(true);
   };
 
+  // Table headers (responsive)
+  const renderTableHeaders = () => {
+    const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
+    return (
+      <thead className="bg-gray-100 text-gray-700 border-b">
+        <tr>
+          <th className={thClass}>Sr.No</th>
+          <th className={thClass}>Customer</th>
+          <th className={thClass}>Product</th>
+          <th className={thClass}>Acc</th>
+          <th className={thClass}>Rej</th>
+          <th className={thClass}>Total</th>
+          <th className={thClass}>Rate</th>
+        </tr>
+      </thead>
+    );
+  };
+
+  // Table row
+  const renderTableRow = (record, index) => {
+    const tdClass = `${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"}`;
+    return (
+      <tr
+        key={index}
+        className={`hover:bg-gray-50 ${index !== data.records.length - 1 ? "border-b" : ""}`}
+      >
+        <td className={tdClass}>
+          <span className="text-gray-600 font-medium">
+            {getSerialNumber(index)}
+          </span>
+        </td>
+        <td className={`${tdClass} text-gray-800 capitalize`}>
+          {record.customerName || "N/A"}
+        </td>
+        <td className={tdClass}>
+          <button
+            onClick={() => handleProductClick(record)}
+            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
+          >
+            <Package size={isMobileView ? 12 : 16} />
+            <span className={isMobileView ? "text-[10px]" : "text-sm"}>
+              {isMobileView
+                ? record.productName?.length > 20
+                  ? record.productName.substring(0, 15) + "..."
+                  : record.productName
+                : record.productName}
+            </span>
+          </button>
+        </td>
+        <td className={`${tdClass} text-green-600 font-semibold`}>
+          {record.acceptedCount || 0}
+        </td>
+        <td className={`${tdClass} text-red-500 font-semibold`}>
+          {record.rejectedCount || 0}
+        </td>
+        <td className={`${tdClass} text-gray-700 font-medium`}>
+          {record.totalProducts || 0}
+        </td>
+        <td className={`${tdClass} text-blue-600 font-semibold`}>
+          {record.acceptanceRate?.toFixed(2) || 0}%
+        </td>
+      </tr>
+    );
+  };
+
+  // Pagination (responsive)
+  const renderPagination = () => {
+    if (pagination.totalPages <= 1) return null;
+    return (
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
+        <button
+          onClick={() => handlePageChange(pagination.currentPage - 1)}
+          disabled={pagination.currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          ← Prev
+        </button>
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
+            <button
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
+        <button
+          onClick={() => handlePageChange(pagination.currentPage + 1)}
+          disabled={pagination.currentPage === pagination.totalPages}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          Next →
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <div className="p-6 space-y-6 min-h-screen bg-gray-50">
+    <div
+      className={`${isMobileView ? "p-3 pb-20" : "p-6"} space-y-4 min-h-screen bg-gray-50 relative`}
+    >
       <SampleDetailsModal
         isOpen={isSampleModalOpen}
         onClose={() => setIsSampleModalOpen(false)}
@@ -744,58 +882,118 @@ const CustomerProductAcceptanceRate = () => {
         initialEnd={endDate}
       />
 
-      {/* Header */}
-      <div className="flex justify-between items-center flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">
-            Customer Product Acceptance Rate
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Viewing:{" "}
-            <span className="font-semibold text-indigo-600">{filterLabel}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by customer or product..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
-            />
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              size={18}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X size={16} />
-              </button>
-            )}
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <FlaskConical className="w-5 h-5 text-blue-600" />
+            <h1 className="text-base font-bold text-gray-800">
+              Acceptance Rate
+            </h1>
           </div>
-          <button
-            onClick={exportToExcel}
-            disabled={exportLoading}
-            className={`flex items-center gap-2 ${exportLoading ? "bg-green-500 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"} text-white px-4 py-2 rounded-xl shadow-md`}
-          >
-            {exportLoading ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />{" "}
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download size={18} /> Export Excel
-              </>
-            )}
-          </button>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">
+              Customer Product Acceptance Rate
+            </h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Viewing:{" "}
+              <span className="font-semibold text-indigo-600">
+                {filterLabel}
+              </span>
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by customer or product..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
+              />
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                size={18}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={exportToExcel}
+              disabled={exportLoading}
+              className={`flex items-center gap-2 ${exportLoading ? "bg-green-500 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"} text-white px-4 py-2 rounded-xl shadow-md`}
+            >
+              {exportLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />{" "}
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download size={18} /> Export Excel
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search customer or product..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Date Filter Bar */}
       <DateFilterBar
@@ -810,103 +1008,106 @@ const CustomerProductAcceptanceRate = () => {
         onApply={handleApply}
         loading={loading}
         filterLabel={filterLabel}
+        isMobileView={isMobileView}
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+      <div
+        className={`grid gap-4 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-5 gap-6"}`}
+      >
         <SummaryCard
           title="Total Customers"
-          value={loading ? "—" : data.summary.totalCustomers}
-          icon={<Users className="w-8 h-8 text-green-500" />}
+          value={
+            loading ? "—" : data.summary.totalCustomers?.toLocaleString() || 0
+          }
+          icon={
+            <Users
+              className={`${isMobileView ? "w-5 h-5" : "w-8 h-8"} text-green-500`}
+            />
+          }
           borderColor="border-green-500"
+          isMobileView={isMobileView}
         />
         <SummaryCard
           title="Total Samples"
-          value={loading ? "—" : data.summary.totalSamples}
-          icon={<FlaskConical className="w-8 h-8 text-blue-500" />}
+          value={
+            loading ? "—" : data.summary.totalSamples?.toLocaleString() || 0
+          }
+          icon={
+            <FlaskConical
+              className={`${isMobileView ? "w-5 h-5" : "w-8 h-8"} text-blue-500`}
+            />
+          }
           borderColor="border-blue-500"
+          isMobileView={isMobileView}
         />
         <SummaryCard
           title="Accepted"
-          value={loading ? "—" : data.summary.totalAccepted}
-          icon={<Eye className="w-8 h-8 text-purple-500" />}
+          value={
+            loading ? "—" : data.summary.totalAccepted?.toLocaleString() || 0
+          }
+          icon={
+            <Eye
+              className={`${isMobileView ? "w-5 h-5" : "w-8 h-8"} text-purple-500`}
+            />
+          }
           borderColor="border-purple-500"
+          isMobileView={isMobileView}
         />
         <SummaryCard
           title="Rejected"
-          value={loading ? "—" : data.summary.totalRejected}
-          icon={<TrendingUp className="w-8 h-8 text-red-500" />}
+          value={
+            loading ? "—" : data.summary.totalRejected?.toLocaleString() || 0
+          }
+          icon={
+            <TrendingUp
+              className={`${isMobileView ? "w-5 h-5" : "w-8 h-8"} text-red-500`}
+            />
+          }
           borderColor="border-red-500"
+          isMobileView={isMobileView}
         />
         <SummaryCard
           title="Acceptance Rate"
-          value={loading ? "—" : `${data.summary.acceptanceRate?.toFixed(2)}%`}
-          icon={<Percent className="w-8 h-8 text-orange-500" />}
+          value={
+            loading ? "—" : `${data.summary.acceptanceRate?.toFixed(1) || 0}%`
+          }
+          icon={
+            <Percent
+              className={`${isMobileView ? "w-5 h-5" : "w-8 h-8"} text-orange-500`}
+            />
+          }
           borderColor="border-orange-500"
+          isMobileView={isMobileView}
         />
       </div>
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm text-center">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-sm font-medium">Sr.No</th>
-              <th className="p-3 text-sm font-medium">Customer Name</th>
-              <th className="p-3 text-sm font-medium">Product Name</th>
-              <th className="p-3 text-sm font-medium">Accepted</th>
-              <th className="p-3 text-sm font-medium">Rejected</th>
-              <th className="p-3 text-sm font-medium">Total Samples</th>
-              <th className="p-3 text-sm font-medium">Acceptance %</th>
-            </tr>
-          </thead>
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[500px]" : ""}`}
+        >
+          {renderTableHeaders()}
           <tbody>
             {loading ? (
               <tr>
                 <td colSpan={7} className="p-8 text-center">
                   <div className="flex justify-center items-center gap-2">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
-                    <span>Loading...</span>
+                    <span className={`${isMobileView ? "text-xs" : "text-sm"}`}>
+                      Loading...
+                    </span>
                   </div>
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
-              data.records.map((record, index) => (
-                <tr
-                  key={index}
-                  className={`hover:bg-gray-50 ${index !== data.records.length - 1 ? "border-b" : ""}`}
-                >
-                  <td className="p-3 text-sm text-gray-600 font-medium">
-                    {getSerialNumber(index)}
-                  </td>
-                  <td className="p-3 text-sm text-gray-800 capitalize">
-                    {record.customerName || "N/A"}
-                  </td>
-                  <td className="p-3 text-sm text-gray-800 text-center">
-                    <button
-                      onClick={() => handleProductClick(record)}
-                      className="inline-flex items-center gap-2 text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
-                    >
-                      <Package size={16} /> {record.productName}
-                    </button>
-                  </td>
-                  <td className="p-3 text-sm text-green-600 font-semibold">
-                    {record.acceptedCount || 0}
-                  </td>
-                  <td className="p-3 text-sm text-red-500 font-semibold">
-                    {record.rejectedCount || 0}
-                  </td>
-                  <td className="p-3 text-sm text-gray-700 font-medium">
-                    {record.totalProducts || 0}
-                  </td>
-                  <td className="p-3 text-sm text-blue-600 font-semibold">
-                    {record.acceptanceRate?.toFixed(2) || 0}%
-                  </td>
-                </tr>
-              ))
+              data.records.map((record, index) => renderTableRow(record, index))
             ) : (
               <tr>
-                <td colSpan={7} className="p-8 text-gray-500 text-center">
+                <td
+                  colSpan={7}
+                  className={`p-8 text-center ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
+                >
                   No customer product acceptance data found for the selected
                   period
                 </td>
@@ -916,39 +1117,10 @@ const CustomerProductAcceptanceRate = () => {
         </table>
       </div>
 
-      {/* Pagination */}
-      {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-start gap-2 mt-6">
-          <button
-            onClick={() => handlePageChange(pagination.currentPage - 1)}
-            disabled={!pagination.hasPrev}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
-          >
-            <ChevronLeft size={16} /> Prev
-          </button>
-          <div className="flex gap-1">
-            {visiblePages.map((page, i) => (
-              <button
-                key={i}
-                onClick={() =>
-                  typeof page === "number" && handlePageChange(page)
-                }
-                disabled={typeof page !== "number"}
-                className={`min-w-[40px] px-3 py-2 rounded-lg ${page === pagination.currentPage ? "bg-indigo-600 text-white" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-transparent text-gray-500"}`}
-              >
-                {page}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => handlePageChange(pagination.currentPage + 1)}
-            disabled={!pagination.hasNext}
-            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
-          >
-            Next <ChevronRight size={16} />
-          </button>
-        </div>
-      )}
+      {renderPagination()}
+
+      {/* ── MOBILE bottom action bar (Export button REMOVED) ── */}
+      {/* Export button is completely removed on mobile view */}
     </div>
   );
 };

@@ -12,13 +12,15 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import { showToast } from "../../utils/toast";
-import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import { getVisiblePages } from "../../utils/useVisiblePages";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -43,6 +45,18 @@ const NewCustomerAddition = () => {
     hasPrev: false,
   });
 
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
   // ── View type tabs ──────────────────────────────────────────────────────
   const [selectedReportType, setSelectedReportType] = useState("MR Wise");
 
@@ -65,15 +79,14 @@ const NewCustomerAddition = () => {
     hasPrev: false,
   });
   const [modalLoading, setModalLoading] = useState(false);
-  const [selectedEntity, setSelectedEntity] = useState(null); // { type: 'mr' or 'zone', id, name }
+  const [selectedEntity, setSelectedEntity] = useState(null);
 
   const inputRef = useRef(null);
-  const visiblePages = useVisiblePages(
+  const visiblePages = getVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
-
-  const modalVisiblePages = useVisiblePages(
+  const modalVisiblePages = getVisiblePages(
     modalPagination.currentPage,
     modalPagination.totalPages,
   );
@@ -87,15 +100,12 @@ const NewCustomerAddition = () => {
     return `${year}-${month}-${day}`;
   };
 
-  // ── Helper: Format date string (YYYY-MM-DD) to "4 March 2026" ───────────
+  // ── Helper: Format date string (YYYY-MM-DD) to "4 Mar 2026" ───────────
   const formatDateReadable = (dateStr) => {
     if (!dateStr) return "N/A";
-
-    // Extract YYYY-MM-DD from the beginning of the string (handles ISO format)
     const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (match) {
       const [, year, month, day] = match;
-      // Create a Date in UTC to avoid timezone shifts
       const date = new Date(Date.UTC(year, month - 1, day));
       return date.toLocaleDateString("en-GB", {
         day: "numeric",
@@ -104,8 +114,6 @@ const NewCustomerAddition = () => {
         timeZone: "UTC",
       });
     }
-
-    // Fallback for other formats (if needed)
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return "Invalid Date";
     return d.toLocaleDateString("en-GB", {
@@ -114,6 +122,7 @@ const NewCustomerAddition = () => {
       year: "numeric",
     });
   };
+
   // ── Date helpers ────────────────────────────────────────────────────────
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
@@ -178,7 +187,7 @@ const NewCustomerAddition = () => {
           return {
             startDate: formatDateLocal(customDateRange.startDate),
             endDate: formatDateLocal(customDateRange.endDate),
-            displayLabel: `${customDateRange.startDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} – ${customDateRange.endDate.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`,
+            displayLabel: `${customDateRange.startDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })} – ${customDateRange.endDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`,
           };
         }
         return { displayLabel: "Select dates" };
@@ -281,16 +290,13 @@ const NewCustomerAddition = () => {
       if (dateParams.startDate) params.startDate = dateParams.startDate;
       if (dateParams.endDate) params.endDate = dateParams.endDate;
 
-      // ── FIX: send correct filter param based on entity type ──
       if (entity.type === "mr") {
-        // Prefer the MongoDB _id; fall back to name
         if (entity.id && entity.id !== "N/A") {
           params.mrId = entity.id;
         } else {
           params.mrName = entity.name;
         }
       } else if (entity.type === "zone") {
-        // Zone Wise — send the zone name
         params.zone = entity.name;
       }
 
@@ -438,76 +444,96 @@ const NewCustomerAddition = () => {
 
   // ── Render helpers ──────────────────────────────────────────────────────
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
+    <div
+      className={`grid gap-4 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-3 mb-6"}`}
+    >
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Total New Customers</p>
-            <p className="text-2xl font-bold text-gray-800">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
+              Total New Customers
+            </p>
+            <p
+              className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+            >
               {data.summary.totalNewCustomers?.toLocaleString() || 0}
             </p>
           </div>
-          <User className="w-8 h-8 text-green-500" />
+          <User
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-green-500`}
+          />
         </div>
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
               {selectedReportType === "MR Wise" ? "Total MRs" : "Total Zones"}
             </p>
-            <p className="text-2xl font-bold text-gray-800">
+            <p
+              className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+            >
               {selectedReportType === "MR Wise"
                 ? data.summary.totalMRs || 0
                 : data.summary.totalZones || 0}
             </p>
           </div>
           {selectedReportType === "MR Wise" ? (
-            <Users className="w-8 h-8 text-blue-500" />
+            <Users
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-blue-500`}
+            />
           ) : (
-            <MapPin className="w-8 h-8 text-blue-500" />
+            <MapPin
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-blue-500`}
+            />
           )}
         </div>
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200 ${isMobileView ? "col-span-2" : ""}`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
               Avg per {selectedReportType === "MR Wise" ? "MR" : "Zone"}
             </p>
-            <p className="text-2xl font-bold text-gray-800">
+            <p
+              className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+            >
               {data.summary.averageCustomersPerMR?.toFixed(1) || "0.0"}
             </p>
           </div>
-          <TrendingUp className="w-8 h-8 text-purple-500" />
-        </div>
-      </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Active Filter</p>
-            <p className="text-base font-bold text-gray-800 truncate max-w-[140px]">
-              {getActiveFilterLabel()}
-            </p>
-          </div>
-          <Calendar className="w-8 h-8 text-orange-500" />
+          <TrendingUp
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-purple-500`}
+          />
         </div>
       </div>
     </div>
   );
 
   const renderTableHeaders = () => {
+    const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
     if (selectedReportType === "MR Wise") {
       return (
         <thead className="bg-gray-100 text-gray-700 border-b">
           <tr>
-            <th className="p-3 text-sm font-medium">Sr.No</th>
-            <th className="p-3 text-sm font-medium">MR Name</th>
-            <th className="p-3 text-sm font-medium">Contact</th>
-            <th className="p-3 text-sm font-medium">Zone</th>
-            <th className="p-3 text-sm font-medium">New Customers</th>
-            <th className="p-3 text-sm font-medium">Latest Date</th>
-            <th className="p-3 text-sm font-medium">Action</th>
+            <th className={thClass}>Sr.No</th>
+            <th className={thClass}>MR Name</th>
+            {!isMobileView && <th className={thClass}>Contact</th>}
+            {!isMobileView && <th className={thClass}>Zone</th>}
+            <th className={thClass}>New Customers</th>
+            {!isMobileView && <th className={thClass}>Latest Date</th>}
+            <th className={thClass}>Action</th>
           </tr>
         </thead>
       );
@@ -515,56 +541,69 @@ const NewCustomerAddition = () => {
     return (
       <thead className="bg-gray-100 text-gray-700 border-b">
         <tr>
-          <th className="p-3 text-sm font-medium">Sr.No</th>
-          <th className="p-3 text-sm font-medium">Zone Name</th>
-          <th className="p-3 text-sm font-medium">Total MRs</th>
-          <th className="p-3 text-sm font-medium">New Customers</th>
-          <th className="p-3 text-sm font-medium">Avg per MR</th>
-          <th className="p-3 text-sm font-medium">Latest Date</th>
-          <th className="p-3 text-sm font-medium">Action</th>
+          <th className={thClass}>Sr.No</th>
+          <th className={thClass}>Zone Name</th>
+          {!isMobileView && <th className={thClass}>Total MRs</th>}
+          <th className={thClass}>New Customers</th>
+          {!isMobileView && <th className={thClass}>Avg per MR</th>}
+          {!isMobileView && <th className={thClass}>Latest Date</th>}
+          <th className={thClass}>Action</th>
         </tr>
       </thead>
     );
   };
 
   const renderTableRow = (record, index) => {
+    const tdClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"}`;
     if (selectedReportType === "MR Wise") {
       return (
         <tr
           key={index}
           className={`hover:bg-gray-50 ${index < data.records.length - 1 ? "border-b" : ""}`}
         >
-          <td className="p-3 text-sm text-gray-600 font-medium">
+          <td className={`${tdClass} text-gray-600 font-medium`}>
             {record.srNo}
           </td>
-          <td className="p-3 text-sm font-medium text-gray-900 capitalize">
+          <td className={`${tdClass} font-medium text-gray-900 capitalize`}>
             {record.mrName}
+            {isMobileView && record.contactNo && (
+              <div className="text-[8px] text-gray-400 mt-0.5">
+                {record.contactNo}
+              </div>
+            )}
+            {isMobileView && record.zone && (
+              <div className="text-[8px] text-gray-400">
+                Zone: {record.zone}
+              </div>
+            )}
           </td>
-          <td className="p-3 text-sm text-gray-900">
-            {record.contactNo || "N/A"}
-          </td>
-          <td className="p-3 text-sm text-gray-900 capitalize">
-            {record.zone || "N/A"}
-          </td>
-          <td className="p-3 text-sm font-semibold text-blue-600">
+          {!isMobileView && (
+            <td className={tdClass}>{record.contactNo || "N/A"}</td>
+          )}
+          {!isMobileView && (
+            <td className={`${tdClass} capitalize`}>{record.zone || "N/A"}</td>
+          )}
+          <td className={`${tdClass} font-semibold text-blue-600`}>
             {record.newCustomers?.toLocaleString() || 0}
           </td>
-          <td className="p-3 text-sm text-gray-500">
-            {formatDateReadable(record.date)}
-          </td>
-          <td className="p-3 text-center">
+          {!isMobileView && (
+            <td className={`${tdClass} text-gray-500`}>
+              {formatDateReadable(record.date)}
+            </td>
+          )}
+          <td className={tdClass}>
             <button
               onClick={() =>
                 openCustomerModal({
                   type: "mr",
-                  id: record.medicalRepId, // ── FIX: use medicalRepId (MongoDB ObjectId string)
+                  id: record.medicalRepId,
                   name: record.mrName,
                 })
               }
-              className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200"
+              className="inline-flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200 text-[10px] md:text-sm"
               title="View Customers"
             >
-              <Eye size={16} />
+              <Eye size={isMobileView ? 12 : 16} />
               <span>View</span>
             </button>
           </td>
@@ -577,34 +616,48 @@ const NewCustomerAddition = () => {
         key={index}
         className={`hover:bg-gray-50 ${index < data.records.length - 1 ? "border-b" : ""}`}
       >
-        <td className="p-3 text-sm text-gray-600 font-medium">{record.srNo}</td>
-        <td className="p-3 text-sm font-medium text-gray-900 capitalize">
+        <td className={`${tdClass} text-gray-600 font-medium`}>
+          {record.srNo}
+        </td>
+        <td className={`${tdClass} font-medium text-gray-900 capitalize`}>
           {record.zoneName}
+          {isMobileView && (
+            <div className="text-[8px] text-gray-400">
+              MRs: {record.totalMRs || 0} | Avg:{" "}
+              {record.averagePerMR?.toFixed(1) || "0.0"}
+            </div>
+          )}
         </td>
-        <td className="p-3 text-sm font-semibold text-gray-800">
-          {record.totalMRs?.toLocaleString() || 0}
-        </td>
-        <td className="p-3 text-sm font-semibold text-blue-600">
+        {!isMobileView && (
+          <td className={`${tdClass} font-semibold text-gray-800`}>
+            {record.totalMRs?.toLocaleString() || 0}
+          </td>
+        )}
+        <td className={`${tdClass} font-semibold text-blue-600`}>
           {record.newCustomers?.toLocaleString() || 0}
         </td>
-        <td className="p-3 text-sm font-semibold text-green-600">
-          {record.averagePerMR?.toFixed(1) || "0.0"}
-        </td>
-        <td className="p-3 text-sm text-gray-500">
-          {formatDateReadable(record.date)}
-        </td>
-        <td className="p-3 text-center">
+        {!isMobileView && (
+          <td className={`${tdClass} font-semibold text-green-600`}>
+            {record.averagePerMR?.toFixed(1) || "0.0"}
+          </td>
+        )}
+        {!isMobileView && (
+          <td className={`${tdClass} text-gray-500`}>
+            {formatDateReadable(record.date)}
+          </td>
+        )}
+        <td className={tdClass}>
           <button
             onClick={() =>
               openCustomerModal({
                 type: "zone",
-                name: record.zoneName, // ── correct: zoneName passed as entity.name
+                name: record.zoneName,
               })
             }
-            className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200"
+            className="inline-flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200 text-[10px] md:text-sm"
             title="View Customers"
           >
-            <Eye size={16} />
+            <Eye size={isMobileView ? 12 : 16} />
             <span>View</span>
           </button>
         </td>
@@ -612,47 +665,46 @@ const NewCustomerAddition = () => {
     );
   };
 
+  // ── Pagination (Improved like Product/DailyReports component) ─────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
           disabled={!pagination.hasPrev}
-          className={`px-3 py-2 rounded-lg ${
-            pagination.hasPrev
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           ← Prev
         </button>
-        <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
             <button
-              key={index}
+              key={idx}
               onClick={() => typeof page === "number" && handlePageChange(page)}
-              disabled={typeof page !== "number"}
-              className={`min-w-[40px] px-3 py-2 rounded-lg ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number"
-                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                    : "bg-transparent text-gray-500 cursor-default"
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
               }`}
             >
               {page}
             </button>
-          ))}
-        </div>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
-          className={`px-3 py-2 rounded-lg ${
-            pagination.hasNext
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           Next →
         </button>
@@ -660,21 +712,28 @@ const NewCustomerAddition = () => {
     );
   };
 
+  const getColSpan = () => {
+    if (selectedReportType === "MR Wise") {
+      return isMobileView ? 4 : 7;
+    }
+    return isMobileView ? 3 : 7;
+  };
+
   const tabBtn = (tab, active, label) => (
     <button
       key={tab}
       onClick={() => handleDateTabChange(tab)}
-      className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
+      className={`${isMobileView ? "px-3 py-1.5 text-[10px]" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors ${
         active === tab
           ? "bg-indigo-600 text-white"
           : "bg-gray-200 text-gray-700 hover:bg-gray-300"
       }`}
     >
-      {label}
+      {isMobileView && tab === "currentMonth"
+        ? label.slice(0, 12) + "..."
+        : label}
     </button>
   );
-
-  const getColSpan = () => (selectedReportType === "MR Wise" ? 7 : 7);
 
   // ── Customer Modal ──────────────────────────────────────────────────────
   const renderCustomerModal = () => {
@@ -712,7 +771,7 @@ const NewCustomerAddition = () => {
           ) : (
             <>
               <div className="overflow-x-auto rounded-xl border border-gray-200">
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-sm border-collapse min-w-[600px]">
                   <thead className="bg-gray-100 text-gray-700">
                     <tr>
                       <th className="px-4 py-3 text-left font-medium">#</th>
@@ -740,9 +799,7 @@ const NewCustomerAddition = () => {
                     {modalCustomers.map((cust, idx) => (
                       <tr
                         key={cust._id || idx}
-                        className={`hover:bg-gray-50 ${
-                          idx < modalCustomers.length - 1 ? "border-b" : ""
-                        }`}
+                        className={`hover:bg-gray-50 ${idx < modalCustomers.length - 1 ? "border-b" : ""}`}
                       >
                         <td className="px-4 py-3 text-gray-500">
                           {(modalPagination.currentPage - 1) * 10 + idx + 1}
@@ -852,67 +909,148 @@ const NewCustomerAddition = () => {
   };
 
   return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold text-gray-800">
-          New Customer Addition
-        </h1>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder={`Search by ${selectedReportType === "MR Wise" ? "MR name" : "zone name"}...`}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyPress={(e) => e.key === "Enter" && fetchData(1)}
-              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
-            />
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              size={18}
-              onClick={() => inputRef.current?.focus()}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => {
-                  setSearchTerm("");
-                  fetchData(1);
-                }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X size={16} />
-              </button>
-            )}
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <User className="w-5 h-5 text-green-600" />
+            <h1 className="text-base font-bold text-gray-800">New Customers</h1>
           </div>
-          <button
-            onClick={exportToExcel}
-            disabled={exporting || data.records.length === 0}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md ${
-              exporting || data.records.length === 0
-                ? "bg-gray-400 text-white cursor-not-allowed opacity-70"
-                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
-            }`}
-          >
-            {exporting ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download size={18} />
-                Export Excel
-              </>
-            )}
-          </button>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3">
+            <User className="w-8 h-8 text-green-600" />
+            <h1 className="text-2xl font-bold text-gray-800">
+              New Customer Addition
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder={`Search by ${selectedReportType === "MR Wise" ? "MR name" : "zone name"}...`}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && fetchData(1)}
+                className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
+              />
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                size={18}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => {
+                    setSearchTerm("");
+                    fetchData(1);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={exportToExcel}
+              disabled={exporting || data.records.length === 0}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md ${
+                exporting || data.records.length === 0
+                  ? "bg-gray-400 text-white cursor-not-allowed opacity-70"
+                  : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+              }`}
+            >
+              {exporting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download size={18} />
+                  Export Excel
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <input
+            type="text"
+            placeholder={`Search by ${selectedReportType === "MR Wise" ? "MR name" : "zone name"}...`}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyPress={(e) => e.key === "Enter" && fetchData(1)}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={() => {
+                setSearchTerm("");
+                fetchData(1);
+              }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Search result hint */}
+      {searchTerm && pagination.totalRecords > 0 && (
+        <div className="mb-3 p-2 bg-blue-50 rounded-lg">
+          <p
+            className={`text-blue-700 ${isMobileView ? "text-xs" : "text-sm"}`}
+          >
+            Searching: <span className="font-semibold">"{searchTerm}"</span>
+            <span className="ml-3">
+              Found:{" "}
+              <span className="font-bold">{pagination.totalRecords}</span>{" "}
+              record(s)
+            </span>
+          </p>
+        </div>
+      )}
 
       {/* View Type Tabs */}
-      <div className="bg-white p-4 rounded-xl shadow-md mb-4 border border-gray-200">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}
+      >
+        <p
+          className={`${isMobileView ? "text-[9px]" : "text-xs"} font-semibold text-gray-500 uppercase tracking-wide mb-3`}
+        >
           Report Type
         </p>
         <div className="flex flex-wrap gap-2">
@@ -920,7 +1058,7 @@ const NewCustomerAddition = () => {
             <button
               key={type}
               onClick={() => setSelectedReportType(type)}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
+              className={`${isMobileView ? "px-3 py-1.5 text-[10px]" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors ${
                 selectedReportType === type
                   ? "bg-indigo-600 text-white"
                   : "bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -933,8 +1071,12 @@ const NewCustomerAddition = () => {
       </div>
 
       {/* Date Filter Tabs */}
-      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}
+      >
+        <p
+          className={`${isMobileView ? "text-[9px]" : "text-xs"} font-semibold text-gray-500 uppercase tracking-wide mb-3`}
+        >
           Date Filter
         </p>
         <div className="flex flex-wrap gap-2 mb-3">
@@ -943,32 +1085,49 @@ const NewCustomerAddition = () => {
           {tabBtn(
             "currentMonth",
             selectedDateTab,
-            `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
+            isMobileView
+              ? `${getCurrentMonthName().slice(0, 3)} ${getCurrentYear()}`
+              : `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
           )}
           {tabBtn(
             "janToPreviousMonth",
             selectedDateTab,
-            getJanToPreviousMonthRange().label,
+            isMobileView
+              ? getJanToPreviousMonthRange()
+                  .label.replace("January", "Jan")
+                  .replace("February", "Feb")
+                  .replace("March", "Mar")
+              : getJanToPreviousMonthRange().label,
           )}
-          {tabBtn("custom", selectedDateTab, "Custom Filter")}
+          {tabBtn("custom", selectedDateTab, "Custom")}
         </div>
+      </div>
 
-        {/* Active filter display */}
-        <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">
-          <Filter size={14} />
-          <span>Active:</span>
+      {/* Active Filter Display - Moved outside summary cards */}
+      <div
+        className={`bg-indigo-50 rounded-lg p-3 mb-4 flex items-center justify-between flex-wrap gap-2 ${isMobileView ? "text-xs" : "text-sm"}`}
+      >
+        <div className="flex items-center gap-2">
+          <Filter size={isMobileView ? 14 : 16} className="text-indigo-600" />
+          <span className="text-gray-700">Active Filter:</span>
           <span className="font-semibold text-indigo-700">
             {getActiveFilterLabel()}
           </span>
-          {selectedDateTab !== "all" && (
-            <button
-              onClick={handleClearFilters}
-              className="ml-2 text-xs text-red-500 hover:text-red-700 underline"
-            >
-              Clear
-            </button>
+          {selectedReportType !== "All" && (
+            <span className="text-gray-400 mx-1">•</span>
           )}
+          <span className="font-medium text-gray-600">
+            {selectedReportType}
+          </span>
         </div>
+        {selectedDateTab !== "all" && (
+          <button
+            onClick={handleClearFilters}
+            className="text-red-500 hover:text-red-700 underline text-xs md:text-sm"
+          >
+            Clear All Filters
+          </button>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -976,7 +1135,9 @@ const NewCustomerAddition = () => {
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[480px]" : ""}`}
+        >
           {renderTableHeaders()}
           <tbody>
             {loading ? (
@@ -984,7 +1145,11 @@ const NewCustomerAddition = () => {
                 <td colSpan={getColSpan()} className="p-6 text-center">
                   <div className="flex justify-center items-center gap-2">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
-                    <span className="text-gray-500">Loading...</span>
+                    <span
+                      className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+                    >
+                      Loading...
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -994,7 +1159,7 @@ const NewCustomerAddition = () => {
               <tr>
                 <td
                   colSpan={getColSpan()}
-                  className="p-8 text-center text-gray-400"
+                  className={`p-8 text-center ${isMobileView ? "text-xs" : "text-sm"} text-gray-400`}
                 >
                   {selectedDateTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
@@ -1009,6 +1174,7 @@ const NewCustomerAddition = () => {
 
       {renderPagination()}
 
+      {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1016,7 +1182,7 @@ const NewCustomerAddition = () => {
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowCustomFilter(false)}
             />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10 mx-4">
               <button
                 onClick={() => setShowCustomFilter(false)}
                 className="absolute top-3 right-3 text-gray-400 hover:text-gray-700"

@@ -20,10 +20,12 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowLeft,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -35,15 +37,18 @@ function capitalizeWords(str) {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
 }
+
 function formatDate(dateStr) {
   if (!dateStr) return "—";
   const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "—";
   return `${d.getDate().toString().padStart(2, "0")} ${d.toLocaleString("default", { month: "short" })} ${d.getFullYear()}`;
 }
+
 const getCurrentYearLabel = () => `${new Date().getFullYear()}`;
 const getPrevYearLabel = () => `${new Date().getFullYear() - 1}`;
 
-// ─── CUSTOMER DETAIL MODAL ───────────────────────────────────────────────────
+// ─── CUSTOMER DETAIL MODAL (Responsive) ──────────────────────────────────────
 const CustomerDetailModal = ({
   isOpen,
   onClose,
@@ -53,6 +58,7 @@ const CustomerDetailModal = ({
   filterType,
   mrName,
   title,
+  isMobileView,
 }) => {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -63,7 +69,7 @@ const CustomerDetailModal = ({
     if (!isOpen) return;
     setSearchTerm("");
     setExpandedIdx(null);
-    (async () => {
+    const fetchCustomers = async () => {
       setLoading(true);
       try {
         const params = { period, filterType };
@@ -77,12 +83,14 @@ const CustomerDetailModal = ({
           { params },
         );
         setCustomers(res.data?.data || []);
-      } catch {
+      } catch (error) {
+        console.error("Error fetching customers:", error);
         showToast("error", "Failed to load customer details");
       } finally {
         setLoading(false);
       }
-    })();
+    };
+    fetchCustomers();
   }, [isOpen, period, customStartDate, customEndDate, filterType, mrName]);
 
   const filtered = useMemo(() => {
@@ -98,19 +106,28 @@ const CustomerDetailModal = ({
 
   if (!isOpen) return null;
 
+  const tdClass = isMobileView ? "p-2 text-xs" : "p-3 text-sm";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between p-5 border-b border-gray-200">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between p-4 md:p-5 border-b border-gray-200">
+          <div className="flex items-center gap-2 md:gap-3">
             <button
               onClick={onClose}
               className="p-2 hover:bg-gray-100 rounded-lg transition"
             >
-              <ArrowLeft size={18} className="text-gray-600" />
+              <ArrowLeft
+                size={isMobileView ? 16 : 18}
+                className="text-gray-600"
+              />
             </button>
             <div>
-              <h2 className="text-lg font-bold text-gray-800">{title}</h2>
+              <h2
+                className={`${isMobileView ? "text-base" : "text-lg"} font-bold text-gray-800`}
+              >
+                {title}
+              </h2>
               <p className="text-xs text-gray-500 mt-0.5">
                 {loading
                   ? "Loading..."
@@ -122,29 +139,28 @@ const CustomerDetailModal = ({
             onClick={onClose}
             className="p-2 hover:bg-gray-100 rounded-lg transition"
           >
-            <X size={18} className="text-gray-500" />
+            <X size={isMobileView ? 16 : 18} className="text-gray-500" />
           </button>
         </div>
 
-        <div className="p-4 border-b border-gray-100">
+        <div className="p-3 md:p-4 border-b border-gray-100">
           <div className="relative">
             <input
               type="text"
               placeholder="Search customer name, code, or MR..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+              className={`w-full pl-9 md:pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${isMobileView ? "text-xs" : "text-sm"}`}
             />
             <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              size={16}
+              className={`absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 ${isMobileView ? "w-3.5 h-3.5" : "w-4 h-4"}`}
             />
             {searchTerm && (
               <button
                 onClick={() => setSearchTerm("")}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
-                <X size={14} />
+                <X size={isMobileView ? 12 : 14} />
               </button>
             )}
           </div>
@@ -161,135 +177,170 @@ const CustomerDetailModal = ({
               No customers found
             </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 sticky top-0 z-10">
-                <tr className="border-b border-gray-200">
-                  <th className="p-3 text-left text-gray-600 font-semibold w-10">
-                    Sr.
-                  </th>
-                  <th className="p-3 text-left text-gray-600 font-semibold">
-                    Customer Name
-                  </th>
-                  <th className="p-3 text-left text-gray-600 font-semibold">
-                    Code
-                  </th>
-                  <th className="p-3 text-left text-gray-600 font-semibold">
-                    MR Name
-                  </th>
-                  <th className="p-3 text-center text-gray-600 font-semibold">
-                    Orders
-                  </th>
-                  <th className="p-3 text-center text-gray-600 font-semibold">
-                    Type
-                  </th>
-                  <th className="p-3 text-left text-gray-600 font-semibold">
-                    First Purchase
-                  </th>
-                  <th className="p-3 text-left text-gray-600 font-semibold">
-                    Last Purchase
-                  </th>
-                  <th className="p-3 text-center text-gray-600 font-semibold">
-                    Invoices
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((c, idx) => (
-                  <React.Fragment key={c.customerCode || idx}>
-                    <tr
-                      className={`border-b border-gray-100 hover:bg-gray-50 transition ${expandedIdx === idx ? "bg-indigo-50/40" : ""}`}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[800px]">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr className="border-b border-gray-200">
+                    <th
+                      className={`${tdClass} text-left text-gray-600 font-semibold w-10`}
                     >
-                      <td className="p-3 text-gray-500">{idx + 1}</td>
-                      <td className="p-3 font-medium text-gray-900">
-                        {capitalizeWords(c.customerName)}
-                      </td>
-                      <td className="p-3 text-gray-600 text-xs">
-                        {c.customerCode || "—"}
-                      </td>
-                      <td className="p-3 text-gray-600 text-xs">
-                        {capitalizeWords(c.mrName)}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className="inline-flex items-center justify-center w-8 h-8 bg-indigo-50 text-indigo-700 font-bold rounded-full text-sm">
-                          {c.totalOrders}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        {c.isRetained ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                            <UserPlus size={11} /> New in Period
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                            <UserCheck size={11} /> Existing
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 text-gray-600 text-xs">
-                        {formatDate(
-                          c.absoluteFirstPurchase || c.firstPurchaseDate,
-                        )}
-                      </td>
-                      <td className="p-3 text-gray-600 text-xs">
-                        {formatDate(c.lastPurchaseDate)}
-                      </td>
-                      <td className="p-3 text-center">
-                        <button
-                          onClick={() =>
-                            setExpandedIdx(expandedIdx === idx ? null : idx)
-                          }
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs transition"
+                      Sr.
+                    </th>
+                    <th
+                      className={`${tdClass} text-left text-gray-600 font-semibold`}
+                    >
+                      Customer Name
+                    </th>
+                    <th
+                      className={`${tdClass} text-left text-gray-600 font-semibold`}
+                    >
+                      Code
+                    </th>
+                    <th
+                      className={`${tdClass} text-left text-gray-600 font-semibold`}
+                    >
+                      MR Name
+                    </th>
+                    <th
+                      className={`${tdClass} text-center text-gray-600 font-semibold`}
+                    >
+                      Orders
+                    </th>
+                    <th
+                      className={`${tdClass} text-center text-gray-600 font-semibold`}
+                    >
+                      Type
+                    </th>
+                    <th
+                      className={`${tdClass} text-left text-gray-600 font-semibold`}
+                    >
+                      First Purchase
+                    </th>
+                    <th
+                      className={`${tdClass} text-left text-gray-600 font-semibold`}
+                    >
+                      Last Purchase
+                    </th>
+                    <th
+                      className={`${tdClass} text-center text-gray-600 font-semibold`}
+                    >
+                      Invoices
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((c, idx) => (
+                    <React.Fragment key={c.customerCode || idx}>
+                      <tr
+                        className={`border-b border-gray-100 hover:bg-gray-50 transition ${expandedIdx === idx ? "bg-indigo-50/40" : ""}`}
+                      >
+                        <td className={tdClass}>{idx + 1}</td>
+                        <td className={`${tdClass} font-medium text-gray-900`}>
+                          {capitalizeWords(c.customerName)}
+                        </td>
+                        <td
+                          className={`${tdClass} text-gray-600 ${isMobileView ? "text-[10px]" : "text-xs"}`}
                         >
-                          <ShoppingBag size={12} />
-                          {c.invoices?.length || 0}
-                          {expandedIdx === idx ? (
-                            <ChevronUp size={12} />
+                          {c.customerCode || "—"}
+                        </td>
+                        <td
+                          className={`${tdClass} text-gray-600 ${isMobileView ? "text-[10px]" : "text-xs"}`}
+                        >
+                          {capitalizeWords(c.mrName)}
+                        </td>
+                        <td className={`${tdClass} text-center`}>
+                          <span className="inline-flex items-center justify-center w-7 h-7 md:w-8 md:h-8 bg-indigo-50 text-indigo-700 font-bold rounded-full text-xs">
+                            {c.totalOrders}
+                          </span>
+                        </td>
+                        <td className={`${tdClass} text-center`}>
+                          {c.isRetained ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                              <UserPlus size={10} /> New
+                            </span>
                           ) : (
-                            <ChevronDown size={12} />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                              <UserCheck size={10} /> Existing
+                            </span>
                           )}
-                        </button>
-                      </td>
-                    </tr>
-                    {expandedIdx === idx && c.invoices?.length > 0 && (
-                      <tr>
-                        <td colSpan={9} className="bg-indigo-50/30 px-6 py-3">
-                          <div className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1">
-                            <ShoppingBag size={12} /> Invoice History —{" "}
-                            {capitalizeWords(c.customerName)}
-                          </div>
-                          <div className="flex flex-col gap-1">
-                            {c.invoices.map((inv, iIdx) => (
-                              <div
-                                key={iIdx}
-                                className="flex items-center gap-4 bg-white rounded-lg px-3 py-2 border border-indigo-100 text-xs text-gray-700"
-                              >
-                                <span className="font-semibold text-indigo-600 min-w-[80px]">
-                                  #{inv.invoiceNumber}
-                                </span>
-                                <span className="text-gray-500">
-                                  {formatDate(inv.invoiceDate)}
-                                </span>
-                                <span className="font-medium">
-                                  ৳{(inv.totalAmount || 0).toLocaleString()}
-                                </span>
-                                <span
-                                  className={`px-2 py-0.5 rounded-full font-semibold ${inv.paymentStatus === "Paid" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
-                                >
-                                  {inv.paymentStatus}
-                                </span>
-                                <span className="text-gray-400">
-                                  {inv.saleType}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
+                        </td>
+                        <td
+                          className={`${tdClass} text-gray-600 ${isMobileView ? "text-[10px]" : "text-xs"}`}
+                        >
+                          {formatDate(
+                            c.absoluteFirstPurchase || c.firstPurchaseDate,
+                          )}
+                        </td>
+                        <td
+                          className={`${tdClass} text-gray-600 ${isMobileView ? "text-[10px]" : "text-xs"}`}
+                        >
+                          {formatDate(c.lastPurchaseDate)}
+                        </td>
+                        <td className={`${tdClass} text-center`}>
+                          <button
+                            onClick={() =>
+                              setExpandedIdx(expandedIdx === idx ? null : idx)
+                            }
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs transition"
+                          >
+                            <ShoppingBag size={isMobileView ? 10 : 12} />
+                            {c.invoices?.length || 0}
+                            {expandedIdx === idx ? (
+                              <ChevronUp size={isMobileView ? 10 : 12} />
+                            ) : (
+                              <ChevronDown size={isMobileView ? 10 : 12} />
+                            )}
+                          </button>
                         </td>
                       </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+                      {expandedIdx === idx && c.invoices?.length > 0 && (
+                        <tr>
+                          <td
+                            colSpan={9}
+                            className="bg-indigo-50/30 px-4 md:px-6 py-2 md:py-3"
+                          >
+                            <div className="text-xs font-semibold text-indigo-700 mb-2 flex items-center gap-1">
+                              <ShoppingBag size={12} /> Invoice History —{" "}
+                              {capitalizeWords(c.customerName)}
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              {c.invoices.map((inv, iIdx) => (
+                                <div
+                                  key={iIdx}
+                                  className="flex flex-wrap items-center gap-2 md:gap-3 bg-white rounded-lg px-2 md:px-3 py-1.5 md:py-2 border border-indigo-100 text-xs text-gray-700"
+                                >
+                                  <span className="font-semibold text-indigo-600 min-w-[70px] md:min-w-[80px]">
+                                    #{inv.invoiceNumber}
+                                  </span>
+                                  <span className="text-gray-500">
+                                    {formatDate(inv.invoiceDate)}
+                                  </span>
+                                  <span className="font-medium">
+                                    ৳{(inv.totalAmount || 0).toLocaleString()}
+                                  </span>
+                                  <span
+                                    className={`px-1.5 md:px-2 py-0.5 rounded-full text-[10px] md:text-xs font-semibold ${
+                                      inv.paymentStatus === "Paid"
+                                        ? "bg-green-100 text-green-700"
+                                        : "bg-red-100 text-red-700"
+                                    }`}
+                                  >
+                                    {inv.paymentStatus}
+                                  </span>
+                                  <span className="text-gray-400 text-[10px] md:text-xs">
+                                    {inv.saleType}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
@@ -322,7 +373,18 @@ const AnnualCustomerRepeatRate = () => {
     hasPrev: false,
   });
 
-  // ✅ Default = current month (for annual view, use current month as starting point)
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Default = current month (for annual view, use current month as starting point)
   const [period, setPeriod] = useState("month");
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
@@ -354,7 +416,7 @@ const AnnualCustomerRepeatRate = () => {
           params.startDate = customStartDate;
           params.endDate = customEndDate;
         }
-        if (search.trim()) params.search = search.trim();
+        if (search && search.trim()) params.search = search.trim();
         const res = await axios.get(
           `${backendUrl}/api/reports/customer-retention/annual`,
           { params },
@@ -373,7 +435,8 @@ const AnnualCustomerRepeatRate = () => {
             hasPrev: false,
           },
         );
-      } catch {
+      } catch (error) {
+        console.error("Error fetching data:", error);
         showToast("error", "Failed to fetch annual data");
         setData(emptyData);
       } finally {
@@ -385,30 +448,46 @@ const AnnualCustomerRepeatRate = () => {
 
   useEffect(() => {
     fetchData(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   useEffect(() => {
-    if (period !== "custom") fetchData(1);
+    if (period !== "custom") {
+      fetchData(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
+
   useEffect(() => {
-    if (period === "custom" && customStartDate && customEndDate) fetchData(1);
+    if (period === "custom" && customStartDate && customEndDate) {
+      fetchData(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customStartDate, customEndDate]);
+
   useEffect(() => {
-    const t = setTimeout(() => fetchData(1, searchTerm), 500);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => fetchData(1, searchTerm), 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm]);
 
   const handlePageChange = (page) => {
-    if (page >= 1 && page <= pagination.totalPages) fetchData(page);
+    if (page >= 1 && page <= pagination.totalPages) {
+      fetchData(page);
+    }
   };
+
   const handlePeriodChange = (p) => {
     setPeriod(p);
-    if (p === "custom") setShowCustomPicker(true);
-    else {
+    if (p === "custom") {
+      setShowCustomPicker(true);
+    } else {
       setShowCustomPicker(false);
       setCustomStartDate("");
       setCustomEndDate("");
     }
   };
+
   const openModal = (filterType, mrName, title) =>
     setModal({ open: true, filterType, mrName: mrName ?? null, title });
 
@@ -441,7 +520,8 @@ const AnnualCustomerRepeatRate = () => {
       a.remove();
       window.URL.revokeObjectURL(url);
       showToast("success", "Excel downloaded!");
-    } catch {
+    } catch (error) {
+      console.error("Export error:", error);
       showToast("error", "Failed to download Excel");
     } finally {
       setExporting(false);
@@ -457,6 +537,218 @@ const AnnualCustomerRepeatRate = () => {
 
   const summary = data.summary || emptyData.summary;
 
+  // Responsive table headers
+  const renderTableHeaders = () => {
+    const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
+    return (
+      <thead className="bg-gray-100 text-gray-700 border-b">
+        <tr>
+          <th className={thClass}>Sr.No</th>
+          <th className={`${thClass} text-left`}>MR Name</th>
+          <th className={thClass}>
+            Total
+            {!isMobileView && (
+              <div className="text-[9px] text-gray-400">click to view</div>
+            )}
+          </th>
+          <th className={thClass}>
+            New
+            {!isMobileView && (
+              <div className="text-[9px] text-gray-400">click to view</div>
+            )}
+          </th>
+          <th className={thClass}>
+            Existing
+            {!isMobileView && (
+              <div className="text-[9px] text-gray-400">before period</div>
+            )}
+          </th>
+          <th className={thClass}>
+            Rate
+            {!isMobileView && (
+              <div className="text-[9px] text-gray-400">New/Existing%</div>
+            )}
+          </th>
+        </tr>
+      </thead>
+    );
+  };
+
+  // Responsive summary cards
+  const renderSummaryCards = () => {
+    const cardClass = `bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4`;
+    const valueClass = `${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`;
+    const labelClass = `${isMobileView ? "text-xs" : "text-sm"} text-gray-600`;
+
+    return (
+      <div
+        className={`grid gap-4 mb-6 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-4 gap-6"}`}
+      >
+        {/* Total Customers */}
+        <button
+          onClick={() => openModal("all", null, "All Customers in Period")}
+          className={`${cardClass} border-green-500 text-left hover:shadow-lg transition-all cursor-pointer`}
+        >
+          <div className="flex justify-between items-center">
+            <div>
+              <div className={labelClass}>Total Customers</div>
+              <div className={valueClass}>
+                {loading ? (
+                  <div
+                    className={`${isMobileView ? "h-6 w-16" : "h-8 w-20"} bg-gray-200 rounded animate-pulse`}
+                  />
+                ) : (
+                  summary.totalCustomers?.toLocaleString() || 0
+                )}
+              </div>
+              {!isMobileView && (
+                <div className="text-xs text-green-600 mt-0.5 opacity-0 group-hover:opacity-100 transition">
+                  Click to view all →
+                </div>
+              )}
+            </div>
+            <Users
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-green-500`}
+            />
+          </div>
+        </button>
+
+        {/* New Customers */}
+        <button
+          onClick={() => openModal("retained", null, "New Customers in Period")}
+          className={`${cardClass} border-blue-500 text-left hover:shadow-lg transition-all cursor-pointer`}
+        >
+          <div className="flex justify-between items-center">
+            <div>
+              <div className={labelClass}>New Customers</div>
+              <div className={valueClass}>
+                {loading ? (
+                  <div
+                    className={`${isMobileView ? "h-6 w-16" : "h-8 w-20"} bg-gray-200 rounded animate-pulse`}
+                  />
+                ) : (
+                  summary.retainedCustomers?.toLocaleString() || 0
+                )}
+              </div>
+              {!isMobileView && (
+                <div className="text-xs text-blue-600 mt-0.5 opacity-0 group-hover:opacity-100 transition">
+                  Click to view →
+                </div>
+              )}
+            </div>
+            <UserPlus
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-blue-500`}
+            />
+          </div>
+        </button>
+
+        {/* Existing Customers */}
+        <div className={`${cardClass} border-purple-500`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <div className={labelClass}>Existing Customers</div>
+              <div className={valueClass}>
+                {loading ? (
+                  <div
+                    className={`${isMobileView ? "h-6 w-16" : "h-8 w-20"} bg-gray-200 rounded animate-pulse`}
+                  />
+                ) : (
+                  (() => {
+                    const existing =
+                      summary.existingCustomers ??
+                      summary.totalCustomers - summary.retainedCustomers;
+                    return existing?.toLocaleString() || 0;
+                  })()
+                )}
+              </div>
+              {!isMobileView && (
+                <div className="text-xs text-gray-400 mt-1">
+                  Bought before this period
+                </div>
+              )}
+            </div>
+            <UserCheck
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-purple-500`}
+            />
+          </div>
+        </div>
+
+        {/* Retention Rate */}
+        <div className={`${cardClass} border-orange-500`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <div className={labelClass}>Retention Rate</div>
+              <div className={valueClass}>
+                {loading ? (
+                  <div
+                    className={`${isMobileView ? "h-6 w-16" : "h-8 w-20"} bg-gray-200 rounded animate-pulse`}
+                  />
+                ) : (
+                  `${summary.retentionRate?.toFixed(2) || 0}%`
+                )}
+              </div>
+              {!isMobileView && (
+                <div className="text-xs text-gray-400 mt-1">
+                  New / Existing × 100
+                </div>
+              )}
+            </div>
+            <BarChart3
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-orange-500`}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Responsive pagination
+  const renderPagination = () => {
+    if (pagination.totalPages <= 1) return null;
+    return (
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
+        <button
+          onClick={() => handlePageChange(pagination.currentPage - 1)}
+          disabled={pagination.currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          ← Prev
+        </button>
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
+            <button
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
+        <button
+          onClick={() => handlePageChange(pagination.currentPage + 1)}
+          disabled={pagination.currentPage === pagination.totalPages}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+        >
+          Next →
+        </button>
+      </div>
+    );
+  };
+
   return (
     <>
       <CustomerDetailModal
@@ -468,268 +760,228 @@ const AnnualCustomerRepeatRate = () => {
         filterType={modal.filterType}
         mrName={modal.mrName}
         title={modal.title}
+        isMobileView={isMobileView}
       />
 
-      <div className="p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold text-gray-800">
-            Annual Customer Repeat Rate – MR Summary
-          </h1>
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search by MR name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && fetchData(1)}
-                className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-72"
-              />
-              <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                size={18}
-              />
-              {searchTerm && (
-                <button
-                  onClick={() => {
-                    setSearchTerm("");
-                    fetchData(1, "");
-                  }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-            <button
-              onClick={exportToExcel}
-              disabled={exporting || !data.records?.length}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md ${exporting || !data.records?.length ? "bg-gray-400 text-white cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"}`}
-            >
-              <Download size={18} />
-              {exporting ? "Exporting..." : "Export Excel"}
-            </button>
-          </div>
-        </div>
+      <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+        {/* ── Sidebar (mobile only) ── */}
+        {isMobileView && (
+          <Sidebar
+            isOpen={sidebarOpen}
+            toggleSidebar={() => setSidebarOpen(false)}
+            isMobile={true}
+          />
+        )}
 
-        {/* Period Tabs */}
-        <div className="flex flex-wrap items-center gap-3 mb-4">
+        {/* ── MOBILE Header ── */}
+        {isMobileView && (
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+              >
+                <Menu size={20} className="text-gray-700" />
+              </button>
+              <BarChart3 className="w-5 h-5 text-indigo-600" />
+              <h1 className="text-base font-bold text-gray-800">Annual Rate</h1>
+            </div>
+            <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+              Total: {pagination.totalRecords}
+            </div>
+          </div>
+        )}
+
+        {/* ── DESKTOP Header ── */}
+        {!isMobileView && (
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold text-gray-800">
+              Annual Customer Repeat Rate – MR Summary
+            </h1>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search by MR name..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && fetchData(1)}
+                  className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-72"
+                />
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                  size={18}
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => {
+                      setSearchTerm("");
+                      fetchData(1, "");
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={exportToExcel}
+                disabled={exporting || !data.records?.length}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md ${exporting || !data.records?.length ? "bg-gray-400 text-white cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"}`}
+              >
+                <Download size={18} />
+                {exporting ? "Exporting..." : "Export Excel"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── MOBILE Search ── */}
+        {isMobileView && (
+          <div className="relative mb-4">
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search MR name..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && fetchData(1)}
+              className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+            />
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              size={15}
+            />
+            {searchTerm && (
+              <button
+                onClick={() => {
+                  setSearchTerm("");
+                  fetchData(1, "");
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Period Tabs - Responsive */}
+        <div
+          className={`flex flex-wrap gap-2 mb-4 ${isMobileView ? "overflow-x-auto whitespace-nowrap pb-2" : ""}`}
+        >
           {[
-            { id: "today", label: "Today" },
-            { id: "all", label: "All Records" },
-            { id: "month", label: `This Month` },
-            { id: "last_year", label: `Last Year (${getPrevYearLabel()})` },
-            { id: "jan_feb", label: `Jan – Now (${getCurrentYearLabel()})` },
+            { id: "today", label: isMobileView ? "Today" : "Today" },
+            { id: "all", label: isMobileView ? "All" : "All Records" },
+            { id: "month", label: isMobileView ? "Month" : "This Month" },
+            {
+              id: "last_year",
+              label: isMobileView
+                ? `Last Yr`
+                : `Last Year (${getPrevYearLabel()})`,
+            },
+            {
+              id: "jan_feb",
+              label: isMobileView
+                ? `Jan-Now`
+                : `Jan – Now (${getCurrentYearLabel()})`,
+            },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => handlePeriodChange(tab.id)}
-              className={`px-4 py-2 rounded-lg font-medium transition text-sm ${period === tab.id ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg font-medium transition whitespace-nowrap ${period === tab.id ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
             >
               {tab.label}
             </button>
           ))}
           <button
             onClick={() => handlePeriodChange("custom")}
-            className={`px-4 py-2 rounded-lg font-medium transition text-sm flex items-center gap-2 ${period === "custom" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+            className={`flex items-center gap-1 ${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg font-medium transition whitespace-nowrap ${period === "custom" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
           >
-            <Calendar size={16} /> Custom Filter
+            <Calendar size={isMobileView ? 12 : 16} /> Custom
           </button>
         </div>
 
+        {/* Custom Date Picker - Responsive */}
         {showCustomPicker && (
-          <div className="flex flex-wrap items-center gap-4 mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">
+          <div
+            className={`flex flex-wrap items-center gap-3 mb-6 p-3 bg-gray-50 rounded-lg border border-gray-200 ${isMobileView ? "flex-col items-stretch" : ""}`}
+          >
+            <div className={isMobileView ? "w-full" : "flex-1"}>
+              <label className="block text-xs text-gray-600 mb-1">
                 Start Date
               </label>
               <input
                 type="date"
                 value={customStartDate}
                 onChange={(e) => setCustomStartDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
+                className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 ${isMobileView ? "text-xs" : "text-sm"}`}
               />
             </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">
+            <div className={isMobileView ? "w-full" : "flex-1"}>
+              <label className="block text-xs text-gray-600 mb-1">
                 End Date
               </label>
               <input
                 type="date"
                 value={customEndDate}
                 onChange={(e) => setCustomEndDate(e.target.value)}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm"
+                className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 ${isMobileView ? "text-xs" : "text-sm"}`}
               />
             </div>
-            <button
-              onClick={() => {
-                if (!customStartDate || !customEndDate) {
-                  showToast("warning", "Please select both dates");
-                  return;
-                }
-                if (customStartDate > customEndDate) {
-                  showToast("warning", "Start date cannot be after end date");
-                  return;
-                }
-                fetchData(1);
-              }}
-              className="mt-5 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm cursor-pointer"
-            >
-              Apply
-            </button>
-            <button
-              onClick={() => {
-                setCustomStartDate("");
-                setCustomEndDate("");
-                setPeriod("month");
-                setShowCustomPicker(false);
-              }}
-              className="mt-5 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm cursor-pointer"
-            >
-              Clear
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  if (!customStartDate || !customEndDate) {
+                    showToast("warning", "Please select both dates");
+                    return;
+                  }
+                  if (customStartDate > customEndDate) {
+                    showToast("warning", "Start date cannot be after end date");
+                    return;
+                  }
+                  fetchData(1);
+                }}
+                className={`flex-1 sm:flex-none px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 ${isMobileView ? "text-xs" : "text-sm"} cursor-pointer`}
+              >
+                Apply
+              </button>
+              <button
+                onClick={() => {
+                  setCustomStartDate("");
+                  setCustomEndDate("");
+                  setPeriod("month");
+                  setShowCustomPicker(false);
+                }}
+                className={`flex-1 sm:flex-none px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 ${isMobileView ? "text-xs" : "text-sm"} cursor-pointer`}
+              >
+                Clear
+              </button>
+            </div>
           </div>
         )}
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          <button
-            onClick={() => openModal("all", null, "All Customers in Period")}
-            className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 text-left hover:shadow-lg hover:scale-[1.02] transition-all group cursor-pointer"
-          >
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="text-sm text-gray-600 group-hover:text-green-700 transition">
-                  Total Customers
-                </div>
-                <div className="text-2xl font-bold text-gray-800">
-                  {loading ? (
-                    <div className="h-8 w-20 bg-gray-200 rounded animate-pulse" />
-                  ) : (
-                    summary.totalCustomers
-                  )}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  New + Existing in period
-                </div>
-                <div className="text-xs text-green-600 mt-0.5 opacity-0 group-hover:opacity-100 transition">
-                  Click to view all →
-                </div>
-              </div>
-              <Users className="w-8 h-8 text-green-500" />
-            </div>
-          </button>
-
-          <button
-            onClick={() =>
-              openModal("retained", null, "New Customers in Period")
-            }
-            className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 text-left hover:shadow-lg hover:scale-[1.02] transition-all group cursor-pointer"
-          >
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="text-sm text-gray-600 group-hover:text-blue-700 transition">
-                  New Customers
-                </div>
-                <div className="text-2xl font-bold text-gray-800">
-                  {loading ? (
-                    <div className="h-8 w-20 bg-gray-200 rounded animate-pulse" />
-                  ) : (
-                    summary.retainedCustomers
-                  )}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  First purchase in this period
-                </div>
-                <div className="text-xs text-blue-600 mt-0.5 opacity-0 group-hover:opacity-100 transition">
-                  Click to view →
-                </div>
-              </div>
-              <UserPlus className="w-8 h-8 text-blue-500" />
-            </div>
-          </button>
-
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500">
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="text-sm text-gray-600">Existing Customers</div>
-                <div className="text-2xl font-bold text-gray-800">
-                  {loading ? (
-                    <div className="h-8 w-20 bg-gray-200 rounded animate-pulse" />
-                  ) : (
-                    (summary.existingCustomers ??
-                    summary.totalCustomers - summary.retainedCustomers)
-                  )}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  Bought before this period
-                </div>
-              </div>
-              <UserCheck className="w-8 h-8 text-purple-500" />
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500">
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="text-sm text-gray-600">Retention Rate</div>
-                <div className="text-2xl font-bold text-gray-800">
-                  {loading ? (
-                    <div className="h-8 w-20 bg-gray-200 rounded animate-pulse" />
-                  ) : (
-                    `${summary.retentionRate?.toFixed(2) || 0}%`
-                  )}
-                </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  New / Existing × 100
-                </div>
-              </div>
-              <BarChart3 className="w-8 h-8 text-orange-500" />
-            </div>
-          </div>
-        </div>
+        {renderSummaryCards()}
 
         {/* MR Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-            <thead className="bg-gray-100 text-gray-700 border-b">
-              <tr>
-                <th className="p-3 text-sm font-medium">Sr.No</th>
-                <th className="p-3 text-sm font-medium text-left">MR Name</th>
-                <th className="p-3 text-sm font-medium">
-                  Total Customers
-                  <div className="text-xs text-gray-400 font-normal leading-tight">
-                    click to view
-                  </div>
-                </th>
-                <th className="p-3 text-sm font-medium">
-                  New in Period
-                  <div className="text-xs text-gray-400 font-normal leading-tight">
-                    click to view
-                  </div>
-                </th>
-                <th className="p-3 text-sm font-medium">
-                  Existing
-                  <div className="text-xs text-gray-400 font-normal leading-tight">
-                    before period
-                  </div>
-                </th>
-                <th className="p-3 text-sm font-medium">
-                  Retention Rate
-                  <div className="text-xs text-gray-400 font-normal leading-tight">
-                    New / Existing %
-                  </div>
-                </th>
-              </tr>
-            </thead>
+          <table
+            className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[500px]" : ""}`}
+          >
+            {renderTableHeaders()}
             <tbody>
               {loading ? (
                 <tr>
                   <td colSpan={6} className="p-8 text-center">
                     <div className="flex justify-center items-center gap-2">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
-                      <span className="text-gray-500">Loading...</span>
+                      <span
+                        className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
+                      >
+                        Loading...
+                      </span>
                     </div>
                   </td>
                 </tr>
@@ -739,13 +991,17 @@ const AnnualCustomerRepeatRate = () => {
                     key={mr._id || index}
                     className={`hover:bg-gray-50 ${index < filteredRecords.length - 1 ? "border-b border-gray-100" : ""}`}
                   >
-                    <td className="p-3 text-sm text-gray-600 font-medium">
-                      {index + 1}
+                    <td
+                      className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-gray-600 font-medium`}
+                    >
+                      {(pagination.currentPage - 1) * itemsPerPage + index + 1}
                     </td>
-                    <td className="p-3 text-sm font-medium text-gray-900 capitalize text-left">
+                    <td
+                      className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} font-medium text-gray-900 capitalize text-left`}
+                    >
                       {mr.mrName || "—"}
                     </td>
-                    <td className="p-3">
+                    <td className={isMobileView ? "p-2" : "p-3"}>
                       <button
                         onClick={() =>
                           openModal(
@@ -754,13 +1010,12 @@ const AnnualCustomerRepeatRate = () => {
                             `${mr.mrName || "MR"} — All Customers`,
                           )
                         }
-                        title={`View all customers for ${mr.mrName}`}
-                        className="inline-flex items-center justify-center min-w-[36px] h-8 bg-indigo-50 text-indigo-700 font-bold text-sm rounded-full px-3 hover:bg-indigo-200 hover:scale-110 transition-all cursor-pointer ring-1 ring-indigo-200"
+                        className={`inline-flex items-center justify-center min-w-[32px] h-7 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-full px-2 hover:bg-indigo-200 transition-all cursor-pointer ring-1 ring-indigo-200`}
                       >
                         {mr.totalCustomers || 0}
                       </button>
                     </td>
-                    <td className="p-3">
+                    <td className={isMobileView ? "p-2" : "p-3"}>
                       <button
                         onClick={() =>
                           openModal(
@@ -769,25 +1024,31 @@ const AnnualCustomerRepeatRate = () => {
                             `${mr.mrName || "MR"} — New Customers`,
                           )
                         }
-                        title={`View new customers for ${mr.mrName}`}
-                        className="inline-flex items-center justify-center min-w-[36px] h-8 bg-blue-50 text-blue-700 font-bold text-sm rounded-full px-3 hover:bg-blue-200 hover:scale-110 transition-all cursor-pointer ring-1 ring-blue-200"
+                        className={`inline-flex items-center justify-center min-w-[32px] h-7 bg-blue-50 text-blue-700 font-bold text-xs rounded-full px-2 hover:bg-blue-200 transition-all cursor-pointer ring-1 ring-blue-200`}
                       >
                         {mr.retainedCustomers || 0}
                       </button>
                     </td>
-                    <td className="p-3">
-                      <span className="inline-flex items-center justify-center min-w-[36px] h-8 bg-green-50 text-green-700 font-bold text-sm rounded-full px-3 ring-1 ring-green-200">
+                    <td className={isMobileView ? "p-2" : "p-3"}>
+                      <span
+                        className={`inline-flex items-center justify-center min-w-[32px] h-7 bg-green-50 text-green-700 font-bold text-xs rounded-full px-2 ring-1 ring-green-200`}
+                      >
                         {mr.existingCustomers || 0}
                       </span>
                     </td>
-                    <td className="p-3 text-sm font-semibold text-gray-800">
+                    <td
+                      className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} font-semibold text-gray-800`}
+                    >
                       {mr.retentionRate?.toFixed(2) ?? 0}%
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="p-10 text-center text-gray-400">
+                  <td
+                    colSpan={6}
+                    className={`p-8 text-center ${isMobileView ? "text-xs" : "text-sm"} text-gray-400`}
+                  >
                     {period === "custom" && (!customStartDate || !customEndDate)
                       ? "Please select start and end dates"
                       : "No MR data found for selected filter"}
@@ -798,39 +1059,10 @@ const AnnualCustomerRepeatRate = () => {
           </table>
         </div>
 
-        {/* Pagination */}
-        {pagination.totalPages > 1 && filteredRecords.length > 0 && (
-          <div className="flex items-center justify-start gap-2 mt-6">
-            <button
-              onClick={() => handlePageChange(pagination.currentPage - 1)}
-              disabled={!pagination.hasPrev}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasPrev ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
-            >
-              <ChevronLeft size={16} /> Prev
-            </button>
-            <div className="flex gap-1">
-              {visiblePages.map((page, i) => (
-                <button
-                  key={i}
-                  onClick={() =>
-                    typeof page === "number" && handlePageChange(page)
-                  }
-                  disabled={typeof page !== "number"}
-                  className={`min-w-[40px] px-3 py-2 rounded-lg ${page === pagination.currentPage ? "bg-indigo-600 text-white" : typeof page === "number" ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-transparent text-gray-500 cursor-default"}`}
-                >
-                  {page}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => handlePageChange(pagination.currentPage + 1)}
-              disabled={!pagination.hasNext}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg ${pagination.hasNext ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer" : "bg-gray-100 text-gray-400 cursor-not-allowed"}`}
-            >
-              Next <ChevronRight size={16} />
-            </button>
-          </div>
-        )}
+        {renderPagination()}
+
+        {/* ── MOBILE bottom action bar (Export button REMOVED) ── */}
+        {/* Export button is completely removed on mobile view */}
       </div>
     </>
   );

@@ -10,6 +10,7 @@ import {
   X,
   FileText,
   Eye,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -18,6 +19,7 @@ import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -57,6 +59,17 @@ const MRWiseOutstanding = () => {
     hasPrev: false,
   });
   const inputRef = useRef(null);
+
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // State for customer modal
   const [selectedMR, setSelectedMR] = useState(null);
@@ -423,131 +436,265 @@ const MRWiseOutstanding = () => {
       maximumFractionDigits: 2,
     });
 
+  // Responsive table headers
+  const renderTableHeaders = () => {
+    const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
+    return (
+      <thead className="bg-gray-100 text-gray-700 border-b">
+        <tr>
+          <th className={thClass}>Sr.No</th>
+          {!isMobileView && <th className={thClass}>MR ID</th>}
+          <th className={`${thClass} text-left`}>MR Name</th>
+          {!isMobileView && <th className={thClass}>Contact</th>}
+          <th className={thClass}>Customers</th>
+          <th className={thClass}>Outstanding ($)</th>
+          <th className={thClass}>Action</th>
+        </tr>
+      </thead>
+    );
+  };
+
+  // Responsive pagination
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
-          disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasPrev
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          disabled={pagination.currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          <ChevronLeft size={16} /> Prev
+          ← Prev
         </button>
-        <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
             <button
-              key={index}
-              onClick={() =>
-                typeof page === "number" ? handlePageChange(page) : null
-              }
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number"
-                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                    : "bg-transparent text-gray-500 cursor-default"
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
               }`}
-              disabled={typeof page !== "number"}
             >
               {page}
             </button>
-          ))}
-        </div>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
-          disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasNext
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          disabled={pagination.currentPage === pagination.totalPages}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          Next <ChevronRight size={16} />
+          Next →
         </button>
       </div>
     );
   };
 
-  return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-3">
-          <Users className="w-8 h-8 text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-800">
-            MR Wise Outstanding
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by MR name or ID..."
-              value={searchTerm}
-              onChange={handleSearchChange}
-              onKeyPress={handleSearch}
-              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
+  // Responsive summary cards
+  const renderSummaryCards = () => {
+    const cardClass = `bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4`;
+    const valueClass = `${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`;
+    const labelClass = `${isMobileView ? "text-xs" : "text-sm"} text-gray-600`;
+
+    return (
+      <div
+        className={`grid gap-4 mb-6 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-3 gap-6"}`}
+      >
+        <div className={`${cardClass} border-blue-500`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <div className={labelClass}>Total Outstanding</div>
+              <div className={valueClass}>
+                ${fmt(data.summary.totalOutstandingAmount)}
+              </div>
+            </div>
+            <FileText
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-blue-500`}
             />
-            <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-              size={18}
-              onClick={() => inputRef.current?.focus()}
-            />
-            {searchTerm && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            )}
           </div>
-          <button
-            onClick={exportToExcel}
-            disabled={
-              exporting ||
-              (selectedTab === "custom" &&
-                (!customDateRange.startDate || !customDateRange.endDate))
-            }
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
-              exporting ||
-              (selectedTab === "custom" &&
-                (!customDateRange.startDate || !customDateRange.endDate))
-                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 text-white"
-            }`}
-          >
-            <Download size={18} />
-            {exporting ? "Exporting..." : "Export Excel"}
-          </button>
+        </div>
+        <div className={`${cardClass} border-green-500`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <div className={labelClass}>Total Customers</div>
+              <div className={valueClass}>
+                {data.summary.totalCustomers?.toLocaleString() || 0}
+              </div>
+            </div>
+            <Users
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-green-500`}
+            />
+          </div>
+        </div>
+        <div className={`${cardClass} border-purple-500`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <div className={labelClass}>Total MRs</div>
+              <div className={valueClass}>
+                {data.summary.totalMRs?.toLocaleString() || 0}
+              </div>
+            </div>
+            <User
+              className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-purple-500`}
+            />
+          </div>
         </div>
       </div>
+    );
+  };
 
-      {/* Tabs */}
-      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-        <div className="flex flex-wrap gap-2 mb-4">
+  return (
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <Users className="w-5 h-5 text-blue-600" />
+            <h1 className="text-base font-bold text-gray-800">
+              MR Outstanding
+            </h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
+        </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3">
+            <Users className="w-8 h-8 text-blue-600" />
+            <h1 className="text-2xl font-bold text-gray-800">
+              MR Wise Outstanding
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by MR name or ID..."
+                value={searchTerm}
+                onChange={handleSearchChange}
+                onKeyPress={handleSearch}
+                className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
+              />
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                size={18}
+              />
+              {searchTerm && (
+                <button
+                  onClick={handleClearSearch}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={exportToExcel}
+              disabled={
+                exporting ||
+                (selectedTab === "custom" &&
+                  (!customDateRange.startDate || !customDateRange.endDate))
+              }
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+                exporting ||
+                (selectedTab === "custom" &&
+                  (!customDateRange.startDate || !customDateRange.endDate))
+                  ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-700 text-white"
+              }`}
+            >
+              <Download size={18} />
+              {exporting ? "Exporting..." : "Export Excel"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-4">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search MR name..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            onKeyPress={handleSearch}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={handleClearSearch}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Tabs - Responsive */}
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-6 border border-gray-200`}
+      >
+        <div
+          className={`flex flex-wrap gap-2 mb-4 ${isMobileView ? "overflow-x-auto whitespace-nowrap pb-2" : ""}`}
+        >
           {[
             {
               key: "currentMonth",
-              label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
+              label: isMobileView
+                ? `${getCurrentMonthName().slice(0, 3)} ${getCurrentYear()}`
+                : `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
             },
             {
               key: "janToPreviousMonth",
-              label: getJanToPreviousMonthRange().label,
+              label: isMobileView
+                ? getJanToPreviousMonthRange().label.slice(0, 12)
+                : getJanToPreviousMonthRange().label,
             },
-            { key: "custom", label: "Custom Filter" },
-            { key: "all", label: "All Records" },
+            { key: "custom", label: "Custom" },
+            { key: "all", label: isMobileView ? "All" : "All Records" },
           ].map(({ key, label }) => (
             <button
               key={key}
               onClick={() => handleTabChange(key)}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors whitespace-nowrap ${
                 selectedTab === key
                   ? "bg-indigo-600 text-white"
                   : "bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -557,71 +704,32 @@ const MRWiseOutstanding = () => {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <Filter size={16} />
+        <div
+          className={`flex items-center gap-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+        >
+          <Filter size={isMobileView ? 13 : 16} />
           <span>Active Filter: </span>
           <span className="font-medium">{getActiveFilterDisplay()}</span>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">Total Outstanding</p>
-              <p className="text-2xl font-bold text-gray-800">
-                ${fmt(data.summary.totalOutstandingAmount)}
-              </p>
-            </div>
-            <FileText className="w-8 h-8 text-blue-500" />
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">Total Customers</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {data.summary.totalCustomers || 0}
-              </p>
-            </div>
-            <Users className="w-8 h-8 text-green-500" />
-          </div>
-        </div>
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-gray-600">Total MRs</p>
-              <p className="text-2xl font-bold text-gray-800">
-                {data.summary.totalMRs || 0}
-              </p>
-            </div>
-            <User className="w-8 h-8 text-purple-500" />
-          </div>
-        </div>
-      </div>
+      {renderSummaryCards()}
 
       {/* Main Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-sm font-medium">Sr.No</th>
-              <th className="p-3 text-sm font-medium">MR ID</th>
-              <th className="p-3 text-sm font-medium">MR Name</th>
-              <th className="p-3 text-sm font-medium">Contact</th>
-              <th className="p-3 text-sm font-medium">Total Customers</th>
-              <th className="p-3 text-sm font-medium">Total Outstanding ($)</th>
-              <th className="p-3 text-sm font-medium">Actions</th>
-            </tr>
-          </thead>
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[550px]" : ""}`}
+        >
+          {renderTableHeaders()}
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" className="p-8 text-center">
+                <td colSpan={isMobileView ? 5 : 7} className="p-8 text-center">
                   <div className="flex justify-center items-center gap-2">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
-                    <span>Loading...</span>
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
+                    <span className={`${isMobileView ? "text-xs" : "text-sm"}`}>
+                      Loading...
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -634,30 +742,51 @@ const MRWiseOutstanding = () => {
                   }`}
                   onClick={() => handleRowClick(mr)}
                 >
-                  <td className="p-3 text-sm text-gray-600 font-medium">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-gray-600 font-medium`}
+                  >
                     {getSerialNumber(index)}
                   </td>
-                  <td className="p-3 text-sm text-gray-600 font-medium">
-                    {mr.mrId || "N/A"}
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900 capitalize">
+                  {!isMobileView && (
+                    <td
+                      className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-gray-600 font-medium`}
+                    >
+                      {mr.mrId || "N/A"}
+                    </td>
+                  )}
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-left`}
+                  >
+                    <div className="font-medium text-gray-900 capitalize">
                       {mr.mrName}
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {mr.staff?.email || "No email"}
-                    </div>
+                    {isMobileView && mr.staff?.email && (
+                      <div className="text-[10px] text-gray-500 truncate max-w-[120px]">
+                        {mr.staff?.email || "No email"}
+                      </div>
+                    )}
+                    {isMobileView && mr.staff?.contactNo && (
+                      <div className="text-[10px] text-gray-400">
+                        {mr.staff?.contactNo}
+                      </div>
+                    )}
                   </td>
-                  <td className="p-3 text-sm text-gray-900">
-                    {mr.staff?.contactNo || "Not Available"}
-                  </td>
-                  <td className="p-3 text-sm font-semibold text-green-600">
+                  {!isMobileView && (
+                    <td className="p-3 text-sm text-gray-900">
+                      {mr.staff?.contactNo || "Not Available"}
+                    </td>
+                  )}
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} font-semibold text-green-600`}
+                  >
                     {mr.totalCustomers || 0}
                   </td>
-                  <td className="p-3 text-sm font-semibold text-blue-600">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} font-semibold text-blue-600`}
+                  >
                     ${fmt(mr.totalOutstandingAmount)}
                   </td>
-                  <td className="p-3">
+                  <td className={isMobileView ? "p-2" : "p-3"}>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -666,14 +795,17 @@ const MRWiseOutstanding = () => {
                       className="text-blue-600 hover:text-blue-800"
                       title="View Invoice Details"
                     >
-                      <Eye size={18} />
+                      <Eye size={isMobileView ? 16 : 18} />
                     </button>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="7" className="p-8 text-center text-gray-500">
+                <td
+                  colSpan={isMobileView ? 5 : 7}
+                  className={`p-8 text-center ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
+                >
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -687,45 +819,51 @@ const MRWiseOutstanding = () => {
 
       {renderPagination()}
 
+      {/* Customer Modal - Responsive (Export button hidden on mobile) */}
       {customerModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
             <div className="bg-white w-full max-w-5xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
               {/* Modal Header */}
-              <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between p-4 md:p-6 border-b border-gray-200 flex-wrap gap-3">
                 <div>
-                  <h2 className="text-xl font-semibold text-gray-800">
+                  <h2
+                    className={`${isMobileView ? "text-base" : "text-xl"} font-semibold text-gray-800`}
+                  >
                     Invoice Details — {selectedMR?.mrName}
                   </h2>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <p className="text-xs text-gray-500 mt-0.5">
                     All outstanding invoices for this MR
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <button
-                    onClick={exportModalToExcel}
-                    disabled={exportingModal || customerDetails.length === 0}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer ${
-                      exportingModal || customerDetails.length === 0
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-green-600 hover:bg-green-700 text-white"
-                    }`}
-                    title="Export to Excel"
-                  >
-                    <Download size={16} />
-                    {exportingModal ? "Exporting..." : "Export"}
-                  </button>
+                  {/* Export button - Only visible on desktop */}
+                  {!isMobileView && (
+                    <button
+                      onClick={exportModalToExcel}
+                      disabled={exportingModal || customerDetails.length === 0}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm ${
+                        exportingModal || customerDetails.length === 0
+                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                          : "bg-green-600 hover:bg-green-700 text-white"
+                      }`}
+                      title="Export to Excel"
+                    >
+                      <Download size={16} />
+                      {exportingModal ? "Exporting..." : "Export"}
+                    </button>
+                  )}
                   <button
                     onClick={() => setCustomerModalOpen(false)}
                     className="text-gray-400 hover:text-gray-600 transition-colors"
                   >
-                    <X size={24} />
+                    <X size={isMobileView ? 20 : 24} />
                   </button>
                 </div>
               </div>
 
               {/* Modal Body */}
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto p-4 md:p-6">
                 {loadingCustomers ? (
                   <div className="flex justify-center items-center h-40 gap-2">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
@@ -739,78 +877,81 @@ const MRWiseOutstanding = () => {
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse text-sm">
+                    <table className="w-full border-collapse text-sm min-w-[700px]">
                       <thead className="bg-gray-50 sticky top-0">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                          <th className="px-3 md:px-4 py-2 md:py-3 text-left text-[10px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
                             Sr.No
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                          <th className="px-3 md:px-4 py-2 md:py-3 text-left text-[10px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
                             Invoice
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
-                            Customer Name
+                          <th className="px-3 md:px-4 py-2 md:py-3 text-left text-[10px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Customer
                           </th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
-                            Customer Address
+                          {!isMobileView && (
+                            <th className="px-3 md:px-4 py-2 md:py-3 text-left text-[10px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                              Address
+                            </th>
+                          )}
+                          <th className="px-3 md:px-4 py-2 md:py-3 text-right text-[10px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Total ($)
                           </th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
-                            Total Amount ($)
+                          <th className="px-3 md:px-4 py-2 md:py-3 text-right text-[10px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Collected ($)
                           </th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
-                            Collected Amount ($)
-                          </th>
-                          <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
-                            Pending Amount ($)
+                          <th className="px-3 md:px-4 py-2 md:py-3 text-right text-[10px] md:text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
+                            Pending ($)
                           </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
                         {customerDetails.map((row, idx) => (
                           <tr key={idx} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-gray-500">
+                            <td className="px-3 md:px-4 py-2 text-gray-500 text-xs md:text-sm">
                               {idx + 1}
                             </td>
-                            <td className="px-4 py-3 font-mono font-semibold text-indigo-700">
+                            <td className="px-3 md:px-4 py-2 font-mono font-semibold text-indigo-700 text-xs md:text-sm">
                               {row.invoiceNumber || "N/A"}
                             </td>
-                            <td className="px-4 py-3 font-medium text-gray-900">
+                            <td className="px-3 md:px-4 py-2 font-medium text-gray-900 text-xs md:text-sm">
                               {row.customerName || "N/A"}
                             </td>
-                            <td
-                              className="px-4 py-3 text-gray-600 max-w-[200px] truncate"
-                              title={row.customerAddress}
-                            >
-                              {row.customerAddress || "N/A"}
-                            </td>
-                            <td className="px-4 py-3 text-right font-medium text-gray-800">
+                            {!isMobileView && (
+                              <td
+                                className="px-3 md:px-4 py-2 text-gray-600 text-xs md:text-sm max-w-[200px] truncate"
+                                title={row.customerAddress}
+                              >
+                                {row.customerAddress || "N/A"}
+                              </td>
+                            )}
+                            <td className="px-3 md:px-4 py-2 text-right font-medium text-gray-800 text-xs md:text-sm">
                               ${fmt(row.totalAmount)}
                             </td>
-                            <td className="px-4 py-3 text-right font-medium text-green-600">
+                            <td className="px-3 md:px-4 py-2 text-right font-medium text-green-600 text-xs md:text-sm">
                               ${fmt(row.collectedAmount)}
                             </td>
-                            <td className="px-4 py-3 text-right font-semibold text-red-600">
+                            <td className="px-3 md:px-4 py-2 text-right font-semibold text-red-600 text-xs md:text-sm">
                               ${fmt(row.pendingAmount)}
                             </td>
                           </tr>
                         ))}
                       </tbody>
-                      {/* Footer totals row */}
                       <tfoot className="bg-gray-50 border-t-2 border-gray-300">
                         <tr>
                           <td
-                            colSpan="4"
-                            className="px-4 py-3 text-sm font-bold text-gray-800 text-right"
+                            colSpan={isMobileView ? 3 : 4}
+                            className="px-3 md:px-4 py-2 text-xs md:text-sm font-bold text-gray-800 text-right"
                           >
                             Grand Total:
                           </td>
-                          <td className="px-4 py-3 text-right font-bold text-gray-800">
+                          <td className="px-3 md:px-4 py-2 text-right font-bold text-gray-800 text-xs md:text-sm">
                             ${fmt(modalTotals.totalAmount)}
                           </td>
-                          <td className="px-4 py-3 text-right font-bold text-green-600">
+                          <td className="px-3 md:px-4 py-2 text-right font-bold text-green-600 text-xs md:text-sm">
                             ${fmt(modalTotals.collectedAmount)}
                           </td>
-                          <td className="px-4 py-3 text-right font-bold text-red-600">
+                          <td className="px-3 md:px-4 py-2 text-right font-bold text-red-600 text-xs md:text-sm">
                             ${fmt(modalTotals.pendingAmount)}
                           </td>
                         </tr>
@@ -821,14 +962,14 @@ const MRWiseOutstanding = () => {
               </div>
 
               {/* Modal Footer */}
-              <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
-                <p className="text-sm text-gray-500">
+              <div className="flex items-center justify-between p-4 md:p-6 border-t border-gray-200 bg-gray-50">
+                <p className="text-xs md:text-sm text-gray-500">
                   {customerDetails.length} invoice
                   {customerDetails.length !== 1 ? "s" : ""} found
                 </p>
                 <button
                   onClick={() => setCustomerModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg transition-colors"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 md:px-6 py-2 rounded-lg transition-colors text-sm"
                 >
                   Close
                 </button>
@@ -846,7 +987,7 @@ const MRWiseOutstanding = () => {
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowCustomFilter(false)}
             />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10 mx-4">
               <button
                 onClick={() => setShowCustomFilter(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"

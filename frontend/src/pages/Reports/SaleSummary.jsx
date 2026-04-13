@@ -9,6 +9,7 @@ import {
   Calendar,
   DollarSign,
   BarChart3,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -18,9 +19,10 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import LoadingOverlay from "../../components/Loading";
+import Sidebar from "../../components/Sidebar";
 
 // ----------------------------------------------------------------------
-// 🔐 Robust role detection (same logic as in Sidebar)
+// Role detection
 // ----------------------------------------------------------------------
 const getUserRole = () => {
   try {
@@ -34,7 +36,6 @@ const getUserRole = () => {
         } catch (e) {}
       }
     }
-
     const token =
       localStorage.getItem("token") || localStorage.getItem("authToken");
     if (token) {
@@ -46,11 +47,8 @@ const getUserRole = () => {
         if (payload && payload.role) return payload.role;
       }
     }
-
-    console.warn("⚠️ No role found in localStorage or token");
     return null;
   } catch (error) {
-    console.error("❌ getUserRole error:", error);
     return null;
   }
 };
@@ -61,7 +59,6 @@ const useAuth = () => {
 };
 // ----------------------------------------------------------------------
 
-// ✅ NEW HELPER: Format Date as YYYY-MM-DD in LOCAL timezone
 const formatLocalDate = (date) => {
   if (!date) return null;
   const year = date.getFullYear();
@@ -92,20 +89,30 @@ const SaleSummary = () => {
   const [selectedTab, setSelectedTab] = useState("daily");
   const [summaryData, setSummaryData] = useState([]);
 
+  // ── Mobile detection ────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+  // ────────────────────────────────────────────────────────────────────────
+
   const inputRef = useRef(null);
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super admin";
 
-  // Fetch sales records based on date range
   useEffect(() => {
     const fetchSalesRecords = async () => {
       if (
         selectedTab === "combine" &&
         (!customDateRange.startDate || !customDateRange.endDate)
-      ) {
+      )
         return;
-      }
       setIsLoading(true);
       try {
         let url = `${backendUrl}/api/sales-summary/summary`;
@@ -115,15 +122,12 @@ const SaleSummary = () => {
           customDateRange.endDate
         ) {
           const params = new URLSearchParams({
-            startDate: formatLocalDate(customDateRange.startDate), // ✅ FIXED
-            endDate: formatLocalDate(customDateRange.endDate), // ✅ FIXED
+            startDate: formatLocalDate(customDateRange.startDate),
+            endDate: formatLocalDate(customDateRange.endDate),
           });
           url += `?${params.toString()}`;
         } else if (selectedTab === "daily") {
-          url += `?${new URLSearchParams({
-            startDate: "2000-01-01",
-            endDate: formatLocalDate(new Date()), // ✅ today in local
-          }).toString()}`;
+          url += `?${new URLSearchParams({ startDate: "2000-01-01", endDate: formatLocalDate(new Date()) }).toString()}`;
         }
         const response = await fetch(url);
         const data = await response.json();
@@ -149,11 +153,9 @@ const SaleSummary = () => {
     backendUrl,
   ]);
 
-  // ✅ Calculate daily summary – grouped by invoiceDate (not recordingDate)
   const calculateDailySummary = () => {
     const dailyMap = {};
     summaryData.forEach((record) => {
-      // Use invoiceDate instead of recordingDate
       const date = record.invoiceDate
         ? new Date(record.invoiceDate).toLocaleDateString("en-US", {
             year: "numeric",
@@ -161,7 +163,6 @@ const SaleSummary = () => {
             day: "2-digit",
           })
         : "Unknown Date";
-
       if (!dailyMap[date]) {
         dailyMap[date] = {
           date,
@@ -177,7 +178,7 @@ const SaleSummary = () => {
         const normalizedName = productName.toLowerCase().trim();
         if (!dailyMap[date].products.has(normalizedName)) {
           dailyMap[date].products.set(normalizedName, {
-            productName: productName,
+            productName,
             salesQuantity: 0,
             bonusQuantity: 0,
             totalQuantity: 0,
@@ -222,7 +223,7 @@ const SaleSummary = () => {
         const normalizedName = productName.toLowerCase().trim();
         if (!productMap.has(normalizedName)) {
           productMap.set(normalizedName, {
-            productName: productName,
+            productName,
             normalizedName,
             salesQuantity: 0,
             bonusQuantity: 0,
@@ -252,24 +253,18 @@ const SaleSummary = () => {
   };
 
   const getFilteredData = useMemo(() => {
-    let data = [];
-    if (selectedTab === "daily") {
-      data = calculateDailySummary();
-    } else if (selectedTab === "combine") {
-      data = calculateCombineSummary();
-    }
+    let data =
+      selectedTab === "daily"
+        ? calculateDailySummary()
+        : calculateCombineSummary();
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
-      data = data.filter((item) => {
-        if (selectedTab === "daily") {
-          return (
-            item.date?.toLowerCase().includes(search) ||
+      data = data.filter((item) =>
+        selectedTab === "daily"
+          ? item.date?.toLowerCase().includes(search) ||
             item.productName?.toLowerCase().includes(search)
-          );
-        } else {
-          return item.productName?.toLowerCase().includes(search);
-        }
-      });
+          : item.productName?.toLowerCase().includes(search),
+      );
     }
     return data;
   }, [summaryData, selectedTab, searchTerm]);
@@ -282,32 +277,29 @@ const SaleSummary = () => {
   );
 
   const calculateTotals = () => {
-    let totalSales = 0;
-    let totalQuantity = 0;
-    let totalProfit = 0;
-    let totalProducts = 0;
-
+    let totalSales = 0,
+      totalQuantity = 0,
+      totalProfit = 0,
+      totalProducts = 0;
     if (selectedTab === "daily") {
       const dailyData = calculateDailySummary();
-      dailyData.forEach((product) => {
-        totalSales += product.amount || 0;
-        totalQuantity += product.totalQuantity || 0;
-        totalProfit += product.profit || 0;
+      dailyData.forEach((p) => {
+        totalSales += p.amount || 0;
+        totalQuantity += p.totalQuantity || 0;
+        totalProfit += p.profit || 0;
       });
-      const uniqueCombos = new Set(
+      totalProducts = new Set(
         dailyData.map((item) => `${item.productName}-${item.date}`),
-      );
-      totalProducts = uniqueCombos.size;
+      ).size;
     } else if (selectedTab === "combine") {
       const combineData = calculateCombineSummary();
-      combineData.forEach((product) => {
-        totalSales += product.amount || 0;
-        totalQuantity += product.totalQuantity || 0;
-        totalProfit += product.profit || 0;
+      combineData.forEach((p) => {
+        totalSales += p.amount || 0;
+        totalQuantity += p.totalQuantity || 0;
+        totalProfit += p.profit || 0;
       });
       totalProducts = combineData.length;
     }
-
     return {
       totalSales: parseFloat(totalSales.toFixed(2)),
       totalQuantity: parseFloat(totalQuantity.toFixed(2)),
@@ -332,12 +324,12 @@ const SaleSummary = () => {
             tab: selectedTab,
             startDate:
               selectedTab === "combine" && customDateRange.startDate
-                ? formatLocalDate(customDateRange.startDate) // ✅ FIXED
+                ? formatLocalDate(customDateRange.startDate)
                 : "2000-01-01",
             endDate:
               selectedTab === "combine" && customDateRange.endDate
-                ? formatLocalDate(customDateRange.endDate) // ✅ FIXED
-                : formatLocalDate(new Date()), // ✅ today in local
+                ? formatLocalDate(customDateRange.endDate)
+                : formatLocalDate(new Date()),
           },
           responseType: "blob",
         },
@@ -356,19 +348,16 @@ const SaleSummary = () => {
       showToast("success", "Excel report downloaded successfully");
     } catch (error) {
       console.error("Error exporting to Excel:", error);
-      if (error.response && error.response.status === 404) {
+      if (error.response?.status === 404)
         showToast("warning", "No data found for the selected filters");
-      } else {
-        showToast("error", "Failed to export Excel report");
-      }
+      else showToast("error", "Failed to export Excel report");
     } finally {
       setExportLoading(false);
     }
   };
 
-  const handleCustomDateChange = (name, date) => {
+  const handleCustomDateChange = (name, date) =>
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
-  };
 
   const handleApplyCustomFilter = () => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
@@ -387,17 +376,14 @@ const SaleSummary = () => {
     setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
     setCurrentPage(1);
-    if (selectedTab === "combine") {
-      setShowDateFilter(true);
-    }
+    if (selectedTab === "combine") setShowDateFilter(true);
   };
 
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
     setCurrentPage(1);
-    if (tab === "combine") {
-      setShowDateFilter(true);
-    } else {
+    if (tab === "combine") setShowDateFilter(true);
+    else {
       setCustomDateRange({ startDate: null, endDate: null });
       setShowDateFilter(false);
     }
@@ -408,14 +394,12 @@ const SaleSummary = () => {
     if (
       selectedTab === "combine" &&
       (!customDateRange.startDate || !customDateRange.endDate)
-    ) {
+    )
       setSelectedTab("daily");
-    }
   };
 
-  const getSerialNumber = (index) => {
-    return (currentPage - 1) * saleSummaryPerPage + index + 1;
-  };
+  const getSerialNumber = (index) =>
+    (currentPage - 1) * saleSummaryPerPage + index + 1;
 
   const getActiveFilterDisplay = () => {
     if (
@@ -423,108 +407,122 @@ const SaleSummary = () => {
       customDateRange.startDate &&
       customDateRange.endDate
     ) {
-      const start = formatDateToReadable(customDateRange.startDate);
-      const end = formatDateToReadable(customDateRange.endDate);
-      return `${start} - ${end}`;
-    } else if (selectedTab === "daily") {
-      return "All Dates";
-    }
+      return `${formatDateToReadable(customDateRange.startDate)} - ${formatDateToReadable(customDateRange.endDate)}`;
+    } else if (selectedTab === "daily") return "All Dates";
     return "Select Date Range";
   };
 
-  // ----------------------------------------------------------------------
-  // Render
-  // ----------------------------------------------------------------------
-  const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Total Sales</p>
-            <p className="text-2xl font-bold text-gray-800">
-              $
-              {totals.totalSales.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {getActiveFilterDisplay()}
-            </p>
-          </div>
-          <DollarSign className="w-8 h-8 text-blue-500" />
-        </div>
-      </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Total Quantity</p>
-            <p className="text-2xl font-bold text-gray-800">
-              {totals.totalQuantity.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {getActiveFilterDisplay()}
-            </p>
-          </div>
-          <Package className="w-8 h-8 text-green-500" />
-        </div>
-      </div>
-      {isSuperAdmin && (
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+  const getEmptyColSpan = () => {
+    if (selectedTab === "daily") return isSuperAdmin ? 8 : 7;
+    return isSuperAdmin ? 7 : 6;
+  };
+
+  // ── Summary Cards ──────────────────────────────────────────────────────────
+  const renderSummaryCards = () => {
+    const cardClass = `bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border border-gray-200`;
+    const labelClass = `${isMobileView ? "text-xs" : "text-sm"} text-gray-600`;
+    const valueClass = `${isMobileView ? "text-lg" : "text-2xl"} font-bold text-gray-800`;
+    const subClass = "text-xs text-gray-500 mt-1";
+    const iconSize = isMobileView ? "w-6 h-6" : "w-8 h-8";
+
+    return (
+      <div
+        className={`grid gap-3 md:gap-6 mb-4 md:mb-6 ${isSuperAdmin ? "grid-cols-2 md:grid-cols-4" : "grid-cols-2 md:grid-cols-3"}`}
+      >
+        <div className={`${cardClass} border-blue-500`}>
           <div className="flex justify-between items-center">
             <div>
-              <p className="text-sm text-gray-600">Total Profit</p>
-              <p className="text-2xl font-bold text-gray-800">
+              <p className={labelClass}>Total Sales</p>
+              <p className={valueClass}>
                 $
-                {totals.totalProfit.toLocaleString(undefined, {
+                {totals.totalSales.toLocaleString(undefined, {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 })}
               </p>
-              <p className="text-xs text-gray-500 mt-1">
-                {getActiveFilterDisplay()}
+              <p className={subClass}>{getActiveFilterDisplay()}</p>
+            </div>
+            <DollarSign className={`${iconSize} text-blue-500`} />
+          </div>
+        </div>
+
+        <div className={`${cardClass} border-green-500`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <p className={labelClass}>Total Quantity</p>
+              <p className={valueClass}>
+                {totals.totalQuantity.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+              <p className={subClass}>{getActiveFilterDisplay()}</p>
+            </div>
+            <Package className={`${iconSize} text-green-500`} />
+          </div>
+        </div>
+
+        {isSuperAdmin && (
+          <div className={`${cardClass} border-purple-500`}>
+            <div className="flex justify-between items-center">
+              <div>
+                <p className={labelClass}>Total Profit</p>
+                <p className={valueClass}>
+                  $
+                  {totals.totalProfit.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+                <p className={subClass}>{getActiveFilterDisplay()}</p>
+              </div>
+              <TrendingUp className={`${iconSize} text-purple-500`} />
+            </div>
+          </div>
+        )}
+
+        <div className={`${cardClass} border-orange-500`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <p className={labelClass}>Total Products</p>
+              <p className={valueClass}>
+                {totals.totalProducts.toLocaleString()}
+              </p>
+              <p className={subClass}>
+                {isMobileView
+                  ? selectedTab === "combine"
+                    ? "Unique"
+                    : "Combinations"
+                  : selectedTab === "combine"
+                    ? "Unique Products"
+                    : "Product-Day Combinations"}
               </p>
             </div>
-            <TrendingUp className="w-8 h-8 text-purple-500" />
+            <BarChart3 className={`${iconSize} text-orange-500`} />
           </div>
-        </div>
-      )}
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Total Products</p>
-            <p className="text-2xl font-bold text-gray-800">
-              {totals.totalProducts.toLocaleString()}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {selectedTab === "combine"
-                ? "Unique Products (Case-insensitive)"
-                : "Product-Day Combinations"}
-            </p>
-          </div>
-          <BarChart3 className="w-8 h-8 text-orange-500" />
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  // ── Table ──────────────────────────────────────────────────────────────────
+  const thClass = `${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`;
+  const tdClass = `${isMobileView ? "p-2 text-xs" : "p-3 text-sm"}`;
 
   const renderTableHeaders = () => {
     if (selectedTab === "daily") {
       return (
         <thead className="bg-gray-100 text-gray-700 border-b">
           <tr>
-            <th className="p-3 text-sm font-medium">Sr.No</th>
-            <th className="p-3 text-sm font-medium">Date</th>
-            <th className="p-3 text-sm font-medium">Product Name</th>
-            <th className="p-3 text-sm font-medium">Sales Qty</th>
-            <th className="p-3 text-sm font-medium">Bonus Qty</th>
-            <th className="p-3 text-sm font-medium">Total Qty</th>
-            <th className="p-3 text-sm font-medium">Amount ($)</th>
-            {isSuperAdmin && (
-              <th className="p-3 text-sm font-medium">Profit ($)</th>
+            <th className={thClass}>Sr.No</th>
+            <th className={thClass}>Date</th>
+            <th className={thClass}>Product Name</th>
+            <th className={thClass}>Sales Qty</th>
+            {!isMobileView && <th className={thClass}>Bonus Qty</th>}
+            <th className={thClass}>Total Qty</th>
+            <th className={thClass}>Amount ($)</th>
+            {isSuperAdmin && !isMobileView && (
+              <th className={thClass}>Profit ($)</th>
             )}
           </tr>
         </thead>
@@ -533,14 +531,14 @@ const SaleSummary = () => {
       return (
         <thead className="bg-gray-100 text-gray-700 border-b">
           <tr>
-            <th className="p-3 text-sm font-medium">Sr.No</th>
-            <th className="p-3 text-sm font-medium">Product Name</th>
-            <th className="p-3 text-sm font-medium">Sales Qty</th>
-            <th className="p-3 text-sm font-medium">Bonus Qty</th>
-            <th className="p-3 text-sm font-medium">Total Qty</th>
-            <th className="p-3 text-sm font-medium">Amount ($)</th>
-            {isSuperAdmin && (
-              <th className="p-3 text-sm font-medium">Profit ($)</th>
+            <th className={thClass}>Sr.No</th>
+            <th className={thClass}>Product Name</th>
+            <th className={thClass}>Sales Qty</th>
+            {!isMobileView && <th className={thClass}>Bonus Qty</th>}
+            <th className={thClass}>Total Qty</th>
+            <th className={thClass}>Amount ($)</th>
+            {isSuperAdmin && !isMobileView && (
+              <th className={thClass}>Profit ($)</th>
             )}
           </tr>
         </thead>
@@ -548,41 +546,46 @@ const SaleSummary = () => {
     }
   };
 
-  const renderTableRows = () => {
-    return currentData.map((item, index) => {
+  const renderTableRows = () =>
+    currentData.map((item, index) => {
       const isLastRow = index === currentData.length - 1;
+      const rowStyle = {
+        borderBottom: isLastRow ? "none" : "1px solid #e5e7eb",
+      };
       if (selectedTab === "daily") {
         return (
           <tr
             key={`${item.date}-${item.productName}-${index}`}
             className="hover:bg-gray-50"
-            style={{ borderBottom: isLastRow ? "none" : "1px solid #e5e7eb" }}
+            style={rowStyle}
           >
-            <td className="p-3">
-              <div className="text-sm text-gray-600 font-medium">
+            <td className={tdClass}>
+              <span className="text-gray-600 font-medium">
                 {getSerialNumber(index)}
-              </div>
+              </span>
             </td>
-            <td className="p-3 text-sm text-gray-600">
+            <td className={`${tdClass} text-gray-600`}>
               {formatDateToReadable(item.date)}
             </td>
-            <td className="p-3 text-sm font-medium text-gray-900 capitalize">
+            <td className={`${tdClass} font-medium text-gray-900 capitalize`}>
               {item.productName}
             </td>
-            <td className="p-3 text-sm text-gray-800">
+            <td className={`${tdClass} text-gray-800`}>
               {formatNumber(item.salesQuantity)}
             </td>
-            <td className="p-3 text-sm text-gray-800">
-              {formatNumber(item.bonusQuantity)}
-            </td>
-            <td className="p-3 text-sm text-gray-800">
+            {!isMobileView && (
+              <td className={`${tdClass} text-gray-800`}>
+                {formatNumber(item.bonusQuantity)}
+              </td>
+            )}
+            <td className={`${tdClass} text-gray-800`}>
               {formatNumber(item.totalQuantity)}
             </td>
-            <td className="p-3 text-sm font-semibold text-green-600">
+            <td className={`${tdClass} font-semibold text-green-600`}>
               ${formatNumber(item.amount)}
             </td>
-            {isSuperAdmin && (
-              <td className="p-3 text-sm font-semibold text-blue-600">
+            {isSuperAdmin && !isMobileView && (
+              <td className={`${tdClass} font-semibold text-blue-600`}>
                 ${formatNumber(item.profit)}
               </td>
             )}
@@ -593,30 +596,32 @@ const SaleSummary = () => {
           <tr
             key={`${item.productName}-${index}`}
             className="hover:bg-gray-50"
-            style={{ borderBottom: isLastRow ? "none" : "1px solid #e5e7eb" }}
+            style={rowStyle}
           >
-            <td className="p-3">
-              <div className="text-sm text-gray-600 font-medium">
+            <td className={tdClass}>
+              <span className="text-gray-600 font-medium">
                 {getSerialNumber(index)}
-              </div>
+              </span>
             </td>
-            <td className="p-3 text-sm font-medium text-gray-900 capitalize">
+            <td className={`${tdClass} font-medium text-gray-900 capitalize`}>
               {item.productName}
             </td>
-            <td className="p-3 text-sm text-gray-800">
+            <td className={`${tdClass} text-gray-800`}>
               {formatNumber(item.salesQuantity)}
             </td>
-            <td className="p-3 text-sm text-gray-800">
-              {formatNumber(item.bonusQuantity)}
-            </td>
-            <td className="p-3 text-sm text-gray-800">
+            {!isMobileView && (
+              <td className={`${tdClass} text-gray-800`}>
+                {formatNumber(item.bonusQuantity)}
+              </td>
+            )}
+            <td className={`${tdClass} text-gray-800`}>
               {formatNumber(item.totalQuantity)}
             </td>
-            <td className="p-3 text-sm font-semibold text-green-600">
+            <td className={`${tdClass} font-semibold text-green-600`}>
               ${formatNumber(item.amount)}
             </td>
-            {isSuperAdmin && (
-              <td className="p-3 text-sm font-semibold text-blue-600">
+            {isSuperAdmin && !isMobileView && (
+              <td className={`${tdClass} font-semibold text-blue-600`}>
                 ${formatNumber(item.profit)}
               </td>
             )}
@@ -624,33 +629,49 @@ const SaleSummary = () => {
         );
       }
     });
-  };
 
+  // ── Pagination (Improved like DailyReports component) ─────────────────────────
   const renderPagination = () => {
     if (totalPages <= 1) return null;
     return (
-      <div className="mt-4 p-5 flex gap-2">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
-          onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
           disabled={currentPage === 1}
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           ← Prev
         </button>
-        {visiblePages.map((p, index) => (
-          <button
-            key={index}
-            onClick={() => typeof p === "number" && setCurrentPage(p)}
-            disabled={p === "..."}
-            className={`px-4 py-2 rounded ${p === "..." ? "bg-gray-200 cursor-not-allowed" : currentPage === p ? "bg-indigo-600 text-white cursor-pointer" : "bg-gray-200 hover:bg-gray-300 cursor-pointer"}`}
-          >
-            {p}
-          </button>
-        ))}
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
+            <button
+              key={idx}
+              onClick={() => typeof page === "number" && setCurrentPage(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {currentPage} of {totalPages}
+          </span>
+        )}
         <button
-          onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+          onClick={() =>
+            setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+          }
           disabled={currentPage === totalPages}
-          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
           Next →
         </button>
@@ -658,28 +679,69 @@ const SaleSummary = () => {
     );
   };
 
-  const handleIconClick = () => {
-    inputRef.current?.focus();
-    inputRef.current?.classList.add("highlight");
-    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
-  };
-
   if (isLoading && currentData.length === 0) {
     return <LoadingOverlay text="Loading sales summary..." />;
   }
 
-  const getEmptyColSpan = () => {
-    if (selectedTab === "daily") {
-      return isSuperAdmin ? 8 : 7;
-    } else {
-      return isSuperAdmin ? 7 : 6;
-    }
+  const getEmptyColSpanMobile = () => {
+    if (selectedTab === "daily") return 6;
+    return 5;
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6">
-      <div className="container">
-        {/* Header */}
+    <div className={`${isMobileView ? "p-3 pb-6" : "p-6"} relative`}>
+      {/* Sidebar (mobile only) */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <TrendingUp className="w-5 h-5 text-indigo-600" />
+            <h1 className="text-base font-bold text-gray-800">Sales Summary</h1>
+          </div>
+          <div className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-medium">
+            {getFilteredData.length} records
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="pl-9 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+          />
+        </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div className="flex items-center gap-3">
             <TrendingUp className="w-8 h-8 text-indigo-600" />
@@ -697,7 +759,9 @@ const SaleSummary = () => {
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                 size={16}
-                onClick={handleIconClick}
+                onClick={() => {
+                  inputRef.current?.focus();
+                }}
               />
               <input
                 ref={inputRef}
@@ -711,6 +775,7 @@ const SaleSummary = () => {
                 className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
               />
             </div>
+            {/* Export button — desktop only */}
             <button
               onClick={handleExportToExcel}
               disabled={exportLoading || getFilteredData.length === 0}
@@ -718,7 +783,7 @@ const SaleSummary = () => {
             >
               {exportLoading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                   <span>Exporting...</span>
                 </>
               ) : (
@@ -730,151 +795,161 @@ const SaleSummary = () => {
             </button>
           </div>
         </div>
+      )}
 
-        {/* Tabs and Filter Info */}
-        <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-          <div className="flex flex-wrap gap-2 mb-4">
-            <button
-              onClick={() => handleTabChange("daily")}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "daily" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-            >
-              Daily Summary
-            </button>
-            <button
-              onClick={() => handleTabChange("combine")}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${selectedTab === "combine" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-            >
-              Combine Summary
-            </button>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <Filter size={16} />
-            <span>Active Filter: </span>
-            <span className="font-medium">{getActiveFilterDisplay()}</span>
-            <span className="mx-2">•</span>
-            <span>View: </span>
-            <span className="font-medium capitalize">{selectedTab}</span>
-          </div>
+      {/* ── Tabs and Filter Info ── */}
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 md:mb-6 border border-gray-200`}
+      >
+        <div className="flex flex-wrap gap-2 mb-3">
+          <button
+            onClick={() => handleTabChange("daily")}
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors ${selectedTab === "daily" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+          >
+            {isMobileView ? "Daily" : "Daily Summary"}
+          </button>
+          <button
+            onClick={() => handleTabChange("combine")}
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors ${selectedTab === "combine" ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+          >
+            {isMobileView ? "Combine" : "Combine Summary"}
+          </button>
         </div>
-
-        {renderSummaryCards()}
-
-        {/* Data Table */}
-        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
-            {renderTableHeaders()}
-            <tbody>
-              {currentData.length === 0 ? (
-                <tr>
-                  <td colSpan={getEmptyColSpan()} className="p-8 text-center">
-                    <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">
-                      No data found
-                    </h3>
-                    <p className="text-gray-500 max-w-md mx-auto">
-                      {searchTerm
-                        ? `No sales data found for "${searchTerm}". Try a different search term.`
-                        : selectedTab === "combine" &&
-                            (!customDateRange.startDate ||
-                              !customDateRange.endDate)
-                          ? "Please select a date range to view combine summary"
-                          : "No sales data available."}
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                renderTableRows()
-              )}
-            </tbody>
-          </table>
-          {currentData.length > 0 && totalPages > 1 && renderPagination()}
+        <div
+          className={`flex items-center gap-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-600 flex-wrap`}
+        >
+          <Filter size={isMobileView ? 13 : 16} />
+          <span>Filter: </span>
+          <span className="font-medium">{getActiveFilterDisplay()}</span>
+          <span className="mx-1">•</span>
+          <span className="font-medium capitalize">{selectedTab}</span>
         </div>
+      </div>
 
-        {/* Date Filter Modal */}
-        {showDateFilter &&
-          selectedTab === "combine" &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
-              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-semibold text-gray-800">
-                    Select Date Range for Combine Summary
-                  </h2>
-                  <button
-                    onClick={handleCloseDateFilterModal}
-                    className="text-gray-500 hover:text-gray-700 cursor-pointer"
-                  >
-                    <X size={20} />
-                  </button>
+      {renderSummaryCards()}
+
+      {/* ── Data Table ── */}
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center ${isMobileView ? "min-w-[420px]" : ""}`}
+        >
+          {renderTableHeaders()}
+          <tbody>
+            {currentData.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={
+                    isMobileView ? getEmptyColSpanMobile() : getEmptyColSpan()
+                  }
+                  className="p-8 text-center"
+                >
+                  <Package className="w-12 h-12 md:w-16 md:h-16 text-gray-300 mx-auto mb-3" />
+                  <h3 className="text-base md:text-lg font-medium text-gray-900 mb-2">
+                    No data found
+                  </h3>
+                  <p className="text-gray-500 max-w-md mx-auto text-sm">
+                    {searchTerm
+                      ? `No sales data found for "${searchTerm}".`
+                      : selectedTab === "combine" &&
+                          (!customDateRange.startDate ||
+                            !customDateRange.endDate)
+                        ? "Please select a date range to view combine summary"
+                        : "No sales data available."}
+                  </p>
+                </td>
+              </tr>
+            ) : (
+              renderTableRows()
+            )}
+          </tbody>
+        </table>
+        {currentData.length > 0 && totalPages > 1 && renderPagination()}
+      </div>
+
+      {/* ── Date Filter Modal ── */}
+      {showDateFilter &&
+        selectedTab === "combine" &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 px-4">
+            <div className="bg-white w-full max-w-md p-5 rounded-xl shadow-lg">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-base md:text-lg font-semibold text-gray-800">
+                  {isMobileView
+                    ? "Select Date Range"
+                    : "Select Date Range for Combine Summary"}
+                </h2>
+                <button
+                  onClick={handleCloseDateFilterModal}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="space-y-4 mb-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Start Date <span className="text-red-500">*</span>
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.startDate}
+                    onChange={(date) =>
+                      handleCustomDateChange("startDate", date)
+                    }
+                    selectsStart
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    placeholderText="Select start date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                    required
+                  />
                 </div>
-                <div className="space-y-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Start Date <span className="text-red-500">*</span>
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.startDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("startDate", date)
-                      }
-                      selectsStart
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholderText="Select start date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      End Date <span className="text-red-500">*</span>
-                    </label>
-                    <DatePicker
-                      selected={customDateRange.endDate}
-                      onChange={(date) =>
-                        handleCustomDateChange("endDate", date)
-                      }
-                      selectsEnd
-                      startDate={customDateRange.startDate}
-                      endDate={customDateRange.endDate}
-                      minDate={customDateRange.startDate}
-                      className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholderText="Select end date"
-                      dateFormat="yyyy-MM-dd"
-                      isClearable
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <button
-                    onClick={handleClearFilters}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
-                  >
-                    Clear All
-                  </button>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleCloseDateFilterModal}
-                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleApplyCustomFilter}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors"
-                    >
-                      Apply Filter
-                    </button>
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date <span className="text-red-500">*</span>
+                  </label>
+                  <DatePicker
+                    selected={customDateRange.endDate}
+                    onChange={(date) => handleCustomDateChange("endDate", date)}
+                    selectsEnd
+                    startDate={customDateRange.startDate}
+                    endDate={customDateRange.endDate}
+                    minDate={customDateRange.startDate}
+                    className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    placeholderText="Select end date"
+                    dateFormat="yyyy-MM-dd"
+                    isClearable
+                    required
+                  />
                 </div>
               </div>
-            </div>,
-            document.body,
-          )}
-      </div>
+              <div className="flex justify-between gap-3">
+                <button
+                  onClick={handleClearFilters}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm"
+                >
+                  Clear All
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleCloseDateFilterModal}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleApplyCustomFilter}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 };

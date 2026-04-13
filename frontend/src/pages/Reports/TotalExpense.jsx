@@ -15,6 +15,7 @@ import {
   Eye,
   EyeOff,
   Search,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -23,25 +24,30 @@ import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Detail Modal (same as before)
-const DetailModal = ({ isOpen, onClose, title, records }) => {
+// Detail Modal (Responsive)
+const DetailModal = ({ isOpen, onClose, title, records, isMobileView }) => {
   if (!isOpen) return null;
 
   const total = records.reduce((sum, r) => sum + (r.amount || 0), 0);
+  const thClass = isMobileView ? "px-3 py-2 text-[10px]" : "px-4 py-3 text-xs";
+  const tdClass = isMobileView ? "px-3 py-2 text-xs" : "px-4 py-3 text-sm";
 
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 flex justify-center items-center z-50">
+    <div className="fixed inset-0 flex justify-center items-center z-50 p-4">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
       />
       <div className="relative z-10 bg-white w-full max-w-2xl mx-4 rounded-xl shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-indigo-50">
+        <div className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b bg-indigo-50">
           <div>
-            <h2 className="text-lg font-bold text-indigo-800">
+            <h2
+              className={`${isMobileView ? "text-base" : "text-lg"} font-bold text-indigo-800`}
+            >
               {title} — Records
             </h2>
             <p className="text-xs text-indigo-500 mt-0.5">
@@ -52,7 +58,7 @@ const DetailModal = ({ isOpen, onClose, title, records }) => {
             onClick={onClose}
             className="p-1.5 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
           >
-            <X size={20} />
+            <X size={isMobileView ? 18 : 20} />
           </button>
         </div>
 
@@ -62,70 +68,88 @@ const DetailModal = ({ isOpen, onClose, title, records }) => {
               No records found
             </div>
           ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100 sticky top-0">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
-                    #
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
-                    Date
-                  </th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
-                    Description / Remarks
-                  </th>
-                  <th className="px-4 py-3 text-right font-semibold text-gray-700">
-                    Amount ($)
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((rec, idx) => (
-                  <tr
-                    key={rec._id || idx}
-                    className={`border-b last:border-0 hover:bg-gray-50 ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}`}
-                  >
-                    <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
-                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
-                      {rec.date
-                        ? new Date(rec.date).toLocaleDateString("en-US", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : "—"}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[500px]">
+                <thead className="bg-gray-100 sticky top-0">
+                  <tr>
+                    <th
+                      className={`${thClass} text-left font-semibold text-gray-700`}
+                    >
+                      #
+                    </th>
+                    <th
+                      className={`${thClass} text-left font-semibold text-gray-700`}
+                    >
+                      Date
+                    </th>
+                    <th
+                      className={`${thClass} text-left font-semibold text-gray-700`}
+                    >
+                      Description
+                    </th>
+                    <th
+                      className={`${thClass} text-right font-semibold text-gray-700`}
+                    >
+                      Amount ($)
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.map((rec, idx) => (
+                    <tr
+                      key={rec._id || idx}
+                      className={`border-b last:border-0 hover:bg-gray-50 ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}`}
+                    >
+                      <td className={`${tdClass} text-gray-500`}>{idx + 1}</td>
+                      <td
+                        className={`${tdClass} text-gray-700 whitespace-nowrap`}
+                      >
+                        {rec.date
+                          ? new Date(rec.date).toLocaleDateString("en-US", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })
+                          : "—"}
+                      </td>
+                      <td
+                        className={`${tdClass} text-gray-700 max-w-[180px] md:max-w-[220px] truncate`}
+                      >
+                        {rec.description || rec.remarks || "—"}
+                      </td>
+                      <td
+                        className={`${tdClass} text-right font-semibold text-red-600`}
+                      >
+                        $
+                        {(rec.amount || 0).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-indigo-50 sticky bottom-0">
+                  <tr>
+                    <td
+                      colSpan={3}
+                      className={`${tdClass} font-bold text-indigo-800 text-right`}
+                    >
+                      Total
                     </td>
-                    <td className="px-4 py-3 text-gray-700 max-w-[220px] truncate">
-                      {rec.description || rec.remarks || "—"}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-red-600">
+                    <td
+                      className={`${tdClass} text-right font-bold text-indigo-800`}
+                    >
                       $
-                      {(rec.amount || 0).toLocaleString(undefined, {
+                      {total.toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
                     </td>
                   </tr>
-                ))}
-              </tbody>
-              <tfoot className="bg-indigo-50 sticky bottom-0">
-                <tr>
-                  <td
-                    colSpan={3}
-                    className="px-4 py-3 font-bold text-indigo-800 text-right"
-                  >
-                    Total
-                  </td>
-                  <td className="px-4 py-3 text-right font-bold text-indigo-800">
-                    $
-                    {total.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+                </tfoot>
+              </table>
+            </div>
           )}
         </div>
       </div>
@@ -166,7 +190,7 @@ const TotalExpense = () => {
   });
 
   const [exportLoading, setExportLoading] = useState(false);
-  const [itemsPerPage] = useState(7); // Change to 7 for production
+  const [itemsPerPage] = useState(7);
 
   const [detailModal, setDetailModal] = useState({
     isOpen: false,
@@ -174,13 +198,24 @@ const TotalExpense = () => {
     records: [],
   });
 
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
   const inputRef = useRef(null);
   const visiblePages = useVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
 
-  // ROWS Definition - Memoize this to prevent recalculation on every render
+  // ROWS Definition
   const ROWS = useMemo(
     () => [
       {
@@ -223,10 +258,8 @@ const TotalExpense = () => {
     ],
   );
 
-  // Derived summaryData - Memoize this
   const summaryData = useMemo(() => ROWS.filter((r) => r.amount > 0), [ROWS]);
 
-  // Paginated Data - Memoize this
   const paginatedData = useMemo(
     () =>
       summaryData.slice(
@@ -236,7 +269,7 @@ const TotalExpense = () => {
     [summaryData, pagination.currentPage, itemsPerPage],
   );
 
-  // Update Pagination - Fix the infinite loop by removing dependency on summaryData
+  // Update Pagination
   useEffect(() => {
     const totalRecords = summaryData.length;
     const totalPages = Math.max(1, Math.ceil(totalRecords / itemsPerPage));
@@ -248,13 +281,11 @@ const TotalExpense = () => {
       hasNext: prev.currentPage < totalPages,
       hasPrev: prev.currentPage > 1,
     }));
-  }, [summaryData.length, itemsPerPage]); // Only depend on length, not the entire array
+  }, [summaryData.length, itemsPerPage]);
 
-  // Handle Page Change
   const handlePageChange = useCallback(
     (page) => {
       if (page < 1 || page > pagination.totalPages) return;
-
       setPagination((prev) => ({
         ...prev,
         currentPage: page,
@@ -265,7 +296,6 @@ const TotalExpense = () => {
     [pagination.totalPages],
   );
 
-  // Date Helpers (keep as is)
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
   const getCurrentYear = () => new Date().getFullYear();
@@ -389,7 +419,6 @@ const TotalExpense = () => {
     [buildParams, searchTerm],
   );
 
-  // Effects - Fixed dependencies
   useEffect(() => {
     if (
       selectedTab === "custom" &&
@@ -398,7 +427,7 @@ const TotalExpense = () => {
       return;
     }
     fetchFinancialData(1);
-  }, [selectedTab, fetchFinancialData]); // Added fetchFinancialData to deps
+  }, [selectedTab, fetchFinancialData]);
 
   useEffect(() => {
     if (
@@ -415,7 +444,6 @@ const TotalExpense = () => {
     fetchFinancialData,
   ]);
 
-  // Debounced search effect
   useEffect(() => {
     const timer = setTimeout(() => {
       if (
@@ -435,7 +463,6 @@ const TotalExpense = () => {
     fetchFinancialData,
   ]);
 
-  // Handlers
   const handleCustomDateChange = (name, date) =>
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
 
@@ -459,7 +486,7 @@ const TotalExpense = () => {
       setShowCustomFilter(true);
     } else {
       setCustomDateRange({ startDate: null, endDate: null });
-      setPagination((prev) => ({ ...prev, currentPage: 1 })); // Reset to page 1
+      setPagination((prev) => ({ ...prev, currentPage: 1 }));
     }
   }, []);
 
@@ -510,123 +537,210 @@ const TotalExpense = () => {
     [ROWS],
   );
 
-  // Render Pagination
+  // Render Pagination - Responsive
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
-
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
-          disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasPrev
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          disabled={pagination.currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          <ChevronLeft size={16} /> Prev
+          ← Prev
         </button>
-
-        <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
             <button
-              key={index}
+              key={idx}
               onClick={() => typeof page === "number" && handlePageChange(page)}
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number"
-                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                    : "bg-transparent text-gray-500 cursor-default"
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
               }`}
-              disabled={typeof page !== "number"}
             >
               {page}
             </button>
-          ))}
-        </div>
-
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
-          disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasNext
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          disabled={pagination.currentPage === pagination.totalPages}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          Next <ChevronRight size={16} />
+          Next →
         </button>
       </div>
     );
   };
 
-  return (
-    <div className="p-6">
-      {/* Header - same as before */}
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-3">
-          <PieChart className="w-8 h-8 text-purple-600" />
-          <h1 className="text-2xl font-bold text-gray-800">
-            Financial Summary Report
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 w-64 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
-            />
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={() => {
-              /* Add your exportToExcel function here */
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl shadow-md cursor-pointer"
-          >
-            <Download size={18} /> Export Excel
-          </button>
-        </div>
-      </div>
+  // Export function (placeholder - add your actual export logic)
+  const exportToExcel = async () => {
+    setExportLoading(true);
+    try {
+      // Add your export logic here
+      showToast("success", "Export functionality to be implemented");
+    } catch (error) {
+      showToast("error", "Failed to export");
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
-      {/* Rest of the JSX remains the same */}
-      {/* Tabs */}
-      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-        <div className="flex flex-wrap gap-2 mb-4">
+  // Responsive table headers
+  const renderTableHeaders = () => {
+    const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
+    return (
+      <thead className="bg-gray-100 text-gray-700 border-b">
+        <tr>
+          <th className={thClass}>Sr.No</th>
+          <th className={thClass}>Type</th>
+          <th className={thClass}>Amount ($)</th>
+          <th className={thClass}>Action</th>
+        </tr>
+      </thead>
+    );
+  };
+
+  return (
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <PieChart className="w-5 h-5 text-purple-600" />
+            <h1 className="text-base font-bold text-gray-800">
+              Expense Report
+            </h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
+          </div>
+        </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3">
+            <PieChart className="w-8 h-8 text-purple-600" />
+            <h1 className="text-2xl font-bold text-gray-800">
+              Financial Summary Report
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 w-64 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+              />
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={exportToExcel}
+              disabled={exportLoading}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl shadow-md cursor-pointer"
+            >
+              <Download size={18} /> Export Excel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-4">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Tabs - Responsive */}
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-6 border border-gray-200`}
+      >
+        <div
+          className={`flex flex-wrap gap-2 mb-4 ${isMobileView ? "overflow-x-auto whitespace-nowrap pb-2" : ""}`}
+        >
           {[
-            { key: "all", label: "All Records" },
+            { key: "all", label: isMobileView ? "All" : "All Records" },
             {
               key: "currentMonth",
-              label: `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
+              label: isMobileView
+                ? `${getCurrentMonthName().slice(0, 3)} ${getCurrentYear()}`
+                : `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`,
             },
             {
               key: "janToPreviousMonth",
-              label: getJanToPreviousMonthRange().label,
+              label: isMobileView
+                ? getJanToPreviousMonthRange().label.slice(0, 12)
+                : getJanToPreviousMonthRange().label,
             },
-            { key: "custom", label: "Custom Filter" },
+            { key: "custom", label: "Custom" },
           ].map(({ key, label }) => (
             <button
               key={key}
               onClick={() => handleTabChange(key)}
-              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors whitespace-nowrap ${
                 selectedTab === key
                   ? "bg-indigo-600 text-white"
                   : "bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -636,66 +750,92 @@ const TotalExpense = () => {
             </button>
           ))}
         </div>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <Filter size={16} />
-            Active Filter:{" "}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div
+            className={`flex items-center gap-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+          >
+            <Filter size={isMobileView ? 13 : 16} />
+            <span>Active Filter: </span>
             <span className="font-medium">{getActiveFilterDisplay()}</span>
-            <span className="text-gray-500 ml-2">
-              ({pagination.totalRecords} records found)
+            <span className="text-gray-500 ml-1">
+              ({pagination.totalRecords} records)
             </span>
           </div>
           <button
             onClick={() => setShowBreakdown(!showBreakdown)}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg cursor-pointer"
+            className={`flex items-center gap-1 ${isMobileView ? "px-2 py-1 text-xs" : "px-3 py-1.5 text-sm"} bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer`}
           >
-            {showBreakdown ? <EyeOff size={16} /> : <Eye size={16} />}
-            {showBreakdown ? "Hide Breakdown" : "View Breakdown"}
+            {showBreakdown ? (
+              <EyeOff size={isMobileView ? 12 : 14} />
+            ) : (
+              <Eye size={isMobileView ? 12 : 14} />
+            )}
+            {showBreakdown
+              ? isMobileView
+                ? "Hide"
+                : "Hide Breakdown"
+              : isMobileView
+                ? "View"
+                : "View Breakdown"}
           </button>
         </div>
       </div>
 
-      {/* Grand Total */}
-      <div className="bg-white p-6 rounded-xl shadow-md mb-6 border-l-4 border-indigo-500">
+      {/* Grand Total - Responsive */}
+      <div className="bg-white p-4 md:p-6 rounded-xl shadow-md mb-6 border-l-4 border-indigo-500">
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Total Overall Expense</p>
-            <p className="text-3xl font-bold text-indigo-600">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
+              Total Overall Expense
+            </p>
+            <p
+              className={`${isMobileView ? "text-xl" : "text-3xl"} font-bold text-indigo-600`}
+            >
               ${totalAmount.toLocaleString()}
             </p>
           </div>
-          <PieChart className="w-12 h-12 text-indigo-500" />
+          <PieChart
+            className={`${isMobileView ? "w-8 h-8" : "w-12 h-12"} text-indigo-500`}
+          />
         </div>
       </div>
 
-      {/* Breakdown */}
+      {/* Breakdown - Responsive */}
       {showBreakdown && totalAmount > 0 && (
         <div className="bg-white rounded-xl shadow-md mb-6 border border-gray-200">
-          <div className="p-6 border-b flex justify-between items-center">
-            <h3 className="text-lg font-semibold text-gray-800">
+          <div className="p-4 md:p-6 border-b flex justify-between items-center flex-wrap gap-3">
+            <h3
+              className={`${isMobileView ? "text-base" : "text-lg"} font-semibold text-gray-800`}
+            >
               Financial Breakdown by Type
             </h3>
             <button
               onClick={() => setShowBreakdown(false)}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
+              className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded-lg cursor-pointer text-xs"
             >
-              <EyeOff size={14} /> Hide
+              <EyeOff size={12} /> Hide
             </button>
           </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="p-4 md:p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
             {ROWS.map((item) => (
-              <div key={item.type} className="bg-gray-50 p-4 rounded-lg">
+              <div key={item.type} className="bg-gray-50 p-3 md:p-4 rounded-lg">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-gray-700">
+                  <span
+                    className={`${isMobileView ? "text-xs" : "text-sm"} font-medium text-gray-700`}
+                  >
                     {item.label}
                   </span>
-                  <span className="text-lg font-bold text-gray-800">
+                  <span
+                    className={`${isMobileView ? "text-sm" : "text-lg"} font-bold text-gray-800`}
+                  >
                     ${item.amount.toLocaleString()}
                   </span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                <div className="w-full bg-gray-200 rounded-full h-1.5 md:h-2 mt-2">
                   <div
-                    className={`${item.color} h-2 rounded-full`}
+                    className={`${item.color} h-1.5 md:h-2 rounded-full`}
                     style={{
                       width:
                         totalAmount > 0
@@ -704,7 +844,7 @@ const TotalExpense = () => {
                     }}
                   />
                 </div>
-                <div className="text-xs text-gray-500 mt-1">
+                <div className="text-[10px] md:text-xs text-gray-500 mt-1">
                   {totalAmount > 0
                     ? ((item.amount / totalAmount) * 100).toFixed(1)
                     : 0}
@@ -718,20 +858,20 @@ const TotalExpense = () => {
 
       {/* Main Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-sm font-medium">Sr. No.</th>
-              <th className="p-3 text-sm font-medium">Type</th>
-              <th className="p-3 text-sm font-medium">Amount ($)</th>
-              <th className="p-3 text-sm font-medium">Actions</th>
-            </tr>
-          </thead>
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[400px]" : ""}`}
+        >
+          {renderTableHeaders()}
           <tbody>
             {loading ? (
               <tr>
                 <td colSpan="4" className="p-6 text-center text-gray-400">
-                  Loading...
+                  <div className="flex justify-center items-center gap-2">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
+                    <span className={`${isMobileView ? "text-xs" : "text-sm"}`}>
+                      Loading...
+                    </span>
+                  </div>
                 </td>
               </tr>
             ) : paginatedData.length > 0 ? (
@@ -740,32 +880,41 @@ const TotalExpense = () => {
                   key={item.type}
                   className="hover:bg-gray-50 border-b last:border-0"
                 >
-                  <td className="p-3 text-sm text-gray-600 font-medium">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} text-gray-600 font-medium`}
+                  >
                     {(pagination.currentPage - 1) * itemsPerPage + index + 1}
                   </td>
-                  <td className="p-3 text-sm font-medium text-gray-900 capitalize">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} font-medium text-gray-900 capitalize`}
+                  >
                     {item.label}
                   </td>
-                  <td className="p-3 text-sm font-semibold text-red-600">
+                  <td
+                    className={`${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"} font-semibold text-red-600`}
+                  >
                     $
                     {(item.amount || 0).toLocaleString(undefined, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
                   </td>
-                  <td className="p-3">
+                  <td className={isMobileView ? "p-2" : "p-3"}>
                     <button
                       onClick={() => openDetail(item.type, item.label)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg border border-indigo-200 transition-colors cursor-pointer"
                     >
-                      <Eye size={14} /> View All
+                      <Eye size={isMobileView ? 12 : 14} /> View
                     </button>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="4" className="p-6 text-center text-gray-500">
+                <td
+                  colSpan="4"
+                  className={`p-6 text-center ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
+                >
                   No financial data found
                 </td>
               </tr>
@@ -774,7 +923,6 @@ const TotalExpense = () => {
         </table>
       </div>
 
-      {/* Pagination */}
       {renderPagination()}
 
       {/* Detail Modal */}
@@ -783,12 +931,13 @@ const TotalExpense = () => {
         onClose={closeDetail}
         title={detailModal.title}
         records={detailModal.records}
+        isMobileView={isMobileView}
       />
 
       {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 flex justify-center items-center z-50">
+          <div className="fixed inset-0 flex justify-center items-center z-50 p-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowCustomFilter(false)}
@@ -816,7 +965,7 @@ const TotalExpense = () => {
                         startDate: date,
                       }))
                     }
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     placeholderText="Start date"
                     dateFormat="yyyy-MM-dd"
                     isClearable
@@ -831,7 +980,7 @@ const TotalExpense = () => {
                     onChange={(date) =>
                       setCustomDateRange((prev) => ({ ...prev, endDate: date }))
                     }
-                    className="w-full border rounded-lg px-3 py-2"
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     placeholderText="End date"
                     dateFormat="yyyy-MM-dd"
                     isClearable
@@ -841,20 +990,20 @@ const TotalExpense = () => {
               <div className="flex justify-between gap-3">
                 <button
                   onClick={handleClearFilters}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Clear All
                 </button>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setShowCustomFilter(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer text-sm"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleApplyCustomFilter}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer text-sm"
                   >
                     Apply Filter
                   </button>

@@ -14,10 +14,12 @@ import {
   Eye,
   FileSpreadsheet,
   UserCheck,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
-import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import { getVisiblePages } from "../../utils/useVisiblePages";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -45,15 +47,27 @@ const ZoneWiseCustomers = () => {
   const [expandedZones, setExpandedZones] = useState(new Set());
   const [showExportOptions, setShowExportOptions] = useState(false);
 
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const inputRef = useRef(null);
   const exportOptionsRef = useRef(null);
 
-  const visiblePages = useVisiblePages(
+  const visiblePages = getVisiblePages(
     pagination.currentPage,
-    pagination.totalPages
+    pagination.totalPages,
   );
-
   const itemsPerPage = 7;
+
   const getSerialNumber = (index) => {
     return (pagination.currentPage - 1) * itemsPerPage + index + 1;
   };
@@ -85,9 +99,7 @@ const ZoneWiseCustomers = () => {
 
       const response = await axios.get(
         `${backendUrl}/api/reports/zone-wise-customers`,
-        {
-          params,
-        }
+        { params },
       );
 
       setData(
@@ -99,7 +111,7 @@ const ZoneWiseCustomers = () => {
             averageCustomersPerZone: 0,
           },
           records: [],
-        }
+        },
       );
       setPagination(
         response.data.pagination || {
@@ -108,13 +120,12 @@ const ZoneWiseCustomers = () => {
           totalRecords: 0,
           hasNext: false,
           hasPrev: false,
-        }
+        },
       );
     } catch (error) {
       console.error("Error fetching zone wise customer data:", error);
       showToast("error", "Failed to fetch zone wise customer data");
 
-      // Reset data on error
       setData({
         summary: {
           totalCustomers: 0,
@@ -143,7 +154,10 @@ const ZoneWiseCustomers = () => {
   // Close export options when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (exportOptionsRef.current && !exportOptionsRef.current.contains(event.target)) {
+      if (
+        exportOptionsRef.current &&
+        !exportOptionsRef.current.contains(event.target)
+      ) {
         setShowExportOptions(false);
       }
     };
@@ -197,22 +211,20 @@ const ZoneWiseCustomers = () => {
         `${backendUrl}/api/reports/zone-wise-customers/export`,
         {
           params,
-          responseType: 'blob',
-        }
+          responseType: "blob",
+        },
       );
 
-      // Create blob from response
       const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
 
-      // Create download link
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      const fileName = `zone_wise_customers_${new Date().toISOString().split('T')[0]}.xlsx`;
-      
+      const link = document.createElement("a");
+      const fileName = `zone_wise_customers_${new Date().toISOString().split("T")[0]}.xlsx`;
+
       link.href = url;
-      link.setAttribute('download', fileName);
+      link.setAttribute("download", fileName);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -221,7 +233,7 @@ const ZoneWiseCustomers = () => {
       showToast("success", "Zone wise data exported successfully!");
       setShowExportOptions(false);
     } catch (error) {
-      console.error('Export error:', error);
+      console.error("Export error:", error);
       showToast("error", "Failed to export data to Excel");
     } finally {
       setExportLoading(false);
@@ -241,22 +253,20 @@ const ZoneWiseCustomers = () => {
         `${backendUrl}/api/reports/zone-wise-customers/export-customers`,
         {
           params,
-          responseType: 'blob',
-        }
+          responseType: "blob",
+        },
       );
 
-      // Create blob from response
       const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
 
-      // Create download link
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      const fileName = `customer_list_${new Date().toISOString().split('T')[0]}.xlsx`;
-      
+      const link = document.createElement("a");
+      const fileName = `customer_list_${new Date().toISOString().split("T")[0]}.xlsx`;
+
       link.href = url;
-      link.setAttribute('download', fileName);
+      link.setAttribute("download", fileName);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -265,177 +275,205 @@ const ZoneWiseCustomers = () => {
       showToast("success", "Customer list exported successfully!");
       setShowExportOptions(false);
     } catch (error) {
-      console.error('Customer export error:', error);
+      console.error("Customer export error:", error);
       showToast("error", "Failed to export customer list");
     } finally {
       setCustomerExportLoading(false);
     }
   };
 
-  // Render Pagination Component
+  // ── Pagination (Improved like Product component) ─────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
-
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
+      <div
+        className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
+      >
         <button
           onClick={() => handlePageChange(pagination.currentPage - 1)}
           disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasPrev
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          <ChevronLeft size={16} />
-          Prev
+          ← Prev
         </button>
-
-        {/* Page Numbers */}
-        <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
+        {!isMobileView ? (
+          visiblePages.map((page, idx) => (
             <button
-              key={index}
-              onClick={() =>
-                typeof page === "number" ? handlePageChange(page) : null
-              }
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number"
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
+              key={idx}
+              onClick={() => typeof page === "number" && handlePageChange(page)}
+              disabled={page === "..."}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
               }`}
-              disabled={typeof page !== "number"}
             >
               {page}
             </button>
-          ))}
-        </div>
-
-        {/* Next Button */}
+          ))
+        ) : (
+          <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+            Page {pagination.currentPage} of {pagination.totalPages}
+          </span>
+        )}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasNext
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
+          className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
         >
-          Next
-          <ChevronRight size={16} />
+          Next →
         </button>
       </div>
     );
   };
 
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
+    <div
+      className={`grid gap-4 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-4 mb-6"}`}
+    >
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Total Customers</p>
-            <p className="text-2xl font-bold text-gray-800">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
+              Total Customers
+            </p>
+            <p
+              className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+            >
               {data.summary.totalCustomers?.toLocaleString() || 0}
             </p>
           </div>
-          <Users className="w-8 h-8 text-green-500" />
+          <Users
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-green-500`}
+          />
         </div>
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Total Zones</p>
-            <p className="text-2xl font-bold text-gray-800">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
+              Total Zones
+            </p>
+            <p
+              className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+            >
               {data.summary.totalZones || 0}
             </p>
           </div>
-          <MapPin className="w-8 h-8 text-blue-500" />
+          <MapPin
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-blue-500`}
+          />
         </div>
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Total MRs</p>
-            <p className="text-2xl font-bold text-gray-800">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
+              Total MRs
+            </p>
+            <p
+              className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+            >
               {data.summary.totalMRs || 0}
             </p>
           </div>
-          <User className="w-8 h-8 text-purple-500" />
+          <User
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-purple-500`}
+          />
         </div>
       </div>
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200 ${isMobileView ? "col-span-2" : ""}`}
+      >
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-sm text-gray-600">Avg per Zone</p>
-            <p className="text-2xl font-bold text-gray-800">
+            <p
+              className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+            >
+              Avg per Zone
+            </p>
+            <p
+              className={`${isMobileView ? "text-base" : "text-2xl"} font-bold text-gray-800`}
+            >
               {data.summary.averageCustomersPerZone?.toFixed(1) || 0}
             </p>
           </div>
-          <TrendingUp className="w-8 h-8 text-orange-500" />
+          <TrendingUp
+            className={`${isMobileView ? "w-6 h-6" : "w-8 h-8"} text-orange-500`}
+          />
         </div>
       </div>
     </div>
   );
 
   // Render zone header row
-  const renderZoneHeader = (record, index) => (
-    <tr
-      key={`zone-${record.zoneId}`}
-      className={`hover:bg-gray-50 ${
-        (index + 1) % itemsPerPage === 0 || index + 1 === data.summary.totalZones
-          ? ""
-          : "border-b"
-      }`}
-    >
-      <td className="p-3">
-        <div className="text-sm text-gray-600 font-medium">
+  const renderZoneHeader = (record, index) => {
+    const tdClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"}`;
+    return (
+      <tr
+        key={`zone-${record.zoneId}`}
+        className={`hover:bg-gray-50 ${index < data.records.length - 1 ? "border-b" : ""}`}
+      >
+        <td className={`${tdClass} text-gray-600 font-medium`}>
           {getSerialNumber(index)}
-        </div>
-      </td>
-      <td className="p-3">
-        <div className="text-sm text-gray-600 font-medium">
+        </td>
+        <td className={`${tdClass} font-medium text-gray-900 capitalize`}>
           {record.zoneName || "N/A"}
-        </div>
-      </td>
-      <td className="p-3">
-        <div className="text-sm text-gray-600 font-medium">
-          {record.totalMRs?.toLocaleString() || 0}
-        </div>
-      </td>
-      <td className="p-3">
-        <div className="text-sm font-semibold text-blue-600">
-          {record.totalCustomers?.toLocaleString() || 0}
-        </div>
-      </td>
-      <td className="p-3">
-        <div className="text-sm font-semibold text-green-600">
-          {record.averagePerMR?.toFixed(1) || 0}
-        </div>
-      </td>
-      <td className="p-3 text-center">
-        <div className="flex justify-center">
+          {isMobileView && (
+            <div className="text-[8px] text-gray-400 mt-0.5">
+              MRs: {record.totalMRs?.toLocaleString() || 0} | Customers:{" "}
+              {record.totalCustomers?.toLocaleString() || 0}
+            </div>
+          )}
+        </td>
+        {!isMobileView && (
+          <td className={`${tdClass} text-gray-600`}>
+            {record.totalMRs?.toLocaleString() || 0}
+          </td>
+        )}
+        {!isMobileView && (
+          <td className={`${tdClass} font-semibold text-blue-600`}>
+            {record.totalCustomers?.toLocaleString() || 0}
+          </td>
+        )}
+        {!isMobileView && (
+          <td className={`${tdClass} font-semibold text-green-600`}>
+            {record.averagePerMR?.toFixed(1) || 0}
+          </td>
+        )}
+        <td className={tdClass}>
           <button
             onClick={(e) => {
               e.stopPropagation();
               toggleZoneExpansion(record.zoneId);
             }}
-            className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs cursor-pointer ${
+            className={`inline-flex items-center gap-1 px-2 py-1 md:px-3 md:py-1.5 rounded-lg text-[10px] md:text-xs cursor-pointer ${
               expandedZones.has(record.zoneId)
                 ? "bg-indigo-600 hover:bg-indigo-700 text-white"
                 : "bg-gray-200 hover:bg-gray-300 text-gray-700"
             }`}
           >
-            <Eye size={14} />
-            {expandedZones.has(record.zoneId)
-              ? "Hide Customers"
-              : "View Customers"}
+            <Eye size={isMobileView ? 12 : 14} />
+            {expandedZones.has(record.zoneId) ? "Hide" : "View"}
           </button>
-        </div>
-      </td>
-    </tr>
-  );
+        </td>
+      </tr>
+    );
+  };
 
   // Render customer rows for expanded zone
   const renderCustomerRows = (record) => {
@@ -449,22 +487,30 @@ const ZoneWiseCustomers = () => {
       return null;
     }
 
+    const tdClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"}`;
+
     return record.customers.map((customer, customerIndex) => (
       <tr
         key={`customer-${customer.customerId}`}
-        className="bg-white hover:bg-gray-50 border-b"
+        className="bg-gray-50 hover:bg-gray-100 border-b"
       >
-        <td className="p-3"></td>
-        <td className="p-3 pl-8">
-          <div className="flex items-start gap-3">
+        <td className={tdClass}></td>
+        <td className={`${tdClass} pl-4 md:pl-8`}>
+          <div className="flex items-start gap-2 md:gap-3">
             <div className="flex-shrink-0">
-              <User className="w-4 h-4 text-gray-400 mt-1" />
+              <User
+                className={`${isMobileView ? "w-3 h-3" : "w-4 h-4"} text-gray-400 mt-0.5`}
+              />
             </div>
             <div className="flex-1">
-              <div className="text-sm font-medium text-gray-900 capitalize">
+              <div
+                className={`font-medium text-gray-900 capitalize ${isMobileView ? "text-[10px]" : "text-sm"}`}
+              >
                 {customer.customerName || "N/A"}
               </div>
-              <div className="text-xs text-gray-500 mt-1 space-y-1">
+              <div
+                className={`${isMobileView ? "text-[8px]" : "text-xs"} text-gray-500 mt-0.5 space-y-0.5`}
+              >
                 {customer.customerCode && (
                   <div>Code: {customer.customerCode}</div>
                 )}
@@ -474,50 +520,72 @@ const ZoneWiseCustomers = () => {
                 {customer.medicalRepName && (
                   <div>MR: {customer.medicalRepName}</div>
                 )}
+                {isMobileView && customer.contactNumber && (
+                  <div>Contact: {customer.contactNumber}</div>
+                )}
+                {isMobileView && customer.province && (
+                  <div>Province: {customer.province}</div>
+                )}
               </div>
             </div>
           </div>
         </td>
-        <td className="p-3">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <Phone size={14} />
-            {customer.contactNumber || "N/A"}
-          </div>
-        </td>
-        <td className="p-3">
-          <div className="text-sm text-gray-600">
+        {!isMobileView && (
+          <td className={tdClass}>
+            <div className="flex items-center gap-2 text-gray-600">
+              <Phone size={14} />
+              {customer.contactNumber || "N/A"}
+            </div>
+          </td>
+        )}
+        {!isMobileView && (
+          <td className={`${tdClass} text-gray-600`}>
             {customer.province || "N/A"}
-          </div>
-        </td>
-        <td className="p-3">
-          <div className="text-sm text-gray-600">
+          </td>
+        )}
+        {!isMobileView && (
+          <td className={`${tdClass} text-gray-600 max-w-xs truncate`}>
             {customer.address || "N/A"}
-          </div>
-        </td>
-        <td className="p-3"></td>
+          </td>
+        )}
+        <td className={tdClass}></td>
       </tr>
     ));
   };
 
-  const renderTableHeaders = () => (
-    <thead className="bg-gray-100 text-gray-700 border-b">
-      <tr>
-        <th className="p-3 text-sm font-medium">Sr.No</th>
-        <th className="p-3 text-sm font-medium">Zone Name / Customer Name</th>
-        <th className="p-3 text-sm font-medium">MR Count</th>
-        <th className="p-3 text-sm font-medium">Customer Count</th>
-        <th className="p-3 text-sm font-medium">MR Average</th>
-        <th className="p-3 text-sm font-medium">Action</th>
-      </tr>
-    </thead>
-  );
+  const renderTableHeaders = () => {
+    const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
+    if (isMobileView) {
+      return (
+        <thead className="bg-gray-100 text-gray-700 border-b">
+          <tr>
+            <th className={thClass}>Sr.No</th>
+            <th className={thClass}>Zone / Customer</th>
+            <th className={thClass}>Action</th>
+          </tr>
+        </thead>
+      );
+    }
+    return (
+      <thead className="bg-gray-100 text-gray-700 border-b">
+        <tr>
+          <th className={thClass}>Sr.No</th>
+          <th className={thClass}>Zone Name / Customer Name</th>
+          <th className={thClass}>MR Count</th>
+          <th className={thClass}>Customer Count</th>
+          <th className={thClass}>MR Average</th>
+          <th className={thClass}>Action</th>
+        </tr>
+      </thead>
+    );
+  };
 
   // Get column span
-  const getColSpan = () => 6;
+  const getColSpan = () => (isMobileView ? 3 : 6);
 
-  // Export Options Dropdown
+  // Export Options Dropdown (Desktop only)
   const renderExportOptions = () => (
-    <div 
+    <div
       ref={exportOptionsRef}
       className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50"
     >
@@ -525,14 +593,14 @@ const ZoneWiseCustomers = () => {
         <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 px-2">
           Export Options
         </div>
-        
+
         <button
           onClick={exportZoneWiseData}
           disabled={exportLoading}
           className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-md mb-1 ${
             exportLoading
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              : 'hover:bg-blue-50 text-blue-700 hover:text-blue-800'
+              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+              : "hover:bg-blue-50 text-blue-700 hover:text-blue-800"
           }`}
         >
           {exportLoading ? (
@@ -545,7 +613,9 @@ const ZoneWiseCustomers = () => {
               <FileSpreadsheet size={16} />
               <div className="text-left">
                 <div className="font-medium">Zone Wise Report</div>
-                <div className="text-xs text-gray-500">Summary + Zones + Customers</div>
+                <div className="text-xs text-gray-500">
+                  Summary + Zones + Customers
+                </div>
               </div>
             </>
           )}
@@ -558,8 +628,8 @@ const ZoneWiseCustomers = () => {
           disabled={customerExportLoading}
           className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-md ${
             customerExportLoading
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              : 'hover:bg-green-50 text-green-700 hover:text-green-800'
+              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+              : "hover:bg-green-50 text-green-700 hover:text-green-800"
           }`}
         >
           {customerExportLoading ? (
@@ -572,7 +642,9 @@ const ZoneWiseCustomers = () => {
               <UserCheck size={16} />
               <div className="text-left">
                 <div className="font-medium">Customer List Only</div>
-                <div className="text-xs text-gray-500">Detailed customer data</div>
+                <div className="text-xs text-gray-500">
+                  Detailed customer data
+                </div>
               </div>
             </>
           )}
@@ -582,67 +654,146 @@ const ZoneWiseCustomers = () => {
   );
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-3">
-          <MapPin className="w-8 h-8 text-blue-600" />
-          <h1 className="text-2xl font-bold text-gray-800">
-            Zone Wise Customers
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by zone, customer, MR..."
-              value={searchTerm}
-              onChange={handleSearchChange}
-              onKeyPress={handleSearch}
-              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
-            />
-            <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-              size={18}
-              onClick={() => inputRef.current?.focus()}
-            />
-            {searchTerm && (
-              <button
-                onClick={handleClearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            )}
-          </div>
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
 
-          {/* Export Button with Dropdown */}
-          <div className="relative">
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowExportOptions(!showExportOptions)}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
             >
-              <Download size={18} />
-              Export Excel
+              <Menu size={20} className="text-gray-700" />
             </button>
-            
-            {showExportOptions && renderExportOptions()}
+            <MapPin className="w-5 h-5 text-blue-600" />
+            <h1 className="text-base font-bold text-gray-800">Zone Wise</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {pagination.totalRecords}
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ── DESKTOP Header ── */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3">
+            <MapPin className="w-8 h-8 text-blue-600" />
+            <h1 className="text-2xl font-bold text-gray-800">
+              Zone Wise Customers
+            </h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by zone, customer, MR..."
+                value={searchTerm}
+                onChange={handleSearchChange}
+                onKeyPress={handleSearch}
+                className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
+              />
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                size={18}
+                onClick={() => inputRef.current?.focus()}
+              />
+              {searchTerm && (
+                <button
+                  onClick={handleClearSearch}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            {/* Export Button with Dropdown (Desktop only) */}
+            <div className="relative">
+              <button
+                onClick={() => setShowExportOptions(!showExportOptions)}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              >
+                <Download size={18} />
+                Export Excel
+              </button>
+
+              {showExportOptions && renderExportOptions()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-3">
+          <input
+            type="text"
+            placeholder="Search by zone, customer, MR..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            onKeyPress={handleSearch}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={handleClearSearch}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Search result hint */}
+      {searchTerm && pagination.totalRecords > 0 && (
+        <div className="mb-3 p-2 bg-blue-50 rounded-lg">
+          <p
+            className={`text-blue-700 ${isMobileView ? "text-xs" : "text-sm"}`}
+          >
+            Searching: <span className="font-semibold">"{searchTerm}"</span>
+            <span className="ml-3">
+              Found:{" "}
+              <span className="font-bold">{pagination.totalRecords}</span>{" "}
+              zone(s)
+            </span>
+          </p>
+        </div>
+      )}
 
       {renderSummaryCards()}
 
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+        <table
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[400px]" : ""}`}
+        >
           {renderTableHeaders()}
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={getColSpan()} className="p-3 text-center">
-                  <div className="flex justify-center items-center">
+                <td colSpan={getColSpan()} className="p-6 text-center">
+                  <div className="flex justify-center items-center gap-2">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
-                    <span className="ml-2">Loading...</span>
+                    <span
+                      className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+                    >
+                      Loading...
+                    </span>
                   </div>
                 </td>
               </tr>
@@ -657,7 +808,7 @@ const ZoneWiseCustomers = () => {
               <tr>
                 <td
                   colSpan={getColSpan()}
-                  className="p-3 text-center text-gray-500"
+                  className={`p-6 text-center ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
                 >
                   No zone wise customer data found
                 </td>
