@@ -249,7 +249,10 @@ const DailySample = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const inputRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
 
   // ── Mobile detection ──────────────────────────────────────────────────────
   const [isMobileView, setIsMobileView] = useState(false);
@@ -261,7 +264,6 @@ const DailySample = () => {
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
-  // ─────────────────────────────────────────────────────────────────────────
 
   const [customerList, setCustomerList] = useState([]);
   const [customerListLoading, setCustomerListLoading] = useState(false);
@@ -286,6 +288,68 @@ const DailySample = () => {
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // FETCH DAILY SAMPLES WITH SERVER-SIDE PAGINATION AND SEARCH
+  // ─────────────────────────────────────────────────────────────────────────
+  const fetchDailySampleReports = useCallback(async (page = 1, search = "") => {
+    try {
+      setLoading(true);
+
+      // Build URL with query parameters
+      let url = `${backendUrl}/api/reports/daily-sample?page=${page}&limit=${dailySamplePerPage}`;
+
+      if (search && search.trim()) {
+        url += `&mrName=${encodeURIComponent(search)}&productName=${encodeURIComponent(search)}&requestNumber=${encodeURIComponent(search)}`;
+      }
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch");
+      const data = await res.json();
+
+      setDailySampleData(data.reports || []);
+      setTotalRecords(data.totalCount || 0);
+
+      if (data.pagination) {
+        setTotalPages(data.pagination.totalPages);
+        setCurrentPage(data.pagination.currentPage);
+      }
+    } catch (error) {
+      console.error(error);
+      showToast(
+        "error",
+        error.message || "Error fetching daily sample reports",
+      );
+      setDailySampleData([]);
+      setTotalRecords(0);
+      setTotalPages(1);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    fetchDailySampleReports(1, "");
+  }, [fetchDailySampleReports]);
+
+  // Debounced search
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchDailySampleReports(1, searchTerm);
+    }, 500);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchTerm, fetchDailySampleReports]);
+
+  // Load customers and products for edit modal
   useEffect(() => {
     const loadCustomers = async () => {
       try {
@@ -317,54 +381,8 @@ const DailySample = () => {
     fetchProducts();
   }, []);
 
-  const filteredDailySamples = (dailySampleData || []).filter((item) => {
-    const searchLower = searchTerm.toLowerCase();
-    const productsArray = Array.isArray(item.products) ? item.products : [];
-    const productMatch = productsArray.some((p) =>
-      p.productName?.toLowerCase().includes(searchLower),
-    );
-    return (
-      productMatch ||
-      item?.customerName?.toLowerCase().includes(searchLower) ||
-      item?.customerCode?.toLowerCase().includes(searchLower) ||
-      item?.remark?.toLowerCase().includes(searchLower) ||
-      item?.requestNumber?.toString().includes(searchLower) ||
-      item?.mrName?.toLowerCase().includes(searchLower)
-    );
-  });
-
-  const totalPages =
-    Math.ceil(filteredDailySamples.length / dailySamplePerPage) || 1;
-  const visiblePages = Array.isArray(getVisiblePages(currentPage, totalPages))
-    ? getVisiblePages(currentPage, totalPages)
-    : [];
-  const currentDailySamples = filteredDailySamples.slice(
-    (currentPage - 1) * dailySamplePerPage,
-    currentPage * dailySamplePerPage,
-  );
-
-  const fetchDailySampleReports = async () => {
-    try {
-      setLoading(true);
-      const res = await fetch(`${backendUrl}/api/reports/daily-sample`);
-      if (!res.ok) throw new Error("Failed to fetch");
-      const data = await res.json();
-      setDailySampleData(data.reports || []);
-    } catch (error) {
-      console.error(error);
-      showToast(
-        "error",
-        error.message || "Error fetching daily sample reports",
-      );
-      setDailySampleData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDailySampleReports();
-  }, []);
+  // No longer need client-side filtering - backend handles it
+  const currentDailySamples = dailySampleData;
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
@@ -472,7 +490,7 @@ const DailySample = () => {
       if (res.status === 200) {
         showToast("success", res.data.message || "Imported successfully!");
         setShowImportModal(false);
-        fetchDailySampleReports();
+        fetchDailySampleReports(currentPage, searchTerm);
         setParsedData([]);
       }
     } catch (err) {
@@ -508,7 +526,7 @@ const DailySample = () => {
       if (res.status === 200) {
         showToast("success", "Updated successfully");
         setIsEditModalOpen(false);
-        fetchDailySampleReports();
+        fetchDailySampleReports(currentPage, searchTerm);
       }
     } catch (err) {
       console.error(err);
@@ -531,7 +549,7 @@ const DailySample = () => {
           `${backendUrl}/api/reports/daily-sample/${dailySampleData._id}`,
         );
         showToast("success", "Deleted successfully");
-        fetchDailySampleReports();
+        fetchDailySampleReports(currentPage, searchTerm);
       } catch (error) {
         showToast("error", "Failed to delete");
       }
@@ -551,7 +569,7 @@ const DailySample = () => {
           data: { ids: selected },
         });
         showToast("success", `Deleted ${selected.length} reports`);
-        fetchDailySampleReports();
+        fetchDailySampleReports(currentPage, searchTerm);
         setSelected([]);
       } catch (error) {
         showToast("error", "Failed to delete selected reports");
@@ -584,6 +602,14 @@ const DailySample = () => {
   const handleProductCountClick = (item) => {
     setSelectedProducts(item.products || []);
     setIsProductModalOpen(true);
+  };
+
+  const handlePageChange = (page) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+      fetchDailySampleReports(page, searchTerm);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   };
 
   // Edit modal product handlers
@@ -689,7 +715,39 @@ const DailySample = () => {
     setEditErrors,
   );
 
-  if (loading) {
+  // Get visible pages for pagination
+  const visiblePages = useMemo(() => {
+    const delta = 2;
+    const range = [];
+    const rangeWithDots = [];
+    let l;
+
+    for (let i = 1; i <= totalPages; i++) {
+      if (
+        i === 1 ||
+        i === totalPages ||
+        (i >= currentPage - delta && i <= currentPage + delta)
+      ) {
+        range.push(i);
+      }
+    }
+
+    range.forEach((i) => {
+      if (l) {
+        if (i - l === 2) {
+          rangeWithDots.push(l + 1);
+        } else if (i - l !== 1) {
+          rangeWithDots.push("...");
+        }
+      }
+      rangeWithDots.push(i);
+      l = i;
+    });
+
+    return rangeWithDots;
+  }, [currentPage, totalPages]);
+
+  if (loading && currentDailySamples.length === 0) {
     return (
       <div className="p-6 flex justify-center items-center h-64">
         <div className="text-lg text-gray-600">Loading...</div>
@@ -729,7 +787,7 @@ const DailySample = () => {
             <h1 className="text-base font-bold text-gray-800">Daily Sample</h1>
           </div>
           <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
-            {filteredDailySamples.length} records
+            {totalRecords} records
           </div>
         </div>
       )}
@@ -744,7 +802,7 @@ const DailySample = () => {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search..."
+            placeholder="Search by MR, Product, Customer..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
@@ -755,10 +813,7 @@ const DailySample = () => {
         </div>
       )}
 
-      {/* 
-        ── MOBILE Action Buttons (HIDDEN - "Add New" and "Import CSV" removed) ── 
-        Only the Delete button appears when items are selected.
-      */}
+      {/* Mobile Action Buttons - Delete only when selected */}
       {isMobileView && selected.length > 0 && (
         <div className="flex gap-2 mb-3 flex-wrap">
           <button
@@ -799,7 +854,7 @@ const DailySample = () => {
             <p className="text-sm font-medium text-gray-700 whitespace-nowrap">
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold shadow-sm">
-                {filteredDailySamples.length}
+                {totalRecords}
               </span>
             </p>
             <div className="relative w-full md:w-72">
@@ -873,7 +928,7 @@ const DailySample = () => {
             </tr>
           </thead>
           <tbody>
-            {currentDailySamples.length > 0 ? (
+            {!loading && currentDailySamples.length > 0 ? (
               currentDailySamples.map((item, index) => {
                 const productsArray = Array.isArray(item.products)
                   ? item.products
@@ -886,7 +941,7 @@ const DailySample = () => {
                 return (
                   <tr
                     key={item._id}
-                    className={`hover:bg-gray-50 ${(index + 1) % dailySamplePerPage === 0 || index + 1 === currentDailySamples.length ? "" : "border-b"}`}
+                    className={`hover:bg-gray-50 ${index + 1 === currentDailySamples.length ? "" : "border-b"}`}
                   >
                     <td className={`${tdClass} text-center`}>
                       <input
@@ -919,42 +974,44 @@ const DailySample = () => {
                     <td
                       className={`${tdClass} flex items-center justify-center gap-2`}
                     >
-                      {/* View button - visible on both mobile and desktop */}
                       <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
                         <Eye
                           onClick={() => handleView(item)}
                           size={isMobileView ? 15 : 18}
                         />
                       </button>
-
-                      {/* Edit and Delete buttons - HIDDEN on mobile, visible on desktop */}
-                      {!isMobileView && (
-                        <>
-                          <button className="text-green-600 hover:text-green-800 cursor-pointer">
-                            <Edit
-                              onClick={() => editDailySample(item)}
-                              size={18}
-                            />
-                          </button>
-                          <button
-                            onClick={() => deleteDailySample(item)}
-                            className="text-red-600 hover:text-red-800 cursor-pointer"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </>
-                      )}
+                      <button className="text-green-600 hover:text-green-800 cursor-pointer">
+                        <Edit
+                          onClick={() => editDailySample(item)}
+                          size={isMobileView ? 15 : 18}
+                        />
+                      </button>
+                      <button
+                        onClick={() => deleteDailySample(item)}
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                      >
+                        <Trash2 size={isMobileView ? 15 : 18} />
+                      </button>
                     </td>
                   </tr>
                 );
               })
+            ) : loading ? (
+              <tr>
+                <td colSpan="6" className="text-center py-6">
+                  <div className="flex justify-center items-center gap-2">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600" />
+                    <span className="text-gray-500 text-sm">Loading...</span>
+                  </div>
+                </td>
+              </tr>
             ) : (
               <tr>
                 <td
                   colSpan="6"
                   className="text-center py-6 text-gray-500 text-sm"
                 >
-                  No products match your search.
+                  No daily sample reports found.
                 </td>
               </tr>
             )}
@@ -962,29 +1019,24 @@ const DailySample = () => {
         </table>
       </div>
 
-      {/* 
-        ── Pagination (Mobile: Daily Report style) ── 
-        On mobile: shows "Prev Page X of Y Next" like the DailyReports component.
-        On desktop: shows full pagination with page numbers.
-      */}
-      {filteredDailySamples.length > 0 && totalPages > 0 && (
+      {/* ── Pagination ── */}
+      {totalPages > 1 && (
         <div
           className={`mt-4 p-3 md:p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"} flex-wrap`}
         >
           <button
-            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
+            onClick={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1 || loading}
             className="px-3 py-1.5 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
           >
             Prev
           </button>
+
           {isMobileView ? (
-            // Mobile: Simple page indicator (like DailyReports)
             <span className="px-3 py-1.5 text-sm text-gray-700 font-medium">
               Page {currentPage} of {totalPages}
             </span>
           ) : (
-            // Desktop: Full pagination with numbers
             visiblePages.map((page, idx) =>
               page === "..." ? (
                 <span
@@ -996,20 +1048,23 @@ const DailySample = () => {
               ) : (
                 <button
                   key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                  onClick={() => handlePageChange(page)}
+                  disabled={loading}
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
                 >
                   {page}
                 </button>
               ),
             )
           )}
+
           <button
-            onClick={() => {
-              setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}
-            disabled={currentPage === totalPages}
+            onClick={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages || loading}
             className="px-3 py-1.5 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
           >
             Next
@@ -1055,14 +1110,22 @@ const DailySample = () => {
                 <button
                   onClick={() => setShowImportModal(false)}
                   disabled={isUploading}
-                  className={`px-4 py-2 rounded-lg text-sm cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}
+                  className={`px-4 py-2 rounded-lg text-sm cursor-pointer ${
+                    isUploading
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                  }`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleImport}
                   disabled={isUploading}
-                  className={`px-4 py-2 rounded-lg text-sm cursor-pointer ${isUploading ? "bg-blue-400 text-white cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
+                  className={`px-4 py-2 rounded-lg text-sm cursor-pointer ${
+                    isUploading
+                      ? "bg-blue-400 text-white cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
                 >
                   {isUploading ? "Uploading…" : "Upload"}
                 </button>
@@ -1199,7 +1262,11 @@ const DailySample = () => {
                                   150,
                                 )
                               }
-                              className={`w-full border rounded-md px-3 py-2 text-sm ${editErrors[`productName_${idx}`] ? "border-red-500" : "border-gray-300"}`}
+                              className={`w-full border rounded-md px-3 py-2 text-sm ${
+                                editErrors[`productName_${idx}`]
+                                  ? "border-red-500"
+                                  : "border-gray-300"
+                              }`}
                               placeholder="Type to search..."
                               autoComplete="off"
                             />
@@ -1236,7 +1303,13 @@ const DailySample = () => {
                                           pIdx,
                                         )
                                       }
-                                      className={`cursor-pointer px-3 py-2 text-sm ${productSuggestionHook.suggestionsList[idx].highlightedIndex === pIdx ? "bg-blue-600 text-white" : "bg-white text-gray-900 hover:bg-gray-100"}`}
+                                      className={`cursor-pointer px-3 py-2 text-sm ${
+                                        productSuggestionHook.suggestionsList[
+                                          idx
+                                        ].highlightedIndex === pIdx
+                                          ? "bg-blue-600 text-white"
+                                          : "bg-white text-gray-900 hover:bg-gray-100"
+                                      }`}
                                     >
                                       {product.productName}
                                     </li>
@@ -1265,7 +1338,11 @@ const DailySample = () => {
                                   e.target.value,
                                 )
                               }
-                              className={`w-full border rounded-md px-3 py-2 text-sm ${editErrors[`totalQty_${idx}`] ? "border-red-500" : "border-gray-300"}`}
+                              className={`w-full border rounded-md px-3 py-2 text-sm ${
+                                editErrors[`totalQty_${idx}`]
+                                  ? "border-red-500"
+                                  : "border-gray-300"
+                              }`}
                             />
                             {editErrors[`totalQty_${idx}`] && (
                               <p className="text-red-500 text-xs">

@@ -10,6 +10,7 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  Menu,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -21,12 +22,12 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const holidaysPerPage = 7;
-const upcomingHolidaysPerPage = 3;
 
 const Holidays = () => {
   const navigate = useNavigate();
@@ -43,6 +44,11 @@ const Holidays = () => {
   const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // Mobile states
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [form, setForm] = useState({
     startDate: "",
@@ -61,6 +67,14 @@ const Holidays = () => {
   const [calendarViewType, setCalendarViewType] = useState("monthly");
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+
+  // Detect mobile view
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   useEffect(() => {
     fetchHolidays();
@@ -120,9 +134,9 @@ const Holidays = () => {
     );
   }, [holidays, currentYearString]);
 
-  // For calendar, use ALL holidays (both 2025 and 2026)
+  // For calendar, use ALL holidays
   const allHolidaysForCalendar = useMemo(() => {
-    return holidays; // Use all holidays for calendar display
+    return holidays;
   }, [holidays]);
 
   const filteredHolidays = currentYearHolidays.filter(
@@ -133,7 +147,7 @@ const Holidays = () => {
         r.startDate.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
-  // Get holidays for the entire current year - FOR CALENDAR (FIXED)
+  // Get holidays for the entire current year - FOR CALENDAR
   const currentYearFilteredHolidays = useMemo(() => {
     const startOfYear = new Date(currentYear, 0, 1);
     const endOfYear = new Date(currentYear, 11, 31);
@@ -236,7 +250,6 @@ const Holidays = () => {
     const day = String(date.getDate()).padStart(2, "0");
     const dateString = `${year}-${month}-${day}`;
 
-    // Check if holiday already exists for this date
     const existingHoliday = allHolidaysForCalendar.find((h) => {
       if (!h.startDate) return false;
       const holidayDate = new Date(h.startDate);
@@ -263,6 +276,7 @@ const Holidays = () => {
       description: "",
       _id: null,
     });
+    setMobileMenuOpen(false);
   };
 
   const handleIconClick = () => {
@@ -316,6 +330,7 @@ const Holidays = () => {
         showToast("error", "Failed to delete selected holidays.");
       }
     }
+    setMobileMenuOpen(false);
   };
 
   const handleView = (holiday) => {
@@ -359,7 +374,6 @@ const Holidays = () => {
     }
   };
 
-  // CORRECTED FILE UPLOAD FUNCTION - FIX DATE PARSING
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -373,7 +387,6 @@ const Holidays = () => {
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-        // Updated expected headers based on your Excel file
         const expectedHeaders = [
           "Holiday Name",
           "Start Date",
@@ -382,14 +395,12 @@ const Holidays = () => {
         ];
         let headerIdx = -1;
 
-        // Find the header row
         for (let i = 0; i < rows.length; i++) {
           if (!rows[i] || !Array.isArray(rows[i])) continue;
 
           const row = rows[i].map((c) => c?.toString().trim() || "");
           const normalized = row.map((c) => c.toLowerCase());
 
-          // Check if this row contains most of our expected headers
           let matchCount = 0;
           expectedHeaders.forEach((h) => {
             if (normalized.includes(h.toLowerCase())) {
@@ -398,7 +409,6 @@ const Holidays = () => {
           });
 
           if (matchCount >= 2) {
-            // Require at least 2 header matches
             headerIdx = i;
             break;
           }
@@ -415,20 +425,16 @@ const Holidays = () => {
         const headers = rows[headerIdx].map((h) => h?.toString().trim() || "");
         const dataRows = rows.slice(headerIdx + 1);
 
-        // Convert to JSON using the headers
         const json = dataRows.map((row) => {
           const obj = {};
           headers.forEach((h, i) => {
-            // Use empty string if cell is undefined
             obj[h] = row && row[i] !== undefined ? row[i] : "";
           });
           return obj;
         });
 
-        // Process the data - map Excel columns to your application's field names
         const finalData = json
           .filter((item) => {
-            // Check if we have required data
             const holidayName =
               item["Holiday Name"] ||
               item["HolidayName"] ||
@@ -438,7 +444,6 @@ const Holidays = () => {
             return holidayName && startDate;
           })
           .map((item) => {
-            // Map Excel columns to your application's field names
             const holidayName =
               item["Holiday Name"] ||
               item["HolidayName"] ||
@@ -454,44 +459,30 @@ const Holidays = () => {
               item["EndDate"] ||
               item["End date"] ||
               startDate;
-            const description =
-              item["Description"] || item["Description"] || "";
+            const description = item["Description"] || "";
 
-            // FIXED: Handle Excel date formats properly
             const parseExcelDate = (dateValue) => {
               if (!dateValue) return null;
-
-              // If it's already a date string
               if (typeof dateValue === "string") {
-                // Handle format like "2026-01-01 00:00:00"
-                if (dateValue.includes && dateValue.includes(" ")) {
+                if (dateValue.includes(" ")) {
                   return dateValue.split(" ")[0];
                 }
-                // Handle format like "2026-01-01"
                 return dateValue;
               }
-
-              // If it's a number (Excel serial date)
               if (typeof dateValue === "number") {
-                // Excel serial date: days since Jan 0, 1900 (with Excel's 1900 leap year bug)
-                // Convert to JavaScript Date
                 const excelEpoch = new Date(Date.UTC(1899, 11, 30));
                 const millisecondsPerDay = 24 * 60 * 60 * 1000;
                 const jsDate = new Date(
                   excelEpoch.getTime() + dateValue * millisecondsPerDay,
                 );
-
-                // Format as YYYY-MM-DD
                 const year = jsDate.getUTCFullYear();
                 const month = String(jsDate.getUTCMonth() + 1).padStart(2, "0");
                 const day = String(jsDate.getUTCDate()).padStart(2, "0");
                 return `${year}-${month}-${day}`;
               }
-
               return null;
             };
 
-            // Parse dates
             const formattedStartDate = parseExcelDate(startDate);
             const formattedEndDate =
               endDate === startDate
@@ -505,7 +496,7 @@ const Holidays = () => {
               description: description,
             };
           })
-          .filter((item) => item.startDate && item.endDate); // Only include items with valid dates
+          .filter((item) => item.startDate && item.endDate);
 
         if (finalData.length === 0) {
           showToast(
@@ -648,7 +639,6 @@ const Holidays = () => {
     }
   };
 
-  // NEW: Get holidays for specific month in annual view
   const getHolidaysForMonth = (monthIndex) => {
     return currentYearFilteredHolidays.filter((holiday) => {
       if (!holiday.startDate) return false;
@@ -656,7 +646,6 @@ const Holidays = () => {
       const holidayStart = new Date(holiday.startDate);
       const holidayEnd = new Date(holiday.endDate || holiday.startDate);
 
-      // Check if holiday overlaps with the specified month
       const startOfMonth = new Date(currentYear, monthIndex, 1);
       const endOfMonth = new Date(currentYear, monthIndex + 1, 0);
       endOfMonth.setHours(23, 59, 59, 999);
@@ -665,7 +654,7 @@ const Holidays = () => {
     });
   };
 
-  // Calendar rendering functions
+  // Monthly Calendar Component
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
@@ -687,40 +676,40 @@ const Holidays = () => {
     today.setHours(0, 0, 0, 0);
 
     return (
-      <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
-        <div className="flex justify-between items-center mb-6">
+      <div className="bg-white rounded-2xl shadow border border-gray-200 p-3 md:p-6">
+        <div className="flex justify-between items-center mb-4 md:mb-6">
           <button
             onClick={prevMonth}
             className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
           >
-            <ChevronLeft size={20} />
+            <ChevronLeft size={isMobileView ? 18 : 20} />
           </button>
-          <h2 className="text-xl font-semibold">
+          <h2 className="text-base md:text-xl font-semibold">
             {monthNames[currentMonth]} {currentYear}
           </h2>
           <button
             onClick={nextMonth}
             className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
           >
-            <ChevronRight size={20} />
+            <ChevronRight size={isMobileView ? 18 : 20} />
           </button>
         </div>
 
-        <div className="grid grid-cols-7 gap-1 mb-2">
+        <div className="grid grid-cols-7 gap-0.5 md:gap-1 mb-2">
           {dayNames.map((day) => (
             <div
               key={day}
-              className="p-2 text-center font-medium text-gray-600 text-sm"
+              className="p-1 md:p-2 text-center font-medium text-gray-600 text-[10px] md:text-sm"
             >
-              {day}
+              {isMobileView ? day.charAt(0) : day}
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
+        <div className="grid grid-cols-7 gap-0.5 md:gap-1">
           {days.map((date, index) => {
             if (!date) {
-              return <div key={`empty-${index}`} className="p-2" />;
+              return <div key={`empty-${index}`} className="p-1 md:p-2" />;
             }
 
             const isCurrentMonth = date.getMonth() === currentMonth;
@@ -754,21 +743,23 @@ const Holidays = () => {
               <div
                 key={dateString}
                 onClick={() => handleCalendarDateClick(date)}
-                className={`min-h-[80px] p-2 border-2 rounded-lg cursor-pointer transition-all hover:shadow-md ${bgColor} ${borderColor} ${textColor} ${
+                className={`min-h-[25px] md:min-h-[50px] p-1 md:p-2 border rounded-lg cursor-pointer transition-all hover:shadow-md ${bgColor} ${borderColor} ${textColor} ${
                   !isCurrentMonth ? "opacity-50" : ""
                 }`}
               >
-                <div className="flex justify-between items-start">
+                <div className="flex justify-center items-center">
                   <span
-                    className={`text-sm font-medium ${isSundayDate || isHolidayDate ? "text-white" : "text-gray-900"}`}
+                    className={`text-xs md:text-sm font-medium ${isSundayDate || isHolidayDate ? "text-white" : "text-gray-900"}`}
                   >
                     {date.getDate()}
                   </span>
                 </div>
-                {isHolidayDate && holidayName && (
+                {isHolidayDate && holidayName && !isMobileView && (
                   <div className="mt-1">
-                    <span className="text-xs font-medium truncate block">
-                      {holidayName}
+                    <span className="text-[10px] md:text-xs font-medium truncate block">
+                      {holidayName.length > 12
+                        ? holidayName.slice(0, 10) + "..."
+                        : holidayName}
                     </span>
                   </div>
                 )}
@@ -776,11 +767,29 @@ const Holidays = () => {
             );
           })}
         </div>
+        <div className="mt-4 md:mt-6 flex flex-wrap gap-2 md:gap-4 items-center justify-center text-[10px] md:text-sm bg-gray-50 rounded-lg p-2 md:p-4">
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-red-500 rounded"></div>
+            <span>Holiday</span>
+          </div>
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-gray-400 rounded"></div>
+            <span>Sunday</span>
+          </div>
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-blue-500 rounded"></div>
+            <span>Today</span>
+          </div>
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-gray-100 rounded border border-gray-300"></div>
+            <span>Working Day</span>
+          </div>
+        </div>
       </div>
     );
   };
 
-  // UPDATED: Annual calendar with grid layout similar to Attendance component
+  // Annual Calendar Component
   const renderAnnualCalendar = () => {
     const monthNames = [
       "Jan",
@@ -796,30 +805,29 @@ const Holidays = () => {
       "Nov",
       "Dec",
     ];
-
     const today = new Date();
     const currentYearToday = today.getFullYear();
     const currentMonthToday = today.getMonth();
 
     return (
-      <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
-        <div className="flex justify-between items-center mb-6">
+      <div className="bg-white rounded-2xl shadow border border-gray-200 p-3 md:p-6">
+        <div className="flex justify-between items-center mb-4 md:mb-6">
           <button
             onClick={prevYear}
             className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
           >
-            <ChevronLeft size={20} />
+            <ChevronLeft size={isMobileView ? 18 : 20} />
           </button>
-          <h2 className="text-xl font-semibold">{currentYear}</h2>
+          <h2 className="text-lg md:text-xl font-semibold">{currentYear}</h2>
           <button
             onClick={nextYear}
             className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
           >
-            <ChevronRight size={20} />
+            <ChevronRight size={isMobileView ? 18 : 20} />
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-6">
           {monthNames.map((monthName, monthIndex) => {
             const monthDays = getDaysInMonth(currentYear, monthIndex);
             const isCurrentMonth =
@@ -830,36 +838,36 @@ const Holidays = () => {
             return (
               <div
                 key={monthName}
-                className={`border rounded-lg p-4 ${
+                className={`border rounded-lg p-2 md:p-4 ${
                   isCurrentMonth
                     ? "border-blue-500 bg-blue-50 shadow-md"
                     : "border-gray-200 bg-white"
                 }`}
               >
                 <h3
-                  className={`text-lg font-semibold text-center mb-3 ${
+                  className={`text-sm md:text-lg font-semibold text-center mb-2 md:mb-3 ${
                     isCurrentMonth ? "text-blue-800" : "text-gray-800"
                   }`}
                 >
                   {monthName}
                   {isCurrentMonth && (
-                    <span className="block text-xs font-normal text-blue-600 mt-1">
+                    <span className="block text-[10px] md:text-xs font-normal text-blue-600 mt-0.5 md:mt-1">
                       (Current)
                     </span>
                   )}
                   {monthHolidays.length > 0 && (
-                    <span className="block text-xs font-normal text-red-600 mt-1">
+                    <span className="block text-[10px] md:text-xs font-normal text-red-600 mt-0.5 md:mt-1">
                       {monthHolidays.length} holiday(s)
                     </span>
                   )}
                 </h3>
 
-                <div className="grid grid-cols-7 gap-1 mb-2">
-                  {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                <div className="grid grid-cols-7 gap-0.5 mb-1 md:mb-2">
+                  {["S", "M", "T", "W", "T", "F", "S"].map((day, idx) => (
                     <div
-                      key={`${day}-${index}`}   // ✅ FIX: unique key
-                      className={`text-center text-xs font-medium ${
-                        index === 0 ? "text-red-600" : "text-gray-600"
+                      key={`${day}-${idx}`}
+                      className={`text-center text-[8px] md:text-xs font-medium ${
+                        idx === 0 ? "text-red-600" : "text-gray-600"
                       }`}
                     >
                       {day}
@@ -867,10 +875,12 @@ const Holidays = () => {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-7 gap-1">
-                  {monthDays.map((date, index) => {
+                <div className="grid grid-cols-7 gap-0.5">
+                  {monthDays.map((date, idx) => {
                     if (date === null) {
-                      return <div key={`empty-${index}`} className="h-6" />;
+                      return (
+                        <div key={`empty-${idx}`} className="h-4 md:h-6" />
+                      );
                     }
 
                     const isSundayDay = isSunday(date);
@@ -880,9 +890,8 @@ const Holidays = () => {
                     const dateString = date.toISOString().split("T")[0];
                     const holidayName = getHolidayName(dateString);
 
-                    // Determine cell style based on conditions
                     let cellStyle =
-                      "h-6 flex items-center justify-center rounded text-xs cursor-pointer ";
+                      "h-4 md:h-6 flex items-center justify-center rounded text-[8px] md:text-xs cursor-pointer ";
 
                     if (isToday) {
                       cellStyle += "bg-blue-500 text-white ";
@@ -913,27 +922,38 @@ const Holidays = () => {
                   })}
                 </div>
 
-                {/* Holiday list for the month */}
                 {monthHolidays.length > 0 && (
-                  <div className="mt-3 border-t pt-2">
-                    <div className="space-y-1 max-h-20 overflow-y-auto">
-                      {monthHolidays.map((holiday, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-1 bg-red-50 rounded text-xs cursor-pointer hover:bg-red-100"
-                          onClick={() => {
-                            setForm(holiday);
-                            setIsViewModalOpen(true);
-                          }}
-                        >
-                          <span className="text-red-800 font-medium truncate">
-                            {holiday.name}
-                          </span>
-                          <span className="text-red-600 text-xs">
-                            {formatDateToShort(holiday.startDate)}
-                          </span>
+                  <div className="mt-2 md:mt-3 border-t pt-1 md:pt-2">
+                    <div className="space-y-0.5 md:space-y-1 max-h-16 md:max-h-20 overflow-y-auto">
+                      {monthHolidays
+                        .slice(0, isMobileView ? 1 : 2)
+                        .map((holiday, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between p-0.5 md:p-1 bg-red-50 rounded text-[8px] md:text-xs cursor-pointer hover:bg-red-100"
+                            onClick={() => {
+                              setForm(holiday);
+                              setIsViewModalOpen(true);
+                            }}
+                          >
+                            <span className="text-red-800 font-medium truncate">
+                              {holiday.name.length > (isMobileView ? 10 : 15)
+                                ? holiday.name.slice(0, isMobileView ? 8 : 12) +
+                                  "..."
+                                : holiday.name}
+                            </span>
+                            {!isMobileView && (
+                              <span className="text-red-600 text-[8px] md:text-xs">
+                                {formatDateToShort(holiday.startDate)}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      {monthHolidays.length > (isMobileView ? 1 : 2) && (
+                        <div className="text-center text-[8px] md:text-xs text-gray-500">
+                          +{monthHolidays.length - (isMobileView ? 1 : 2)} more
                         </div>
-                      ))}
+                      )}
                     </div>
                   </div>
                 )}
@@ -943,21 +963,21 @@ const Holidays = () => {
         </div>
 
         {/* Legend */}
-        <div className="mt-6 flex flex-wrap gap-4 items-center justify-center text-sm bg-gray-50 rounded-lg p-4">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-red-500 rounded"></div>
+        <div className="mt-4 md:mt-6 flex flex-wrap gap-2 md:gap-4 items-center justify-center text-[10px] md:text-sm bg-gray-50 rounded-lg p-2 md:p-4">
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-red-500 rounded"></div>
             <span>Holiday</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-gray-400 rounded"></div>
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-gray-400 rounded"></div>
             <span>Sunday</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-blue-500 rounded"></div>
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-blue-500 rounded"></div>
             <span>Today</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-gray-100 rounded border border-gray-300"></div>
+          <div className="flex items-center gap-1 md:gap-2">
+            <div className="w-2 h-2 md:w-4 md:h-4 bg-gray-100 rounded border border-gray-300"></div>
             <span>Working Day</span>
           </div>
         </div>
@@ -992,279 +1012,420 @@ const Holidays = () => {
 
   const visiblePages = getVisiblePages(currentPage, totalPages);
 
-  // Debug: Log the current state
-  useEffect(() => {
-  }, [holidays, currentYearHolidays, filteredHolidays, loading, error]);
-
   if (loading)
-    return <div className="p-6 text-center">Loading holidays...</div>;
+    return <div className="p-4 md:p-6 text-center">Loading holidays...</div>;
   if (error)
-    return <div className="p-6 text-red-500 text-center">Error: {error}</div>;
+    return (
+      <div className="p-4 md:p-6 text-red-500 text-center">Error: {error}</div>
+    );
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex gap-3">
-          <button
-            onClick={handleAddButtonClick}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Plus size={18} /> Add New Holiday
-          </button>
+    <div className={`${isMobileView ? "px-3" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
 
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Upload size={18} /> Import CSV
-          </button>
-
-          <button
-            onClick={() => setShowCalendarView(!showCalendarView)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Calendar size={18} />{" "}
-            {showCalendarView ? "Show Table" : "Show Calendar"}
-          </button>
-
-          {selected.length > 0 && (
+      {/* Mobile Header with Hamburger Menu */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-1">
+          <div className="flex items-center gap-2">
             <button
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={handleDeleteSelected}
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
             >
-              <Trash2 size={18} /> Delete Selected ({selected.length})
+              <Menu size={20} className="text-gray-700" />
             </button>
+            <Calendar className="w-5 h-5 text-blue-600" />
+            <h1 className="text-base font-bold text-gray-800">Holidays</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {filteredHolidays.length}
+          </div>
+        </div>
+      )}
+
+      {/* Desktop Header */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex gap-3">
+            <button
+              onClick={handleAddButtonClick}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <Plus size={18} /> Add New Holiday
+            </button>
+
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <Upload size={18} /> Import CSV
+            </button>
+
+            <button
+              onClick={() => setShowCalendarView(!showCalendarView)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <Calendar size={18} />{" "}
+              {showCalendarView ? "Show Table" : "Show Calendar"}
+            </button>
+
+            {selected.length > 0 && (
+              <button
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={handleDeleteSelected}
+              >
+                <Trash2 size={18} /> Delete Selected ({selected.length})
+              </button>
+            )}
+          </div>
+
+          {!showCalendarView && holidays.length > 0 && (
+            <div className="flex items-center gap-8">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {filteredHolidays.length} ({currentYearString})
+                </span>
+              </p>
+              <div className="relative w-full md:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={handleIconClick}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search holidays..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
+            </div>
           )}
         </div>
+      )}
 
-        {!showCalendarView && holidays.length > 0 && (
-          <div className="flex items-center gap-8">
-            <p className="text-lg font-semibold text-gray-700">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+      {/* Mobile Search and Calendar Toggle */}
+      {isMobileView && !showCalendarView && holidays.length > 0 && (
+        <div className="flex flex-col gap-3 mb-4">
+          <div className="relative w-full">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+              size={15}
+              onClick={handleIconClick}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search holidays..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-9 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+            />
+          </div>
+          <div className="flex justify-between items-center">
+            <p className="text-sm font-semibold text-gray-700">
+              Total:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
                 {filteredHolidays.length} ({currentYearString})
               </span>
             </p>
-            <div className="relative w-full md:w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                size={16}
-                onClick={handleIconClick}
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search holidays..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
-            </div>
+            <button
+              onClick={() => setShowCalendarView(!showCalendarView)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg shadow-md cursor-pointer text-sm"
+            >
+              <Calendar size={16} /> {showCalendarView ? "Table" : "Calendar"}
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {isMobileView && showCalendarView && (
+        <div className="flex justify-between items-center mb-3">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCalendarViewType("monthly")}
+              className={`px-3 py-1.5 rounded-lg font-medium cursor-pointer text-sm ${
+                calendarViewType === "monthly"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setCalendarViewType("annual")}
+              className={`px-3 py-1.5 rounded-lg font-medium cursor-pointer text-sm ${
+                calendarViewType === "annual"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              Annual
+            </button>
+          </div>
+          <button
+            onClick={() => setShowCalendarView(false)}
+            className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg shadow-md cursor-pointer text-sm"
+          >
+            Show Table
+          </button>
+        </div>
+      )}
+
+      {/* Mobile FAB Menu - Only show in table view on mobile */}
+      {isMobileView && !showCalendarView && (
+        <div className="fixed bottom-6 right-6 z-40">
+          <div className="relative">
+            {mobileMenuOpen && (
+              <div className="absolute bottom-16 right-0 mb-2 space-y-2">
+                <button
+                  onClick={handleAddButtonClick}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-lg cursor-pointer w-full justify-center text-sm"
+                >
+                  <Plus size={16} /> Add
+                </button>
+                <button
+                  onClick={() => setShowImportModal(true)}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-lg cursor-pointer w-full justify-center text-sm"
+                >
+                  <Upload size={16} /> Import
+                </button>
+                {selected.length > 0 && (
+                  <button
+                    onClick={handleDeleteSelected}
+                    className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-lg cursor-pointer w-full justify-center text-sm"
+                  >
+                    <Trash2 size={16} /> Delete ({selected.length})
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showCalendarView ? (
         <>
-          {/* Calendar View Toggle and Legend */}
-          <div className="flex justify-between items-center mb-4 bg-white rounded-2xl shadow border border-gray-200 p-4">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setCalendarViewType("monthly")}
-                className={`px-4 py-2 rounded-lg font-medium cursor-pointer ${
-                  calendarViewType === "monthly"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                Monthly
-              </button>
-              <button
-                onClick={() => setCalendarViewType("annual")}
-                className={`px-4 py-2 rounded-lg font-medium cursor-pointer ${
-                  calendarViewType === "annual"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                Annual
-              </button>
-            </div>
+          {/* Desktop Calendar View Toggle and Legend */}
+          {!isMobileView && (
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4 bg-white rounded-2xl shadow border border-gray-200 p-3 md:p-4">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCalendarViewType("monthly")}
+                  className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium cursor-pointer text-sm md:text-base ${
+                    calendarViewType === "monthly"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  }`}
+                >
+                  Monthly
+                </button>
+                <button
+                  onClick={() => setCalendarViewType("annual")}
+                  className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium cursor-pointer text-sm md:text-base ${
+                    calendarViewType === "annual"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  }`}
+                >
+                  Annual
+                </button>
+              </div>
 
-            <div className="flex gap-6 text-sm flex-wrap justify-center">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-red-500 rounded border-2 border-red-600"></div>
-                <span>Holiday</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-gray-400 rounded border-2 border-gray-500"></div>
-                <span>Sunday</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-gray-50 rounded border-2 border-gray-200"></div>
-                <span>Working Day</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-blue-50 rounded border-2 border-blue-500"></div>
-                <span>Today</span>
+              <div className="flex gap-3 md:gap-6 text-xs md:text-sm flex-wrap">
+                <div className="flex items-center gap-1 md:gap-2">
+                  <div className="w-3 h-3 md:w-4 md:h-4 bg-red-500 rounded border-2 border-red-600"></div>
+                  <span>Holiday</span>
+                </div>
+                <div className="flex items-center gap-1 md:gap-2">
+                  <div className="w-3 h-3 md:w-4 md:h-4 bg-gray-400 rounded border-2 border-gray-500"></div>
+                  <span>Sunday</span>
+                </div>
+                <div className="flex items-center gap-1 md:gap-2">
+                  <div className="w-3 h-3 md:w-4 md:h-4 bg-gray-50 rounded border-2 border-gray-200"></div>
+                  <span>Working Day</span>
+                </div>
+                <div className="flex items-center gap-1 md:gap-2">
+                  <div className="w-3 h-3 md:w-4 md:h-4 bg-blue-50 rounded border-2 border-blue-500"></div>
+                  <span>Today</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Calendar Display - Shows ALL holidays (2025 + 2026) */}
+          {/* Calendar Display */}
           {calendarViewType === "monthly"
             ? renderMonthlyCalendar()
             : renderAnnualCalendar()}
         </>
       ) : (
-        /* Table View - Shows ONLY current year (2025) holidays */
+        /* Table View */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           {holidays.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center">
-              <p className="text-gray-500 text-lg mb-4">
+            <div className="bg-white rounded-2xl p-8 md:p-12 text-center">
+              <p className="text-gray-500 text-base md:text-lg mb-4">
                 No holidays found in the system
               </p>
-              <p className="text-gray-400 mb-6">
+              <p className="text-gray-400 text-sm md:text-base mb-6">
                 Add your first holiday or import from a file
               </p>
-        
             </div>
           ) : filteredHolidays.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center">
-              <p className="text-gray-500 text-lg">
+            <div className="bg-white rounded-2xl p-8 md:p-12 text-center">
+              <p className="text-gray-500 text-base md:text-lg">
                 No holidays found for {currentYearString}
               </p>
-              <p className="text-gray-400 mt-2">
+              <p className="text-gray-400 text-sm md:text-base mt-2">
                 Try switching to calendar view to see all years
               </p>
             </div>
           ) : (
             <>
-              <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-                {/* Table Header with Checkbox */}
-                <thead className="bg-gray-100 text-gray-700 border-b text-sm">
-                  <tr>
-                    <th className="p-3">
-                      <div className="flex items-center gap-3">
-                        {currentHolidays.length > 0 && (
-                          <input
-                            type="checkbox"
-                            checked={
-                              selected.length === currentHolidays.length &&
-                              currentHolidays.length > 0
-                            }
-                            onChange={(e) => toggleSelectAll(e.target.checked)}
-                            className="cursor-pointer"
-                          />
-                        )}
-                        <span>Sr No</span>
-                      </div>
-                    </th>
-                    <th className="p-3">Holiday Name</th>
-                    <th className="p-3">Start Date</th>
-                    <th className="p-3">End Date</th>
-                    <th className="p-3">Description</th>
-                    <th className="p-3">Actions</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {currentHolidays.map((holiday, index) => {
-                    const formattedStartDate = formatDateToReadable(
-                      holiday.startDate,
-                    );
-                    const formattedEndDate = formatDateToReadable(
-                      holiday.endDate || holiday.startDate,
-                    );
-
-                    // Check if holiday is selected
-                    const isSelected = selected.some(
-                      (s) => s.id === holiday._id,
-                    );
-
-                    return (
-                      <tr
-                        key={holiday._id}
-                        className={`hover:bg-gray-50 ${
-                          (index + 1) % holidaysPerPage === 0 ||
-                          index + 1 === currentHolidays.length
-                            ? ""
-                            : "border-b"
-                        } ${isSelected ? "bg-blue-50" : ""}`}
-                      >
-                        {/* Checkbox Cell */}
-                        <td className="p-3">
-                          <div className="flex items-center gap-3">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                  <thead className="bg-gray-100 text-gray-700 border-b text-sm">
+                    <tr>
+                      <th className="p-2 md:p-3 w-16 md:w-20">
+                        <div className="flex items-center justify-center gap-1 md:gap-2">
+                          {currentHolidays.length > 0 && (
                             <input
                               type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleSelect(holiday)}
+                              checked={
+                                selected.length === currentHolidays.length &&
+                                currentHolidays.length > 0
+                              }
+                              onChange={(e) =>
+                                toggleSelectAll(e.target.checked)
+                              }
                               className="cursor-pointer"
                             />
-                            <span>
-                              {(currentPage - 1) * holidaysPerPage + index + 1}
-                            </span>
-                          </div>
-                        </td>
+                          )}
+                          <span>#</span>
+                        </div>
+                      </th>
+                      <th className="p-2 md:p-3 text-left">
+                        Holiday Name & Date
+                      </th>
+                      <th className="p-2 md:p-3 hidden md:table-cell">
+                        End Date
+                      </th>
+                      <th className="p-2 md:p-3 hidden lg:table-cell">
+                        Description
+                      </th>
+                      <th className="p-2 md:p-3 w-24 md:w-32">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentHolidays.map((holiday, index) => {
+                      const formattedStartDate = formatDateToReadable(
+                        holiday.startDate,
+                      );
+                      const formattedEndDate = formatDateToReadable(
+                        holiday.endDate || holiday.startDate,
+                      );
+                      const isSelected = selected.some(
+                        (s) => s.id === holiday._id,
+                      );
 
-                        <td className="p-3">
-                          <div className="flex flex-col">
-                            <span className="capitalize font-medium text-gray-800">
-                              {holiday.name}
-                            </span>
-                            <span className="text-sm text-gray-500">
-                              ({formattedStartDate})
-                            </span>
-                          </div>
-                        </td>
-
-                        <td className="p-3">{formattedStartDate}</td>
-                        <td className="p-3">{formattedEndDate}</td>
-
-                        <td className="p-3 capitalize">
-                          {holiday.description || "No description"}
-                        </td>
-
-                        <td className="p-3 flex items-center justify-center gap-3">
-                          <button
-                            onClick={() => handleView(holiday)}
-                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                            title="View"
-                          >
-                            <Eye size={18} />
-                          </button>
-                          <button
-                            onClick={() => editHoliday(holiday)}
-                            className="text-green-600 hover:text-green-800 cursor-pointer"
-                            title="Edit"
-                          >
-                            <Edit size={18} />
-                          </button>
-                          <button
-                            onClick={() => deleteHoliday(holiday)}
-                            className="text-red-600 hover:text-red-800 cursor-pointer"
-                            title="Delete"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                      return (
+                        <tr
+                          key={holiday._id}
+                          className={`hover:bg-gray-50 border-b ${isSelected ? "bg-blue-50" : ""}`}
+                        >
+                          <td className="p-2 md:p-3">
+                            <div className="flex items-center justify-center gap-1 md:gap-2">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleSelect(holiday)}
+                                className="cursor-pointer"
+                              />
+                              <span className="text-xs md:text-sm">
+                                {(currentPage - 1) * holidaysPerPage +
+                                  index +
+                                  1}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-2 md:p-3 text-left">
+                            <div className="flex flex-col">
+                              <span className="capitalize font-medium text-gray-800 text-sm md:text-base">
+                                {holiday.name}
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                {formattedStartDate}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-2 md:p-3 hidden md:table-cell text-sm">
+                            {formattedEndDate}
+                          </td>
+                          <td className="p-2 md:p-3 hidden lg:table-cell capitalize text-sm">
+                            {holiday.description?.substring(0, 40) ||
+                              "No description"}
+                            {holiday.description?.length > 40 && "..."}
+                          </td>
+                          <td className="p-2 md:p-3">
+                            <div className="flex items-center justify-center gap-2 md:gap-3">
+                              <button
+                                onClick={() => handleView(holiday)}
+                                className="text-blue-600 hover:text-blue-800 cursor-pointer p-1"
+                                title="View"
+                              >
+                                <Eye size={isMobileView ? 16 : 18} />
+                              </button>
+                              {/* Only show Edit button on desktop */}
+                              {!isMobileView && (
+                                <button
+                                  onClick={() => editHoliday(holiday)}
+                                  className="text-green-600 hover:text-green-800 cursor-pointer p-1"
+                                  title="Edit"
+                                >
+                                  <Edit size={18} />
+                                </button>
+                              )}
+                              {/* Only show Delete button on desktop */}
+                              {!isMobileView && (
+                                <button
+                                  onClick={() => deleteHoliday(holiday)}
+                                  className="text-red-600 hover:text-red-800 cursor-pointer p-1"
+                                  title="Delete"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
               {totalPages > 1 && (
-                <div className="mt-4 p-5 flex justify-start gap-2">
+                <div className="mt-4 p-3 md:p-5 flex justify-center md:justify-start gap-1 md:gap-2 flex-wrap">
                   <button
                     onClick={() =>
                       setCurrentPage((prev) => Math.max(prev - 1, 1))
                     }
                     disabled={currentPage === 1}
-                    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                    className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
                   >
                     Prev
                   </button>
@@ -1272,7 +1433,7 @@ const Holidays = () => {
                     <button
                       key={page}
                       onClick={() => setCurrentPage(page)}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                      className={`px-2 md:px-3 py-1 rounded w-8 md:w-10 text-center transition cursor-pointer text-sm ${
                         currentPage === page
                           ? "bg-indigo-600 text-white"
                           : "bg-gray-200 hover:bg-gray-300"
@@ -1287,7 +1448,7 @@ const Holidays = () => {
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }}
                     disabled={currentPage === totalPages}
-                    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                    className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
                   >
                     Next
                   </button>
@@ -1301,15 +1462,15 @@ const Holidays = () => {
       {/* Import Modal */}
       {showImportModal &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 p-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={handleCloseImportModal}
             />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+            <div className="bg-white w-full max-w-md p-4 md:p-6 rounded-xl shadow-lg relative">
               <button
                 onClick={handleCloseImportModal}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                className="absolute top-2 md:top-3 right-2 md:right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 disabled={isUploading}
               >
                 <X size={20} />
@@ -1319,7 +1480,7 @@ const Holidays = () => {
               </h2>
               {isSampleFile && <SampleExcelDownloadHolidays />}
               <div className="mb-6">
-                <label className="block text-gray-700 mb-2">
+                <label className="block text-gray-700 mb-2 text-sm">
                   Upload Excel File
                 </label>
                 <input
@@ -1327,7 +1488,7 @@ const Holidays = () => {
                   type="file"
                   accept=".xlsx, .xls, .csv"
                   onChange={handleFileUpload}
-                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer text-sm"
                   disabled={isUploading}
                 />
                 <p className="text-xs text-gray-500 mt-1">
@@ -1347,7 +1508,7 @@ const Holidays = () => {
                 <button
                   onClick={handleCloseImportModal}
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                  className={`px-4 md:px-5 py-2 rounded-lg cursor-pointer text-sm ${
                     isUploading
                       ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                       : "bg-gray-300 hover:bg-gray-400 text-gray-700"
@@ -1358,7 +1519,7 @@ const Holidays = () => {
                 <button
                   onClick={handleImport}
                   disabled={isUploading || parsedData.length === 0}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                  className={`px-4 md:px-5 py-2 rounded-lg cursor-pointer text-sm ${
                     isUploading || parsedData.length === 0
                       ? "bg-blue-400 text-white cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700 text-white"
@@ -1375,25 +1536,22 @@ const Holidays = () => {
       {/* Add Holiday Modal */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 p-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsAddModalOpen(false)}
             />
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+            <div className="bg-white w-full max-w-2xl p-4 md:p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => setIsAddModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                className="absolute top-2 md:top-3 right-2 md:right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <X size={20} />
               </button>
               <h2 className="text-xl font-semibold text-gray-800 mb-4">
                 Add New Holiday
               </h2>
-              <form
-                onSubmit={handleAddHoliday}
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
-              >
+              <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium">
                     Holiday Name <span className="text-red-500">*</span>
@@ -1402,7 +1560,7 @@ const Holidays = () => {
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                    className="w-full border px-3 py-2 rounded-lg capitalize text-sm md:text-base"
                     required
                     placeholder="Enter holiday name"
                   />
@@ -1416,7 +1574,7 @@ const Holidays = () => {
                     onChange={handleStartDateChange}
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select start date"
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm md:text-base"
                     required
                   />
                 </div>
@@ -1430,7 +1588,7 @@ const Holidays = () => {
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select end date"
                     minDate={form.startDate ? new Date(form.startDate) : null}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm md:text-base"
                     required
                   />
                 </div>
@@ -1443,7 +1601,7 @@ const Holidays = () => {
                     onChange={(e) =>
                       setForm({ ...form, description: e.target.value })
                     }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm md:text-base"
                     rows="3"
                     placeholder="Optional description"
                   />
@@ -1452,13 +1610,13 @@ const Holidays = () => {
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   onClick={() => setIsAddModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 md:px-5 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAddHoliday}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 md:px-5 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Add Holiday
                 </button>
@@ -1471,25 +1629,22 @@ const Holidays = () => {
       {/* Edit Holiday Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 p-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsEditModalOpen(false)}
             />
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+            <div className="bg-white w-full max-w-2xl p-4 md:p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                className="absolute top-2 md:top-3 right-2 md:right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <X size={20} />
               </button>
               <h2 className="text-xl font-semibold text-gray-800 mb-4">
                 Edit Holiday
               </h2>
-              <form
-                onSubmit={handleUpdateHoliday}
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
-              >
+              <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium">
                     Holiday Name <span className="text-red-500">*</span>
@@ -1498,7 +1653,7 @@ const Holidays = () => {
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                    className="w-full border px-3 py-2 rounded-lg capitalize text-sm md:text-base"
                     required
                   />
                 </div>
@@ -1511,7 +1666,7 @@ const Holidays = () => {
                     onChange={handleStartDateChange}
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select start date"
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm md:text-base"
                     required
                   />
                 </div>
@@ -1525,7 +1680,7 @@ const Holidays = () => {
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select end date"
                     minDate={form.startDate ? new Date(form.startDate) : null}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm md:text-base"
                     required
                   />
                 </div>
@@ -1538,7 +1693,7 @@ const Holidays = () => {
                     onChange={(e) =>
                       setForm({ ...form, description: e.target.value })
                     }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border px-3 py-2 rounded-lg text-sm md:text-base"
                     rows="3"
                   />
                 </div>
@@ -1546,13 +1701,13 @@ const Holidays = () => {
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 md:px-5 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleUpdateHoliday}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 md:px-5 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Update Holiday
                 </button>
@@ -1565,15 +1720,15 @@ const Holidays = () => {
       {/* View Holiday Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 p-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsViewModalOpen(false)}
             />
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+            <div className="bg-white w-full max-w-2xl p-4 md:p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                className="absolute top-2 md:top-3 right-2 md:right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <X size={20} />
               </button>
@@ -1585,7 +1740,7 @@ const Holidays = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Holiday Name
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize text-sm md:text-base">
                     {form.name} ({formatDateToShort(form.startDate)})
                   </p>
                 </div>
@@ -1593,7 +1748,7 @@ const Holidays = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Start Date
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm md:text-base">
                     {formatDateToReadable(form.startDate)}
                   </p>
                 </div>
@@ -1601,7 +1756,7 @@ const Holidays = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     End Date
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm md:text-base">
                     {formatDateToReadable(form.endDate || form.startDate)}
                   </p>
                 </div>
@@ -1609,7 +1764,7 @@ const Holidays = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Description
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 min-h-[80px]">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 min-h-[80px] text-sm md:text-base">
                     {form.description?.trim()
                       ? form.description
                       : "No Description"}
@@ -1619,7 +1774,7 @@ const Holidays = () => {
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 md:px-5 py-2 rounded-lg cursor-pointer text-sm"
                 >
                   Close
                 </button>

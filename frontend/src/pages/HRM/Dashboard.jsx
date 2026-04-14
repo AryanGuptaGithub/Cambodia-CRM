@@ -19,6 +19,10 @@ import {
   UserX,
   Calendar,
   DollarSign,
+  Menu,
+  ChevronLeft,
+  ChevronRight,
+  LayoutDashboard,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../../utils/toast";
@@ -31,6 +35,8 @@ import ReactDOM from "react-dom";
 import { fetchWholeMRList } from "../../utils/customerUtil";
 import SampleExcelDownloadStaff from "../../excels/SampleExcelDownloadStaff";
 import { parseExcelDate } from "../../utils/excelUtility";
+import Sidebar from "../../components/Sidebar";
+import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -42,16 +48,13 @@ const formatDateToDDMMMYYYY = (dateString) => {
   if (!dateString) return "";
   try {
     let date;
-    if (dateString instanceof Date) {
-      date = dateString;
-    } else if (typeof dateString === "string") {
+    if (dateString instanceof Date) date = dateString;
+    else if (typeof dateString === "string") {
       const m = dateString.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
       date = m
         ? new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]))
         : new Date(dateString);
-    } else {
-      date = new Date(dateString);
-    }
+    } else date = new Date(dateString);
     if (isNaN(date.getTime())) return dateString || "--";
     const months = [
       "Jan",
@@ -92,7 +95,7 @@ const parseDateFromString = (dateString) => {
   }
 };
 
-// AttendanceCalendarModal Component
+// ─── Attendance Calendar Modal ────────────────────────────────────────────────
 const AttendanceCalendarModal = ({ mr, onClose }) => {
   const today = new Date();
   const [viewDate, setViewDate] = useState(
@@ -105,7 +108,6 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
-
   const monthNames = [
     "January",
     "February",
@@ -131,25 +133,21 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
           axios.get(`${backendUrl}/api/hrm/leaves`),
           axios.get(`${backendUrl}/api/hrm/holidays`),
         ]);
-
         setAttendanceRecords(
           (attRes.data || []).filter((r) => r.userId === mr._id),
         );
-
         setLeaves(
           (leaveRes.data || []).filter(
             (l) => l.userId === mr._id && l.status === "approved",
           ),
         );
-
         const raw = holRes.data?.holidays || holRes.data || [];
         const flat = [];
         raw.forEach((h) => {
           const start = new Date(h.startDate || h.date);
           const end = new Date(h.endDate || h.date);
-          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1))
             flat.push({ ...h, date: new Date(d) });
-          }
         });
         setHolidays(flat);
       } catch (err) {
@@ -181,7 +179,6 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
     });
     return h?.name || null;
   };
-
   const getAttendance = (d) => {
     const t = new Date(d);
     t.setHours(0, 0, 0, 0);
@@ -193,7 +190,6 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
       }) || null
     );
   };
-
   const getLeaveInfo = (d) => {
     const t = new Date(d);
     t.setHours(0, 0, 0, 0);
@@ -215,52 +211,50 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
   for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
 
   const getCellStyle = (date) => {
-    if (!date) return { cls: "", title: "", text: "" };
+    if (!date) return { cls: "", title: "" };
     const attendance = getAttendance(date);
     const leaveInfo = getLeaveInfo(date);
     const isSun = isSunday(date);
     const isHol = isHoliday(date);
     const isToday = date.toDateString() === new Date().toDateString();
-
-    if (attendance && !attendance.isLeaveDay) {
+    if (attendance && !attendance.isLeaveDay)
       return {
-        cls: "bg-green-500 text-white border-2 border-green-600 cursor-default",
+        cls: "bg-green-500 text-white border-2 border-green-600",
         title: "Present",
       };
-    }
     if (leaveInfo.isLeave) {
       if (leaveInfo.type === "swapleave")
         return {
-          cls: "bg-purple-500 text-white border-2 border-purple-600 cursor-default",
+          cls: "bg-purple-500 text-white border-2 border-purple-600",
           title: "Leave Swap",
         };
       if (leaveInfo.type === "paid")
         return {
-          cls: "bg-blue-500 text-white border-2 border-blue-600 cursor-default",
+          cls: "bg-blue-500 text-white border-2 border-blue-600",
           title: "Paid Leave",
         };
       return {
-        cls: "bg-red-500 text-white border-2 border-red-600 cursor-default",
+        cls: "bg-red-500 text-white border-2 border-red-600",
         title: "Unpaid Leave",
       };
     }
     if (isSun)
       return {
-        cls: "bg-red-400 text-white border-2 border-red-500 cursor-default",
+        cls: "bg-red-400 text-white border-2 border-red-500",
         title: "Sunday",
       };
     if (isHol)
       return {
-        cls: "bg-gray-400 text-white border-2 border-gray-500 cursor-default",
+        cls: "bg-gray-400 text-white border-2 border-gray-500",
         title: `Holiday: ${getHolidayName(date)}`,
       };
     if (isToday)
       return {
-        cls: "border-2 border-blue-500 bg-blue-50 text-blue-700 cursor-default",
+        cls: "border-2 border-blue-500 bg-blue-50 text-blue-700",
         title: "Today",
       };
     return {
-      cls: "border-2 border-gray-200 bg-gray-50 text-gray-500 cursor-default",
+      cls: "border-2 border-gray-200 bg-gray-50 text-gray-500",
       title: "Working Day",
     };
   };
@@ -283,19 +277,21 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
         onClick={onClose}
       />
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl relative mx-4 overflow-hidden">
-        <div className="bg-indigo-600 text-white px-6 py-4 flex items-center justify-between">
+        <div className="bg-indigo-600 text-white px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center font-bold text-sm">
               {mr.medicalRepName?.substring(0, 2).toUpperCase() || "MR"}
             </div>
             <div>
-              <p className="font-semibold capitalize">{mr.medicalRepName}</p>
+              <p className="font-semibold capitalize text-sm sm:text-base">
+                {mr.medicalRepName}
+              </p>
               <p className="text-xs text-indigo-200">
                 {mr.teamName || "No Team"}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-3 text-xs">
               <span className="bg-green-500/30 text-white px-2 py-0.5 rounded-full font-medium">
                 {presentCount} Present
@@ -312,50 +308,24 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
             </button>
           </div>
         </div>
-
-        <div className="flex items-center justify-between px-6 py-3 border-b border-gray-100">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-gray-100">
           <button
             onClick={() => setViewDate(new Date(year, month - 1, 1))}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-gray-100 rounded-lg"
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
+            <ChevronLeft size={16} />
           </button>
-          <span className="font-semibold text-gray-800">
+          <span className="font-semibold text-gray-800 text-sm sm:text-base">
             {monthNames[month]} {year}
           </span>
           <button
             onClick={() => setViewDate(new Date(year, month + 1, 1))}
-            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-1.5 hover:bg-gray-100 rounded-lg"
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
+            <ChevronRight size={16} />
           </button>
         </div>
-
-        <div className="p-4">
+        <div className="p-3 sm:p-4">
           {loadingData ? (
             <div className="flex items-center justify-center py-16">
               <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-500" />
@@ -366,30 +336,31 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
                 {dayNames.map((d) => (
                   <div
                     key={d}
-                    className={`text-center text-xs font-semibold py-2 ${d === "Sun" ? "text-red-600" : "text-gray-600"}`}
+                    className={`text-center text-xs font-semibold py-2 ${
+                      d === "Sun" ? "text-red-600" : "text-gray-600"
+                    }`}
                   >
                     {d}
                   </div>
                 ))}
               </div>
-
-              <div className="grid grid-cols-7 gap-1.5">
+              <div className="grid grid-cols-7 gap-1">
                 {cells.map((date, idx) => {
-                  if (!date) return <div key={`e-${idx}`} className="h-10" />;
+                  if (!date)
+                    return <div key={`e-${idx}`} className="h-8 sm:h-10" />;
                   const { cls, title } = getCellStyle(date);
                   return (
                     <div
                       key={date.toISOString()}
                       title={title}
-                      className={`h-10 flex items-center justify-center rounded-lg text-sm font-medium transition-all select-none ${cls}`}
+                      className={`h-8 sm:h-10 flex items-center justify-center rounded-lg text-xs sm:text-sm font-medium select-none ${cls}`}
                     >
                       {date.getDate()}
                     </div>
                   );
                 })}
               </div>
-
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-4 pt-3 border-t border-gray-100">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-4 pt-3 border-t border-gray-100">
                 {[
                   ["bg-green-500 border-green-600", "Present"],
                   ["bg-purple-500 border-purple-600", "Leave Swap"],
@@ -399,8 +370,8 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
                   ["bg-gray-400 border-gray-500", "Holiday"],
                   ["bg-blue-50 border-blue-500", "Today"],
                 ].map(([cls, label]) => (
-                  <div key={label} className="flex items-center gap-1.5">
-                    <div className={`w-3.5 h-3.5 rounded border-2 ${cls}`} />
+                  <div key={label} className="flex items-center gap-1">
+                    <div className={`w-3 h-3 rounded border-2 ${cls}`} />
                     <span className="text-xs text-gray-600">{label}</span>
                   </div>
                 ))}
@@ -414,7 +385,310 @@ const AttendanceCalendarModal = ({ mr, onClose }) => {
   );
 };
 
-// Main Dashboard Component
+// ─── Mobile Stat Card ─────────────────────────────────────────────────────────
+const MobileStatCard = ({
+  label,
+  value,
+  icon: Icon,
+  iconBg,
+  iconColor,
+  onClick,
+  active,
+}) => (
+  <div
+    onClick={onClick}
+    className={`rounded-2xl p-4 shadow-sm cursor-pointer transition-all active:scale-95 ${
+      active
+        ? "bg-gray-200 border border-gray-200"
+        : "bg-white border border-gray-100"
+    }`}
+  >
+    <div
+      className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
+      style={{ background: iconBg }}
+    >
+      <Icon className="w-5 h-5" style={{ color: iconColor }} />
+    </div>
+    <p className="text-2xl font-bold text-gray-900">{value}</p>
+    <p className="text-sm text-gray-500 mt-0.5">{label}</p>
+  </div>
+);
+
+// ─── Mobile Attendance Row ────────────────────────────────────────────────────
+const MobileAttendanceRow = ({ mr, status, onCalendar }) => (
+  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 last:border-b-0">
+    <div className="flex items-center gap-3 min-w-0">
+      <div className="w-9 h-9 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-xs font-bold flex-shrink-0">
+        {mr.medicalRepName?.substring(0, 2).toUpperCase() || "MR"}
+      </div>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-gray-800 capitalize truncate">
+          {mr.medicalRepName}
+        </p>
+        <p className="text-xs text-gray-400 truncate">
+          {mr.teamName || "No Team"}
+        </p>
+      </div>
+    </div>
+    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+      {status === "present" && (
+        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+          Present
+        </span>
+      )}
+      {status === "absent" && (
+        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+          Absent
+        </span>
+      )}
+      {!status && (
+        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+          Not Marked
+        </span>
+      )}
+      <button
+        onClick={onCalendar}
+        className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+      >
+        <Calendar size={14} />
+      </button>
+    </div>
+  </div>
+);
+
+// ─── Mobile MR Row ────────────────────────────────────────────────────────────
+const MobileMRRow = ({ item, onView, onToggleStatus }) => (
+  <div className="bg-white rounded-2xl shadow-sm p-4 mb-3 border border-gray-100">
+    <div className="flex items-start justify-between mb-3">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-sm flex-shrink-0">
+          {item.medicalRepName?.substring(0, 2).toUpperCase() || "MR"}
+        </div>
+        <div>
+          <p className="font-semibold text-gray-800 capitalize text-sm">
+            {item.medicalRepName || "Unknown"}
+          </p>
+          <p className="text-xs text-gray-500">{item.teamName || "No Team"}</p>
+        </div>
+      </div>
+      <button
+        onClick={() => onToggleStatus(item)}
+        className={`px-2 py-1 rounded-full text-xs font-medium ${
+          item.isActive
+            ? "bg-green-100 text-green-800"
+            : "bg-red-100 text-red-800"
+        }`}
+      >
+        {item.isActive ? "Active" : "Inactive"}
+      </button>
+    </div>
+    <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 mb-3">
+      <div>
+        <span className="text-gray-400">Contact: </span>
+        {item.contactNo || "N/A"}
+      </div>
+      <div className="text-right">
+        <span className="text-gray-400">Joined: </span>
+        {item.date ? formatDateToDDMMMYYYY(item.date) : "—"}
+      </div>
+      <div className="col-span-2 truncate flex items-center justify-between">
+        <div>
+          <span className="text-gray-400">Email: </span>
+          {item.email || "N/A"}
+        </div>
+        <button
+          onClick={() => onView(item)}
+          className="flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg bg-green-50 text-green-700 text-xs font-medium hover:bg-green-100 transition-colors"
+        >
+          <Eye size={13} /> View
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+// ─── Mobile Payroll Row ──────────────────────────────────────────────────────
+const MobilePayrollRow = ({ item, formatCurrency }) => (
+  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-3">
+    <div className="flex items-center gap-3 mb-3">
+      <div className="w-9 h-9 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-xs font-bold">
+        {item.employeeId?.medicalRepName?.substring(0, 2).toUpperCase() || "MR"}
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-gray-800 capitalize">
+          {item.employeeId?.medicalRepName || "Unknown"}
+        </p>
+        <p className="text-xs text-gray-400">
+          {item.employeeId?.contactNo || "N/A"}
+        </p>
+      </div>
+    </div>
+    <div className="grid grid-cols-2 gap-2 text-xs">
+      <div className="bg-blue-50 rounded-lg p-2">
+        <p className="text-gray-500">Basic</p>
+        <p className="font-semibold text-blue-700">
+          ${formatCurrency(item.basicSalary || 0)}
+        </p>
+      </div>
+      <div className="bg-green-50 rounded-lg p-2">
+        <p className="text-gray-500">Allowance</p>
+        <p className="font-semibold text-green-700">
+          ${formatCurrency(item.totalAllowance || 0)}
+        </p>
+      </div>
+      <div className="bg-red-50 rounded-lg p-2">
+        <p className="text-gray-500">Deductions</p>
+        <p className="font-semibold text-red-700">
+          ${formatCurrency(item.deductions || 0)}
+        </p>
+      </div>
+      <div className="bg-purple-50 rounded-lg p-2">
+        <p className="text-gray-500">Net Salary</p>
+        <p className="font-semibold text-purple-700">
+          ${formatCurrency(item.netSalary || 0)}
+        </p>
+      </div>
+    </div>
+  </div>
+);
+
+// ─── Mobile Tab View ─────────────────────────────────────────────────────────
+const MobileTabView = ({
+  activeTab,
+  activeMRs,
+  attendanceMap,
+  getAttendanceKey,
+  setCalendarMR,
+  filteredMR,
+  currentMR,
+  currentPage,
+  totalPages,
+  setCurrentPage,
+  onView,
+  onToggleStatus,
+  payrollData,
+  formatCurrency,
+  loading,
+}) => {
+  const visiblePages = useVisiblePages(currentPage, totalPages);
+
+  if (activeTab === "Attendance") {
+    // return (
+    //   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    //     <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+    //       <p className="text-sm font-semibold text-gray-700">
+    //         Yesterday's Attendance
+    //       </p>
+    //     </div>
+    //     <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+    //       {activeMRs.length === 0 ? (
+    //         <p className="text-center text-gray-400 text-sm py-8">
+    //           No active MRs
+    //         </p>
+    //       ) : (
+    //         activeMRs.map((mr) => {
+    //           const key = getAttendanceKey(mr._id);
+    //           return (
+    //             <MobileAttendanceRow
+    //               key={mr._id}
+    //               mr={mr}
+    //               status={attendanceMap[key]}
+    //               onCalendar={() => setCalendarMR(mr)}
+    //             />
+    //           );
+    //         })
+    //       )}
+    //     </div>
+    //   </div>
+    // );
+  }
+
+  if (activeTab === "Total Payroll") {
+    return (
+      <div className="space-y-3">
+        {payrollData.length === 0 ? (
+          <div className="bg-white rounded-2xl p-8 text-center text-gray-400 text-sm shadow-sm">
+            {loading ? "Loading..." : "No payroll data found"}
+          </div>
+        ) : (
+          payrollData.map((item, idx) => (
+            <MobilePayrollRow
+              key={item._id || idx}
+              item={item}
+              formatCurrency={formatCurrency}
+            />
+          ))
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {filteredMR.length === 0 ? (
+        <div className="bg-white rounded-2xl p-8 text-center text-gray-400 text-sm shadow-sm">
+          {loading ? "Loading..." : "No MR found"}
+        </div>
+      ) : (
+        <>
+          {currentMR.map((item, idx) => (
+            <MobileMRRow
+              key={item._id || idx}
+              item={item}
+              onView={onView}
+              onToggleStatus={onToggleStatus}
+            />
+          ))}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 mt-4 pb-4">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 bg-gray-200 rounded-lg text-[9px] font-medium disabled:opacity-50 cursor-pointer"
+              >
+                ← Prev
+              </button>
+
+              <div className="flex gap-1">
+                {visiblePages.map((page, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() =>
+                      typeof page === "number" && setCurrentPage(page)
+                    }
+                    disabled={page === "..."}
+                    className={`w-8 h-8 rounded-lg text-[9px] font-medium transition-colors ${
+                      page === "..."
+                        ? "bg-gray-100 text-gray-400 cursor-default"
+                        : currentPage === page
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() =>
+                  setCurrentPage((p) => Math.min(p + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 bg-gray-200 rounded-lg text-[9px] font-medium disabled:opacity-50 cursor-pointer"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+// ─── Main Dashboard Component ─────────────────────────────────────────────────
 const Dashboard = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
@@ -451,11 +725,20 @@ const Dashboard = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
-  // Attendance state
   const [attendanceMap, setAttendanceMap] = useState({});
   const [calendarMR, setCalendarMR] = useState(null);
 
-  // Dynamic attendance date (yesterday)
+  // Mobile detection & sidebar
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobileView(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   const ATTENDANCE_DATE = new Date();
   ATTENDANCE_DATE.setDate(ATTENDANCE_DATE.getDate() - 1);
   const ATT_KEY_PREFIX = `${ATTENDANCE_DATE.getFullYear()}_${String(ATTENDANCE_DATE.getMonth() + 1).padStart(2, "0")}_${String(ATTENDANCE_DATE.getDate()).padStart(2, "0")}`;
@@ -469,31 +752,22 @@ const Dashboard = () => {
       const yesterdayStr = ATTENDANCE_DATE.toISOString().split("T")[0];
       const response = await axios.get(
         `${backendUrl}/api/hrm/leaves/attendance`,
-        { params: { date: yesterdayStr } },
+        {
+          params: { date: yesterdayStr },
+        },
       );
-
       const attendanceData = {};
-
-      if (response.data?.success && Array.isArray(response.data.data)) {
-        response.data.data.forEach((record) => {
+      const process = (records) => {
+        records.forEach((record) => {
           const key = getAttendanceKey(record.userId);
           const recordDate = new Date(record.loginTime || record.date);
-          const recordDateStr = recordDate.toISOString().split("T")[0];
-          if (recordDateStr === yesterdayStr) {
+          if (recordDate.toISOString().split("T")[0] === yesterdayStr)
             attendanceData[key] = record.isLeaveDay ? "absent" : "present";
-          }
         });
-      } else if (Array.isArray(response.data)) {
-        response.data.forEach((record) => {
-          const key = getAttendanceKey(record.userId);
-          const recordDate = new Date(record.loginTime || record.date);
-          const recordDateStr = recordDate.toISOString().split("T")[0];
-          if (recordDateStr === yesterdayStr) {
-            attendanceData[key] = record.isLeaveDay ? "absent" : "present";
-          }
-        });
-      }
-
+      };
+      if (response.data?.success && Array.isArray(response.data.data))
+        process(response.data.data);
+      else if (Array.isArray(response.data)) process(response.data);
       setAttendanceMap(attendanceData);
     } catch (err) {
       console.error("Error fetching attendance:", err);
@@ -502,20 +776,16 @@ const Dashboard = () => {
 
   const handleExport = async () => {
     try {
-      const currentDate = new Date();
       const previousMonth = new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth() - 1,
+        new Date().getFullYear(),
+        new Date().getMonth() - 1,
         1,
       );
       const year = previousMonth.getFullYear();
       const month = previousMonth.getMonth() + 1;
       const res = await fetch(
         `${backendUrl}/api/export-mr-data?year=${year}&month=${month}`,
-        {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        },
+        { method: "GET" },
       );
       if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
       const cd = res.headers.get("Content-Disposition");
@@ -542,10 +812,9 @@ const Dashboard = () => {
 
   const fetchPayrollData = async () => {
     try {
-      const currentDate = new Date();
       const previousMonth = new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth() - 1,
+        new Date().getFullYear(),
+        new Date().getMonth() - 1,
         1,
       );
       const year = previousMonth.getFullYear();
@@ -575,10 +844,9 @@ const Dashboard = () => {
         await fetchUserData();
         const mrData = await fetchWholeMRList();
         setMrList(mrData.data);
-        const currentDate = new Date();
         const previousMonthDate = new Date(
-          currentDate.getFullYear(),
-          currentDate.getMonth() - 1,
+          new Date().getFullYear(),
+          new Date().getMonth() - 1,
           1,
         );
         setPreviousMonthLabel(formatMonthYear(previousMonthDate));
@@ -600,7 +868,6 @@ const Dashboard = () => {
       const storedUsername = localStorage.getItem("username");
       if (!token) throw new Error("No authentication token found");
       const payload = JSON.parse(atob(token.split(".")[1]));
-      const userRole = payload.role || "User";
       const username =
         storedUsername || `User-${payload.username || "Unknown"}`;
       const getInitials = (name) => {
@@ -612,7 +879,7 @@ const Dashboard = () => {
       };
       setUser({
         name: username,
-        role: userRole,
+        role: payload.role || "User",
         initials: getInitials(username),
       });
     } catch {
@@ -637,7 +904,6 @@ const Dashboard = () => {
     () => mrList.filter((mr) => mr.isActive === true),
     [mrList],
   );
-
   const dashboardStats = useMemo(
     () => ({
       totalMRs: mrList.length,
@@ -683,13 +949,7 @@ const Dashboard = () => {
     return filteredMR.slice(start, start + staffPerPage);
   }, [filteredMR, currentPage]);
 
-  const visiblePages = useMemo(() => {
-    if (totalPages <= 5) return [...Array(totalPages).keys()].map((i) => i + 1);
-    if (currentPage <= 3) return [1, 2, 3, "...", totalPages];
-    if (currentPage >= totalPages - 2)
-      return [1, "...", totalPages - 2, totalPages - 1, totalPages];
-    return [1, "...", currentPage, "...", totalPages];
-  }, [currentPage, totalPages]);
+  const visiblePages = useVisiblePages(currentPage, totalPages);
 
   const formatCurrency = (amount) =>
     new Intl.NumberFormat("en-US", {
@@ -818,7 +1078,6 @@ const Dashboard = () => {
         const workbook = XLSX.read(data, { type: "array" });
         const ws = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-
         let headerRowIndex = -1,
           headersMap = {};
         for (let i = 0; i < rows.length; i++) {
@@ -849,7 +1108,6 @@ const Dashboard = () => {
           showToast("error", "Required headers missing!");
           return;
         }
-
         const mappedData = rows
           .slice(headerRowIndex + 1)
           .map((row) => {
@@ -909,7 +1167,6 @@ const Dashboard = () => {
             };
           })
           .filter((e) => e.name?.trim() && e.teamName?.trim());
-
         setParsedData(mappedData);
       } catch (error) {
         showToast("error", "Error parsing Excel file: " + error.message);
@@ -943,7 +1200,6 @@ const Dashboard = () => {
           isActive: item.isActive !== undefined ? item.isActive : true,
         }))
         .filter((item) => item.medicalRepName?.trim() && item.teamName?.trim());
-
       if (!validData.length) {
         showToast("error", "No valid records found.");
         setIsUploading(false);
@@ -952,7 +1208,9 @@ const Dashboard = () => {
       const res = await axios.post(
         `${backendUrl}/api/staff/import`,
         validData,
-        { headers: { "Content-Type": "application/json" } },
+        {
+          headers: { "Content-Type": "application/json" },
+        },
       );
       if (res.data.success) {
         showToast(
@@ -973,9 +1231,7 @@ const Dashboard = () => {
         if (d.emails?.length) msgs.push(`Emails: ${d.emails.join(", ")}`);
         if (d.contacts?.length) msgs.push(`Contacts: ${d.contacts.join(", ")}`);
         msg = `Duplicate entries found: ${msgs.join("; ")}`;
-      } else if (err.response?.data?.message) {
-        msg = err.response.data.message;
-      }
+      } else if (err.response?.data?.message) msg = err.response.data.message;
       showToast("error", msg);
     } finally {
       setIsUploading(false);
@@ -1050,15 +1306,6 @@ const Dashboard = () => {
     setShowSuggestions(false);
   };
 
-  const handleSearchIconClick = () => {
-    searchInputRef.current?.focus();
-    searchInputRef.current?.classList.add("highlight");
-    setTimeout(
-      () => searchInputRef.current?.classList.remove("highlight"),
-      1000,
-    );
-  };
-
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const formattedDate = yesterday.toLocaleDateString("en-GB", {
@@ -1067,6 +1314,251 @@ const Dashboard = () => {
     year: "numeric",
   });
 
+  // Mobile Bottom Nav tabs
+  const mobileNavTabs = [
+    { key: "Active MRs", label: "Active", icon: UserCheck },
+    { key: "Total MRs", label: "All MRs", icon: Users },
+    { key: "Inactive MRs", label: "Inactive", icon: UserX },
+    { key: "Attendance", label: "Attendance", icon: Calendar },
+    { key: "Total Payroll", label: "Payroll", icon: DollarSign },
+  ];
+
+  // ─── MOBILE LAYOUT ─────────────────────────────────────────────────────────
+  if (isMobileView) {
+    const presentCount = activeMRs.filter(
+      (mr) => attendanceMap[getAttendanceKey(mr._id)] === "present",
+    ).length;
+    const absentCount = activeMRs.filter(
+      (mr) => attendanceMap[getAttendanceKey(mr._id)] === "absent",
+    ).length;
+
+    return (
+      <div className="flex flex-col min-h-screen bg-[#F0F4FF] pb-20">
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+
+        <div className="bg-white shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-1.5 hover:bg-gray-100 rounded-lg"
+            >
+              <Menu className="w-5 h-5 text-gray-600" />
+            </button>
+            <LayoutDashboard className="w-5 h-5 text-indigo-600" />
+            <h1 className="text-base font-bold text-gray-800">MR Dashboard</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full text-xs font-medium">
+              {filteredMR.length} MRs
+            </div>
+            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xs">
+              {user.initials}
+            </div>
+          </div>
+        </div>
+        {/* 
+        <div className="px-4 pt-3 pb-2">
+          <div className="relative">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              size={15}
+            />
+            <input
+              type="text"
+              placeholder="Search MR..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9 pr-9 py-2.5 w-full border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-sm shadow-sm"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div> */}
+        {activeTab !== "Attendance" && (
+          <div className="px-4 pt-3 pb-2">
+            <div className="relative">
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                size={15}
+              />
+              <input
+                type="text"
+                placeholder="Search MR..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 pr-9 py-2.5 w-full border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-sm shadow-sm"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "Attendance" && (
+          <div className="px-4 pb-1 pt-2">
+            {/* Stats row with present and absent only */}
+            <div className="flex justify-end gap-2 mb-3">
+              <span className="px-3 py-1 rounded-full bg-green-100 text-green-800 text-xs font-medium">
+                {presentCount} Present
+              </span>
+              <span className="px-3 py-1 rounded-full bg-red-100 text-red-800 text-xs font-medium">
+                {absentCount} Absent
+              </span>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                <div className="text-sm font-semibold text-gray-700">
+                  {formattedDate} Attendance
+                </div>
+                <div className="px-3 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">
+                  {activeMRs.length - presentCount - absentCount} Not Marked
+                </div>
+              </div>
+              <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                {activeMRs.length === 0 ? (
+                  <p className="text-center text-gray-400 text-sm py-8">
+                    No active MRs
+                  </p>
+                ) : (
+                  activeMRs.map((mr) => {
+                    const key = getAttendanceKey(mr._id);
+                    const status = attendanceMap[key];
+                    return (
+                      <MobileAttendanceRow
+                        key={mr._id}
+                        mr={mr}
+                        status={status}
+                        onCalendar={() => setCalendarMR(mr)}
+                      />
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="px-4 flex-1">
+          <MobileTabView
+            activeTab={activeTab}
+            activeMRs={activeMRs}
+            attendanceMap={attendanceMap}
+            getAttendanceKey={getAttendanceKey}
+            setCalendarMR={setCalendarMR}
+            filteredMR={filteredMR}
+            currentMR={currentMR}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            setCurrentPage={setCurrentPage}
+            onView={handleMRView}
+            onToggleStatus={handleStatusToggle}
+            payrollData={payrollData}
+            formatCurrency={formatCurrency}
+            loading={loading}
+          />
+        </div>
+
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 px-2 py-2">
+          <div className="flex items-center justify-around">
+            {mobileNavTabs.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-xl transition-all ${
+                  activeTab === key ? "text-indigo-600" : "text-gray-400"
+                }`}
+              >
+                <Icon size={18} />
+                <span className="text-[10px] font-medium">{label}</span>
+                {activeTab === key && (
+                  <div className="w-1 h-1 rounded-full bg-indigo-600" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {calendarMR && (
+          <AttendanceCalendarModal
+            mr={calendarMR}
+            onClose={() => setCalendarMR(null)}
+          />
+        )}
+
+        {isViewModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsViewModalOpen(false)}
+              />
+              <div className="bg-white w-full max-w-lg p-5 rounded-2xl shadow-xl relative mx-4 overflow-y-auto max-h-[90vh]">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={20} />
+                </button>
+                <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                  View MR
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    ["MR Name", form.medicalRepName, "capitalize"],
+                    ["Team Name", form.teamName, "capitalize"],
+                    ["Contact No", form.contactNo],
+                    ["Email", form.email],
+                    [
+                      "Joining Date",
+                      form.date ? formatDateToDDMMMYYYY(form.date) : "--",
+                    ],
+                    ["Status", form.isActive ? "Enabled" : "Disabled"],
+                  ].map(([label, value, extra = ""]) => (
+                    <div key={label}>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        {label}
+                      </label>
+                      <p
+                        className={`border px-3 py-2 rounded-lg bg-gray-50 text-sm ${extra}`}
+                      >
+                        {value || "--"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={() => setIsViewModalOpen(false)}
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2 rounded-xl text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
+      </div>
+    );
+  }
+
+  // ─── DESKTOP LAYOUT ────────────────────────────────────────────────────────
   // Dashboard Cards Component
   const DashboardCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -1629,7 +2121,6 @@ const Dashboard = () => {
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                 size={16}
-                onClick={handleSearchIconClick}
               />
               <input
                 ref={searchInputRef}
@@ -1663,7 +2154,6 @@ const Dashboard = () => {
         </main>
       </div>
 
-      {/* Attendance Calendar Modal */}
       {calendarMR && (
         <AttendanceCalendarModal
           mr={calendarMR}

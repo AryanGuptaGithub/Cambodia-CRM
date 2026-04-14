@@ -23,9 +23,11 @@ import {
   X,
   ChevronsLeft,
   ChevronsRight,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -232,6 +234,11 @@ const LeaveAttendance = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
 
+  // Mobile states
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   const [selectedMr, setSelectedMr] = useState(null);
   const [showCalendarView, setShowCalendarView] = useState(false);
   const [calendarViewType, setCalendarViewType] = useState("monthly");
@@ -294,6 +301,14 @@ const LeaveAttendance = () => {
 
   const [holidays, setHolidays] = useState([]);
   const [mrLeaves, setMrLeaves] = useState({});
+
+  // Detect mobile view
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
   const calculateRemainingTime = (totalMinutes) => {
@@ -1165,7 +1180,6 @@ const LeaveAttendance = () => {
   if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
 
   // ─── Calendar cell style ───────────────────────────────────────────────────
-  // New: half-day gets orange styling
   const getCalendarCellStyle = (date, mrId) => {
     if (!date)
       return {
@@ -1272,8 +1286,71 @@ const LeaveAttendance = () => {
     return { cellStyle: cellStyle.trim(), titleText, isDeletable };
   };
 
+  // Mobile FAB Menu
+  const MobileFabMenu = () => (
+    <div className="fixed bottom-6 right-6 z-40">
+      <div className="relative">
+        {mobileMenuOpen && (
+          <div className="absolute bottom-16 right-0 mb-2 space-y-2">
+            <button
+              onClick={() => {
+                handleOpenAttendanceModal();
+                setMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-lg cursor-pointer w-full justify-center text-sm"
+            >
+              <Clock size={16} /> Attendance
+            </button>
+            <button
+              onClick={() => {
+                handleOpenLeaveModal();
+                setMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-xl shadow-lg cursor-pointer w-full justify-center text-sm"
+            >
+              <Calendar size={16} /> Leave
+            </button>
+            <button
+              onClick={() => {
+                handleOpenExtraHoursModal();
+                setMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl shadow-lg cursor-pointer w-full justify-center text-sm"
+            >
+              <Clock4 size={16} /> Extra Hours
+            </button>
+            <button
+              onClick={() => {
+                handleOpenDeleteAttendanceModal();
+                setMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl shadow-lg cursor-pointer w-full justify-center text-sm"
+            >
+              <Trash2 size={16} /> Delete
+            </button>
+          </div>
+        )}
+        {/* <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="bg-indigo-600 text-white p-4 rounded-full shadow-lg hover:bg-indigo-700 transition-colors"
+        >
+          <PlusCircle size={24} />
+        </button> */}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="p-6">
+    <div className={`${isMobileView ? "px-3" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
       <ConfirmationModal
         isOpen={confirmDeleteModal}
         onClose={() => setConfirmDeleteModal(false)}
@@ -1295,7 +1372,7 @@ const LeaveAttendance = () => {
         confirmColor="bg-red-600 hover:bg-red-700"
       />
 
-      {/* ── Delete Attendance Modal ── */}
+      {/* ── Delete Attendance Modal (keep existing code) ── */}
       {showDeleteAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg mx-4 max-h-[90vh] flex flex-col">
@@ -1475,7 +1552,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* ── Record Attendance Modal ── */}
+      {/* ── Record Attendance Modal (keep existing code) ── */}
       {showAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1576,7 +1653,7 @@ const LeaveAttendance = () => {
               </div>
             </div>
 
-            {/* ── Duration preview (half-day indicator) ── */}
+            {/* Duration preview */}
             {durationPreview && (
               <div
                 className={`mb-4 p-3 rounded-lg border text-sm ${
@@ -1676,7 +1753,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* ── Apply Leave Modal ── */}
+      {/* ── Apply Leave Modal (keep existing code) ── */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1827,7 +1904,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* ── Convert Extra Hours Modal ── */}
+      {/* ── Convert Extra Hours Modal (keep existing code) ── */}
       {showExtraHoursModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
@@ -2035,8 +2112,31 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* ── List view header ── */}
-      {!showCalendarView && (
+      {/* Mobile Header */}
+      {isMobileView && !showCalendarView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            {/* <CalendarIcon className="w-5 h-5 text-blue-600" /> */}
+            <h1 className="text-base font-bold text-gray-800">
+              MR Leave & Attendance
+            </h1>
+          </div>
+          {mrList.length > 0 && (
+            <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+              Total: {filteredMRList.length}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Desktop Header */}
+      {!showCalendarView && !isMobileView && (
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-800">
             MR Leave & Attendance
@@ -2072,62 +2172,129 @@ const LeaveAttendance = () => {
         </div>
       )}
 
+      {/* Mobile Search */}
+      {isMobileView && !showCalendarView && mrList.length > 0 && (
+        <div className="mb-4">
+          <div className="relative w-full">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+              size={15}
+              onClick={handleIconClick}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search MRs..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-9 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+            />
+          </div>
+        </div>
+      )}
+
       {showCalendarView ? (
         <div>
-          {/* ── Calendar top nav ── */}
-          <div className="flex justify-between items-center mb-4 bg-white rounded-2xl shadow border border-gray-200 p-4">
-            <div className="flex gap-2">
-              <button
-                onClick={handlePreviousMR}
-                disabled={getCurrentMRIndex() <= 0}
-                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() <= 0 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
-              >
-                <ChevronsLeft size={16} />
-              </button>
-              <button
-                onClick={() => setShowCalendarView(false)}
-                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer"
-              >
-                <ChevronLeft size={18} /> Back to MR List
-              </button>
-              <button
-                onClick={() => handleOpenDeleteAttendanceModal(selectedMr?._id)}
-                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg cursor-pointer"
-              >
-                <Trash2 size={16} />
-                Delete Attendance
-              </button>
+          {isMobileView && (
+            <div className="flex justify-between items-center mb-2 bg-white rounded-2xl shadow border border-gray-200 p-3">
+              <div className="flex gap-2">
+                <button
+                  onClick={handlePreviousMR}
+                  disabled={getCurrentMRIndex() <= 0}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() <= 0 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
+                >
+                  <ChevronsLeft size={16} />
+                </button>
+                <button
+                  onClick={() => setShowCalendarView(false)}
+                  className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-lg cursor-pointer text-sm"
+                >
+                  <ChevronLeft size={18} /> Back
+                </button>
+              </div>
+              <div>
+                <button
+                  onClick={handleNextMR}
+                  disabled={getCurrentMRIndex() >= mrList.length - 1}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() >= mrList.length - 1 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
+                >
+                  <ChevronsRight size={16} />
+                </button>
+              </div>
             </div>
+          )}
+          {/* Calendar top nav */}
+          <div className="flex flex-wrap justify-between items-center gap-2 mb-4 bg-white rounded-2xl shadow border border-gray-200 p-3 md:p-4">
+            {/* Left side - for desktop only */}
+            {!isMobileView && (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={handlePreviousMR}
+                  disabled={getCurrentMRIndex() <= 0}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() <= 0 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
+                >
+                  <ChevronsLeft size={16} />
+                </button>
+
+                <button
+                  onClick={() => setShowCalendarView(false)}
+                  className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-3 md:px-4 py-2 rounded-lg cursor-pointer text-sm md:text-base"
+                >
+                  <ChevronLeft size={18} /> Back to MR List
+                </button>
+
+                <button
+                  onClick={() =>
+                    handleOpenDeleteAttendanceModal(selectedMr?._id)
+                  }
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg cursor-pointer"
+                >
+                  <Trash2 size={16} />
+                  Delete Attendance
+                </button>
+              </div>
+            )}
+
+            {/* Right side - for both mobile and desktop */}
             <div className="flex gap-2">
               <button
                 onClick={() => setCalendarViewType("monthly")}
-                className={`px-4 py-2 rounded-lg font-medium cursor-pointer ${calendarViewType === "monthly" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium cursor-pointer text-sm md:text-base ${calendarViewType === "monthly" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
               >
-                Monthly View
+                Monthly
               </button>
               <button
                 onClick={() => setCalendarViewType("annual")}
-                className={`px-4 py-2 rounded-lg font-medium cursor-pointer ${calendarViewType === "annual" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-medium cursor-pointer text-sm md:text-base ${calendarViewType === "annual" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
               >
-                Annual View
+                Annual
               </button>
-              <button
-                onClick={handleNextMR}
-                disabled={getCurrentMRIndex() >= mrList.length - 1}
-                className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() >= mrList.length - 1 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
-              >
-                <ChevronsRight size={16} />
-              </button>
+              {!isMobileView && (
+                <button
+                  onClick={handleNextMR}
+                  disabled={getCurrentMRIndex() >= mrList.length - 1}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-lg transition-colors ${getCurrentMRIndex() >= mrList.length - 1 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}
+                >
+                  <ChevronsRight size={16} />
+                </button>
+              )}
             </div>
           </div>
 
-          {calendarViewType === "monthly" ? (
-            <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-gray-800">
-                  {selectedMr?.medicalRepName} - Calendar View
-                  {selectedMr && (
-                    <span className="ml-2 text-lg font-normal">
+          {/* Mobile-specific layout with justify-between */}
+
+          {/* Monthly Calendar - shown on both mobile and desktop */}
+          {calendarViewType === "monthly" && (
+            <div className="bg-white rounded-2xl shadow border border-gray-200 p-3 md:p-6">
+              <div className="flex justify-between items-center mb-4 md:mb-6">
+                <h2 className="text-base md:text-xl font-bold text-gray-800">
+                  {selectedMr?.medicalRepName}{" "}
+                  {!isMobileView && "- Calendar View"}
+                  {selectedMr && !isMobileView && (
+                    <span className="ml-2 text-sm md:text-lg font-normal">
                       (Unpaid:{" "}
                       {getLeaveCounts(selectedMr._id, selectedMr.date).total},
                       Swap:{" "}
@@ -2139,53 +2306,55 @@ const LeaveAttendance = () => {
                     </span>
                   )}
                 </h2>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3">
                   <button
                     onClick={() => navigateMonth("prev")}
-                    className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
+                    className="p-1 md:p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
-                    <ChevronLeft size={20} />
+                    <ChevronLeft size={isMobileView ? 16 : 20} />
                   </button>
-                  <span className="text-lg font-semibold">
+                  <span className="text-sm md:text-lg font-semibold">
                     {new Date(currentYear, currentMonth).toLocaleString(
                       "default",
-                      { month: "long" },
+                      { month: "short" },
                     )}{" "}
                     {currentYear}
                   </span>
                   <button
                     onClick={() => navigateMonth("next")}
                     disabled={!canNavigateNext("next", "monthly")}
-                    className={`p-2 rounded-lg cursor-pointer ${canNavigateNext("next", "monthly") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
+                    className={`p-1 md:p-2 rounded-lg cursor-pointer ${canNavigateNext("next", "monthly") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
                   >
-                    <ChevronRight size={20} />
+                    <ChevronRight size={isMobileView ? 16 : 20} />
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-7 gap-2 mb-6">
+              <div className="grid grid-cols-7 gap-0.5 md:gap-2 mb-4 md:mb-6">
                 {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
                   (day) => (
                     <div
                       key={day}
-                      className={`text-center font-semibold py-2 ${day === "Sun" ? "text-red-600" : "text-gray-700"}`}
+                      className={`text-center font-semibold py-1 md:py-2 text-[10px] md:text-base ${day === "Sun" ? "text-red-600" : "text-gray-700"}`}
                     >
-                      {day}
+                      {isMobileView ? day.charAt(0) : day}
                     </div>
                   ),
                 )}
                 {getDaysInMonth().map((date, index) => {
                   if (!date)
-                    return <div key={`empty-${index}`} className="h-12" />;
+                    return (
+                      <div key={`empty-${index}`} className="h-8 md:h-12" />
+                    );
                   const { cellStyle, titleText, isDeletable } =
                     getCalendarCellStyle(date, selectedMr?._id);
                   const isCurrentMonth = date.getMonth() === currentMonth;
                   return (
                     <div
                       key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
-                      className={`${cellStyle}${!isCurrentMonth ? " opacity-40" : ""}`}
+                      className={`${cellStyle}${!isCurrentMonth ? " opacity-40" : ""} text-xs md:text-base h-8 md:h-12`}
                       title={titleText}
                       onClick={() => {
-                        if (isDeletable && selectedMr) {
+                        if (isDeletable && selectedMr && !isMobileView) {
                           setCalendarDeleteData({
                             userId: selectedMr._id,
                             date: getDateString(date),
@@ -2199,62 +2368,55 @@ const LeaveAttendance = () => {
                   );
                 })}
               </div>
-              {/* Legend — includes Half Day */}
-              <div className="flex flex-wrap gap-4 items-center text-sm bg-gray-50 rounded-lg p-4">
+              {/* Legend */}
+              <div className="flex flex-wrap gap-2 md:gap-4 items-center justify-center text-[10px] md:text-sm bg-gray-50 rounded-lg p-2 md:p-4">
                 {[
-                  ["bg-green-500  border-green-600", "Present (Full Day)"],
-                  ["bg-orange-400 border-orange-500", "Half Day"],
-                  ["bg-purple-500 border-purple-600", "Leave Swap"],
-                  ["bg-blue-500   border-blue-600", "Paid Leave"],
-                  ["bg-red-500    border-red-600", "Unpaid Leave"],
-                  ["bg-red-400    border-red-500", "Sunday"],
-                  ["bg-gray-400   border-gray-500", "Holiday"],
-                  ["bg-blue-50    border-blue-500", "Today"],
+                  ["bg-green-500", "Present"],
+                  ["bg-orange-400", "Half Day"],
+                  ["bg-purple-500", "Swap Leave"],
+                  ["bg-blue-500", "Paid Leave"],
+                  ["bg-red-500", "Unpaid Leave"],
+                  ["bg-red-400", "Sunday"],
+                  ["bg-gray-400", "Holiday"],
+                  ["bg-blue-50 border-blue-500", "Today"],
                 ].map(([cls, label]) => (
-                  <div key={label} className="flex items-center gap-2">
-                    <div className={`w-4 h-4 rounded border-2 ${cls}`} />
+                  <div key={label} className="flex items-center gap-1 md:gap-2">
+                    <div className={`w-2 h-2 md:w-4 md:h-4 rounded ${cls}`} />
                     <span>{label}</span>
                   </div>
                 ))}
               </div>
             </div>
-          ) : (
-            /* Annual view */
-            <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-gray-800">
-                  {selectedMr?.medicalRepName} - Annual Calendar
-                  {selectedMr && (
-                    <span className="ml-2 text-lg font-normal">
-                      (Unpaid:{" "}
-                      {getLeaveCounts(selectedMr._id, selectedMr.date).total},
-                      Swap:{" "}
-                      {
-                        getLeaveCounts(selectedMr._id, selectedMr.date)
-                          .swapLeaves
-                      }
-                      )
-                    </span>
-                  )}
+          )}
+
+          {/* Annual Calendar - shown on both mobile and desktop */}
+          {calendarViewType === "annual" && (
+            <div className="bg-white rounded-2xl shadow border border-gray-200 p-3 md:p-6">
+              <div className="flex justify-between items-center mb-4 md:mb-6">
+                <h2 className="text-base md:text-xl font-bold text-gray-800">
+                  {selectedMr?.medicalRepName}{" "}
+                  {!isMobileView && "- Annual Calendar"}
                 </h2>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 md:gap-3">
                   <button
                     onClick={() => navigateYear("prev")}
-                    className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
+                    className="p-1 md:p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer"
                   >
-                    <ChevronLeft size={20} />
+                    <ChevronLeft size={isMobileView ? 16 : 20} />
                   </button>
-                  <span className="text-lg font-semibold">{currentYear}</span>
+                  <span className="text-sm md:text-lg font-semibold">
+                    {currentYear}
+                  </span>
                   <button
                     onClick={() => navigateYear("next")}
                     disabled={!canNavigateNext("next", "annual")}
-                    className={`p-2 rounded-lg cursor-pointer ${canNavigateNext("next", "annual") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
+                    className={`p-1 md:p-2 rounded-lg cursor-pointer ${canNavigateNext("next", "annual") ? "bg-gray-100 hover:bg-gray-200" : "bg-gray-100 opacity-40 cursor-not-allowed"}`}
                   >
-                    <ChevronRight size={20} />
+                    <ChevronRight size={isMobileView ? 16 : 20} />
                   </button>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 md:gap-6">
                 {Array.from({ length: 12 }, (_, mi) => {
                   const monthName = new Date(currentYear, mi).toLocaleString(
                     "default",
@@ -2264,26 +2426,29 @@ const LeaveAttendance = () => {
                   return (
                     <div
                       key={monthName}
-                      className="border border-gray-200 rounded-lg p-4 bg-white"
+                      className="border border-gray-200 rounded-lg p-2 md:p-4 bg-white"
                     >
-                      <h3 className="text-lg font-semibold text-center mb-3 text-gray-800">
+                      <h3 className="text-sm md:text-lg font-semibold text-center mb-2 md:mb-3 text-gray-800">
                         {monthName}
                       </h3>
-                      <div className="grid grid-cols-7 gap-1 mb-2">
+                      <div className="grid grid-cols-7 gap-0.5 md:gap-1 mb-1 md:mb-2">
                         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
                           <div
                             key={`${d}-${i}`}
-                            className={`text-center text-xs font-medium ${i === 0 ? "text-red-600" : "text-gray-600"}`}
+                            className={`text-center text-[8px] md:text-xs font-medium ${i === 0 ? "text-red-600" : "text-gray-600"}`}
                           >
                             {d}
                           </div>
                         ))}
                       </div>
-                      <div className="grid grid-cols-7 gap-1">
+                      <div className="grid grid-cols-7 gap-0.5 md:gap-1">
                         {monthDays.map((date, index) => {
                           if (!date)
                             return (
-                              <div key={`empty-${index}`} className="h-6" />
+                              <div
+                                key={`empty-${index}`}
+                                className="h-4 md:h-6"
+                              />
                             );
                           const { cellStyle, titleText, isDeletable } =
                             getAnnualCellStyle(date, selectedMr?._id);
@@ -2293,7 +2458,11 @@ const LeaveAttendance = () => {
                               className={cellStyle}
                               title={titleText}
                               onClick={() => {
-                                if (isDeletable && selectedMr) {
+                                if (
+                                  isDeletable &&
+                                  selectedMr &&
+                                  !isMobileView
+                                ) {
                                   setCalendarDeleteData({
                                     userId: selectedMr._id,
                                     date: getDateString(date),
@@ -2311,13 +2480,33 @@ const LeaveAttendance = () => {
                   );
                 })}
               </div>
+              {/* Legend for Annual view on mobile */}
+              {isMobileView && (
+                <div className="mt-4 flex flex-wrap gap-2 items-center justify-center text-[10px] bg-gray-50 rounded-lg p-2">
+                  {[
+                    ["bg-green-500", "Present"],
+                    ["bg-orange-400", "Half"],
+                    ["bg-purple-500", "Swap"],
+                    ["bg-blue-500", "Paid"],
+                    ["bg-red-500", "Unpaid"],
+                    ["bg-red-400", "Sun"],
+                    ["bg-gray-400", "Hol"],
+                  ].map(([cls, label]) => (
+                    <div key={label} className="flex items-center gap-1">
+                      <div className={`w-2 h-2 rounded ${cls}`} />
+                      <span>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       ) : (
-        /* ── MR list table ── */
+        /* MR list table */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          {mrList.length > 0 && (
+          {/* Desktop Action Buttons */}
+          {!isMobileView && mrList.length > 0 && (
             <div className="flex justify-between items-center p-4 bg-gray-50 border-b">
               <div className="flex gap-2 flex-wrap">
                 <button
@@ -2348,15 +2537,21 @@ const LeaveAttendance = () => {
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b text-sm">
               <tr>
-                <th className="p-3">Sr No</th>
-                <th className="p-3">MR Name</th>
-                <th className="p-3">MR Email</th>
-                <th className="p-3">MR Contact</th>
-                <th className="p-3">Paid Leave</th>
-                <th className="p-3">Leave Taken</th>
-                <th className="p-3">Remaining Paid</th>
-                <th className="p-3">Extra Hours</th>
-                <th className="p-3">Actions</th>
+                <th className="p-2 md:p-3">Sr No</th>
+                <th className="p-2 md:p-3 text-left">MR Name</th>
+                <th className="p-2 md:p-3 hidden sm:table-cell">MR Email</th>
+                <th className="p-2 md:p-3 hidden md:table-cell">MR Contact</th>
+                <th className="p-2 md:p-3">Paid Leave</th>
+                <th className="p-2 md:p-3">Leave Taken</th>
+                <th className="p-2 md:p-3 hidden lg:table-cell">
+                  Remaining Paid
+                </th>
+                {!isMobileView && (
+                  <th className="p-2 md:p-3 hidden xl:table-cell">
+                    Extra Hours
+                  </th>
+                )}
+                <th className="p-2 md:p-3">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -2369,7 +2564,6 @@ const LeaveAttendance = () => {
                     totalExtraHours * 60,
                   );
 
-                  // Count half-day records for this MR
                   const halfDayCount = attendanceRecords.filter((rec) => {
                     if (rec.userId !== mr._id || rec.isLeaveDay) return false;
                     if (rec.attendanceType === "half") return true;
@@ -2384,78 +2578,77 @@ const LeaveAttendance = () => {
                       key={mr._id}
                       className={`hover:bg-gray-50 ${(index + 1) % itemsPerPage === 0 || index + 1 === currentMRs.length ? "" : "border-b"}`}
                     >
-                      <td className="p-3">
+                      <td className="p-2 md:p-3">
                         {(currentPage - 1) * itemsPerPage + index + 1}
                       </td>
-                      <td className="p-3">
-                        <span className="font-medium text-gray-800 capitalize">
+                      <td className="p-2 md:p-3 text-left">
+                        <span className="font-medium text-gray-800 capitalize text-sm md:text-base">
                           {mr.medicalRepName}
                         </span>
                       </td>
-                      <td className="p-3 text-gray-600">{mr.email}</td>
-                      <td className="p-3 text-gray-600">{mr.contactNo}</td>
-                      <td className="p-3">
-                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm font-medium">
+                      <td className="p-2 md:p-3 hidden sm:table-cell text-gray-600 text-sm">
+                        {mr.email}
+                      </td>
+                      <td className="p-2 md:p-3 hidden md:table-cell text-gray-600 text-sm">
+                        {mr.contactNo}
+                      </td>
+                      <td className="p-2 md:p-3">
+                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs md:text-sm font-medium">
                           {leaveCounts.paid}
                         </span>
                       </td>
-                      <td className="p-3">
-                        <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-sm font-medium">
+                      <td className="p-2 md:p-3">
+                        <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs md:text-sm font-medium">
                           {leaveCounts.total}
                         </span>
                         {leaveCounts.swapLeaves > 0 && (
-                          <span className="ml-2 bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-sm font-medium">
-                            +{leaveCounts.swapLeaves} swap
+                          <span className="ml-1 md:ml-2 bg-purple-100 text-purple-800 px-1 md:px-2 py-1 rounded-full text-[10px] md:text-sm font-medium">
+                            +{leaveCounts.swapLeaves}
                           </span>
                         )}
-                        {halfDayCount > 0 && (
-                          <span className="ml-2 bg-orange-100 text-orange-800 px-2 py-1 rounded-full text-sm font-medium">
-                            {halfDayCount} half
+                        { !isMobileView && halfDayCount > 0 && (
+                          <span className="ml-1 md:ml-2 bg-orange-100 text-orange-800 px-1 md:px-2 py-1 rounded-full text-[10px] md:text-sm font-medium">
+                            {halfDayCount}h
                           </span>
                         )}
                       </td>
-                      <td className="p-3">
+                      <td className="p-2 md:p-3 hidden lg:table-cell">
                         <span
-                          className={`px-2 py-1 rounded-full text-sm font-medium ${parseFloat(remainingPaid) > 5 ? "bg-green-100 text-green-800" : parseFloat(remainingPaid) > 2 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800"}`}
+                          className={`px-2 py-1 rounded-full text-xs md:text-sm font-medium ${parseFloat(remainingPaid) > 5 ? "bg-green-100 text-green-800" : parseFloat(remainingPaid) > 2 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800"}`}
                         >
                           {remainingPaid}
                         </span>
                       </td>
-                      <td className="p-3">
-                        {totalExtraHours > 0 ? (
-                          <div className="flex flex-col items-center gap-1">
-                            {extraHoursCalc.days > 0 && (
-                              <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
-                                <Clock size={10} />
-                                {extraHoursCalc.days} day
-                                {extraHoursCalc.days !== 1 ? "s" : ""}
-                              </span>
-                            )}
-                            {(extraHoursCalc.hours > 0 ||
-                              extraHoursCalc.minutes > 0) && (
-                              <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">
-                                <Clock size={10} />
-                                {extraHoursCalc.hours}h {extraHoursCalc.minutes}
-                                m
-                              </span>
-                            )}
-                            {/* <span className="text-xs text-gray-500">
-                              Total: {totalExtraHours.toFixed(2)} hours
-                            </span> */}
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 text-sm">
-                            No extra hours
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 flex items-center justify-center gap-3">
+                      {!isMobileView && (
+                        <td className="p-2 md:p-3 hidden xl:table-cell">
+                          {totalExtraHours > 0 ? (
+                            <div className="flex flex-col items-center gap-0.5">
+                              {extraHoursCalc.days > 0 && (
+                                <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs font-medium">
+                                  {extraHoursCalc.days}d
+                                </span>
+                              )}
+                              {(extraHoursCalc.hours > 0 ||
+                                extraHoursCalc.minutes > 0) && (
+                                <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full text-xs font-medium">
+                                  {extraHoursCalc.hours}h{" "}
+                                  {extraHoursCalc.minutes}m
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 text-xs">-</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="p-2 md:p-3">
                         <button
                           onClick={() => handleView(mr)}
-                          className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
+                          className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-2 md:px-3 py-1 rounded-lg cursor-pointer text-xs md:text-sm"
                           title="View Calendar"
                         >
-                          <Calendar size={16} /> View Calendar
+                          <Calendar size={isMobileView ? 14 : 16} />
+                          {!isMobileView && "View"}
                         </button>
                       </td>
                     </tr>
@@ -2463,7 +2656,10 @@ const LeaveAttendance = () => {
                 })
               ) : (
                 <tr>
-                  <td colSpan={9} className="p-3 text-center text-gray-500">
+                  <td
+                    colSpan={!isMobileView ? 9 : 8}
+                    className="p-3 text-center text-gray-500"
+                  >
                     No MR records found
                   </td>
                 </tr>
@@ -2471,12 +2667,12 @@ const LeaveAttendance = () => {
             </tbody>
           </table>
 
-          {currentMRs.length > 0 && (
-            <div className="mt-4 p-5 flex gap-2">
+          {currentMRs.length > 0 && totalPages > 1 && (
+            <div className="mt-4 p-3 md:p-5 flex justify-center gap-1 md:gap-2 flex-wrap">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
               >
                 Prev
               </button>
@@ -2485,7 +2681,7 @@ const LeaveAttendance = () => {
                   <button
                     key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                    className={`px-2 md:px-3 py-1 rounded w-8 md:w-10 text-center transition cursor-pointer text-sm ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
                   >
                     {page}
                   </button>
@@ -2496,7 +2692,7 @@ const LeaveAttendance = () => {
                   setCurrentPage((p) => Math.min(p + 1, totalPages))
                 }
                 disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
               >
                 Next
               </button>
@@ -2504,6 +2700,9 @@ const LeaveAttendance = () => {
           )}
         </div>
       )}
+
+      {/* Mobile FAB Menu */}
+      {isMobileView && !showCalendarView && <MobileFabMenu />}
     </div>
   );
 };

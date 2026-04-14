@@ -277,7 +277,7 @@ router.get("/", async (req, res) => {
         summary,
         records: paginatedRecords,
         uniqueProvincesCount: uniqueProvincesCount,
-        allRecords: records,
+        allRecords: records, // Include all records for export
       },
       pagination: {
         currentPage: pageNum,
@@ -289,7 +289,7 @@ router.get("/", async (req, res) => {
     });
     
   } catch (error) {
-    console.error("❌ Error in province-wise-sale:", error);
+    console.error("❌ Error in /province-wise-sale:", error);
     console.timeEnd("⏱️ province-wise-sale-query");
     
     res.status(500).json({
@@ -300,6 +300,7 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Export to Excel endpoint
 router.get("/export", async (req, res) => {
   try {
     const { search = "", period = "all" } = req.query;

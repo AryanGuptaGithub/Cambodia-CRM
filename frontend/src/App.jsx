@@ -170,7 +170,6 @@ function App() {
             </ProtectedRoute>
           }
         >
-          {/* ── Dashboard (auto-switches between mobile and desktop) ── */}
           <Route index element={<SmartDashboard />} />
           <Route path="dashboard" element={<SmartDashboard />} />
 

@@ -18,6 +18,7 @@ import {
   List,
   Calendar,
   Download,
+  Menu,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -32,6 +33,7 @@ import ReactDOM from "react-dom";
 import { parseExcelDate } from "../../utils/excelUtility";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -209,7 +211,7 @@ const usePayrollForm = (initialForm = {}) => {
   };
 };
 
-// ─── MultipleSelectDropdown Component (unchanged) ─────────────────────────
+// ─── MultipleSelectDropdown Component ─────────────────────────
 const MultipleSelectDropdown = ({
   label,
   value = [],
@@ -654,7 +656,12 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
 };
 
 // ─── YearFilterButtons (unchanged) ───────────────────────────────────────
-const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
+const YearFilterButtons = ({
+  allPayrolls,
+  selectedYear,
+  onYearSelect,
+  isMobileView,
+}) => {
   const currentYear = new Date().getFullYear();
 
   const years = useMemo(() => {
@@ -676,7 +683,7 @@ const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onYearSelect(null)}
-          className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
+          className={`px-3 md:px-4 py-1.5 md:py-1.5 rounded-full text-xs md:text-sm font-medium border transition-all ${
             selectedYear === null
               ? "bg-indigo-600 text-white border-indigo-600 shadow"
               : "bg-white text-gray-600 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"
@@ -688,7 +695,7 @@ const YearFilterButtons = ({ allPayrolls, selectedYear, onYearSelect }) => {
           <button
             key={yr}
             onClick={() => onYearSelect(yr)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
+            className={`px-3 md:px-4 py-1.5 md:py-1.5 rounded-full text-xs md:text-sm font-medium border transition-all ${
               selectedYear === yr
                 ? "bg-indigo-600 text-white border-indigo-600 shadow"
                 : "bg-white text-gray-600 border-gray-300 hover:border-indigo-400 hover:text-indigo-600"
@@ -906,7 +913,7 @@ const CSVImportModal = ({ isOpen, onClose, onImport }) => {
 // ============================================================================
 // Simplified Advance List Component (no date/year filters)
 // ============================================================================
-const AdvanceList = ({ onDelete }) => {
+const AdvanceList = ({ isMobileView, onDelete }) => {
   const [advances, setAdvances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -983,7 +990,7 @@ const AdvanceList = ({ onDelete }) => {
       try {
         await axios.delete(`${backendUrl}/api/hrm/mr-advance/${adv._id}`);
         showToast("success", "Advance deleted");
-        fetchAdvances(currentPage); // refresh
+        fetchAdvances(currentPage);
       } catch (err) {
         showToast("error", err.response?.data?.message || "Delete failed");
       }
@@ -991,17 +998,21 @@ const AdvanceList = ({ onDelete }) => {
   };
 
   if (loading)
-    return <div className="text-center py-8">Loading advances...</div>;
+    return <div className="text-center py-8 text-sm">Loading advances...</div>;
   if (error)
-    return <div className="text-center py-8 text-red-600">Error: {error}</div>;
+    return (
+      <div className="text-center py-8 text-red-600 text-sm">
+        Error: {error}
+      </div>
+    );
 
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-        <div className="relative w-64">
+        <div className="relative w-full md:w-64">
           <Search
             className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
-            size={16}
+            size={isMobileView ? 14 : 16}
           />
           <input
             type="text"
@@ -1011,12 +1022,14 @@ const AdvanceList = ({ onDelete }) => {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
-            className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+            className={`pl-9 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 ${isMobileView ? "text-sm" : ""}`}
           />
         </div>
-        <div className="bg-blue-50 px-4 py-2 rounded-lg">
-          <p className="text-sm font-medium text-blue-800">
-            Total Count: <span className="font-bold">{totalItems}</span>
+        <div className="bg-blue-50 px-3 md:px-4 py-1.5 md:py-2 rounded-lg">
+          <p
+            className={`font-medium text-blue-800 ${isMobileView ? "text-xs" : "text-sm"}`}
+          >
+            Total: <span className="font-bold">{totalItems}</span>
           </p>
         </div>
       </div>
@@ -1025,19 +1038,44 @@ const AdvanceList = ({ onDelete }) => {
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 text-left">Employee</th>
-              <th className="p-3">Date</th>
-              <th className="p-3">Source Account</th>
-              <th className="p-3">Amount</th>
-              <th className="p-3">Remarks</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Actions</th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium text-left`}
+              >
+                Employee
+              </th>
+              {!isMobileView && (
+                <th className="p-3 text-sm font-medium">Date</th>
+              )}
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Source
+              </th>
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Amount
+              </th>
+              {!isMobileView && (
+                <th className="p-3 text-sm font-medium">Remarks</th>
+              )}
+              <th
+                className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+              >
+                Status
+              </th>
+              {!isMobileView && (
+                <th className={"p-3 text-sm font-medium"}>Actions</th>
+              )}
             </tr>
           </thead>
           <tbody>
             {currentAdvances.length === 0 ? (
               <tr>
-                <td colSpan={7} className="p-6 text-gray-500">
+                <td
+                  colSpan={isMobileView ? 5 : 7}
+                  className="p-6 text-gray-500 text-sm"
+                >
                   No advances found.
                 </td>
               </tr>
@@ -1049,20 +1087,39 @@ const AdvanceList = ({ onDelete }) => {
                     idx < currentAdvances.length - 1 ? "border-b" : ""
                   }`}
                 >
-                  <td className="p-3 text-left font-medium">
+                  <td
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-left font-medium`}
+                  >
                     {adv.employeeId?.medicalRepName ||
                       adv.employeeId?.name ||
                       "Unknown"}
+                    {isMobileView && (
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {formatDateToReadable(adv.date)}
+                      </div>
+                    )}
                   </td>
-                  <td className="p-3">
-                    {formatDateToReadable(adv.date)}
+                  {!isMobileView && (
+                    <td className="p-3 text-sm">
+                      {formatDateToReadable(adv.date)}
+                    </td>
+                  )}
+                  <td
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"}`}
+                  >
+                    {adv.sourceAccount?.name || "N/A"}
                   </td>
-                  <td className="p-3">{adv.sourceAccount?.name || "N/A"}</td>
-                  <td className="p-3 font-semibold">
+                  <td
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-semibold`}
+                  >
                     {formatCurrency(adv.amount)}
                   </td>
-                  <td className="p-3">{adv.remarks || "-"}</td>
-                  <td className="p-3">
+                  {!isMobileView && (
+                    <td className="p-3 text-sm">{adv.remarks || "-"}</td>
+                  )}
+                  <td
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"}`}
+                  >
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(
                         adv.status,
@@ -1071,15 +1128,17 @@ const AdvanceList = ({ onDelete }) => {
                       {adv.status}
                     </span>
                   </td>
-                  <td className="p-3">
-                    <button
-                      onClick={() => handleDelete(adv)}
-                      className="text-red-600 hover:text-red-800 mx-1"
-                      title="Delete"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </td>
+                  {!isMobileView && (
+                    <td className={"p-3 text-sm"}>
+                      <button
+                        onClick={() => handleDelete(adv)}
+                        className="text-red-600 hover:text-red-800"
+                        title="Delete"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
@@ -1092,7 +1151,7 @@ const AdvanceList = ({ onDelete }) => {
           <button
             onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
             disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 text-sm"
           >
             Prev
           </button>
@@ -1100,7 +1159,7 @@ const AdvanceList = ({ onDelete }) => {
             <button
               key={p}
               onClick={() => setCurrentPage(p)}
-              className={`px-3 py-1 rounded ${
+              className={`px-3 py-1 rounded text-sm ${
                 currentPage === p
                   ? "bg-indigo-600 text-white"
                   : "bg-gray-200 hover:bg-gray-300"
@@ -1112,7 +1171,7 @@ const AdvanceList = ({ onDelete }) => {
           <button
             onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
             disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 text-sm"
           >
             Next
           </button>
@@ -1127,7 +1186,18 @@ const AdvanceList = ({ onDelete }) => {
 // ============================================================================
 const Payroll = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("payroll"); // 'payroll' or 'advance'
+  const [activeTab, setActiveTab] = useState("payroll");
+
+  // ─── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // ─── All existing payroll state and functions ───────────────────────────
   const [payrolls, setPayrolls] = useState([]);
@@ -1688,9 +1758,37 @@ const Payroll = () => {
     );
 
   return (
-    <div className="p-6">
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <DollarSign className="w-5 h-5 text-green-600" />
+            <h1 className="text-base font-bold text-gray-800">Payroll</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total: {filteredPayrolls.length}
+          </div>
+        </div>
+      )}
+
       {/* Tab Switcher */}
-      <div className="flex border-b border-gray-200 mb-6">
+      <div className="flex border-b border-gray-200 mb-4 md:mb-6">
         <button
           onClick={() => setActiveTab("payroll")}
           className={`py-2 px-4 font-medium text-sm focus:outline-none transition-colors ${
@@ -1716,68 +1814,91 @@ const Payroll = () => {
       {activeTab === "payroll" ? (
         // ── Existing Payroll Content ────────────────────────────────────────
         <>
-          {/* Header */}
-          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() =>
-                  navigate("/hrmlayout/payroll/new", {
-                    state: { payrollCode: nextPayrollCode },
-                  })
-                }
-                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
-              >
-                <UserPlus size={18} /> Add New Payroll
-              </button>
-              <button
-                onClick={exportToCSV}
-                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
-              >
-                <Download size={18} /> Export CSV
-              </button>
-              {selected.length > 0 && (
+          {/* Desktop Header */}
+          {!isMobileView && (
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+              <div className="flex flex-wrap gap-3">
                 <button
-                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
-                  onClick={handleDeleteSelected}
+                  onClick={() =>
+                    navigate("/hrmlayout/payroll/new", {
+                      state: { payrollCode: nextPayrollCode },
+                    })
+                  }
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
                 >
-                  <Trash2 size={18} /> Delete Selected ({selected.length})
+                  <UserPlus size={18} /> Add New Payroll
                 </button>
-              )}
-            </div>
+                <button
+                  onClick={exportToCSV}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
+                >
+                  <Download size={18} /> Export CSV
+                </button>
+                {selected.length > 0 && (
+                  <button
+                    className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
+                    onClick={handleDeleteSelected}
+                  >
+                    <Trash2 size={18} /> Delete Selected ({selected.length})
+                  </button>
+                )}
+              </div>
 
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
-              <div className="bg-blue-50 px-4 py-2 rounded-lg">
-                <p className="text-sm font-medium text-blue-800">
-                  Total Count:{" "}
-                  <span className="font-bold">{filteredPayrolls.length}</span>
-                </p>
-              </div>
-              <div className="relative w-full sm:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                  onClick={handleIconClick}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search payrolls..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 transition-colors"
-                />
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+                <div className="bg-blue-50 px-4 py-2 rounded-lg">
+                  <p className="text-sm font-medium text-blue-800">
+                    Total Count:{" "}
+                    <span className="font-bold">{filteredPayrolls.length}</span>
+                  </p>
+                </div>
+                <div className="relative w-full sm:w-72">
+                  <Search
+                    className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                    size={16}
+                    onClick={handleIconClick}
+                  />
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Search payrolls..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 transition-colors"
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* MOBILE Search Bar */}
+          {isMobileView && (
+            <div className="relative mb-4">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+                size={14}
+              />
+              <input
+                type="text"
+                placeholder="Search payrolls..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-9 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 text-sm"
+              />
+            </div>
+          )}
 
           {/* Year Filter Buttons */}
           <YearFilterButtons
             allPayrolls={allPayrolls}
             selectedYear={selectedYear}
             onYearSelect={handleYearSelect}
+            isMobileView={isMobileView}
           />
 
           {/* Month Range Tabs */}
@@ -1788,8 +1909,8 @@ const Payroll = () => {
 
           {/* Active filter badge */}
           {(selectedYear !== null || selectedDateRange) && (
-            <div className="mb-4 flex items-center gap-3">
-              <span className="text-sm text-indigo-700 font-medium bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <span className="text-xs md:text-sm text-indigo-700 font-medium bg-indigo-50 border border-indigo-200 px-2 md:px-3 py-1 rounded-full">
                 {selectedYear !== null
                   ? `Showing payrolls for ${selectedYear}`
                   : `Showing: ${selectedDateRange?.label}`}
@@ -1801,20 +1922,9 @@ const Payroll = () => {
                   setPayrolls(allPayrolls);
                   setCurrentPage(1);
                 }}
-                className="text-sm text-gray-500 hover:text-red-600 font-medium flex items-center gap-1"
+                className="text-xs md:text-sm text-gray-500 hover:text-red-600 font-medium flex items-center gap-1"
               >
                 <X size={14} /> Clear filter
-              </button>
-            </div>
-          )}
-
-          {selectedDateRange && !selectedYear && (
-            <div className="mb-4">
-              <button
-                onClick={handleClearDateFilter}
-                className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-              >
-                Clear Date Filter
               </button>
             </div>
           )}
@@ -1824,9 +1934,11 @@ const Payroll = () => {
             <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
               <thead className="bg-gray-100 text-gray-700 border-b">
                 <tr>
-                  <th className="p-3 text-left">
-                    <div className="flex items-center gap-4">
-                      {currentPayrolls.length > 0 && (
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium text-left`}
+                  >
+                    <div className="flex items-center gap-2 md:gap-4">
+                      {!isMobileView && currentPayrolls.length > 0 && (
                         <input
                           type="checkbox"
                           checked={
@@ -1837,24 +1949,59 @@ const Payroll = () => {
                           className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                         />
                       )}
-                      <span className="text-sm font-medium">Employee</span>
+                      <span>Employee</span>
                     </div>
                   </th>
-                  <th className="p-3 text-sm font-medium">Month</th>
-                  <th className="p-3 text-sm font-medium">Year</th>
-                  <th className="p-3 text-sm font-medium">Team Name</th>
-                  <th className="p-3 text-sm font-medium">Contact No</th>
-                  <th className="p-3 text-sm font-medium">Basic Salary</th>
-                  <th className="p-3 text-sm font-medium">Allowances</th>
-                  <th className="p-3 text-sm font-medium">Deductions</th>
-                  <th className="p-3 text-sm font-medium">Net Salary</th>
-                  <th className="p-3 text-sm font-medium">Actions</th>
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+                  >
+                    Month
+                  </th>
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+                  >
+                    Year
+                  </th>
+                  {!isMobileView && (
+                    <th className="p-3 text-sm font-medium">Team</th>
+                  )}
+                  {!isMobileView && (
+                    <th className="p-3 text-sm font-medium">Contact</th>
+                  )}
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+                  >
+                    Basic
+                  </th>
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+                  >
+                    Allow.
+                  </th>
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+                  >
+                    Ded.
+                  </th>
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+                  >
+                    Net
+                  </th>
+                  <th
+                    className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-medium`}
+                  >
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {currentPayrolls.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="p-6 text-center text-gray-500">
+                    <td
+                      colSpan={isMobileView ? 9 : 11}
+                      className="p-6 text-center text-gray-500 text-sm"
+                    >
                       {selectedYear !== null
                         ? `No payroll records found for ${selectedYear}.`
                         : selectedDateRange
@@ -1870,36 +2017,57 @@ const Payroll = () => {
                         idx < currentPayrolls.length - 1 ? "border-b" : ""
                       }`}
                     >
-                      <td className="p-3 text-left">
-                        <div className="flex items-center gap-4">
-                          <input
-                            type="checkbox"
-                            checked={selected.some((s) => s.id === payroll._id)}
-                            onChange={() => toggleSelect(payroll)}
-                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                          />
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-left`}
+                      >
+                        <div className="flex items-center gap-2 md:gap-4">
+                          {!isMobileView && (
+                            <input
+                              type="checkbox"
+                              checked={selected.some(
+                                (s) => s.id === payroll._id,
+                              )}
+                              onChange={() => toggleSelect(payroll)}
+                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                          )}
                           <span className="font-medium text-gray-900 capitalize">
                             {payroll.employeeName}
                           </span>
+                          {isMobileView && (
+                            <div className="text-xs text-gray-400">
+                              {payroll.employeeId?.teamName || "N/A"}
+                            </div>
+                          )}
                         </div>
                       </td>
-                      <td className="p-3 text-gray-600 font-medium">
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-gray-600 font-medium`}
+                      >
                         {formatPeriodToMonth(payroll.period)}
                       </td>
-                      <td className="p-3 text-gray-600 font-medium">
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-gray-600 font-medium`}
+                      >
                         {formatPeriodToYear(payroll.period)}
                       </td>
-                      <td className="p-3 text-gray-600 capitalize">
-                        {payroll.employeeId?.teamName ||
-                          payroll.teamName ||
-                          "N/A"}
-                      </td>
-                      <td className="p-3 text-gray-600">
-                        {payroll.employeeId?.contactNo ||
-                          payroll.contactNo ||
-                          "N/A"}
-                      </td>
-                      <td className="p-3 text-gray-600">
+                      {!isMobileView && (
+                        <td className="p-3 text-sm text-gray-600 capitalize">
+                          {payroll.employeeId?.teamName ||
+                            payroll.teamName ||
+                            "N/A"}
+                        </td>
+                      )}
+                      {!isMobileView && (
+                        <td className="p-3 text-sm text-gray-600">
+                          {payroll.employeeId?.contactNo ||
+                            payroll.contactNo ||
+                            "N/A"}
+                        </td>
+                      )}
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-gray-600`}
+                      >
                         <span
                           title={
                             payroll.payrollType === "current" &&
@@ -1923,8 +2091,10 @@ const Payroll = () => {
                           )}
                         </span>
                       </td>
-                      <td className="p-3">
-                        <div className="flex gap-1 justify-center">
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"}`}
+                      >
+                        <div className="flex gap-1 justify-center items-center">
                           <span className="text-gray-600">
                             {formatCurrency(getTotalAllowance(payroll))}
                           </span>
@@ -1933,31 +2103,41 @@ const Payroll = () => {
                             className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50"
                             title="View Allowance Details"
                           >
-                            <Eye size={18} />
+                            <Eye size={isMobileView ? 14 : 18} />
                           </button>
                         </div>
                       </td>
-                      <td className="p-3 text-red-600">
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-red-600`}
+                      >
                         {formatCurrency(payroll.deductions)}
                       </td>
-                      <td className="p-3 font-semibold text-green-600">
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} font-semibold text-green-600`}
+                      >
                         {formatCurrency(payroll.netSalary)}
                       </td>
-                      <td className="p-3 flex items-center justify-center gap-3">
-                        <button
-                          onClick={() => handleView(payroll)}
-                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                          title="View Details"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        <button
-                          onClick={() => deletePayroll(payroll)}
-                          className="text-red-600 hover:text-red-800 cursor-pointer"
-                          title="Delete"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                      <td
+                        className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"}`}
+                      >
+                        <div className="flex items-center justify-center gap-2 md:gap-3">
+                          <button
+                            onClick={() => handleView(payroll)}
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                            title="View Details"
+                          >
+                            <Eye size={isMobileView ? 16 : 18} />
+                          </button>
+                          {!isMobileView && (
+                            <button
+                              onClick={() => deletePayroll(payroll)}
+                              className="text-red-600 hover:text-red-800 cursor-pointer"
+                              title="Delete"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1967,36 +2147,44 @@ const Payroll = () => {
 
             {/* Pagination */}
             {currentPayrolls.length > 0 && (
-              <div className="mt-4 p-5 flex justify-start gap-2">
+              <div
+                className={`mt-4 p-3 md:p-5 flex ${isMobileView ? "justify-center" : "justify-start"} gap-1 md:gap-2 flex-wrap`}
+              >
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                   disabled={currentPage === 1}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                  className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-xs md:text-sm"
                 >
                   Prev
                 </button>
-                {visiblePages.map((p, index) => (
-                  <button
-                    key={index}
-                    onClick={() => typeof p === "number" && setCurrentPage(p)}
-                    disabled={p === "..."}
-                    className={`px-3 py-1 rounded ${
-                      p === "..."
-                        ? "bg-gray-200 cursor-not-allowed"
-                        : currentPage === p
-                          ? "bg-indigo-600 text-white cursor-pointer"
-                          : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-                    }`}
-                  >
-                    {p}
-                  </button>
-                ))}
+                {!isMobileView ? (
+                  visiblePages.map((p, index) => (
+                    <button
+                      key={index}
+                      onClick={() => typeof p === "number" && setCurrentPage(p)}
+                      disabled={p === "..."}
+                      className={`px-2 md:px-3 py-1 rounded text-xs md:text-sm ${
+                        p === "..."
+                          ? "bg-gray-200 cursor-not-allowed"
+                          : currentPage === p
+                            ? "bg-indigo-600 text-white cursor-pointer"
+                            : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))
+                ) : (
+                  <span className="px-3 py-1 text-xs text-gray-700 font-medium">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                )}
                 <button
                   onClick={() =>
                     setCurrentPage((p) => Math.min(p + 1, totalPages))
                   }
                   disabled={currentPage === totalPages}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                  className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-xs md:text-sm"
                 >
                   Next
                 </button>
@@ -2004,7 +2192,7 @@ const Payroll = () => {
             )}
           </div>
 
-          {/* Modals (unchanged) */}
+          {/* Modals (unchanged - keep existing modal code) */}
           {isAllowanceModalOpen &&
             ReactDOM.createPortal(
               <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
@@ -2514,8 +2702,8 @@ const Payroll = () => {
           )}
         </>
       ) : (
-        // ── Advance Tab Content (simplified) ────────────────────────────────
-        <AdvanceList />
+        // ── Advance Tab Content ────────────────────────────────────────────────
+        <AdvanceList isMobileView={isMobileView} />
       )}
     </div>
   );

@@ -2,8 +2,8 @@ import express from "express";
 import mongoose from "mongoose";
 import DailySampleReport from "../../models/reports/dailysample.js";
 import Staff from "../../models/staffMember/staff.js";
-import MRStockInHand from "../../models/sale/mrStockHand.js";      // ✅ added
-import ReportInHand from "../../models/reports/reportsInHand.js";  // ✅ added
+import MRStockInHand from "../../models/sale/mrStockHand.js";
+import ReportInHand from "../../models/reports/reportsInHand.js";
 
 const router = express.Router();
 
@@ -436,6 +436,7 @@ router.post("/import", async (req, res) => {
   }
 });
 
+// ✅ CORRECTED GET ROUTE - Always returns paginated results with proper defaults
 router.get("/", async (req, res) => {
   try {
     const {
@@ -449,6 +450,7 @@ router.get("/", async (req, res) => {
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
+
     const query = {};
     if (mrName) query.mrName = { $regex: mrName, $options: "i" };
     if (requestNumber)
@@ -462,24 +464,35 @@ router.get("/", async (req, res) => {
       query["products.productName"] = { $regex: productName, $options: "i" };
 
     const sortOptions = { [sortBy]: sortOrder === "desc" ? -1 : 1 };
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const total = await DailySampleReport.countDocuments(query);
     const reports = await DailySampleReport.find(query)
       .sort(sortOptions)
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limitNum)
       .lean();
-    const total = await DailySampleReport.countDocuments(query);
+
+    const totalPages = Math.ceil(total / limitNum);
+
     res.status(200).json({
       success: true,
       reports,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit)),
+        currentPage: pageNum,
+        totalPages,
+        totalRecords: total,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+        limit: limitNum,
       },
+      totalCount: total,
     });
   } catch (err) {
+    console.error("Error fetching daily samples:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });

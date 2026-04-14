@@ -713,7 +713,7 @@ const MobileSidePanel = ({
 };
 
 // --------------------------------------------------------------
-// MAIN MOBILE DASHBOARD (corrected)
+// MAIN MOBILE DASHBOARD (with reduced header size)
 // --------------------------------------------------------------
 const MobileDashboard = () => {
   const navigate = useNavigate();
@@ -783,10 +783,9 @@ const MobileDashboard = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // ✅ Body scroll lock when sidebar is open on mobile
+  // Body scroll lock when sidebar is open on mobile
   useEffect(() => {
     if (isMobileView && sidebarOpen) {
-      document.body.style.overflow = "hidden";
       document.body.style.overflow = "hidden";
     } else {
       document.body.style.overflow = "";
@@ -1059,7 +1058,7 @@ const MobileDashboard = () => {
 
   // Sub-tab pills
   const SubTabs = ({ tabs, active, onChange }) => (
-    <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar pb-1">
+    <div className="flex gap-2 mb-1 overflow-x-auto no-scrollbar pb-1">
       {tabs.map((t) => (
         <button
           key={t}
@@ -1275,27 +1274,28 @@ const MobileDashboard = () => {
         />
       )}
 
-      <div className="flex-1 overflow-y-auto pb-8 px-4 space-y-5">
-        <div className="bg-white rounded-2xl px-5 py-4 shadow-sm flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      <div className="flex-1 overflow-y-auto pb-8 px-4 space-y-4">
+        {/* Reduced Header Size - Changed from py-4 to py-2.5 */}
+        <div className="bg-white rounded-2xl px-4 py-2.5 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-2">
             {isMobileView && (
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="p-2 -ml-1 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"
+                className="p-1.5 -ml-1 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"
               >
-                <Menu size={20} className="text-gray-700" />
+                <Menu size={18} className="text-gray-700" />
               </button>
             )}
             <div>
-              <p className="font-semibold text-gray-900 text-base">
+              <p className="font-semibold text-gray-900 text-sm">
                 Hello, {username}
               </p>
-              <p className="text-xs text-gray-500">
+              <p className="text-[11px] text-gray-500">
                 Here's your overview for today.
               </p>
             </div>
           </div>
-          <span className="text-2xl">👋</span>
+          <span className="text-xl">👋</span>
         </div>
 
         {outOfStockCount > 0 && (

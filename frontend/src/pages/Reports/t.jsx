@@ -233,7 +233,8 @@ const buildCustomerMaps = (custRaw) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CollectedInvoicesSection
+// CollectedInvoicesSection — Full-page list of ALL collected invoices
+// with date filters and global totals
 // ─────────────────────────────────────────────────────────────────────────────
 const CollectedInvoicesSection = ({ onBack }) => {
   const [collections, setCollections] = useState([]);
@@ -257,6 +258,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
     totalInvoices: 0,
   });
 
+  // Mobile detection
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -491,6 +493,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
         />
       )}
 
+      {/* Mobile Header */}
       {isMobileView && (
         <div className="flex justify-between items-center mb-3">
           <div className="flex items-center gap-2">
@@ -517,6 +520,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
         </div>
       )}
 
+      {/* Desktop Header */}
       {!isMobileView && (
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -561,6 +565,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
         </div>
       )}
 
+      {/* Mobile Search */}
       {isMobileView && (
         <div className="relative mb-3">
           <Search
@@ -585,6 +590,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
         </div>
       )}
 
+      {/* Filter Tabs */}
       <div
         className={`flex items-center gap-2 mb-3 flex-wrap ${isMobileView ? "text-xs" : ""}`}
       >
@@ -601,7 +607,9 @@ const CollectedInvoicesSection = ({ onBack }) => {
             {tab === "all"
               ? "All Records"
               : tab === "currentMonth"
-                ? "Current Month"
+                ? isMobileView
+                  ? "Current Month"
+                  : "Current Month"
                 : tab === "janToToday"
                   ? isMobileView
                     ? "Jan→Today"
@@ -621,6 +629,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
         </span>
       </div>
 
+      {/* Summary Cards */}
       <div
         className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-3 gap-4 mb-6"}`}
       >
@@ -687,6 +696,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
         </div>
       </div>
 
+      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table
           className={`w-full text-sm border-collapse ${isMobileView ? "min-w-[600px]" : ""}`}
@@ -852,6 +862,7 @@ const CollectedInvoicesSection = ({ onBack }) => {
 
       {renderPagination()}
 
+      {/* Custom Date Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1535,6 +1546,7 @@ const AddCreditCollectionModal = ({ isOpen, onClose, onSuccess }) => {
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 const OutstandingCollection = () => {
+  // ========== ALL HOOKS (unconditional) ==========
   const [activeView, setActiveView] = useState("outstanding");
   const [data, setData] = useState({
     summary: {
@@ -1571,6 +1583,7 @@ const OutstandingCollection = () => {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [showAddTxModal, setShowAddTxModal] = useState(false);
 
+  // ── Mobile detection ──────────────────────────────────────────────────────
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -1580,11 +1593,13 @@ const OutstandingCollection = () => {
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+  // ─────────────────────────────────────────────────────────────────────────
 
   const visiblePages = getVisiblePages(
     pagination.currentPage,
     pagination.totalPages,
   );
+
   const getSerialNumber = (index) =>
     (pagination.currentPage - 1) * 7 + index + 1;
 
@@ -1596,28 +1611,16 @@ const OutstandingCollection = () => {
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
   const getCurrentYear = () => new Date().getFullYear();
-
-  // ✅ FIXED: Dynamic "Jan to Previous Month" label
-  // e.g. if current month is April (index 3), previous month is March → "Jan - Mar YYYY"
-  // if current month is May (index 4), previous month is April → "Jan - Apr YYYY"
   const getPreviousMonthName = () => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
     return d.toLocaleString("default", { month: "long" });
   };
 
-  // Short name for mobile tab button (e.g. "Mar" instead of "March")
-  const getPreviousMonthShortName = () => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    return d.toLocaleString("default", { month: "short" });
-  };
-
   const getJanToPreviousMonthRange = () => {
     const y = getCurrentYear();
-    const m = new Date().getMonth(); // 0 = Jan, 1 = Feb, ...
+    const m = new Date().getMonth();
     if (m === 0) {
-      // Current month is January — go to previous year Dec
       const py = y - 1;
       return {
         startDate: `${py}-01-01`,
@@ -1625,11 +1628,10 @@ const OutstandingCollection = () => {
         label: `Jan - Dec ${py}`,
       };
     }
-    // End of previous month
     return {
       startDate: `${y}-01-01`,
       endDate: formatLocalDate(new Date(y, m, 0)),
-      label: `Jan - ${getPreviousMonthName()} ${y}`, // ✅ Dynamic e.g. "Jan - March 2026"
+      label: `Jan - ${getPreviousMonthName()} ${y}`,
     };
   };
 
@@ -1834,7 +1836,12 @@ const OutstandingCollection = () => {
         });
         const rows = XLSX.utils.sheet_to_json(
           workbook.Sheets[workbook.SheetNames[0]],
-          { header: 1, defval: "", blankrows: true, raw: true },
+          {
+            header: 1,
+            defval: "",
+            blankrows: true,
+            raw: true,
+          },
         );
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
@@ -1924,7 +1931,7 @@ const OutstandingCollection = () => {
       case "currentMonth":
         return `${getCurrentMonthName()} ${getCurrentYear()}`;
       case "janToPreviousMonth":
-        return getJanToPreviousMonthRange().label; // ✅ Dynamic e.g. "Jan - March 2026"
+        return getJanToPreviousMonthRange().label;
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
           let d = `${formatDateToReadable(customDateRange.startDate)} to ${formatDateToReadable(customDateRange.endDate)}`;
@@ -1942,6 +1949,7 @@ const OutstandingCollection = () => {
     }
   };
 
+  // ── Pagination (Improved like DailyReports component) ─────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
@@ -1961,7 +1969,13 @@ const OutstandingCollection = () => {
               key={idx}
               onClick={() => typeof page === "number" && handlePageChange(page)}
               disabled={page === "..."}
-              className={`px-4 py-2 rounded text-sm ${page === "..." ? "bg-gray-200 cursor-not-allowed" : pagination.currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+              className={`px-4 py-2 rounded text-sm ${
+                page === "..."
+                  ? "bg-gray-200 cursor-not-allowed"
+                  : pagination.currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+              }`}
             >
               {page}
             </button>
@@ -1982,13 +1996,16 @@ const OutstandingCollection = () => {
     );
   };
 
+  // ========== useEffect hooks (unconditional) ==========
   useEffect(() => {
     fetchCustomerOptions();
   }, []);
+
   useEffect(() => {
     setPagination((p) => ({ ...p, currentPage: 1 }));
     fetchOutstandingCollections(1);
   }, [selectedTab]);
+
   useEffect(() => {
     if (
       selectedTab === "custom" &&
@@ -1997,22 +2014,26 @@ const OutstandingCollection = () => {
     )
       fetchOutstandingCollections(1);
   }, [customDateRange.startDate, customDateRange.endDate, selectedTab]);
+
   useEffect(() => {
     const d = setTimeout(() => fetchOutstandingCollections(1, searchTerm), 500);
     return () => clearTimeout(d);
   }, [searchTerm]);
 
+  // ========== EARLY RETURN (after all hooks) ==========
   if (activeView === "collected") {
     return (
       <CollectedInvoicesSection onBack={() => setActiveView("outstanding")} />
     );
   }
 
+  // ========== JSX for Outstanding view ==========
   const isExportDisabled =
     loading || exportLoading || data.records.length === 0;
 
   return (
     <div className={`${isMobileView ? "p-3 pb-20" : "p-4"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -2050,7 +2071,8 @@ const OutstandingCollection = () => {
               onClick={() => setActiveView("collected")}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-medium cursor-pointer transition-colors shadow-sm"
             >
-              <CheckCircle size={15} /> Collected
+              <CheckCircle size={15} />
+              Collected
             </button>
           </div>
           <div className="flex items-center gap-3">
@@ -2111,17 +2133,20 @@ const OutstandingCollection = () => {
         </div>
       )}
 
+      {/* ── MOBILE: Only Collected Button (No Add Transaction or Upload Excel) ── */}
       {isMobileView && (
         <div className="mb-3">
           <button
             onClick={() => setActiveView("collected")}
             className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-medium cursor-pointer transition-colors shadow-sm"
           >
-            <CheckCircle size={14} /> View Collected Invoices
+            <CheckCircle size={14} />
+            View Collected Invoices
           </button>
         </div>
       )}
 
+      {/* ── MOBILE Search ── */}
       {isMobileView && (
         <div className="relative mb-3">
           <Search
@@ -2152,7 +2177,7 @@ const OutstandingCollection = () => {
         </div>
       )}
 
-      {/* ── Filter Tabs ── */}
+      {/* Filter Tabs */}
       <div
         className={`flex items-center gap-2 mb-3 flex-wrap ${isMobileView ? "text-[10px]" : ""}`}
       >
@@ -2170,8 +2195,8 @@ const OutstandingCollection = () => {
                   : `Current Month (${getCurrentMonthName()} ${getCurrentYear()})`
                 : tab === "janToPreviousMonth"
                   ? isMobileView
-                    ? `Jan-${getPreviousMonthShortName()}` // ✅ e.g. "Jan-Mar" on mobile
-                    : getJanToPreviousMonthRange().label // ✅ e.g. "Jan - March 2026" on desktop
+                    ? "Jan→Prev"
+                    : getJanToPreviousMonthRange().label
                   : "Custom"}
           </button>
         ))}
@@ -2187,7 +2212,7 @@ const OutstandingCollection = () => {
         </span>
       </div>
 
-      {/* ── Summary Cards ── */}
+      {/* Summary Cards */}
       <div
         className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-4 gap-4 mb-6"}`}
       >
@@ -2226,7 +2251,9 @@ const OutstandingCollection = () => {
           />
         </div>
         {!isMobileView && (
-          <div className="border border-gray-300 rounded-xl p-4 flex items-center justify-between bg-gray-50">
+          <div
+            className={`border border-gray-300 rounded-xl p-4 flex items-center justify-between bg-gray-50`}
+          >
             <div>
               <p className="text-sm text-gray-500">Total Invoices</p>
               <p className="text-2xl font-bold text-gray-700">
@@ -2236,9 +2263,26 @@ const OutstandingCollection = () => {
             <FileText className="w-9 h-9 text-blue-400" />
           </div>
         )}
+        {/* <div
+          className={`border border-gray-300 rounded-xl ${isMobileView ? "p-2" : "p-4"} flex items-center justify-between ${isMobileView ? "col-span-2" : ""}`}
+        >
+          <div>
+            <p
+              className={`${isMobileView ? "text-[9px]" : "text-sm"} text-gray-500`}
+            >
+              Total Invoices
+            </p>
+            <p className={`${isMobileView ? "text-sm" : "text-2xl"} font-bold`}>
+              {data.summary.totalInvoices || 0}
+            </p>
+          </div>
+          <FileText
+            className={`${isMobileView ? "w-6 h-6" : "w-9 h-9"} text-blue-400`}
+          />
+        </div> */}
       </div>
 
-      {/* ── Table ── */}
+      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table
           className={`w-full text-sm border-collapse ${isMobileView ? "min-w-[650px]" : ""}`}
@@ -2336,7 +2380,8 @@ const OutstandingCollection = () => {
                   {!isMobileView && (
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 text-gray-600">
-                        <Phone size={12} /> {record.phone || "N/A"}
+                        <Phone size={12} />
+                        {record.phone || "N/A"}
                       </div>
                     </td>
                   )}

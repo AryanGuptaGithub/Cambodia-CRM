@@ -67,7 +67,17 @@ function DashboardLayout() {
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <header className="lg:hidden flex items-center justify-between bg-[#F0F4FF] px-4 py-3 z-30 flex-shrink-0 min-h-[56px]">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 leading-tight">
+            <img 
+              src="/mainlogo.png" 
+              alt="Logo" 
+              className="h-8 w-auto object-contain"
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.style.display = 'none';
+                e.target.nextSibling.style.display = 'block';
+              }}
+            />
+            <h1 className="hidden text-2xl font-bold text-gray-900 leading-tight">
               Dashboard
             </h1>
           </div>

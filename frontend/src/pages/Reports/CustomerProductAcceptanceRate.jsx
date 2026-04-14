@@ -30,7 +30,6 @@ import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// ─── Date filter constants ────────────────────────────────────────────────
 const MONTHS = [
   "January",
   "February",
@@ -63,7 +62,7 @@ const CURRENT_YEAR = new Date().getFullYear();
 const CURRENT_MONTH = new Date().getMonth();
 const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR - 2 + i);
 
-// ─── Modal to show sample details (like in DailySample) ──────────────────
+// ─── Sample Details Modal ─────────────────────────────────────────────────
 const SampleDetailsModal = ({
   isOpen,
   onClose,
@@ -71,7 +70,6 @@ const SampleDetailsModal = ({
   productName,
 }) => {
   if (!isOpen) return null;
-
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
       <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
@@ -136,7 +134,7 @@ const SampleDetailsModal = ({
   );
 };
 
-// ─── Custom Range Calendar Modal (same as before) ────────────────────────
+// ─── Custom Range Calendar Modal ──────────────────────────────────────────
 const CustomRangeModal = ({
   isOpen,
   onClose,
@@ -344,7 +342,10 @@ const CustomRangeModal = ({
                     setHovering(new Date(calYear, calMonth, day))
                   }
                   onMouseLeave={() => setHovering(null)}
-                  className={`h-9 w-full text-sm font-medium transition-all rounded-lg ${s || e ? "bg-indigo-600 text-white" : ""} ${r ? "bg-indigo-100 text-indigo-800" : ""} ${!s && !e && !r ? "text-gray-700 hover:bg-gray-100" : ""}`}
+                  className={`h-9 w-full text-sm font-medium transition-all rounded-lg
+                    ${s || e ? "bg-indigo-600 text-white" : ""}
+                    ${r ? "bg-indigo-100 text-indigo-800" : ""}
+                    ${!s && !e && !r ? "text-gray-700 hover:bg-gray-100" : ""}`}
                 >
                   {day}
                 </button>
@@ -388,7 +389,9 @@ const CustomRangeModal = ({
   );
 };
 
-// ─── Date Filter Bar (Responsive) ─────────────────────────────────────────
+// ─── Date Filter Bar ───────────────────────────────────────────────────────
+// FIX 1: Apply button hidden on mobile
+// FIX 2: Year select aligned to left on mobile (not center)
 const DateFilterBar = ({
   filterMode,
   year,
@@ -417,26 +420,96 @@ const DateFilterBar = ({
     return result;
   }, []);
 
+  if (isMobileView) {
+    // ── MOBILE layout: month buttons + year select left-aligned + custom button
+    // Apply button is completely hidden on mobile
+    return (
+      <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+        {/* Row 1: Month buttons — left aligned */}
+        <div className="flex gap-2 flex-wrap mb-2">
+          {recentMonths.map((rm) => (
+            <button
+              key={`${rm.month}-${rm.year}`}
+              onClick={() => onMonthClick(rm.month, rm.year)}
+              className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${
+                filterMode === "month" && month === rm.month && year === rm.year
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300"
+              }`}
+            >
+              {rm.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Row 2: Year select (LEFT aligned) + Custom button */}
+        <div className="flex items-center gap-2">
+          {/* Year select — left side */}
+          <select
+            value={year}
+            onChange={(e) => onYearChange(Number(e.target.value))}
+            className={`border rounded-lg px-3 py-1.5 text-xs font-medium ${
+              filterMode === "year"
+                ? "border-indigo-500 text-indigo-700 bg-indigo-50"
+                : "border-gray-300 text-gray-600"
+            }`}
+          >
+            {YEARS.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+
+          {/* Custom date range button */}
+          <button
+            onClick={onOpenCustom}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium border ${
+              filterMode === "custom"
+                ? "bg-indigo-600 text-white border-indigo-600 shadow"
+                : "bg-white text-gray-600 border-gray-200"
+            }`}
+          >
+            <Calendar size={12} />
+            Custom
+          </button>
+
+          {/* NO Apply button on mobile */}
+        </div>
+      </div>
+    );
+  }
+
+  // ── DESKTOP layout: unchanged, includes Apply button ──
   return (
-    <div
-      className={`bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap gap-3 items-center shadow-sm ${isMobileView ? "flex-col" : ""}`}
-    >
-      <div className={`flex flex-wrap gap-2 ${isMobileView ? "w-full" : ""}`}>
+    <div className="bg-white border border-gray-200 rounded-xl p-4 flex flex-wrap gap-3 items-center shadow-sm">
+      {/* Recent month buttons */}
+      <div className="flex flex-wrap gap-2">
         {recentMonths.map((rm) => (
           <button
             key={`${rm.month}-${rm.year}`}
             onClick={() => onMonthClick(rm.month, rm.year)}
-            className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${filterMode === "month" && month === rm.month && year === rm.year ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300"}`}
+            className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all border ${
+              filterMode === "month" && month === rm.month && year === rm.year
+                ? "bg-indigo-600 text-white border-indigo-600 shadow"
+                : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300"
+            }`}
           >
             {rm.label}
           </button>
         ))}
       </div>
+
+      {/* Year select + Custom button */}
       <div className="flex flex-wrap gap-2 items-center">
         <select
           value={year}
           onChange={(e) => onYearChange(Number(e.target.value))}
-          className={`border rounded-lg px-3 py-1.5 text-xs font-medium ${filterMode === "year" ? "border-indigo-500 text-indigo-700 bg-indigo-50" : "border-gray-300 text-gray-600"}`}
+          className={`border rounded-lg px-3 py-1.5 text-xs font-medium ${
+            filterMode === "year"
+              ? "border-indigo-500 text-indigo-700 bg-indigo-50"
+              : "border-gray-300 text-gray-600"
+          }`}
         >
           {YEARS.map((y) => (
             <option key={y} value={y}>
@@ -446,18 +519,24 @@ const DateFilterBar = ({
         </select>
         <button
           onClick={onOpenCustom}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium border ${filterMode === "custom" ? "bg-indigo-600 text-white border-indigo-600 shadow" : "bg-white text-gray-600 border-gray-200"}`}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-medium border ${
+            filterMode === "custom"
+              ? "bg-indigo-600 text-white border-indigo-600 shadow"
+              : "bg-white text-gray-600 border-gray-200"
+          }`}
         >
           <Calendar size={12} />
-          {filterMode === "custom" && startDate && endDate && !isMobileView
+          {filterMode === "custom" && startDate && endDate
             ? filterLabel
             : "Custom"}
         </button>
       </div>
+
+      {/* Apply button — desktop only */}
       <button
         onClick={onApply}
         disabled={loading}
-        className={`flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium ${isMobileView ? "w-full" : "ml-auto"}`}
+        className="flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium ml-auto"
       >
         {loading ? (
           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
@@ -470,7 +549,7 @@ const DateFilterBar = ({
   );
 };
 
-// ─── Summary Card (Responsive) ────────────────────────────────────────────
+// ─── Summary Card ─────────────────────────────────────────────────────────
 const SummaryCard = ({ title, value, icon, borderColor, isMobileView }) => (
   <div
     className={`bg-white ${isMobileView ? "p-3" : "p-6"} rounded-xl shadow-md border-l-4 ${borderColor} border border-gray-200`}
@@ -491,7 +570,7 @@ const SummaryCard = ({ title, value, icon, borderColor, isMobileView }) => (
   </div>
 );
 
-// ─── Main Component ──────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────
 const CustomerProductAcceptanceRate = () => {
   const today = new Date();
 
@@ -524,7 +603,7 @@ const CustomerProductAcceptanceRate = () => {
   const [endDate, setEndDate] = useState(null);
   const [showCustomModal, setShowCustomModal] = useState(false);
 
-  // Modal state for product details
+  // Modal state
   const [isSampleModalOpen, setIsSampleModalOpen] = useState(false);
   const [selectedSampleDetails, setSelectedSampleDetails] = useState([]);
   const [selectedProductName, setSelectedProductName] = useState("");
@@ -655,6 +734,7 @@ const CustomerProductAcceptanceRate = () => {
       null,
     );
   }, []);
+
   useEffect(() => {
     const t = setTimeout(() => fetchData(1, searchTerm), 500);
     return () => clearTimeout(t);
@@ -671,6 +751,7 @@ const CustomerProductAcceptanceRate = () => {
     },
     [fetchData, searchTerm],
   );
+
   const handleYearChange = useCallback(
     (y) => {
       setFilterMode("year");
@@ -681,6 +762,7 @@ const CustomerProductAcceptanceRate = () => {
     },
     [fetchData, searchTerm, month],
   );
+
   const handleCustomApply = useCallback(
     (s, e) => {
       setFilterMode("custom");
@@ -690,6 +772,7 @@ const CustomerProductAcceptanceRate = () => {
     },
     [fetchData, searchTerm, year, month],
   );
+
   const handleApply = useCallback(() => {
     fetchData(
       pagination.currentPage,
@@ -710,6 +793,7 @@ const CustomerProductAcceptanceRate = () => {
     startDate,
     endDate,
   ]);
+
   const handlePageChange = (page) => {
     if (page >= 1 && page <= pagination.totalPages) fetchData(page);
   };
@@ -752,7 +836,6 @@ const CustomerProductAcceptanceRate = () => {
     setIsSampleModalOpen(true);
   };
 
-  // Table headers (responsive)
   const renderTableHeaders = () => {
     const thClass = `${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`;
     return (
@@ -770,7 +853,6 @@ const CustomerProductAcceptanceRate = () => {
     );
   };
 
-  // Table row
   const renderTableRow = (record, index) => {
     const tdClass = `${isMobileView ? "p-2 text-[11px]" : "p-3 text-sm"}`;
     return (
@@ -817,7 +899,6 @@ const CustomerProductAcceptanceRate = () => {
     );
   };
 
-  // Pagination (responsive)
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
@@ -882,7 +963,7 @@ const CustomerProductAcceptanceRate = () => {
         initialEnd={endDate}
       />
 
-      {/* ── Sidebar (mobile only) ── */}
+      {/* Sidebar (mobile only) */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -891,7 +972,7 @@ const CustomerProductAcceptanceRate = () => {
         />
       )}
 
-      {/* ── MOBILE Header ── */}
+      {/* MOBILE Header */}
       {isMobileView && (
         <div className="flex justify-between items-center mb-3">
           <div className="flex items-center gap-2">
@@ -912,7 +993,7 @@ const CustomerProductAcceptanceRate = () => {
         </div>
       )}
 
-      {/* ── DESKTOP Header ── */}
+      {/* DESKTOP Header */}
       {!isMobileView && (
         <div className="flex justify-between items-center flex-wrap gap-3">
           <div>
@@ -952,11 +1033,15 @@ const CustomerProductAcceptanceRate = () => {
             <button
               onClick={exportToExcel}
               disabled={exportLoading}
-              className={`flex items-center gap-2 ${exportLoading ? "bg-green-500 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"} text-white px-4 py-2 rounded-xl shadow-md`}
+              className={`flex items-center gap-2 ${
+                exportLoading
+                  ? "bg-green-500 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-700"
+              } text-white px-4 py-2 rounded-xl shadow-md`}
             >
               {exportLoading ? (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />{" "}
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                   Exporting...
                 </>
               ) : (
@@ -969,7 +1054,7 @@ const CustomerProductAcceptanceRate = () => {
         </div>
       )}
 
-      {/* ── MOBILE Search ── */}
+      {/* MOBILE Search */}
       {isMobileView && (
         <div className="relative mb-3">
           <input
@@ -1085,7 +1170,9 @@ const CustomerProductAcceptanceRate = () => {
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table
-          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[500px]" : ""}`}
+          className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${
+            isMobileView ? "min-w-[500px]" : ""
+          }`}
         >
           {renderTableHeaders()}
           <tbody>
@@ -1118,9 +1205,6 @@ const CustomerProductAcceptanceRate = () => {
       </div>
 
       {renderPagination()}
-
-      {/* ── MOBILE bottom action bar (Export button REMOVED) ── */}
-      {/* Export button is completely removed on mobile view */}
     </div>
   );
 };
