@@ -2114,7 +2114,7 @@ const LeaveAttendance = () => {
 
       {/* Mobile Header */}
       {isMobileView && !showCalendarView && (
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex justify-between items-center mb-4 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -2123,13 +2123,13 @@ const LeaveAttendance = () => {
               <Menu size={20} className="text-gray-700" />
             </button>
             {/* <CalendarIcon className="w-5 h-5 text-blue-600" /> */}
-            <h1 className="text-base font-bold text-gray-800">
+            <h1 className="text-sm font-bold text-gray-800">
               MR Leave & Attendance
             </h1>
           </div>
           {mrList.length > 0 && (
             <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
-              Total: {filteredMRList.length}
+              Total Records: {filteredMRList.length}
             </div>
           )}
         </div>

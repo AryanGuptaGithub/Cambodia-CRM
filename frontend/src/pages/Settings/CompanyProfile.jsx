@@ -7,6 +7,9 @@ import {
   Download,
   X,
   FileText,
+  Menu,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import axios from "axios";
@@ -19,6 +22,7 @@ import ReactDOM from "react-dom";
 import ExcelJS from "exceljs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const companiesPerPage = 7;
@@ -47,6 +51,17 @@ const CompanyProfile = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // Mobile detection and sidebar state
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   useEffect(() => {
     fetchCompanies();
@@ -77,7 +92,7 @@ const CompanyProfile = () => {
         .includes(searchTerm.toLowerCase()) ||
       company.address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       company.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      company.email?.toLowerCase().includes(searchTerm.toLowerCase())
+      company.email?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   const hasCompanyProfile = companies.length > 0;
@@ -87,8 +102,11 @@ const CompanyProfile = () => {
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentCompanies = filteredCompanies.slice(
     (currentPage - 1) * companiesPerPage,
-    currentPage * companiesPerPage
+    currentPage * companiesPerPage,
   );
+
+  // Check if pagination is needed
+  const showPagination = filteredCompanies.length > companiesPerPage;
 
   function getVisiblePages(currentPage, totalPages) {
     if (totalPages <= 5) {
@@ -113,7 +131,6 @@ const CompanyProfile = () => {
     try {
       const doc = new jsPDF("p", "mm", "a4");
 
-      // Title (Centered)
       doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
       doc.text(
@@ -122,17 +139,15 @@ const CompanyProfile = () => {
         15,
         {
           align: "center",
-        }
+        },
       );
 
-      // Subtitle (Centered)
       doc.setFontSize(14);
       doc.setFont("helvetica", "normal");
       doc.text("Company Profiles", doc.internal.pageSize.width / 2, 25, {
         align: "center",
       });
 
-      // Table headers
       const headers = [
         "Sr No.",
         "Company Name",
@@ -142,7 +157,6 @@ const CompanyProfile = () => {
         "Established Date",
       ];
 
-      // Table data
       const data = filteredCompanies.map((company, index) => [
         (index + 1).toString(),
         company.companyName || "-",
@@ -161,31 +175,30 @@ const CompanyProfile = () => {
         styles: {
           fontSize: 8,
           cellPadding: 2,
-          halign: "center", // 👈 centers all text horizontally
-          valign: "middle", // 👈 vertically center aligns the text
+          halign: "center",
+          valign: "middle",
         },
         headStyles: {
           fillColor: [66, 114, 196],
           textColor: 255,
           fontStyle: "bold",
-          halign: "center", // 👈 center-align headers too
+          halign: "center",
         },
         alternateRowStyles: {
           fillColor: [242, 242, 242],
         },
         columnStyles: {
-          0: { cellWidth: 15, halign: "center" }, // Sr No.
-          1: { cellWidth: 40, halign: "center" }, // Company Name
-          2: { cellWidth: 30, halign: "center" }, // Registration No.
-          3: { cellWidth: 25, halign: "center" }, // Phone
-          4: { cellWidth: 40, halign: "center" }, // Email
-          5: { cellWidth: 25, halign: "center" }, // Established Date
+          0: { cellWidth: 15, halign: "center" },
+          1: { cellWidth: 40, halign: "center" },
+          2: { cellWidth: 30, halign: "center" },
+          3: { cellWidth: 25, halign: "center" },
+          4: { cellWidth: 40, halign: "center" },
+          5: { cellWidth: 25, halign: "center" },
         },
         tableWidth: "wrap",
         margin: { top: 35, left: (doc.internal.pageSize.width - 175) / 2 },
       });
 
-      // Footer (Centered)
       const pageCount = doc.internal.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
@@ -199,13 +212,12 @@ const CompanyProfile = () => {
           `Generated on: ${new Date().toLocaleDateString()}`,
           pageWidth - 20,
           pageHeight - 10,
-          { align: "right" }
+          { align: "right" },
         );
       }
 
-      // Save file
       doc.save(
-        `companies_profile_${new Date().toISOString().split("T")[0]}.pdf`
+        `companies_profile_${new Date().toISOString().split("T")[0]}.pdf`,
       );
 
       showToast("success", "PDF downloaded successfully");
@@ -220,7 +232,6 @@ const CompanyProfile = () => {
       const doc = new jsPDF("p", "mm", "a4");
       const pageWidth = doc.internal.pageSize.width;
 
-      // Title (Centered)
       doc.setFontSize(16);
       doc.setFont("helvetica", "bold");
       doc.text("COMPANY PROFILE DETAILS", pageWidth / 2, 20, {
@@ -229,7 +240,6 @@ const CompanyProfile = () => {
 
       let yPosition = 40;
 
-      // Section Header: Basic Information (Centered)
       doc.setFontSize(12);
       doc.setFont("helvetica", "bold");
       doc.text("Basic Information", pageWidth / 2, yPosition, {
@@ -237,7 +247,6 @@ const CompanyProfile = () => {
       });
       yPosition += 10;
 
-      // Company Details (Centered as label: value)
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       const companyDetails = [
@@ -264,7 +273,6 @@ const CompanyProfile = () => {
 
       yPosition += 10;
 
-      // Contact Information (Centered)
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       doc.text("Contact Information", pageWidth / 2, yPosition, {
@@ -291,7 +299,6 @@ const CompanyProfile = () => {
 
       yPosition += 10;
 
-      // Description (Centered multi-line)
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       doc.text("Description", pageWidth / 2, yPosition, { align: "center" });
@@ -304,17 +311,15 @@ const CompanyProfile = () => {
       const descLines = doc.splitTextToSize(desc, pageWidth - 40);
       doc.text(descLines, pageWidth / 2, yPosition, { align: "center" });
 
-      // Footer
       const pageHeight = doc.internal.pageSize.height;
       doc.setFontSize(8);
       doc.text(
         `Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
         pageWidth / 2,
         pageHeight - 10,
-        { align: "center" }
+        { align: "center" },
       );
 
-      // Save the PDF
       doc.save(`${company.companyName || "company"}_profile.pdf`);
       showToast("success", "Company details PDF downloaded");
     } catch (error) {
@@ -482,13 +487,13 @@ const CompanyProfile = () => {
     if (confirmDelete.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/company-profile/${company._id}`
+          `${backendUrl}/api/company-profile/${company._id}`,
         );
 
         if (res.status === 200) {
           showToast(
             "success",
-            `Company <b>${company.companyName}</b> deleted successfully`
+            `Company <b>${company.companyName}</b> deleted successfully`,
           );
           fetchCompanies();
         }
@@ -503,12 +508,12 @@ const CompanyProfile = () => {
     try {
       const res = await axios.put(
         `${backendUrl}/api/company-profile/${form._id}`,
-        form
+        form,
       );
       if (res.status === 200) {
         showToast(
           "success",
-          `Company <b>${form.companyName}</b> updated successfully`
+          `Company <b>${form.companyName}</b> updated successfully`,
         );
         setIsEditModalOpen(false);
         fetchCompanies();
@@ -525,7 +530,7 @@ const CompanyProfile = () => {
       if (res.status === 201) {
         showToast(
           "success",
-          `Company <b>${form.companyName}</b> created successfully`
+          `Company <b>${form.companyName}</b> created successfully`,
         );
         setIsAddModalOpen(false);
         fetchCompanies();
@@ -535,150 +540,297 @@ const CompanyProfile = () => {
     }
   };
 
+  // Mobile card view component (without edit and delete buttons)
+  const MobileCompanyCard = ({ company, index }) => (
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
+      <div className="flex justify-between items-start mb-3">
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-800 text-lg">
+            {company.companyName}
+          </h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Reg No: {company.registrationNumber || "-"}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleView(company)}
+            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            title="View"
+          >
+            <Eye size={18} />
+          </button>
+          <button
+            onClick={() => downloadCompanyDetailPDF(company)}
+            className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+            title="Download PDF"
+          >
+            <FileText size={18} />
+          </button>
+        </div>
+      </div>
+      <div className="space-y-2 text-sm">
+        <div className="flex">
+          <span className="text-gray-600 w-28">Address:</span>
+          <span className="text-gray-800 flex-1 capitalize">
+            {company.address || "-"}
+          </span>
+        </div>
+        <div className="flex">
+          <span className="text-gray-600 w-28">Phone:</span>
+          <span className="text-gray-800 flex-1">{company.phone || "-"}</span>
+        </div>
+        <div className="flex">
+          <span className="text-gray-600 w-28">Email:</span>
+          <span className="text-gray-800 flex-1 truncate">
+            {company.email || "-"}
+          </span>
+        </div>
+        <div className="flex">
+          <span className="text-gray-600 w-28">Established:</span>
+          <span className="text-gray-800 flex-1">
+            {formatDateToReadable(company.establishedDate)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+
   if (loading) return <div className="p-6 text-center">Loading...</div>;
   if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex gap-3">
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* Mobile Header with Hamburger Menu */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-4 bg-gray-200 p-2 border-gray-200 rounded-2xl">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <h1 className="text-base font-bold text-gray-800">
+              Company Profiles
+            </h1>
+          </div>
           {hasCompanyProfile && (
-            <>
-              <button
-                onClick={downloadPDF}
-                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
-              >
-                <FileText size={18} /> Download PDF
-              </button>
-              <button
-                onClick={downloadExcel}
-                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
-              >
-                <Download size={18} /> Download Excel
-              </button>
-            </>
+            <button
+              onClick={downloadPDF}
+              className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg shadow-md cursor-pointer transition-colors text-sm"
+            >
+              <FileText size={16} /> PDF
+            </button>
           )}
         </div>
-      </div>
+      )}
+
+      {/* Desktop Header */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex gap-3">
+            {hasCompanyProfile && (
+              <>
+                <button
+                  onClick={downloadPDF}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+                >
+                  <FileText size={18} /> Download PDF
+                </button>
+                <button
+                  onClick={downloadExcel}
+                  className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+                >
+                  <Download size={18} /> Download Excel
+                </button>
+                <button
+                  onClick={openAddModal}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+                >
+                  <UserPlus size={18} /> Add Company
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {hasCompanyProfile ? (
-        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-            <thead className="bg-gray-100 text-gray-700 border-b">
-              <tr>
-                <th className="p-3 text-sm font-medium">Sr No.</th>
-                <th className="p-3 text-sm font-medium">Company Name</th>
-                <th className="p-3 text-sm font-medium">Registration Number</th>
-                <th className="p-3 text-sm font-medium">Address</th>
-                <th className="p-3 text-sm font-medium">Phone</th>
-                <th className="p-3 text-sm font-medium">Email</th>
-                <th className="p-3 text-sm font-medium">Established Date</th>
-                <th className="p-3 text-sm font-medium">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {currentCompanies.length > 0 ? (
-                currentCompanies.map((company, index) => (
-                  <tr
-                    key={company._id}
-                    className={`hover:bg-gray-50 ${
-                      (index + 1) % companiesPerPage === 0 ||
-                      index + 1 === currentCompanies.length
-                        ? ""
-                        : "border-b"
-                    }`}
-                  >
-                    <td className="p-3">{index + 1}</td>
-                    <td className="p-3">{company.companyName}</td>
-                    <td className="p-3">{company.registrationNumber}</td>
-                    <td className="p-3 capitalize">{company.address}</td>
-                    <td className="p-3">{company.phone}</td>
-                    <td className="p-3">{company.email}</td>
-                    <td className="p-3">
-                      {formatDateToReadable(company.establishedDate)}
-                    </td>
-                    <td className="p-3 flex items-center justify-center gap-3">
-                      <button
-                        onClick={() => handleView(company)}
-                        className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors"
-                      >
-                        <Eye size={18} />
-                      </button>
-                      <button
-                        onClick={() => editCompany(company)}
-                        className="text-green-600 hover:text-green-800 cursor-pointer transition-colors"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button
-                        onClick={() => downloadCompanyDetailPDF(company)}
-                        className="text-purple-600 hover:text-purple-800 cursor-pointer transition-colors"
-                        title="Download PDF"
-                      >
-                        <FileText size={18} />
-                      </button>
-                      <button
-                        onClick={() => deleteCompany(company)}
-                        className="text-red-600 hover:text-red-800 cursor-pointer transition-colors"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+        <>
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto shadow rounded-2xl border border-gray-200">
+            <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+              <thead className="bg-gray-100 text-gray-700 border-b">
+                <tr>
+                  <th className="p-3 text-sm font-medium">Sr No.</th>
+                  <th className="p-3 text-sm font-medium">Company Name</th>
+                  <th className="p-3 text-sm font-medium">
+                    Registration Number
+                  </th>
+                  <th className="p-3 text-sm font-medium">Address</th>
+                  <th className="p-3 text-sm font-medium">Phone</th>
+                  <th className="p-3 text-sm font-medium">Email</th>
+                  <th className="p-3 text-sm font-medium">Established Date</th>
+                  <th className="p-3 text-sm font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentCompanies.length > 0 ? (
+                  currentCompanies.map((company, index) => (
+                    <tr
+                      key={company._id}
+                      className={`hover:bg-gray-50 ${
+                        (index + 1) % companiesPerPage === 0 ||
+                        index + 1 === currentCompanies.length
+                          ? ""
+                          : "border-b"
+                      }`}
+                    >
+                      <td className="p-3">
+                        {(currentPage - 1) * companiesPerPage + index + 1}
+                      </td>
+                      <td className="p-3">{company.companyName}</td>
+                      <td className="p-3">{company.registrationNumber}</td>
+                      <td className="p-3 capitalize">{company.address}</td>
+                      <td className="p-3">{company.phone}</td>
+                      <td className="p-3">{company.email}</td>
+                      <td className="p-3">
+                        {formatDateToReadable(company.establishedDate)}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleView(company)}
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer transition-colors p-1"
+                            title="View"
+                          >
+                            <Eye size={18} />
+                          </button>
+                          <button
+                            onClick={() => editCompany(company)}
+                            className="text-green-600 hover:text-green-800 cursor-pointer transition-colors p-1"
+                            title="Edit"
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button
+                            onClick={() => downloadCompanyDetailPDF(company)}
+                            className="text-purple-600 hover:text-purple-800 cursor-pointer transition-colors p-1"
+                            title="Download PDF"
+                          >
+                            <FileText size={18} />
+                          </button>
+                          <button
+                            onClick={() => deleteCompany(company)}
+                            className="text-red-600 hover:text-red-800 cursor-pointer transition-colors p-1"
+                            title="Delete"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={8} className="p-8 text-center text-gray-500">
+                      No company records found
                     </td>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-gray-500">
-                    No company records found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          {currentCompanies.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer transition-colors"
-              >
-                Prev
-              </button>
-              {visiblePages.map((page, idx) =>
-                page === "..." ? (
-                  <span
-                    key={`ellipsis-${idx}`}
-                    className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                  >
-                    ...
-                  </span>
-                ) : (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                )
-              )}
-              <button
-                onClick={() => {
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer transition-colors"
-              >
-                Next
-              </button>
-            </div>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden">
+            {currentCompanies.length > 0 ? (
+              currentCompanies.map((company, index) => (
+                <MobileCompanyCard
+                  key={company._id}
+                  company={company}
+                  index={(currentPage - 1) * companiesPerPage + index + 1}
+                />
+              ))
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                No company records found
+              </div>
+            )}
+          </div>
+
+          {/* Pagination - Only show when needed */}
+          {showPagination && (
+            <>
+              <div className="mt-4 p-3 md:p-5 flex flex-wrap justify-center md:justify-start gap-2">
+                <button
+                  onClick={() => {
+                    setCurrentPage((prev) => Math.max(prev - 1, 1));
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 cursor-pointer transition-colors flex items-center gap-1"
+                >
+                  <ChevronLeft size={16} /> Prev
+                </button>
+
+                <div className="flex flex-wrap justify-center gap-1">
+                  {visiblePages.map((page, idx) =>
+                    page === "..." ? (
+                      <span
+                        key={`ellipsis-${idx}`}
+                        className="px-2 md:px-3 py-1 text-gray-500 select-none"
+                      >
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={page}
+                        onClick={() => {
+                          setCurrentPage(page);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                        className={`min-w-[36px] md:w-10 px-2 md:px-3 py-1 rounded-lg text-center transition cursor-pointer ${
+                          currentPage === page
+                            ? "bg-indigo-600 text-white"
+                            : "bg-gray-200 hover:bg-gray-300"
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    ),
+                  )}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 cursor-pointer transition-colors flex items-center gap-1"
+                >
+                  Next <ChevronRight size={16} />
+                </button>
+              </div>
+
+              {/* Page Info for Mobile */}
+              <div className="md:hidden text-center text-sm text-gray-500 mt-2">
+                Page {currentPage} of {totalPages}
+              </div>
+            </>
           )}
-        </div>
+        </>
       ) : (
         <div className="text-center py-12 bg-white rounded-2xl shadow border border-gray-200">
           <UserPlus size={48} className="mx-auto text-gray-400 mb-4" />
@@ -697,30 +849,24 @@ const CompanyProfile = () => {
         </div>
       )}
 
-      {/* Rest of your modals remain the same */}
       {/* Add Company Modal */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div className="bg-white w-full max-w-2xl p-4 md:p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => setIsAddModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer transition-colors"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer transition-colors z-10"
               >
                 <X size={20} />
               </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              <h2 className="text-xl font-semibold text-gray-800 mb-4 pr-6">
                 Add Company Profile
               </h2>
-              <form
-                onSubmit={handleCreateCompany}
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
-                autoComplete="off"
-              >
-                {/* Form fields remain the same */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Company Code
+                    Company Code *
                   </label>
                   <input
                     type="text"
@@ -730,12 +876,11 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     required
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Company Name
+                    Company Name *
                   </label>
                   <input
                     type="text"
@@ -745,7 +890,6 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     required
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -759,7 +903,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, registrationNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -773,7 +916,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, taxNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -787,7 +929,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, phone: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -801,7 +942,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, email: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -815,7 +955,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, website: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -829,7 +968,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, address: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div className="md:col-span-2">
@@ -843,7 +981,6 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     rows="3"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -867,10 +1004,9 @@ const CompanyProfile = () => {
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select a date"
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
-              </form>
+              </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   onClick={() => setIsAddModalOpen(false)}
@@ -887,28 +1023,24 @@ const CompanyProfile = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Edit Company Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div className="bg-white w-full max-w-2xl p-4 md:p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer transition-colors"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer transition-colors z-10"
               >
                 <X size={20} />
               </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              <h2 className="text-xl font-semibold text-gray-800 mb-4 pr-6">
                 Edit Company
               </h2>
-              <form
-                onSubmit={handleUpdateCompany}
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
-                autoComplete="off"
-              >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Company Code
@@ -922,7 +1054,7 @@ const CompanyProfile = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Company Name
+                    Company Name *
                   </label>
                   <input
                     type="text"
@@ -932,7 +1064,6 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     required
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -946,7 +1077,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, registrationNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -960,7 +1090,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, taxNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -974,7 +1103,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, phone: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -988,7 +1116,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, email: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -1002,7 +1129,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, website: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -1016,7 +1142,6 @@ const CompanyProfile = () => {
                       setForm({ ...form, address: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div className="md:col-span-2">
@@ -1030,7 +1155,6 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     rows="3"
-                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -1054,10 +1178,9 @@ const CompanyProfile = () => {
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select a date"
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
-                    autoComplete="new-password"
                   />
                 </div>
-              </form>
+              </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
@@ -1074,21 +1197,21 @@ const CompanyProfile = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* View Company Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+            <div className="bg-white w-full max-w-2xl p-4 md:p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer transition-colors"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer transition-colors z-10"
               >
                 <X size={20} />
               </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              <h2 className="text-xl font-semibold text-gray-800 mb-4 pr-6">
                 View Company
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1173,10 +1296,10 @@ const CompanyProfile = () => {
                   </p>
                 </div>
               </div>
-              <div className="mt-6 flex justify-end gap-3">
+              <div className="mt-6 flex flex-col md:flex-row justify-end gap-3">
                 <button
                   onClick={() => downloadCompanyDetailPDF(form)}
-                  className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
+                  className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
                 >
                   <FileText size={16} /> Download PDF
                 </button>
@@ -1189,7 +1312,7 @@ const CompanyProfile = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

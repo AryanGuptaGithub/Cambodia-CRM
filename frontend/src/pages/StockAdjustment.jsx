@@ -5,13 +5,24 @@ import React, {
   useMemo,
   useCallback,
 } from "react";
-import { Plus, Trash2, Edit, Save, Search, X, Eye } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Edit,
+  Save,
+  Search,
+  X,
+  Eye,
+  Menu,
+  Package,
+} from "lucide-react";
 import axios from "axios";
 import { showToast } from "../utils/toast";
 import { getVisiblePages } from "../utils/useVisiblePages";
 import CustomDropdown from "./Utility/customDropdown";
 import { fetchProducts } from "./ProductManager/common/fetchDropdown.jsx";
 import { confirmDialog } from "../utils/confirmationDialog.js";
+import Sidebar from "../components/Sidebar";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const CONFIG = {
@@ -36,6 +47,11 @@ const CONFIG = {
   },
 };
 
+const capitalizeFirstLetter = (string) => {
+  if (!string) return "";
+  return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt$ = (v) => {
   const n = parseFloat(v) || 0;
@@ -55,6 +71,17 @@ const StockAdjustment = () => {
   const [isProductsEmpty, setIsProductsEmpty] = useState(false);
   const [remarksModalVisible, setRemarksModalVisible] = useState(false);
   const [viewingRemarks, setViewingRemarks] = useState("");
+
+  // Mobile detection and sidebar state
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // ── Warehouse summary now tracks totalAmount correctly ────────────────────
   const [warehouseSummary, setWarehouseSummary] = useState({
@@ -209,6 +236,9 @@ const StockAdjustment = () => {
       );
     });
   }, [adjustments, searchTerm]);
+
+  // Check if table has entries
+  const hasTableEntries = filteredAdjustments.length > 0;
 
   const paginatedAdjustments = useMemo(() => {
     const start = (currentPage - 1) * CONFIG.ITEMS_PER_PAGE;
@@ -466,7 +496,7 @@ const StockAdjustment = () => {
     }
   };
 
-  // ── Format currency (INR display — change locale/currency as needed) ───────
+  // ── Format currency ───────────────────────────────────────────────────────
   const formatCurrency = (amount) =>
     new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -475,26 +505,68 @@ const StockAdjustment = () => {
       maximumFractionDigits: 2,
     }).format(amount || 0);
 
+  // Clear search
+  const clearSearch = () => {
+    setSearchTerm("");
+    setCurrentPage(1);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6">
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {isMobileView && (
+        <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <h1 className="text-sm font-bold text-gray-800">
+              Stock Adjustment
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full text-[10px] font-medium">
+              Total Records: {filteredAdjustments.length}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="container">
-        {/* ── Warehouse Summary Cards ── */}
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Total Inventory Value */}
-          <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg shadow-lg p-4 text-white">
+        <div
+          className={`${isMobileView ? "mb-2" : "mb-6"} grid grid-cols-1 md:grid-cols-2 gap-4`}
+        >
+          <div
+            className={`bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg shadow-lg text-white ${isMobileView ? "p-2" : "p-4"}`}
+          >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium opacity-90">
+                <p
+                  className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium opacity-90`}
+                >
                   Total Warehouse Inventory Value
                 </p>
-                <p className="text-2xl font-bold mt-1">
+                <p
+                  className={`${isMobileView ? "text-base" : "text-2xl"} font-bold mt-1`}
+                >
                   {formatCurrency(warehouseSummary.totalAmount)}
                 </p>
               </div>
               <div className="bg-white/20 rounded-full p-3">
                 <svg
-                  className="w-6 h-6"
+                  className={`${isMobileView ? "w-4 h-4" : "w-6 h-6"}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -511,19 +583,25 @@ const StockAdjustment = () => {
           </div>
 
           {/* Products in Stock */}
-          <div className="bg-gradient-to-r from-green-500 to-green-600 rounded-lg shadow-lg p-4 text-white">
+          <div
+            className={`bg-gradient-to-r from-green-500 to-green-600 rounded-lg shadow-lg  ${isMobileView ? "p-2" : "p-4"} text-white`}
+          >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium opacity-90">
+                <p
+                  className={`${isMobileView ? "text-xs" : "text-sm"} font-medium opacity-90`}
+                >
                   Products In Warehouse Stock
                 </p>
-                <p className="text-2xl font-bold mt-1">
+                <p
+                  className={`${isMobileView ? "text-base" : "text-2xl"} font-bold mt-1`}
+                >
                   {warehouseSummary.totalProducts}
                 </p>
               </div>
               <div className="bg-white/20 rounded-full p-3">
                 <svg
-                  className="w-6 h-6"
+                  className={`${isMobileView ? "w-4 h-4" : "w-6 h-6"}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -540,6 +618,33 @@ const StockAdjustment = () => {
           </div>
         </div>
 
+        {isMobileView && hasTableEntries && (
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search by Product Name, Type..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+            />
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              size={15}
+            />
+            {searchTerm && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ── Last Adjustment Result Banner ── */}
         {lastAdjustment && (
           <div
@@ -549,10 +654,10 @@ const StockAdjustment = () => {
                 : "bg-red-50 border-red-200"
             }`}
           >
-            <div className="flex items-start justify-between">
-              <div>
+            <div className="flex items-start justify-between flex-wrap gap-2">
+              <div className="flex-1">
                 <h3
-                  className={`text-sm font-semibold mb-2 ${
+                  className={`${isMobileView ? "text-xs" : "text-sm"} font-semibold mb-2 ${
                     lastAdjustment.adjustment?.type === "add"
                       ? "text-green-800"
                       : "text-red-800"
@@ -563,7 +668,9 @@ const StockAdjustment = () => {
                     : "📤 Stock Removed"}{" "}
                   — {lastAdjustment.productName}
                 </h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div
+                  className={`grid grid-cols-2 md:grid-cols-4 gap-2 ${isMobileView ? "text-xs" : "text-sm"}`}
+                >
                   <div className="bg-white rounded p-2 shadow-sm">
                     <p className="text-gray-500 text-xs">Boxes Adjusted</p>
                     <p className="font-bold text-gray-800">
@@ -603,13 +710,13 @@ const StockAdjustment = () => {
                     </p>
                   </div>
                 </div>
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
                   <span className="text-xs text-gray-500">New Avg Price:</span>
                   <span className="text-xs font-semibold text-gray-700">
                     {fmt$(lastAdjustment.averagePrice)} / box
                   </span>
                   <span
-                    className={`ml-2 text-xs px-2 py-0.5 rounded-full font-medium ${
+                    className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                       lastAdjustment.status === "In Stock"
                         ? "bg-green-100 text-green-700"
                         : lastAdjustment.status === "Low Stock"
@@ -623,7 +730,7 @@ const StockAdjustment = () => {
               </div>
               <button
                 onClick={() => setLastAdjustment(null)}
-                className="text-gray-400 hover:text-gray-600 ml-4"
+                className="text-gray-400 hover:text-gray-600"
               >
                 <X size={16} />
               </button>
@@ -661,38 +768,43 @@ const StockAdjustment = () => {
 
         {/* ── Toolbar ── */}
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-          <div className="flex gap-3 flex-wrap">
-            <button
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors duration-200 ${
-                isProductsEmpty
-                  ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
-                  : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
-              }`}
-              onClick={() => setModalVisible(true)}
-              disabled={isProductsEmpty}
-            >
-              <Plus size={18} /> Add New Adjustment
-            </button>
-
-            {selectedIds.length > 0 && (
+          {/* Desktop: Show Add New Adjustment button */}
+          {!isMobileView && (
+            <div className="flex gap-3 flex-wrap">
               <button
-                onClick={handleBulkDelete}
-                className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 cursor-pointer"
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors duration-200 ${
+                  isProductsEmpty
+                    ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+                    : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                }`}
+                onClick={() => setModalVisible(true)}
+                disabled={isProductsEmpty}
               >
-                <Trash2 size={18} /> Delete Selected ({selectedIds.length})
+                <Plus size={18} /> Add New Adjustment
               </button>
-            )}
-          </div>
 
-          {adjustments.length > 0 && (
-            <div className="flex items-center gap-8">
-              <p className="text-lg font-semibold text-gray-700">
+              {selectedIds.length > 0 && (
+                <button
+                  onClick={handleBulkDelete}
+                  className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 cursor-pointer"
+                >
+                  <Trash2 size={18} /> Delete Selected ({selectedIds.length})
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Desktop Search - Only show when table has entries */}
+          {!isMobileView && hasTableEntries && (
+            <div className="flex items-center gap-4 flex-wrap">
+              <p className="text-base font-semibold text-gray-700">
                 Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                <span className="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium shadow-sm">
                   {filteredAdjustments.length}
                 </span>
               </p>
-              <div className="relative w-full md:w-72">
+
+              <div className="relative w-72">
                 <Search
                   className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                   size={16}
@@ -712,66 +824,87 @@ const StockAdjustment = () => {
                     isProductsEmpty ? "bg-gray-100 cursor-not-allowed" : ""
                   }`}
                 />
+                {searchTerm && (
+                  <button
+                    onClick={clearSearch}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               </div>
             </div>
           )}
         </div>
 
         {/* ── Table ── */}
-        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-            <thead className="bg-gray-100 text-gray-700 border-b">
-              <tr>
-                <th className="p-3">
-                  <div className="flex justify-left gap-3">
-                    {paginatedAdjustments.length > 0 && (
-                      <input
-                        type="checkbox"
-                        aria-label="Select all adjustments"
-                        checked={
-                          paginatedAdjustments.length > 0 &&
-                          paginatedAdjustments.every((adj) =>
-                            selectedIds.includes(adj._id),
-                          )
-                        }
-                        ref={(input) => {
-                          if (input) {
-                            input.indeterminate =
-                              selectedIds.length > 0 &&
-                              selectedIds.length < paginatedAdjustments.length;
-                          }
-                        }}
-                        onChange={(e) => toggleSelectAll(e.target.checked)}
-                        className="cursor-pointer"
-                        disabled={isProductsEmpty}
-                      />
-                    )}
-                    <span className="text-sm font-medium">Product Name</span>
-                  </div>
-                </th>
-                <th className="p-3 text-sm font-medium">Box Qty</th>
-                <th className="p-3 text-sm font-medium">Type</th>
-                <th className="p-3 text-sm font-medium">Remarks</th>
-                <th className="p-3 text-sm font-medium">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {paginatedAdjustments.length === 0 ? (
+        {hasTableEntries && (
+          <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+            <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+              <thead className="bg-gray-100 text-gray-700 border-b">
                 <tr>
-                  <td colSpan={5} className="p-4 text-center text-gray-500">
-                    {loading ? "Loading..." : CONFIG.MESSAGES.NO_DATA}
-                  </td>
+                  <th
+                    className={`p-3 ${isMobileView ? "min-w-[150px] text-xs" : "text-sm"}`}
+                  >
+                    <div className="flex justify-left gap-3">
+                      {paginatedAdjustments.length > 0 && (
+                        <input
+                          type="checkbox"
+                          aria-label="Select all adjustments"
+                          checked={
+                            paginatedAdjustments.length > 0 &&
+                            paginatedAdjustments.every((adj) =>
+                              selectedIds.includes(adj._id),
+                            )
+                          }
+                          ref={(input) => {
+                            if (input) {
+                              input.indeterminate =
+                                selectedIds.length > 0 &&
+                                selectedIds.length <
+                                  paginatedAdjustments.length;
+                            }
+                          }}
+                          onChange={(e) => toggleSelectAll(e.target.checked)}
+                          className="cursor-pointer"
+                          disabled={isProductsEmpty}
+                        />
+                      )}
+                      <span className="font-medium">Product Name</span>
+                    </div>
+                  </th>
+                  <th
+                    className={`p-3 ${isMobileView ? "min-w-[80px] text-xs" : "text-sm"} font-medium`}
+                  >
+                    Box Qty
+                  </th>
+                  <th
+                    className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "text-sm"} font-medium`}
+                  >
+                    Type
+                  </th>
+                  <th
+                    className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "text-sm"} font-medium`}
+                  >
+                    Remarks
+                  </th>
+                  {!isMobileView && (
+                    <th className="p-3 text-sm font-medium">Actions</th>
+                  )}
                 </tr>
-              ) : (
-                paginatedAdjustments.map((adj, index) => {
+              </thead>
+
+              <tbody>
+                {paginatedAdjustments.map((adj, index) => {
                   const productName = adj.productId?.productName || "N/A";
                   return (
                     <tr
                       key={adj._id}
                       className={`hover:bg-gray-50 ${index < paginatedAdjustments.length - 1 ? "border-b" : ""}`}
                     >
-                      <td className="p-3 text-sm">
+                      <td
+                        className={`p-3 ${isMobileView ? "text-xs" : "text-sm"}`}
+                      >
                         <div className="flex gap-4 items-center">
                           <input
                             type="checkbox"
@@ -784,11 +917,19 @@ const StockAdjustment = () => {
                             }`}
                             disabled={isProductsEmpty}
                           />
-                          <span className="font-medium">{productName}</span>
+                          <span className="font-medium">
+                            {capitalizeFirstLetter(productName)}
+                          </span>
                         </div>
                       </td>
-                      <td className="p-3 text-sm">{adj.boxQuantity}</td>
-                      <td className="p-3 text-sm">
+                      <td
+                        className={`p-3 ${isMobileView ? "text-xs" : "text-sm"}`}
+                      >
+                        {adj.boxQuantity}
+                      </td>
+                      <td
+                        className={`p-3 ${isMobileView ? "text-xs" : "text-sm"}`}
+                      >
                         <span
                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             adj.adjustmentType === "add"
@@ -807,99 +948,136 @@ const StockAdjustment = () => {
                             onClick={() => handleViewRemarks(adj.remarks)}
                             className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 cursor-pointer"
                           >
-                            <Eye size={16} />
-                            <span>View</span>
+                            <Eye size={isMobileView ? 14 : 16} />
+                            <span className={isMobileView ? "text-xs" : ""}>
+                              View
+                            </span>
                           </button>
                         ) : (
                           <span className="text-gray-400">—</span>
                         )}
                       </td>
-                      <td className="p-3 text-sm">
-                        <div className="flex items-center justify-center gap-3">
-                          <button
-                            className={`${isProductsEmpty ? "text-gray-400 cursor-not-allowed" : "text-indigo-600 hover:text-indigo-800 cursor-pointer"}`}
-                            onClick={() => handleEdit(adj)}
-                            disabled={isProductsEmpty}
-                          >
-                            <Edit size={18} />
-                          </button>
-                          <button
-                            className="text-red-600 hover:text-red-800 cursor-pointer"
-                            onClick={() => handleDelete(adj._id, productName)}
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </div>
+                      <td
+                        className={`p-3 ${isMobileView ? "text-xs" : "text-sm"}`}
+                      >
+                        {/* Desktop: Show Edit and Delete buttons, Mobile: Only show View */}
+                        {!isMobileView && (
+                          <div className="flex items-center justify-center gap-3">
+                            <button
+                              className={`${isProductsEmpty ? "text-gray-400 cursor-not-allowed" : "text-indigo-600 hover:text-indigo-800 cursor-pointer"}`}
+                              onClick={() => handleEdit(adj)}
+                              disabled={isProductsEmpty}
+                            >
+                              <Edit size={18} />
+                            </button>
+                            <button
+                              className="text-red-600 hover:text-red-800 cursor-pointer"
+                              onClick={() => handleDelete(adj._id, productName)}
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
 
-          {/* ── Pagination ── */}
-          {paginatedAdjustments.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1 || isProductsEmpty}
-                className={`px-3 py-1 rounded hover:bg-gray-300 ${
-                  currentPage === 1 || isProductsEmpty
-                    ? "bg-gray-200 opacity-50 cursor-not-allowed"
-                    : "bg-gray-200 cursor-pointer"
-                }`}
-              >
-                Prev
-              </button>
-              {visiblePages.map((page, idx) =>
-                page === "..." ? (
-                  <span
-                    key={`ellipsis-${idx}`}
-                    className="px-3 py-1 text-gray-500 select-none"
-                  >
-                    ...
-                  </span>
+            {/* ── Pagination ── */}
+            {paginatedAdjustments.length > 0 && totalPages > 1 && (
+              <div className="mt-4 p-5 flex flex-wrap justify-start gap-2">
+                <button
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(prev - 1, 1))
+                  }
+                  disabled={currentPage === 1 || isProductsEmpty}
+                  className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
+                >
+                  ← Prev
+                </button>
+                {!isMobileView ? (
+                  <div className="flex gap-1">
+                    {visiblePages.map((page, idx) =>
+                      page === "..." ? (
+                        <span
+                          key={`ellipsis-${idx}`}
+                          className="px-3 py-1 text-gray-500 select-none"
+                        >
+                          ...
+                        </span>
+                      ) : (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          disabled={isProductsEmpty}
+                          className={`px-3 py-2 rounded-lg min-w-[40px] transition cursor-pointer ${
+                            currentPage === page
+                              ? "bg-indigo-600 text-white"
+                              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ),
+                    )}
+                  </div>
                 ) : (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    disabled={isProductsEmpty}
-                    className={`px-3 py-1 rounded w-10 text-center transition ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : isProductsEmpty
-                          ? "bg-gray-200 opacity-50 cursor-not-allowed"
-                          : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ),
-              )}
-              <button
-                onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                }
-                disabled={currentPage === totalPages || isProductsEmpty}
-                className={`px-3 py-1 rounded hover:bg-gray-300 ${
-                  currentPage === totalPages || isProductsEmpty
-                    ? "bg-gray-200 opacity-50 cursor-not-allowed"
-                    : "bg-gray-200 cursor-pointer"
-                }`}
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </div>
+                  <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                )}
+                <button
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                  }
+                  disabled={currentPage === totalPages || isProductsEmpty}
+                  className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
+                >
+                  Next →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Empty state message */}
+        {!hasTableEntries && adjustments.length > 0 && (
+          <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+            <Package size={48} className="mx-auto text-gray-400 mb-3" />
+            <p className="text-gray-500 font-medium">
+              No stock adjustments found
+            </p>
+            <p className="text-sm text-gray-400 mt-1">
+              {searchTerm
+                ? "Try a different search term"
+                : "Click 'Add New Adjustment' to create one"}
+            </p>
+          </div>
+        )}
+
+        {/* No data at all */}
+        {adjustments.length === 0 && !loading && (
+          <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
+            <Package size={48} className="mx-auto text-gray-400 mb-3" />
+            <p className="text-gray-500 font-medium">
+              No stock adjustments found
+            </p>
+            <p className="text-sm text-gray-400 mt-1">
+              Click "Add New Adjustment" to create one
+            </p>
+          </div>
+        )}
 
         {/* ── Add / Edit Modal ── */}
         {modalVisible && (
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-900">
+              <div className="flex items-center justify-between p-6 border-b border-gray-200 sticky top-0 bg-white">
+                <h2
+                  className={`${isMobileView ? "text-base" : "text-xl"} font-semibold text-gray-900`}
+                >
                   {editingAdjustment ? "Edit Adjustment" : "Add New Adjustment"}
                 </h2>
                 <button
@@ -1034,7 +1212,6 @@ const StockAdjustment = () => {
                       }`}
                       placeholder="e.g. 1.75"
                     />
-                    {/* Live preview of total amount to be added */}
                     {formData.boxQuantity > 0 && (
                       <p className="mt-1 text-xs text-green-700 font-medium">
                         ≈ Amount to add:{" "}
@@ -1101,29 +1278,39 @@ const StockAdjustment = () => {
           </div>
         )}
 
-        {/* ── View Remarks Modal ── */}
+        {/* ── View Remarks Modal with proper sizing ── */}
         {remarksModalVisible && (
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-900">Remarks</h2>
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50 p-4">
+            <div
+              className={`bg-white rounded-lg shadow-xl w-full ${isMobileView ? "max-w-sm" : "max-w-md"} max-h-[80vh] overflow-y-auto`}
+            >
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 sticky top-0 bg-white">
+                <h2
+                  className={`${isMobileView ? "text-sm" : "text-lg"} font-semibold text-gray-900`}
+                >
+                  Remarks
+                </h2>
                 <button
                   onClick={() => setRemarksModalVisible(false)}
                   className="text-gray-400 hover:text-gray-600 cursor-pointer"
                 >
-                  <X size={24} />
+                  <X size={20} />
                 </button>
               </div>
-              <div className="p-6">
-                <div className="bg-gray-50 p-4 rounded-lg min-h-[150px]">
-                  <p className="text-gray-700 whitespace-pre-wrap">
+              <div className="p-4">
+                <div
+                  className={`bg-gray-50 p-4 rounded-lg ${isMobileView ? "min-h-[100px]" : "min-h-[150px]"}`}
+                >
+                  <p
+                    className={`text-gray-700 whitespace-pre-wrap break-words ${isMobileView ? "text-xs" : "text-sm"}`}
+                  >
                     {viewingRemarks}
                   </p>
                 </div>
-                <div className="mt-6 flex justify-end">
+                <div className="mt-4 flex justify-end">
                   <button
                     onClick={() => setRemarksModalVisible(false)}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 cursor-pointer"
+                    className={`px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 cursor-pointer ${isMobileView ? "text-xs" : "text-sm"}`}
                   >
                     Close
                   </button>

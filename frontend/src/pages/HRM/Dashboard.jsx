@@ -1340,7 +1340,9 @@ const Dashboard = () => {
           isMobile={true}
         />
 
-        <div className="bg-white shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl">
+        <div
+          className={`shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl ${isMobileView ? "bg-gray-200" : "bg-white"}`}
+        >
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(true)}

@@ -974,7 +974,7 @@ const CustomerProductAcceptanceRate = () => {
 
       {/* MOBILE Header */}
       {isMobileView && (
-        <div className="flex justify-between items-center mb-3">
+        <div className="flex justify-between items-center mb-3 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -988,7 +988,7 @@ const CustomerProductAcceptanceRate = () => {
             </h1>
           </div>
           <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
-            Total: {pagination.totalRecords}
+            Total Records: {pagination.totalRecords}
           </div>
         </div>
       )}

@@ -1032,7 +1032,7 @@ const Holidays = () => {
 
       {/* Mobile Header with Hamburger Menu */}
       {isMobileView && (
-        <div className="flex justify-between items-center mb-1">
+        <div className="flex justify-between items-center mb-1 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -1044,7 +1044,7 @@ const Holidays = () => {
             <h1 className="text-base font-bold text-gray-800">Holidays</h1>
           </div>
           <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
-            Total: {filteredHolidays.length}
+            Total Records: {filteredHolidays.length}
           </div>
         </div>
       )}

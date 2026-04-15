@@ -835,7 +835,7 @@ const ExpiryStockReport = () => {
 
       {/* ── MOBILE Header ── */}
       {isMobileView && (
-        <div className="flex justify-between items-center mb-3">
+        <div className="flex justify-between items-center mb-3 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -847,7 +847,7 @@ const ExpiryStockReport = () => {
             <h1 className="text-base font-bold text-gray-800">Expiry Stock</h1>
           </div>
           <div className="bg-orange-50 text-orange-700 px-3 py-1 rounded-full text-xs font-medium">
-            {data.summary.totalItems || 0} items
+            Total Records: {data.summary.totalItems || 0}
           </div>
         </div>
       )}

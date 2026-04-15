@@ -10,12 +10,14 @@ import {
   Edit,
   Trash2,
   HandCoins,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { format } from "date-fns";
 import { showToast } from "../../utils/toast.jsx";
 import { confirmDialog } from "../../utils/confirmationDialog.js";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
+import Sidebar from "../../components/Sidebar";
 
 const ITEMS_PER_PAGE = 10;
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -90,6 +92,17 @@ function MRCash() {
     remarks: "",
   });
   const [editCreditLoading, setEditCreditLoading] = useState(false);
+
+  // ── Mobile detection ──────────────────────────────────────────────────────
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const inputRef = useRef(null);
 
@@ -758,6 +771,67 @@ function MRCash() {
     }
   };
 
+  // ─── Pagination Component ──────────────────────────────────────────────────
+  const renderPagination = () => {
+    if (totalPages <= 1) return null;
+
+    return (
+      <div
+        className={`mt-4 p-4 flex gap-2 ${isMobileView ? "justify-center items-center flex-wrap" : "justify-start"}`}
+      >
+        <button
+          onClick={() => handlePageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className={`px-3 py-1.5 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${isMobileView ? "text-[10px]" : "text-sm"}`}
+        >
+          ← Prev
+        </button>
+
+        {!isMobileView ? (
+          (() => {
+            const maxVisible = 5;
+            let startPage = Math.max(
+              1,
+              currentPage - Math.floor(maxVisible / 2),
+            );
+            let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+            if (endPage - startPage + 1 < maxVisible) {
+              startPage = Math.max(1, endPage - maxVisible + 1);
+            }
+            const pages = [];
+            for (let i = startPage; i <= endPage; i++) pages.push(i);
+
+            return pages.map((page) => (
+              <button
+                key={page}
+                onClick={() => handlePageChange(page)}
+                className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer ${
+                  currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+                }`}
+              >
+                {page}
+              </button>
+            ));
+          })()
+        ) : (
+          <span className="px-3 py-1.5 text-[10px] text-gray-700 font-medium bg-gray-100 rounded-lg">
+            Page {currentPage} of {totalPages}
+          </span>
+        )}
+
+        <button
+          onClick={() => handlePageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className={`px-3 py-1.5 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${isMobileView ? "text-[10px]" : "text-sm"}`}
+        >
+          Next →
+        </button>
+      </div>
+    );
+  };
+
   if (loading && mrCashes.length === 0) {
     return (
       <div className="p-6 flex justify-center items-center h-64">
@@ -766,130 +840,206 @@ function MRCash() {
     );
   }
 
-  const colSpan = activeTab === "carry" ? 5 : 4;
+  const colSpan =
+    activeTab === "carry" ? (isMobileView ? 4 : 5) : isMobileView ? 3 : 4;
 
   return (
-    <div className="p-6">
-      {/* Breadcrumb */}
-      <div className="mb-4 text-gray-600 text-sm">
-        Dashboard <span className="mx-2">{">"}</span> Accounts{" "}
-        <span className="mx-2">{">"}</span> MR Cash
-      </div>
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* ── Sidebar (mobile only) ── */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
 
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
-        <div>
-          <button
-            onClick={handleAdd}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-md cursor-pointer"
-          >
-            <TrendingUp size={18} /> Transfer Cash to Admin
-          </button>
-        </div>
-        <div className="flex gap-3">
-          <div className="relative w-full lg:w-80">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={18}
-              onClick={() => inputRef.current?.focus()}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by MR name or notes..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
-            />
+      {/* ── MOBILE Header ── */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-1 bg-gray-200 border-gray-200 p-2 rounded-2xl">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={18} className="text-gray-700" />
+            </button>
+            <DollarSign className="w-4 h-4 text-blue-600" />
+            <h1 className="text-[10px] font-bold text-gray-800">MR Cash</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full text-[8px] font-medium">
+            Total Records: {totalCount}
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ── DESKTOP Breadcrumb & Header (unchanged) ── */}
+      {!isMobileView && (
+        <>
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+            <div>
+              <button
+                onClick={handleAdd}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-md cursor-pointer"
+              >
+                <TrendingUp size={18} /> Transfer Cash to Admin
+              </button>
+            </div>
+            <div className="flex gap-3">
+              <div className="relative w-full lg:w-80">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={18}
+                  onClick={() => inputRef.current?.focus()}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search by MR name or notes..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+                />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── MOBILE Search ── */}
+      {isMobileView && (
+        <div className="relative mb-2">
+          <input
+            type="text"
+            placeholder="Search MR..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-7 pr-7 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-[10px]"
+          />
+          <Search
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
+            size={12}
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Error */}
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <div className="flex items-center gap-2 text-red-700">
-            <X size={20} />
+        <div
+          className={`${isMobileView ? "mb-4 p-2" : "mb-6 p-4"} bg-red-50 border border-red-200 rounded-lg`}
+        >
+          <div
+            className={`flex items-center gap-2 text-red-700 ${isMobileView ? "text-xs" : ""}`}
+          >
+            <X size={isMobileView ? 14 : 20} />
             <span>{error}</span>
           </div>
         </div>
       )}
 
-      {/* Totals */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      {/* Totals - Responsive */}
+      <div
+        className={`grid ${isMobileView ? "grid-cols-1 gap-2" : "grid-cols-1 md:grid-cols-2 gap-4"} mb-6`}
+      >
         <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <DollarSign className="w-6 h-6 text-blue-600" />
+            <div
+              className={`${isMobileView ? "p-1.5" : "p-2"} bg-blue-100 rounded-lg`}
+            >
+              <DollarSign
+                className={`${isMobileView ? "w-4 h-4" : "w-6 h-6"} text-blue-600`}
+              />
             </div>
             <div>
-              <p className="text-sm text-gray-600">All MR Carry Current Cash</p>
-              <p className="text-2xl font-bold text-blue-700">
+              <p
+                className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+              >
+                All MR Carry Current Cash
+              </p>
+              <p
+                className={`${isMobileView ? "text-lg" : "text-2xl"} font-bold text-blue-700`}
+              >
                 {formatCurrency(totals.totalCurrentCash)}
               </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Sum of all MRs' current cash
-              </p>
+              {!isMobileView && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Sum of all MRs' current cash
+                </p>
+              )}
             </div>
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-100 rounded-lg">
-              <TrendingUp className="w-6 h-6 text-green-600" />
+            <div
+              className={`${isMobileView ? "p-1.5" : "p-2"} bg-green-100 rounded-lg`}
+            >
+              <TrendingUp
+                className={`${isMobileView ? "w-4 h-4" : "w-6 h-6"} text-green-600`}
+              />
             </div>
             <div>
-              <p className="text-sm text-gray-600">
-                Total Transferred to Admin (All MRs)
+              <p
+                className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+              >
+                Total Transferred to Admin
               </p>
-              <p className="text-2xl font-bold text-green-700">
+              <p
+                className={`${isMobileView ? "text-lg" : "text-2xl"} font-bold text-green-700`}
+              >
                 {formatCurrency(totals.totalTransferred)}
               </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Sum of all transfers to admin
-              </p>
+              {!isMobileView && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Sum of all transfers to admin
+                </p>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Tabs */}
-      <div className="mb-6 border-b border-gray-200">
-        <div className="flex space-x-4">
+      <div
+        className={`${isMobileView ? "mb-3" : "mb-4"} border-b border-gray-200 overflow-x-auto`}
+      >
+        <div className={`flex ${isMobileView ? "space-x-2" : "space-x-4"}`}>
           <button
             onClick={() => handleTabChange("carry")}
-            className={`py-2 px-4 font-medium text-sm transition-colors ${activeTab === "carry" ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-500 hover:text-gray-700"}`}
+            className={`py-2 ${isMobileView ? "px-2 text-xs" : "px-4 text-sm"} font-medium transition-colors whitespace-nowrap ${
+              activeTab === "carry"
+                ? "text-blue-600 border-b-2 border-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
           >
             MR Carry Cash
-            <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-              {
-                allMRCashes.filter(
-                  (r) =>
-                    r.currentCash > 0 &&
-                    (searchTerm === "" ||
-                      r.mrName
-                        ?.toLowerCase()
-                        .includes(searchTerm.toLowerCase())),
-                ).length
-              }
+            <span
+              className={`ml-2 ${isMobileView ? "text-[10px] px-1.5 py-0.5" : "text-xs px-2 py-1"} bg-blue-100 text-blue-800 rounded-full`}
+            >
+              {allMRCashes.filter((r) => r.currentCash > 0).length}
             </span>
           </button>
           <button
             onClick={() => handleTabChange("transferred")}
-            className={`py-2 px-4 font-medium text-sm transition-colors ${activeTab === "transferred" ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-500 hover:text-gray-700"}`}
+            className={`py-2 ${isMobileView ? "px-2 text-xs" : "px-4 text-sm"} font-medium transition-colors whitespace-nowrap ${
+              activeTab === "transferred"
+                ? "text-blue-600 border-b-2 border-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
           >
-            MR Transfer Cash To Admin
-            <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
-              {
-                allMRCashes.filter(
-                  (r) =>
-                    r.cashTransferredToAdmin > 0 &&
-                    (searchTerm === "" ||
-                      r.mrName
-                        ?.toLowerCase()
-                        .includes(searchTerm.toLowerCase())),
-                ).length
-              }
+            MR Transfer Cash
+            <span
+              className={`ml-2 ${isMobileView ? "text-[10px] px-1.5 py-0.5" : "text-xs px-2 py-1"} bg-green-100 text-green-800 rounded-full`}
+            >
+              {allMRCashes.filter((r) => r.cashTransferredToAdmin > 0).length}
             </span>
           </button>
         </div>
@@ -898,31 +1048,56 @@ function MRCash() {
       {/* Table */}
       <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-max">
+          <table
+            className={`w-full ${isMobileView ? "min-w-[500px]" : "min-w-max"}`}
+          >
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th className="py-3 px-4 text-center">MR Name</th>
+                <th
+                  className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                >
+                  MR Name
+                </th>
                 {activeTab === "carry" ? (
                   <>
-                    <th className="py-3 px-4 text-center">
-                      Current Cash
-                      <div className="text-xs font-normal text-gray-400">
-                        Database
-                      </div>
+                    <th
+                      className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                    >
+                      {isMobileView ? "Cash" : "Current Cash"}
                     </th>
-                    <th className="py-3 px-4 text-center">
-                      Collection + Sale Paid
+                    {!isMobileView && (
+                      <th className="py-3 px-4 text-center">
+                        Collection + Sale Paid
+                      </th>
+                    )}
+                    <th
+                      className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                    >
+                      {isMobileView ? "Last" : "Last Transfer"}
                     </th>
-                    <th className="py-3 px-4 text-center">Last Transfer</th>
-                    <th className="py-3 px-4 text-center">Actions</th>
+                    <th
+                      className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                    >
+                      Actions
+                    </th>
                   </>
                 ) : (
                   <>
-                    <th className="py-3 px-4 text-center">
-                      Transferred to Admin
+                    <th
+                      className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                    >
+                      {isMobileView ? "Transferred" : "Transferred to Admin"}
                     </th>
-                    <th className="py-3 px-4 text-center">Last Transfer</th>
-                    <th className="py-3 px-4 text-center">Actions</th>
+                    <th
+                      className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                    >
+                      {isMobileView ? "Date" : "Last Transfer"}
+                    </th>
+                    <th
+                      className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                    >
+                      Actions
+                    </th>
                   </>
                 )}
               </tr>
@@ -932,7 +1107,7 @@ function MRCash() {
                 <tr key="empty-row">
                   <td
                     colSpan={colSpan}
-                    className="p-8 text-gray-500 text-center"
+                    className={`${isMobileView ? "p-4" : "p-8"} text-gray-500 text-center`}
                   >
                     {searchTerm
                       ? "No matching records found"
@@ -947,79 +1122,107 @@ function MRCash() {
                     key={record._id}
                     className={`hover:bg-gray-50 ${index < mrCashes.length - 1 ? "border-b" : ""}`}
                   >
-                    <td className="py-3 px-4 text-center">
-                      <div className="font-medium text-gray-900">
+                    <td
+                      className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                    >
+                      <div
+                        className={`font-medium text-gray-900 ${isMobileView ? "text-xs" : ""}`}
+                      >
                         {record.mrName}
                       </div>
                     </td>
                     {activeTab === "carry" ? (
                       <>
-                        <td className="py-3 px-4 text-center">
-                          <div className="text-blue-700 font-semibold">
+                        <td
+                          className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                        >
+                          <div
+                            className={`text-blue-700 font-semibold ${isMobileView ? "text-xs" : ""}`}
+                          >
                             {formatCurrency(record.currentCash)}
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <div className="text-green-700 font-semibold">
-                            {formatCurrency(getCombinedCash(record))}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <div className="text-gray-700">
+                        {!isMobileView && (
+                          <td className="py-3 px-4 text-center">
+                            <div className="text-green-700 font-semibold">
+                              {formatCurrency(getCombinedCash(record))}
+                            </div>
+                          </td>
+                        )}
+                        <td
+                          className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                        >
+                          <div
+                            className={`text-gray-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                          >
                             {record.lastTransferDate
                               ? formatDateShort(record.lastTransferDate)
                               : "N/A"}
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-3">
+                        <td
+                          className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                        >
+                          <div className="flex items-center justify-center gap-2">
                             <button
                               onClick={() => handleView(record)}
                               className="text-blue-600 hover:text-blue-800 cursor-pointer"
                               title="View Details"
                             >
-                              <Eye size={18} />
+                              <Eye size={isMobileView ? 14 : 18} />
                             </button>
-                            <button
-                              onClick={() => handleOpenTransferModal(record)}
-                              className="text-green-600 hover:text-green-800 cursor-pointer"
-                              title="Transfer to Admin"
-                              disabled={record.currentCash <= 0}
-                            >
-                              <TrendingUp size={18} />
-                            </button>
+                            {!isMobileView && (
+                              <button
+                                onClick={() => handleOpenTransferModal(record)}
+                                className="text-green-600 hover:text-green-800 cursor-pointer"
+                                title="Transfer to Admin"
+                                disabled={record.currentCash <= 0}
+                              >
+                                <TrendingUp size={18} />
+                              </button>
+                            )}
                             <button
                               onClick={() => openCreditModal(record)}
                               className="text-indigo-600 hover:text-indigo-800 cursor-pointer"
                               title="View Credit Collection Invoices"
                             >
-                              <HandCoins size={18} />
+                              <HandCoins size={isMobileView ? 14 : 18} />
                             </button>
                           </div>
                         </td>
                       </>
                     ) : (
                       <>
-                        <td className="py-3 px-4 text-center">
-                          <div className="text-green-700 font-semibold">
+                        <td
+                          className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                        >
+                          <div
+                            className={`text-green-700 font-semibold ${isMobileView ? "text-xs" : ""}`}
+                          >
                             {formatCurrency(record.cashTransferredToAdmin)}
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <div className="text-gray-700">
+                        <td
+                          className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                        >
+                          <div
+                            className={`text-gray-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                          >
                             {record.lastTransferDate
                               ? formatDate(record.lastTransferDate)
                               : "N/A"}
                           </div>
                         </td>
-                        <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-3">
+                        <td
+                          className={`${isMobileView ? "py-2 px-2 text-xs" : "py-3 px-4 text-center"}`}
+                        >
+                          <div className="flex items-center justify-center gap-2">
                             <button
                               onClick={() => handleView(record)}
                               className="text-blue-600 hover:text-blue-800 cursor-pointer"
                               title="View Transfer History"
                             >
-                              <History size={18} />
+                              <History size={isMobileView ? 14 : 18} />
                             </button>
                           </div>
                         </td>
@@ -1034,44 +1237,9 @@ function MRCash() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center gap-4 mt-6">
-          <button
-            onClick={() => handlePageChange(currentPage - 1)}
-            disabled={currentPage === 1}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            Previous
-          </button>
-          <div className="flex items-center gap-2">
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              let pageNum;
-              if (totalPages <= 5) pageNum = i + 1;
-              else if (currentPage <= 3) pageNum = i + 1;
-              else if (currentPage >= totalPages - 2)
-                pageNum = totalPages - 4 + i;
-              else pageNum = currentPage - 2 + i;
-              return (
-                <button
-                  key={pageNum}
-                  onClick={() => handlePageChange(pageNum)}
-                  className={`px-3 py-1 rounded-lg min-w-[40px] cursor-pointer ${currentPage === pageNum ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-                >
-                  {pageNum}
-                </button>
-              );
-            })}
-          </div>
-          <button
-            onClick={() => handlePageChange(currentPage + 1)}
-            disabled={currentPage === totalPages}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            Next
-          </button>
-        </div>
-      )}
+      {renderPagination()}
 
+      {/* ══ View Modal - Mobile only font changes ══ */}
       {isViewModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -1083,88 +1251,181 @@ function MRCash() {
                 setTransferHistory([]);
               }}
             />
-            <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
+            <div
+              className={`bg-white w-full ${isMobileView ? "max-w-full m-2 p-4" : "max-w-6xl p-6"} rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]`}
+            >
               <button
                 onClick={() => {
                   setIsViewModalOpen(false);
                   setTransferHistory([]);
                 }}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                className={`absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer`}
               >
                 <X size={20} />
               </button>
               {activeTab === "carry" ? (
                 <>
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  <h2
+                    className={`${isMobileView ? "text-sm" : "text-xl"} font-semibold text-gray-800 ${isMobileView ? "mb-3" : "mb-4"}`}
+                  >
                     MR Cash Details
                   </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        MR Name
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {selectedRecord.mrName}
-                      </p>
+
+                  {/* Mobile View - Single Row Layout */}
+                  {isMobileView ? (
+                    <div className="mb-6 space-y-3">
+                      {/* Row 1: MR Name and Current Cash */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-medium text-gray-600 mb-1">
+                            MR Name
+                          </label>
+                          <p className="border px-2 py-1 text-[10px] rounded-lg bg-gray-100 capitalize">
+                            {selectedRecord.mrName}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-gray-600 mb-1">
+                            Current Cash
+                          </label>
+                          <p className="border px-2 py-1 text-[10px] rounded-lg bg-gray-100 font-bold text-blue-700">
+                            {formatCurrency(getCombinedCash(selectedRecord))}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Row 2: Last Transfer Date */}
+                      <div>
+                        <label className="block text-[10px] font-medium text-gray-600 mb-1">
+                          Last Transfer Date
+                        </label>
+                        <p className="border px-2 py-1 text-[10px] rounded-lg bg-gray-100">
+                          {selectedRecord.lastTransferDate
+                            ? formatDateShort(selectedRecord.lastTransferDate)
+                            : "N/A"}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        Current Cash
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-bold text-blue-700">
-                        {formatCurrency(getCombinedCash(selectedRecord))}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        Last Transfer Date
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {selectedRecord.lastTransferDate
-                          ? formatDateShort(selectedRecord.lastTransferDate)
-                          : "N/A"}
-                      </p>
-                    </div>
-                  </div>
+                  ) : (
+                    /* Desktop View - Original Layout */
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-600 mb-1">
+                            MR Name
+                          </label>
+                          <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                            {selectedRecord.mrName}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-600 mb-1">
+                            Current Cash
+                          </label>
+                          <p className="border px-3 py-2 rounded-lg bg-gray-100 font-bold text-blue-700">
+                            {formatCurrency(getCombinedCash(selectedRecord))}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-600 mb-1">
+                            Last Transfer Date
+                          </label>
+                          <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                            {selectedRecord.lastTransferDate
+                              ? formatDateShort(selectedRecord.lastTransferDate)
+                              : "N/A"}
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <>
-                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  <h2
+                    className={`${isMobileView ? "text-sm" : "text-xl"} font-semibold text-gray-800 ${isMobileView ? "mb-3" : "mb-4"}`}
+                  >
                     MR Transfer History - {selectedRecord.mrName}
                   </h2>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        MR Name
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {selectedRecord.mrName}
-                      </p>
+
+                  {/* Mobile View - Single Row Layout */}
+                  {isMobileView ? (
+                    <div className="mb-6 space-y-3">
+                      {/* Row 1: MR Name and Total Transferred */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-medium text-gray-600 mb-1">
+                            MR Name
+                          </label>
+                          <p className="border px-2 py-1 text-[10px] rounded-lg bg-gray-100 capitalize">
+                            {selectedRecord.mrName}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-gray-600 mb-1">
+                            Total Transferred
+                          </label>
+                          <p className="border px-2 py-1 text-[10px] rounded-lg bg-gray-100 font-bold text-green-700">
+                            {formatCurrency(
+                              selectedRecord.cashTransferredToAdmin,
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Row 2: Last Transfer Date */}
+                      <div>
+                        <label className="block text-[10px] font-medium text-gray-600 mb-1">
+                          Last Transfer Date
+                        </label>
+                        <p className="border px-2 py-1 text-[10px] rounded-lg bg-gray-100">
+                          {selectedRecord.lastTransferDate
+                            ? formatDateShort(selectedRecord.lastTransferDate)
+                            : "N/A"}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        Total Transferred to Admin
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-bold text-green-700">
-                        {formatCurrency(selectedRecord.cashTransferredToAdmin)}
-                      </p>
+                  ) : (
+                    /* Desktop View - Original Layout */
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          MR Name
+                        </label>
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                          {selectedRecord.mrName}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Total Transferred to Admin
+                        </label>
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100 font-bold text-green-700">
+                          {formatCurrency(
+                            selectedRecord.cashTransferredToAdmin,
+                          )}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Last Transfer Date
+                        </label>
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                          {selectedRecord.lastTransferDate
+                            ? formatDateShort(selectedRecord.lastTransferDate)
+                            : "N/A"}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        Last Transfer Date
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {selectedRecord.lastTransferDate
-                          ? formatDateShort(selectedRecord.lastTransferDate)
-                          : "N/A"}
-                      </p>
-                    </div>
-                  </div>
+                  )}
+
                   <div className="mb-6">
-                    <h3 className="text-lg font-medium text-gray-700 mb-3">
-                      Last 30 Transfer Records
+                    <h3
+                      className={`${isMobileView ? "text-xs" : "text-lg"} font-medium text-gray-700 ${isMobileView ? "mb-2" : "mb-3"}`}
+                    >
+                      Transfer Records
                     </h3>
                     {transferHistoryLoading ? (
                       <div className="text-center py-4">
@@ -1183,24 +1444,36 @@ function MRCash() {
                         <table className="w-full min-w-max text-center">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
-                                Transfer Date
+                              <th
+                                className={`py-3 px-4 font-medium text-gray-700 text-center ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                              >
+                                Date
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
+                              <th
+                                className={`py-3 px-4 font-medium text-gray-700 text-center ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                              >
                                 Amount
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
-                                Destination Account
+                              <th
+                                className={`py-3 px-4 font-medium text-gray-700 text-center ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                              >
+                                Destination
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
-                                Notes
+                              {!isMobileView && (
+                                <th className="py-3 px-4 font-medium text-gray-700 text-center text-sm">
+                                  Notes
+                                </th>
+                              )}
+                              <th
+                                className={`py-3 px-4 font-medium text-gray-700 text-center ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                              >
+                                By
                               </th>
-                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
-                                Transferred By
-                              </th>
-                              <th className="py-3 px-4 font-medium text-gray-700 text-center">
-                                Actions
-                              </th>
+                              {!isMobileView && (
+                                <th className="py-3 px-4 font-medium text-gray-700 text-center text-sm">
+                                  Actions
+                                </th>
+                              )}
                             </tr>
                           </thead>
                           <tbody>
@@ -1209,43 +1482,55 @@ function MRCash() {
                                 key={transfer._id}
                                 className={`hover:bg-gray-50 ${index < transferHistory.length - 1 ? "border-b" : ""}`}
                               >
-                                <td className="py-3 px-4 text-center">
+                                <td
+                                  className={`py-3 px-4 text-center ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   {formatDateShort(transfer.transferredAt)}
                                 </td>
-                                <td className="py-3 px-4 text-center font-medium text-green-700">
+                                <td
+                                  className={`py-3 px-4 text-center font-medium text-green-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   {formatCurrency(transfer.amount)}
                                 </td>
-                                <td className="py-3 px-4 text-center text-gray-600">
+                                <td
+                                  className={`py-3 px-4 text-center text-gray-600 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   {transfer.toAccountName || "N/A"}
                                 </td>
-                                <td className="py-3 px-4 text-center text-gray-600">
-                                  {transfer.notes || "N/A"}
-                                </td>
-                                <td className="py-3 px-4 text-center text-gray-600">
+                                {!isMobileView && (
+                                  <td className="py-3 px-4 text-center text-gray-600 text-sm">
+                                    {transfer.notes || "N/A"}
+                                  </td>
+                                )}
+                                <td
+                                  className={`py-3 px-4 text-center text-gray-600 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   {transfer.transferredBy?.name || "System"}
                                 </td>
-                                <td className="py-3 px-4 text-center">
-                                  <div className="flex items-center justify-center gap-2">
-                                    <button
-                                      onClick={() =>
-                                        handleEditTransfer(transfer)
-                                      }
-                                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                                      title="Edit Transfer"
-                                    >
-                                      <Edit size={16} />
-                                    </button>
-                                    <button
-                                      onClick={() =>
-                                        handleDeleteTransfer(transfer)
-                                      }
-                                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                                      title="Delete Transfer"
-                                    >
-                                      <Trash2 size={16} />
-                                    </button>
-                                  </div>
-                                </td>
+                                {!isMobileView && (
+                                  <td className="py-3 px-4 text-center">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <button
+                                        onClick={() =>
+                                          handleEditTransfer(transfer)
+                                        }
+                                        className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                                        title="Edit Transfer"
+                                      >
+                                        <Edit size={16} />
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          handleDeleteTransfer(transfer)
+                                        }
+                                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                                        title="Delete Transfer"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                )}
                               </tr>
                             ))}
                           </tbody>
@@ -1255,13 +1540,15 @@ function MRCash() {
                   </div>
                 </>
               )}
-              <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
+              <div
+                className={`mt-6 flex justify-end border-t border-gray-300 ${isMobileView ? "pt-3" : "pt-4"}`}
+              >
                 <button
                   onClick={() => {
                     setIsViewModalOpen(false);
                     setTransferHistory([]);
                   }}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className={`bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer ${isMobileView ? "px-3 py-1 text-[10px]" : "px-5 py-2"}`}
                 >
                   Close
                 </button>
@@ -1271,14 +1558,18 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ══ Add / Transfer to Admin Modal (UPDATED) ══ */}
+      {/* ══ Add / Transfer to Admin Modal - Mobile only font changes ══ */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+            <div
+              className={`bg-white rounded-xl shadow-lg ${isMobileView ? "max-w-sm w-full" : "max-w-md w-full"}`}
+            >
               <div className="flex justify-between items-center p-6 border-b">
-                <h2 className="text-xl font-bold text-gray-800">
-                  MR Cash Transfer To Admin
+                <h2
+                  className={`${isMobileView ? "text-sm" : "text-xl"} font-bold text-gray-800`}
+                >
+                  MR Cash Transfer
                 </h2>
                 <button
                   onClick={() => {
@@ -1299,63 +1590,65 @@ function MRCash() {
               </div>
               <form
                 onSubmit={handleSubmitTransferToAdmin}
-                className="p-6 space-y-4"
+                className={`${isMobileView ? "p-4 space-y-3" : "p-6 space-y-4"}`}
               >
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Select MR <span className="text-red-500">*</span>
                   </label>
                   <SearchableDropdown
                     value={formData.mrCashId}
                     onChange={handleMRSelect}
                     options={mrList}
-                    placeholder={
-                      mrListLoading ? "Loading MRs with cash..." : "Select MR"
-                    }
+                    placeholder={mrListLoading ? "Loading..." : "Select MR"}
                     required
                     disabled={mrListLoading || mrList.length === 0}
                   />
-                  {mrList.length === 0 && !mrListLoading && (
-                    <p className="text-sm text-gray-500 mt-1">
-                      No MRs found with positive cash balance
-                    </p>
-                  )}
                 </div>
                 {selectedMRCash && (
                   <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-gray-700">
+                      <span
+                        className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700`}
+                      >
                         Available Cash:
                       </span>
-                      <span className="text-lg font-bold text-blue-700">
+                      <span
+                        className={`${isMobileView ? "text-sm" : "text-lg"} font-bold text-blue-700`}
+                      >
                         {formatCurrency(selectedMRCash.currentCash)}
                       </span>
                     </div>
                   </div>
                 )}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Destination Account <span className="text-red-500">*</span>
                   </label>
                   <select
                     name="destinationAccount"
                     value={formData.destinationAccount}
                     onChange={handleFormChange}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     required
                     disabled={destinationsLoading}
                   >
                     <option value="">Select Destination</option>
                     {destinationOptions.map((acc) => (
                       <option key={acc.value} value={acc.value}>
-                        {acc.label} (Balance: {formatCurrency(acc.totalAmount)})
+                        {acc.label} ({formatCurrency(acc.totalAmount)})
                       </option>
                     ))}
                   </select>
                 </div>
-                {/* NEW: Transfer Date */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Transfer Date <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -1363,12 +1656,14 @@ function MRCash() {
                     name="transferDate"
                     value={formData.transferDate}
                     onChange={handleFormChange}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Transfer Amount ($) <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -1376,46 +1671,32 @@ function MRCash() {
                     name="transferAmount"
                     value={formData.transferAmount}
                     onChange={handleFormChange}
-                    className="w-full border px-3 py-2 rounded-lg"
-                    placeholder="Enter amount to transfer"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
+                    placeholder="Enter amount"
                     required
                     disabled={!selectedMRCash}
                   />
-                  {selectedMRCash && (
-                    <p className="text-sm text-gray-500 mt-1">
-                      Maximum transferable:{" "}
-                      {formatCurrency(selectedMRCash.currentCash)}
-                    </p>
-                  )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Transfer Notes
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
+                    Notes
                   </label>
                   <textarea
                     name="notes"
                     value={formData.notes}
                     onChange={handleFormChange}
                     rows="3"
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Reason for transfer..."
                   />
                 </div>
                 <div className="flex justify-end gap-3 pt-4 border-t">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsAddModalOpen(false);
-                      setSelectedMRCash(null);
-                      setFormData({
-                        mrCashId: "",
-                        transferAmount: "",
-                        notes: "",
-                        destinationAccount: "",
-                        transferDate: new Date().toISOString().split("T")[0],
-                      });
-                    }}
-                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                    onClick={() => setIsAddModalOpen(false)}
+                    className={`bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
                     Cancel
                   </button>
@@ -1431,9 +1712,9 @@ function MRCash() {
                       !formData.destinationAccount ||
                       !formData.transferDate
                     }
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
-                    Transfer to Admin
+                    Transfer
                   </button>
                 </div>
               </form>
@@ -1442,15 +1723,19 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ══ Transfer Modal (from table row) ══ */}
+      {/* ══ Transfer Modal (from table row) - Mobile only font changes ══ */}
       {isTransferModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+            <div
+              className={`bg-white rounded-xl shadow-lg ${isMobileView ? "max-w-sm w-full" : "max-w-md w-full"}`}
+            >
               <div className="flex justify-between items-center p-6 border-b">
-                <h2 className="text-xl font-bold text-gray-800">
-                  Transfer Cash to Admin
+                <h2
+                  className={`${isMobileView ? "text-sm" : "text-xl"} font-bold text-gray-800`}
+                >
+                  Transfer Cash
                 </h2>
                 <button
                   onClick={() => setIsTransferModalOpen(false)}
@@ -1459,45 +1744,60 @@ function MRCash() {
                   <X size={24} />
                 </button>
               </div>
-              <form onSubmit={handleSubmitTransfer} className="p-6 space-y-4">
+              <form
+                onSubmit={handleSubmitTransfer}
+                className={`${isMobileView ? "p-4 space-y-3" : "p-6 space-y-4"}`}
+              >
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     MR Name
                   </label>
-                  <div className="p-3 bg-gray-50 rounded-lg font-medium">
+                  <div
+                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} bg-gray-50 rounded-lg font-medium`}
+                  >
                     {selectedRecord.mrName}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Available Cash
                   </label>
-                  <div className="p-3 bg-blue-50 rounded-lg font-bold text-blue-700">
+                  <div
+                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} bg-blue-50 rounded-lg font-bold text-blue-700`}
+                  >
                     {formatCurrency(selectedRecord.currentCash)}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Destination Account <span className="text-red-500">*</span>
                   </label>
                   <select
                     name="destinationAccount"
                     value={transferForm.destinationAccount}
                     onChange={handleTransferFormChange}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     required
                     disabled={destinationsLoading}
                   >
                     <option value="">Select Destination</option>
                     {destinationOptions.map((acc) => (
                       <option key={acc.value} value={acc.value}>
-                        {acc.label} (Balance: {formatCurrency(acc.totalAmount)})
+                        {acc.label} ({formatCurrency(acc.totalAmount)})
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Transfer Amount ($) <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -1505,24 +1805,23 @@ function MRCash() {
                     name="amount"
                     value={transferForm.amount}
                     onChange={handleTransferFormChange}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Enter amount"
                     required
                   />
-                  <p className="text-sm text-gray-500 mt-1">
-                    Maximum: {formatCurrency(selectedRecord.currentCash)}
-                  </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Transfer Notes
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
+                    Notes
                   </label>
                   <textarea
                     name="notes"
                     value={transferForm.notes}
                     onChange={handleTransferFormChange}
                     rows="3"
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Reason for transfer..."
                   />
                 </div>
@@ -1530,7 +1829,7 @@ function MRCash() {
                   <button
                     type="button"
                     onClick={() => setIsTransferModalOpen(false)}
-                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                    className={`bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
                     Cancel
                   </button>
@@ -1543,7 +1842,7 @@ function MRCash() {
                         selectedRecord.currentCash ||
                       !transferForm.destinationAccount
                     }
-                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
                     Transfer
                   </button>
@@ -1554,14 +1853,18 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ══ Edit Transfer Modal ══ */}
+      {/* ══ Edit Transfer Modal - Mobile only font changes ══ */}
       {isEditTransferModalOpen &&
         editingTransfer &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+            <div
+              className={`bg-white rounded-xl shadow-lg ${isMobileView ? "max-w-sm w-full" : "max-w-md w-full"}`}
+            >
               <div className="flex justify-between items-center p-6 border-b">
-                <h2 className="text-xl font-bold text-gray-800">
+                <h2
+                  className={`${isMobileView ? "text-sm" : "text-xl"} font-bold text-gray-800`}
+                >
                   Edit Transfer
                 </h2>
                 <button
@@ -1576,26 +1879,36 @@ function MRCash() {
               </div>
               <form
                 onSubmit={handleSubmitEditTransfer}
-                className="p-6 space-y-4"
+                className={`${isMobileView ? "p-4 space-y-3" : "p-6 space-y-4"}`}
               >
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     MR Name
                   </label>
-                  <div className="p-3 bg-gray-50 rounded-lg font-medium">
+                  <div
+                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} bg-gray-50 rounded-lg font-medium`}
+                  >
                     {editingTransfer.fromAccountName}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Destination Account
                   </label>
-                  <div className="p-3 bg-gray-50 rounded-lg">
+                  <div
+                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} bg-gray-50 rounded-lg`}
+                  >
                     {editingTransfer.toAccountName}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Transfer Amount ($) <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -1603,21 +1916,23 @@ function MRCash() {
                     name="amount"
                     value={editTransferForm.amount}
                     onChange={handleEditTransferFormChange}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Enter amount"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Transfer Notes
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
+                    Notes
                   </label>
                   <textarea
                     name="notes"
                     value={editTransferForm.notes}
                     onChange={handleEditTransferFormChange}
                     rows="3"
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Reason for transfer..."
                   />
                 </div>
@@ -1628,15 +1943,15 @@ function MRCash() {
                       setIsEditTransferModalOpen(false);
                       setEditingTransfer(null);
                     }}
-                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                    className={`bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+                    className={`bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
-                    Update Transfer
+                    Update
                   </button>
                 </div>
               </form>
@@ -1645,18 +1960,24 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ══ Credit Collection Invoices Modal ══ */}
+      {/* ══ Credit Collection Invoices Modal - Mobile only font changes ══ */}
       {isCreditModalOpen &&
         selectedMrForCredit &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+            <div
+              className={`bg-white rounded-xl shadow-lg ${isMobileView ? "max-w-full m-2" : "max-w-5xl"} w-full max-h-[90vh] overflow-y-auto`}
+            >
               <div className="flex justify-between items-center p-6 border-b">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-800">
+                  <h2
+                    className={`${isMobileView ? "text-sm" : "text-xl"} font-bold text-gray-800`}
+                  >
                     Credit Collection Invoices
                   </h2>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <p
+                    className={`${isMobileView ? "text-[10px]" : "text-sm"} text-gray-500 mt-0.5`}
+                  >
                     MR:{" "}
                     <span className="font-semibold text-indigo-700">
                       {selectedMrForCredit.mrName}
@@ -1699,7 +2020,7 @@ function MRCash() {
                 </div>
               </div>
 
-              <div className="p-6">
+              <div className={`${isMobileView ? "p-4" : "p-6"}`}>
                 {/* COLLECTION TAB */}
                 {creditModalTab === "collection" && (
                   <>
@@ -1717,19 +2038,19 @@ function MRCash() {
                         <p className="text-gray-500 font-medium">
                           No credit collection invoices found
                         </p>
-                        <p className="text-gray-400 text-sm mt-1">
-                          No Credit Collection transactions have been recorded
-                          for this MR yet.
-                        </p>
                       </div>
                     ) : (
                       <>
                         <div className="mb-4 p-3 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-between">
-                          <span className="text-sm text-indigo-700 font-medium">
+                          <span
+                            className={`${isMobileView ? "text-[10px]" : "text-sm"} text-indigo-700 font-medium`}
+                          >
                             {creditInvoices.length} invoice
                             {creditInvoices.length !== 1 ? "s" : ""} collected
                           </span>
-                          <span className="text-sm text-indigo-700 font-bold">
+                          <span
+                            className={`${isMobileView ? "text-[10px]" : "text-sm"} text-indigo-700 font-bold`}
+                          >
                             Total:{" "}
                             {formatCurrency(
                               creditInvoices.reduce(
@@ -1740,27 +2061,41 @@ function MRCash() {
                           </span>
                         </div>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
+                          <table
+                            className={`w-full ${isMobileView ? "min-w-[500px]" : ""} ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                          >
                             <thead className="bg-gray-50">
                               <tr>
-                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                <th
+                                  className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   Invoice #
                                 </th>
-                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                <th
+                                  className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   Customer
                                 </th>
-                                <th className="py-3 px-4 text-center font-medium text-gray-700">
-                                  Date
-                                </th>
-                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                {!isMobileView && (
+                                  <th className="py-3 px-4 text-center font-medium text-gray-700 text-sm">
+                                    Date
+                                  </th>
+                                )}
+                                <th
+                                  className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   Amount
                                 </th>
-                                <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                <th
+                                  className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                >
                                   Account
                                 </th>
-                                <th className="py-3 px-4 text-center font-medium text-gray-700">
-                                  Actions
-                                </th>
+                                {!isMobileView && (
+                                  <th className="py-3 px-4 text-center font-medium text-gray-700 text-sm">
+                                    Actions
+                                  </th>
+                                )}
                               </tr>
                             </thead>
                             <tbody>
@@ -1772,11 +2107,6 @@ function MRCash() {
                                   inv.customer_name ||
                                   inv.customer ||
                                   "—";
-                                const rawDate =
-                                  inv.date ||
-                                  inv.invoiceDate ||
-                                  inv.createdAt ||
-                                  null;
                                 const amount = getSafeAmount(inv);
                                 const account = (() => {
                                   const dest =
@@ -1799,46 +2129,60 @@ function MRCash() {
                                     className="border-t hover:bg-gray-50"
                                   >
                                     <td className="py-3 px-4 text-center">
-                                      <span className="font-medium text-indigo-700">
+                                      <span
+                                        className={`font-medium text-indigo-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                                      >
                                         {invoiceNo}
                                       </span>
                                     </td>
-                                    <td className="py-3 px-4 text-center text-gray-600">
+                                    <td
+                                      className={`py-3 px-4 text-center text-gray-600 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                                    >
                                       {customer}
                                     </td>
-                                    <td className="py-3 px-4 text-center text-gray-600">
-                                      {rawDate ? formatDateShort(rawDate) : "—"}
-                                    </td>
-                                    <td className="py-3 px-4 text-center font-semibold text-green-700">
+                                    {!isMobileView && (
+                                      <td className="py-3 px-4 text-center text-gray-600 text-sm">
+                                        {inv.date
+                                          ? formatDateShort(inv.date)
+                                          : "—"}
+                                      </td>
+                                    )}
+                                    <td
+                                      className={`py-3 px-4 text-center font-semibold text-green-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                                    >
                                       {formatCurrency(amount)}
                                     </td>
                                     <td className="py-3 px-4 text-center">
-                                      <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">
+                                      <span
+                                        className={`px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full ${isMobileView ? "text-[8px]" : "text-xs"} font-medium`}
+                                      >
                                         {account}
                                       </span>
                                     </td>
-                                    <td className="py-3 px-4 text-center">
-                                      <div className="flex items-center justify-center gap-2">
-                                        <button
-                                          onClick={() =>
-                                            handleEditCreditInvoice(inv)
-                                          }
-                                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                                          title="Edit"
-                                        >
-                                          <Edit size={16} />
-                                        </button>
-                                        <button
-                                          onClick={() =>
-                                            handleDeleteCreditInvoice(inv)
-                                          }
-                                          className="text-red-600 hover:text-red-800 cursor-pointer"
-                                          title="Delete"
-                                        >
-                                          <Trash2 size={16} />
-                                        </button>
-                                      </div>
-                                    </td>
+                                    {!isMobileView && (
+                                      <td className="py-3 px-4 text-center">
+                                        <div className="flex items-center justify-center gap-2">
+                                          <button
+                                            onClick={() =>
+                                              handleEditCreditInvoice(inv)
+                                            }
+                                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                                            title="Edit"
+                                          >
+                                            <Edit size={16} />
+                                          </button>
+                                          <button
+                                            onClick={() =>
+                                              handleDeleteCreditInvoice(inv)
+                                            }
+                                            className="text-red-600 hover:text-red-800 cursor-pointer"
+                                            title="Delete"
+                                          >
+                                            <Trash2 size={16} />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    )}
                                   </tr>
                                 );
                               })}
@@ -1867,10 +2211,6 @@ function MRCash() {
                         <p className="text-gray-500 font-medium">
                           No Cash / Paid sales this month
                         </p>
-                        <p className="text-gray-400 text-sm mt-1">
-                          No matching sales were found for this MR in the
-                          current month.
-                        </p>
                       </div>
                     ) : (
                       (() => {
@@ -1881,7 +2221,9 @@ function MRCash() {
                         return (
                           <>
                             <div className="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-100 flex items-center justify-between">
-                              <span className="text-sm text-orange-700 font-medium">
+                              <span
+                                className={`${isMobileView ? "text-[10px]" : "text-sm"} text-orange-700 font-medium`}
+                              >
                                 {saleSummaries.length} sale
                                 {saleSummaries.length !== 1 ? "s" : ""} in{" "}
                                 {new Date().toLocaleString("default", {
@@ -1895,25 +2237,39 @@ function MRCash() {
                               </span>
                             </div>
                             <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
+                              <table
+                                className={`w-full ${isMobileView ? "min-w-[500px]" : ""} ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                              >
                                 <thead className="bg-gray-50">
                                   <tr>
-                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                    <th
+                                      className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                    >
                                       Invoice #
                                     </th>
-                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                    <th
+                                      className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                    >
                                       Customer
                                     </th>
-                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
-                                      Date
-                                    </th>
-                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                    {!isMobileView && (
+                                      <th className="py-3 px-4 text-center font-medium text-gray-700 text-sm">
+                                        Date
+                                      </th>
+                                    )}
+                                    <th
+                                      className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                    >
                                       Total
                                     </th>
-                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                    <th
+                                      className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                    >
                                       Paid
                                     </th>
-                                    <th className="py-3 px-4 text-center font-medium text-gray-700">
+                                    <th
+                                      className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[8px]" : "text-sm"}`}
+                                    >
                                       Status
                                     </th>
                                   </tr>
@@ -1938,7 +2294,9 @@ function MRCash() {
                                         className={`border-t hover:bg-gray-50 ${isCollected ? "bg-green-50" : ""}`}
                                       >
                                         <td className="py-3 px-4 text-center">
-                                          <span className="font-medium text-orange-700">
+                                          <span
+                                            className={`font-medium text-orange-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                                          >
                                             {sale.invoiceNumber || "—"}
                                           </span>
                                           {isCollected && (
@@ -1947,19 +2305,27 @@ function MRCash() {
                                             </span>
                                           )}
                                         </td>
-                                        <td className="py-3 px-4 text-center text-gray-600">
+                                        <td
+                                          className={`py-3 px-4 text-center text-gray-600 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                                        >
                                           {sale.customerName || "—"}
                                         </td>
-                                        <td className="py-3 px-4 text-center text-gray-600">
-                                          {formatDateShort(
-                                            sale.invoiceDate ||
-                                              sale.recordingDate,
-                                          )}
-                                        </td>
-                                        <td className="py-3 px-4 text-center font-medium text-gray-700">
+                                        {!isMobileView && (
+                                          <td className="py-3 px-4 text-center text-gray-600 text-sm">
+                                            {formatDateShort(
+                                              sale.invoiceDate ||
+                                                sale.recordingDate,
+                                            )}
+                                          </td>
+                                        )}
+                                        <td
+                                          className={`py-3 px-4 text-center font-medium text-gray-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                                        >
                                           {formatCurrency(sale.totalAmount)}
                                         </td>
-                                        <td className="py-3 px-4 text-center font-medium text-green-700">
+                                        <td
+                                          className={`py-3 px-4 text-center font-medium text-green-700 ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                                        >
                                           {formatCurrency(sale.paidAmount)}
                                         </td>
                                         <td className="py-3 px-4 text-center">
@@ -1986,7 +2352,7 @@ function MRCash() {
               <div className="flex justify-end p-6 border-t">
                 <button
                   onClick={closeCreditModal}
-                  className="px-5 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg cursor-pointer"
+                  className={`bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg cursor-pointer ${isMobileView ? "px-3 py-1 text-[10px]" : "px-5 py-2"}`}
                 >
                   Close
                 </button>
@@ -1996,18 +2362,24 @@ function MRCash() {
           document.body,
         )}
 
-      {/* ══ Edit Credit Invoice Modal ══ */}
+      {/* ══ Edit Credit Invoice Modal - Mobile only font changes ══ */}
       {isEditCreditModalOpen &&
         editingCreditInvoice &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+            <div
+              className={`bg-white rounded-xl shadow-lg ${isMobileView ? "max-w-sm w-full" : "max-w-md w-full"}`}
+            >
               <div className="flex justify-between items-center p-6 border-b">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-800">
+                  <h2
+                    className={`${isMobileView ? "text-sm" : "text-xl"} font-bold text-gray-800`}
+                  >
                     Edit Credit Invoice
                   </h2>
-                  <p className="text-sm text-gray-500 mt-0.5">
+                  <p
+                    className={`${isMobileView ? "text-[10px]" : "text-sm"} text-gray-500 mt-0.5`}
+                  >
                     Invoice:{" "}
                     <span className="font-semibold text-indigo-700">
                       {editingCreditInvoice.invoiceNumber ||
@@ -2026,34 +2398,32 @@ function MRCash() {
                   <X size={24} />
                 </button>
               </div>
-              <div className="mx-6 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                ⚠️ Changing the amount adjusts this MR's current cash <b>and</b>{" "}
-                updates the sale's paid/due amounts in the outstanding report.
+              <div
+                className={`mx-6 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg ${isMobileView ? "text-[8px]" : "text-xs"} text-amber-800`}
+              >
+                ⚠️ Changing the amount adjusts this MR's current cash and
+                updates the sale's paid/due amounts.
               </div>
               <form
                 onSubmit={handleSubmitEditCreditInvoice}
-                className="p-6 space-y-4"
+                className={`${isMobileView ? "p-4 space-y-3" : "p-6 space-y-4"}`}
               >
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Invoice #
-                  </label>
-                  <div className="p-3 bg-gray-50 rounded-lg text-gray-700 font-medium">
-                    {editingCreditInvoice.invoiceNumber ||
-                      editingCreditInvoice.invoiceNo ||
-                      "—"}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Current Amount
                   </label>
-                  <div className="p-3 bg-gray-50 rounded-lg text-green-700 font-bold">
+                  <div
+                    className={`p-3 bg-gray-50 rounded-lg text-green-700 font-bold ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                  >
                     {formatCurrency(getSafeAmount(editingCreditInvoice))}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     New Amount ($) <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -2061,13 +2431,15 @@ function MRCash() {
                     name="amount"
                     value={editCreditForm.amount}
                     onChange={handleEditCreditFormChange}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Enter new amount"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Customer Name
                   </label>
                   <input
@@ -2075,12 +2447,14 @@ function MRCash() {
                     name="customerName"
                     value={editCreditForm.customerName}
                     onChange={handleEditCreditFormChange}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Customer name"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label
+                    className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-700 mb-2`}
+                  >
                     Remarks
                   </label>
                   <textarea
@@ -2088,7 +2462,7 @@ function MRCash() {
                     value={editCreditForm.remarks}
                     onChange={handleEditCreditFormChange}
                     rows="3"
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+                    className={`w-full border rounded-lg ${isMobileView ? "px-2 py-1 text-[10px]" : "px-3 py-2 text-sm"}`}
                     placeholder="Add remarks..."
                   />
                 </div>
@@ -2099,7 +2473,7 @@ function MRCash() {
                       setIsEditCreditModalOpen(false);
                       setEditingCreditInvoice(null);
                     }}
-                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                    className={`bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
                     Cancel
                   </button>
@@ -2110,12 +2484,12 @@ function MRCash() {
                       !editCreditForm.amount ||
                       parseFloat(editCreditForm.amount) <= 0
                     }
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    className={`bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${isMobileView ? "px-3 py-1 text-[10px]" : "px-4 py-2 text-sm"}`}
                   >
                     {editCreditLoading && (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                     )}
-                    Update Invoice
+                    Update
                   </button>
                 </div>
               </form>

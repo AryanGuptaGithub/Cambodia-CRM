@@ -648,7 +648,7 @@ const MRWiseSales = () => {
 
       {/* ── MOBILE Header ── */}
       {isMobileView && (
-        <div className="flex justify-between items-center mb-3">
+        <div className="flex justify-between items-center mb-3 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(true)}

@@ -243,7 +243,7 @@ const ProvinceWiseCustomer = () => {
 
       {/* ── MOBILE Header ── */}
       {isMobileView && (
-        <div className="flex justify-between items-center mb-3">
+        <div className="flex justify-between items-center mb-3 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSidebarOpen(true)}
@@ -257,7 +257,7 @@ const ProvinceWiseCustomer = () => {
             </h1>
           </div>
           <div className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-medium">
-            {summary.totalProvinces} provinces
+            Total Records: {summary.totalProvinces}
           </div>
         </div>
       )}

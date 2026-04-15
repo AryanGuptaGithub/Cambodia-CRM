@@ -4186,7 +4186,7 @@ const Sales = () => {
       {/* ── Main Content ── */}
       <div className="container">
         {isMobileView && (
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-1 bg-gray-200 border-gray-200 p-2 rounded-2xl">
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
@@ -4195,7 +4195,7 @@ const Sales = () => {
             </button>
             {sales.length > 0 && (
               <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
-                Total: {filteredSales.length}
+                Total Records: {filteredSales.length}
               </div>
             )}
           </div>
@@ -4336,7 +4336,7 @@ const Sales = () => {
                 className={`flex items-center gap-1 bg-gray-100 border border-gray-300 rounded-xl ${isMobileView ? "px-1 py-0.5" : "px-2 py-1"} flex-wrap`}
               >
                 <span
-                  className={`${isMobileView ? "text-[6px] font-bold" : "text-xs"} text-gray-500 font-semibold uppercase tracking-wide ${isMobileView ? "pr-0.5" : "pr-1"}`}
+                  className={`${isMobileView ? "text-[8px] font-bold" : "text-xs"} text-gray-500 font-semibold uppercase tracking-wide ${isMobileView ? "pr-0.5" : "pr-1"}`}
                 >
                   Payment
                 </span>
@@ -4348,7 +4348,7 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${selectedTab === tab ? "bg-indigo-600 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
+                    className={`${isMobileView ? "py-0.5 text-[8px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${selectedTab === tab ? "bg-indigo-600 text-white shadow" : "text-gray-600 hover:bg-gray-200"}`}
                   >
                     {tab}
                   </button>
@@ -4358,7 +4358,7 @@ const Sales = () => {
                 className={`flex items-center gap-1 bg-gray-100 border border-gray-300 rounded-xl ${isMobileView ? "px-1 py-0.5" : "px-2 py-1"} flex-wrap`}
               >
                 <span
-                  className={`${isMobileView ? "text-[6px] font-bold" : "text-xs"} text-gray-500 font-semibold uppercase tracking-wide ${isMobileView ? "pr-0.5" : "pr-1"}`}
+                  className={`${isMobileView ? "text-[8px] font-bold" : "text-xs"} text-gray-500 font-semibold uppercase tracking-wide ${isMobileView ? "pr-0.5" : "pr-1"}`}
                 >
                   Sale Type
                 </span>
@@ -4370,7 +4370,7 @@ const Sales = () => {
                       setCurrentPage(1);
                       setSelected([]);
                     }}
-                    className={`flex items-center gap-1 ${isMobileView ? "py-0.5 text-[6px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${saleTypeTab === tab.id ? (tab.id === "normal" ? "bg-indigo-600 text-white shadow" : tab.id === "mr" ? "bg-green-600 text-white shadow" : "bg-gray-600 text-white shadow") : "text-gray-600 hover:bg-gray-200"}`}
+                    className={`flex items-center gap-1 ${isMobileView ? "py-0.5 text-[8px] font-bold" : "px-3 py-1 text-xs"} rounded-lg cursor-pointer transition-colors font-medium ${saleTypeTab === tab.id ? (tab.id === "normal" ? "bg-indigo-600 text-white shadow" : tab.id === "mr" ? "bg-green-600 text-white shadow" : "bg-gray-600 text-white shadow") : "text-gray-600 hover:bg-gray-200"}`}
                   >
                     <span>{tab.label}</span>
                   </button>

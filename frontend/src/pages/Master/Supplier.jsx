@@ -1373,7 +1373,7 @@ const Supplier = () => {
 
       {/* Mobile header row: hamburger + total count */}
       {isMobileView && (
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex justify-between items-center mb-4 rounded-2xl p-2 bg-gray-200">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"

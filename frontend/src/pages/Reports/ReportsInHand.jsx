@@ -948,7 +948,7 @@ const ReportsInHand = () => {
       {/* ── MOBILE Header ── */}
       {isMobileView ? (
         <div className="mb-3">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 bg-gray-200 border-gray-200 p-2 rounded-2xl">
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setSidebarOpen(true)}
@@ -962,7 +962,7 @@ const ReportsInHand = () => {
               </h1>
             </div>
             <div className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full text-xs font-medium">
-              {products.length} items
+              Total Records: {products.length}
             </div>
           </div>
 

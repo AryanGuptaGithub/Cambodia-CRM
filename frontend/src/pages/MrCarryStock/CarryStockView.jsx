@@ -14,6 +14,7 @@ import {
   X,
   Calendar,
   Package,
+  Menu,
 } from "lucide-react";
 import { showToast } from "../../utils/toast";
 import ReactDOM from "react-dom";
@@ -21,6 +22,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import axios from "axios";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -32,8 +34,8 @@ const CarryStockView = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMr, setSelectedMr] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
-  const [usedTab, setUsedTab] = useState("all"); // For main table
-  const [modalUsedTab, setModalUsedTab] = useState("all"); // For modal filtering - FIX: separate state
+  const [usedTab, setUsedTab] = useState("all");
+  const [modalUsedTab, setModalUsedTab] = useState("all");
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [selectedStock, setSelectedStock] = useState(null);
   const [isProductsModalOpen, setIsProductsModalOpen] = useState(false);
@@ -46,6 +48,17 @@ const CarryStockView = () => {
   const [mrListLoading, setMrListLoading] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const inputRef = useRef(null);
+
+  // Mobile detection and sidebar state
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const ROWS_PER_PAGE = 10;
 
@@ -87,21 +100,15 @@ const CarryStockView = () => {
 
         const transformedData = rawData.map((item, index) => {
           const remainingQty =
-            item.remainingQty ?? // fixed backend
-            item.quantity ?? // old backend / raw DB
-            item.boxQuantity ??
-            0;
+            item.remainingQty ?? item.quantity ?? item.boxQuantity ?? 0;
 
           const assignedQty =
-            item.assignedQty ?? // fixed backend sends this correctly
-            item.assignedQuantity ?? // raw DB field (old backend didn't map it)
-            remainingQty; // absolute fallback: assume nothing used yet
+            item.assignedQty ?? item.assignedQuantity ?? remainingQty;
 
           const usedQty = Math.max(0, assignedQty - remainingQty);
           const utilization =
             assignedQty > 0 ? Math.round((usedQty / assignedQty) * 100) : 0;
 
-          // Status — compute fresh (don't trust old backend's status)
           let status = "Active";
           if (assignedQty > 0 && remainingQty === 0) {
             status = "Full Used";
@@ -269,7 +276,7 @@ const CarryStockView = () => {
       customStartDate,
       customEndDate,
       selectedMr,
-      usedTab, // This uses the main usedTab state
+      usedTab,
     );
     setGroupedData(grouped);
     setTotalCount(grouped.length);
@@ -281,7 +288,7 @@ const CarryStockView = () => {
     customStartDate,
     customEndDate,
     selectedMr,
-    usedTab, // Main table depends on usedTab
+    usedTab,
     applyFiltersAndGroup,
   ]);
 
@@ -290,7 +297,6 @@ const CarryStockView = () => {
     setPagedData(groupedData.slice(start, start + ROWS_PER_PAGE));
   }, [currentPage, groupedData]);
 
-  // ─── Tab badge counts for main table ─────────────────────────────────────
   const tabStats = useMemo(
     () => ({
       all: allStockData.length,
@@ -306,16 +312,16 @@ const CarryStockView = () => {
   // ─── Filtered products for modal based on modalUsedTab ───────────────────
   const getFilteredModalProducts = useCallback(() => {
     if (!selectedMrProducts.length) return [];
-    
+
     if (modalUsedTab === "all") {
       return selectedMrProducts;
     } else if (modalUsedTab === "partial") {
       return selectedMrProducts.filter(
-        (product) => product.usedQty > 0 && product.remainingQty > 0
+        (product) => product.usedQty > 0 && product.remainingQty > 0,
       );
     } else if (modalUsedTab === "full") {
       return selectedMrProducts.filter(
-        (product) => product.assignedQty > 0 && product.remainingQty === 0
+        (product) => product.assignedQty > 0 && product.remainingQty === 0,
       );
     }
     return selectedMrProducts;
@@ -326,10 +332,10 @@ const CarryStockView = () => {
     return {
       all: selectedMrProducts.length,
       partial: selectedMrProducts.filter(
-        (p) => p.usedQty > 0 && p.remainingQty > 0
+        (p) => p.usedQty > 0 && p.remainingQty > 0,
       ).length,
       full: selectedMrProducts.filter(
-        (p) => p.assignedQty > 0 && p.remainingQty === 0
+        (p) => p.assignedQty > 0 && p.remainingQty === 0,
       ).length,
     };
   }, [selectedMrProducts]);
@@ -395,7 +401,7 @@ const CarryStockView = () => {
     }
     setSelectedMr(typeof opt === "string" ? opt : opt.value || "all");
   };
-  
+
   const getMrLabel = () => {
     if (selectedMr === "all") return "All MRs";
     const opt = mrOptions.find(
@@ -403,28 +409,33 @@ const CarryStockView = () => {
     );
     return opt ? opt.label : selectedMr;
   };
-  
+
   const clearDates = () => {
     setCustomStartDate(null);
     setCustomEndDate(null);
     setDateFilter("all");
   };
-  
+
   const handleViewDetails = (s) => {
     setSelectedStock(s);
     setIsViewModalOpen(true);
   };
-  
+
   const handleOpenProductsModal = (grp) => {
     setSelectedMrProducts(grp.products);
     setSelectedMrName(grp.mrName);
-    setModalUsedTab("all"); // Reset modal tab to "all" when opening modal
+    setModalUsedTab("all");
     setIsProductsModalOpen(true);
   };
-  
+
   const handleRefresh = () => {
     setCurrentPage(1);
     fetchStockData();
+  };
+
+  const capitalizeFirstLetter = (string) => {
+    if (!string) return "";
+    return string.charAt(0).toUpperCase() + string.slice(1).toLowerCase();
   };
 
   // ─── Export ───────────────────────────────────────────────────────────────
@@ -522,6 +533,29 @@ const CarryStockView = () => {
     </div>
   );
 
+  // ─── Used Tab Component ───────────────────────────────────────────────────
+  const UsedTabButton = ({ tabKey, label, count, activeTab, setActiveTab }) => (
+    <button
+      onClick={() => setActiveTab(tabKey)}
+      className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg font-medium transition-all duration-200 cursor-pointer ${
+        activeTab === tabKey
+          ? "bg-blue-600 text-white shadow-md"
+          : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+      }`}
+    >
+      {label}
+      <span
+        className={`ml-2 ${isMobileView ? "text-[10px] px-1.5 py-0.5" : "text-xs px-2 py-0.5"} rounded-full ${
+          activeTab === tabKey
+            ? "bg-white text-blue-600"
+            : "bg-gray-400 text-white"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading && currentPage === 1) {
     return (
@@ -534,41 +568,75 @@ const CarryStockView = () => {
     );
   }
 
-  // Get filtered products for modal display
   const filteredModalProducts = getFilteredModalProducts();
 
   return (
-    <div className="p-6">
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* Mobile Header with Hamburger Menu */}
+      {isMobileView && (
+        <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <h1 className="text-sm font-bold text-gray-800">
+              Carry Stock View
+            </h1>
+          </div>
+        </div>
+      )}
+
       <div className="container">
         {/* ── Header ── */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">
-              Carry Stock View
-            </h1>
-            <p className="text-gray-600">View stock assigned to MRs</p>
-          </div>
-          <div className="flex items-center gap-6 flex-wrap justify-end">
-            <div className="flex gap-2">
-              <button
-                onClick={handleRefresh}
-                disabled={loading}
-                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2 cursor-pointer shadow-sm"
-              >
-                <RefreshCw
-                  className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
-                />
-                {loading ? "Loading..." : "Refresh"}
-              </button>
-              <button
-                onClick={handleExport}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 cursor-pointer shadow-sm"
-              >
-                <Download className="w-4 h-4" />
-                Export CSV
-              </button>
+          {!isMobileView && (
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">
+                Carry Stock View
+              </h1>
+              <p className="text-gray-600">View stock assigned to MRs</p>
             </div>
-            <div className="relative w-full md:w-72">
+          )}
+
+          <div className="flex items-center gap-6 flex-wrap justify-end w-full md:w-auto">
+            {/* Desktop: Show both buttons, Mobile: Hide both */}
+            {!isMobileView && (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2 cursor-pointer shadow-sm"
+                >
+                  <RefreshCw
+                    className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                  />
+                  {loading ? "Loading..." : "Refresh"}
+                </button>
+                <button
+                  onClick={handleExport}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 cursor-pointer shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </button>
+              </div>
+            )}
+
+            <div
+              className={`relative ${isMobileView ? "w-full" : "w-full md:w-72"}`}
+            >
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                 size={16}
@@ -580,36 +648,33 @@ const CarryStockView = () => {
                 placeholder="Search by product / MR name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                className={`pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 ${isMobileView ? "text-sm" : ""}`}
               />
             </div>
           </div>
         </div>
 
-        {/* ── Date Filter Tabs ── */}
-        <div className="flex flex-col gap-4 mb-6 mt-4">
-          <div className="flex flex-wrap gap-2">
+        <div className="flex flex-col gap-4 mb-3">
+          <div className="flex flex-wrap gap-3">
             {[
-              { key: "all", label: "All Dates", color: "bg-blue-600" },
-              { key: "today", label: "Today", color: "bg-green-600" },
+              { key: "all", label: "All Dates" },
+              { key: "today", label: "Today" },
               {
                 key: "currentMonth",
-                label: "Current Month",
-                color: "bg-purple-600",
+                label: isMobileView ? "This Month" : "Current Month",
               },
               {
                 key: "yearToDate",
-                label: "Year to Date",
-                color: "bg-orange-600",
+                label: isMobileView ? "YTD" : "Year to Date",
               },
-            ].map(({ key, label, color }) => (
+            ].map(({ key, label }) => (
               <button
                 key={key}
                 onClick={() => setDateFilter(key)}
-                className={`px-4 py-2 rounded-lg transition-colors cursor-pointer ${
+                className={`${isMobileView ? "px-1 py-1 text-[10px]" : "px-4 py-2 text-sm"} rounded-lg mt-4 transition-all duration-200 cursor-pointer ${
                   dateFilter === key
-                    ? `${color} text-white shadow-md`
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    ? "bg-blue-600 text-white shadow-md"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
                 }`}
               >
                 {label}
@@ -617,21 +682,25 @@ const CarryStockView = () => {
             ))}
             <button
               onClick={() => setDateFilter("custom")}
-              className={`px-4 py-2 rounded-lg transition-colors cursor-pointer flex items-center gap-2 ${
+              className={`${isMobileView ? "px-1 py-1 text-[10px]" : "px-4 py-2 text-sm"} rounded-lg mt-4 transition-all duration-200 cursor-pointer flex items-center gap-2 ${
                 dateFilter === "custom"
-                  ? "bg-red-600 text-white shadow-md"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  ? "bg-blue-600 text-white shadow-md"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
               }`}
             >
               <Calendar className="w-4 h-4" />
-              Custom Range
+              {isMobileView ? "Custom" : "Custom Range"}
             </button>
           </div>
 
           {dateFilter === "custom" && (
             <div className="flex flex-wrap items-center gap-4 p-4 bg-gray-50 rounded-lg border">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">From:</span>
+                <span
+                  className={`${isMobileView ? "text-xs" : "text-sm"} font-medium text-gray-700`}
+                >
+                  From:
+                </span>
                 <DatePicker
                   selected={customStartDate}
                   onChange={(d) => {
@@ -643,13 +712,17 @@ const CarryStockView = () => {
                   startDate={customStartDate}
                   endDate={customEndDate}
                   maxDate={new Date()}
-                  className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholderText="Select start date"
+                  className={`border border-gray-300 rounded-lg ${isMobileView ? "px-2 py-1 text-xs" : "px-3 py-2"} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  placeholderText="Start"
                   dateFormat="yyyy-MM-dd"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-700">To:</span>
+                <span
+                  className={`${isMobileView ? "text-xs" : "text-sm"} font-medium text-gray-700`}
+                >
+                  To:
+                </span>
                 <DatePicker
                   selected={customEndDate}
                   onChange={(d) => setCustomEndDate(d)}
@@ -659,15 +732,15 @@ const CarryStockView = () => {
                   minDate={customStartDate}
                   maxDate={new Date()}
                   disabled={!customStartDate}
-                  className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholderText="Select end date"
+                  className={`border border-gray-300 rounded-lg ${isMobileView ? "px-2 py-1 text-xs" : "px-3 py-2"} focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  placeholderText="End"
                   dateFormat="yyyy-MM-dd"
                 />
               </div>
               {(customStartDate || customEndDate) && (
                 <button
                   onClick={clearDates}
-                  className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 cursor-pointer text-sm"
+                  className={`px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 cursor-pointer ${isMobileView ? "text-xs" : "text-sm"}`}
                 >
                   Clear
                 </button>
@@ -675,60 +748,48 @@ const CarryStockView = () => {
             </div>
           )}
 
-          {(dateFilter !== "all" ||
-            selectedMr !== "all" ||
-            searchTerm ||
-            usedTab !== "all") && (
-            <div className="flex items-center gap-2 text-sm text-gray-600 flex-wrap">
-              <Filter className="w-4 h-4" />
-              <span>Active filters:</span>
-              {dateFilter !== "all" && (
-                <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs">
-                  {dateFilter === "today"
-                    ? "Today"
-                    : dateFilter === "currentMonth"
-                      ? "Current Month"
-                      : dateFilter === "yearToDate"
-                        ? "Year to Date"
-                        : "Custom Range"}
-                </span>
-              )}
-              {selectedMr !== "all" && (
-                <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
-                  MR: {getMrLabel()}
-                </span>
-              )}
-              {searchTerm && (
-                <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
-                  Search: {searchTerm}
-                </span>
-              )}
+          {!isMobileView &&
+            (dateFilter !== "all" ||
+              selectedMr !== "all" ||
+              searchTerm ||
+              usedTab !== "all") && (
+              <div className="flex items-center gap-2 text-sm text-gray-600 flex-wrap">
+                <Filter className="w-4 h-4" />
+                {selectedMr !== "all" && (
+                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+                    MR: {getMrLabel()}
+                  </span>
+                )}
+                {searchTerm && (
+                  <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
+                    Search: {searchTerm}
+                  </span>
+                )}
 
-              <button
-                onClick={() => {
-                  setDateFilter("all");
-                  setSelectedMr("all");
-                  setCustomStartDate(null);
-                  setCustomEndDate(null);
-                  setSearchTerm("");
-                  setUsedTab("all");
-                  setCurrentPage(1);
-                }}
-                className="text-blue-600 hover:text-blue-800 underline text-xs"
-              >
-                Clear all
-              </button>
-            </div>
-          )}
+                <button
+                  onClick={() => {
+                    setDateFilter("all");
+                    setSelectedMr("all");
+                    setCustomStartDate(null);
+                    setCustomEndDate(null);
+                    setSearchTerm("");
+                    setUsedTab("all");
+                    setCurrentPage(1);
+                  }}
+                  className="text-blue-600 hover:text-blue-800 underline text-xs"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
         </div>
 
-        {/* ── MR Filter Dropdown ── */}
-        <div className="flex gap-4 mb-6">
-          <div className="flex items-center gap-2 w-full md:w-72">
-            <Filter className="w-5 h-5 text-gray-500 flex-shrink-0" />
-            <div className="w-full">
+        {/* ── MR Filter Dropdown and Clear All in same row (Mobile) ── */}
+        {isMobileView ? (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex-1">
               <SearchableDropdown
-                label="Filter by MR"
+                label="MR"
                 value={
                   selectedMr === "all"
                     ? { value: "all", label: "All MRs" }
@@ -745,11 +806,59 @@ const CarryStockView = () => {
                 showCount={false}
               />
             </div>
+            {(selectedMr !== "all" ||
+              searchTerm ||
+              usedTab !== "all" ||
+              dateFilter !== "all") && (
+              <button
+                onClick={() => {
+                  setDateFilter("all");
+                  setSelectedMr("all");
+                  setCustomStartDate(null);
+                  setCustomEndDate(null);
+                  setSearchTerm("");
+                  setUsedTab("all");
+                  setCurrentPage(1);
+                }}
+                className="px-4 mt-5 py-2 bg-red-500 text-white rounded-lg text-xs font-medium hover:bg-red-600 transition-colors whitespace-nowrap"
+              >
+                Clear All
+              </button>
+            )}
           </div>
-        </div>
+        ) : (
+          <div className="flex gap-4 mb-6">
+            <div className="flex items-center gap-2 w-full md:w-72">
+              <Filter
+                className={`${isMobileView ? "w-4 h-4" : "w-5 h-5"} text-gray-500 flex-shrink-0`}
+              />
+              <div className="w-full">
+                <SearchableDropdown
+                  label={!isMobileView ? "Filter by MR" : "MR"}
+                  value={
+                    selectedMr === "all"
+                      ? { value: "all", label: "All MRs" }
+                      : mrOptions.find((o) => o.value === selectedMr) || {
+                          value: selectedMr,
+                          label: selectedMr,
+                        }
+                  }
+                  onChange={handleMrChange}
+                  options={mrOptions}
+                  placeholder={mrListLoading ? "Loading MRs..." : "Select MR"}
+                  loading={mrListLoading}
+                  className="w-full"
+                  showCount={false}
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Summary ── */}
-        <div className="mb-3 text-sm text-gray-500">
+        <div
+          className={`mb-3 text-gray-500 ${isMobileView ? "text-xs" : "text-sm"}`}
+        >
           Showing {pagedData.length} of {totalCount} MR
           {totalCount !== 1 ? "s" : ""}
           {totalCount > 0 && ` (${allStockData.length} total product records)`}
@@ -760,16 +869,24 @@ const CarryStockView = () => {
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                <th className="p-3 whitespace-nowrap min-w-[180px] text-sm font-medium text-left pl-5">
+                <th
+                  className={`p-3 whitespace-nowrap ${isMobileView ? "min-w-[140px] text-xs" : "min-w-[180px] text-sm"} font-medium text-left pl-5`}
+                >
                   MR Name
                 </th>
-                <th className="p-3 whitespace-nowrap min-w-[140px] text-sm font-medium">
+                <th
+                  className={`p-3 whitespace-nowrap ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[140px] text-sm"} font-medium`}
+                >
                   Products
                 </th>
-                <th className="p-3 whitespace-nowrap min-w-[160px] text-sm font-medium">
+                <th
+                  className={`p-3 whitespace-nowrap ${isMobileView ? "min-w-[120px] text-xs" : "min-w-[160px] text-sm"} font-medium`}
+                >
                   Last Assigned Date
                 </th>
-                <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                <th
+                  className={`p-3 whitespace-nowrap ${isMobileView ? "min-w-[80px] text-xs" : "min-w-[120px] text-sm"} font-medium`}
+                >
                   Actions
                 </th>
               </tr>
@@ -784,10 +901,12 @@ const CarryStockView = () => {
                       </div>
                     ) : (
                       <div>
-                        <div className="text-lg mb-2">
+                        <div
+                          className={`${isMobileView ? "text-sm" : "text-lg"} mb-2`}
+                        >
                           No carry stock records found
                         </div>
-                        <div className="text-sm text-gray-400">
+                        <div className="text-xs text-gray-400">
                           {selectedMr !== "all"
                             ? `No stock for: ${getMrLabel()}`
                             : "Try changing your filters"}
@@ -802,7 +921,9 @@ const CarryStockView = () => {
                     key={mrGroup.mrName}
                     className={`hover:bg-gray-50 ${index < pagedData.length - 1 ? "border-b" : ""}`}
                   >
-                    <td className="p-3 text-left pl-5">
+                    <td
+                      className={`p-3 text-left pl-5 ${isMobileView ? "text-xs" : "text-sm"}`}
+                    >
                       <div className="font-semibold text-gray-900">
                         {mrGroup.mrName}
                       </div>
@@ -810,9 +931,9 @@ const CarryStockView = () => {
                     <td className="p-3">
                       <button
                         onClick={() => handleOpenProductsModal(mrGroup)}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200"
+                        className={`inline-flex items-center gap-2 ${isMobileView ? "px-2 py-1 text-xs" : "px-3 py-1.5"} bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-colors cursor-pointer border border-indigo-200`}
                       >
-                        <Package size={16} />
+                        <Package size={isMobileView ? 12 : 16} />
                         <span className="font-semibold">
                           {mrGroup.products.length}
                         </span>
@@ -823,7 +944,9 @@ const CarryStockView = () => {
                         </span>
                       </button>
                     </td>
-                    <td className="p-3 text-sm text-gray-700">
+                    <td
+                      className={`p-3 ${isMobileView ? "text-xs" : "text-sm"} text-gray-700`}
+                    >
                       {formatDate(mrGroup.lastAssignedDate)}
                     </td>
                     <td className="p-3">
@@ -833,7 +956,7 @@ const CarryStockView = () => {
                           className="text-blue-600 hover:text-blue-800 cursor-pointer p-1 hover:bg-blue-50 rounded"
                           title="View MR Products"
                         >
-                          <Eye size={18} />
+                          <Eye size={isMobileView ? 16 : 18} />
                         </button>
                       </div>
                     </td>
@@ -845,39 +968,50 @@ const CarryStockView = () => {
 
           {totalCount > ROWS_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
-              <div className="text-sm text-gray-600">
+              <div
+                className={`${isMobileView ? "text-xs" : "text-sm"} text-gray-600`}
+              >
                 Page {currentPage} of {totalPages}
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                   disabled={currentPage === 1 || loading}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
                 >
                   ← Prev
                 </button>
-                {visiblePages.map((page, idx) =>
-                  page === "..." ? (
-                    <span key={`e-${idx}`} className="px-3 py-1 text-gray-500">
-                      ...
-                    </span>
-                  ) : (
-                    <button
-                      key={`p-${page}-${idx}`}
-                      onClick={() => setCurrentPage(page)}
-                      disabled={loading}
-                      className={`px-3 py-1 rounded w-10 text-center cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
-                    >
-                      {page}
-                    </button>
-                  ),
+                {!isMobileView ? (
+                  visiblePages.map((page, idx) =>
+                    page === "..." ? (
+                      <span
+                        key={`e-${idx}`}
+                        className="px-3 py-1 text-gray-500"
+                      >
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        key={`p-${page}-${idx}`}
+                        onClick={() => setCurrentPage(page)}
+                        disabled={loading}
+                        className={`px-3 py-1 rounded w-10 text-center cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}
+                      >
+                        {page}
+                      </button>
+                    ),
+                  )
+                ) : (
+                  <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                    Page {currentPage} of {totalPages}
+                  </span>
                 )}
                 <button
                   onClick={() =>
                     setCurrentPage((p) => Math.min(p + 1, totalPages))
                   }
                   disabled={currentPage === totalPages || loading}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
                 >
                   Next →
                 </button>
@@ -887,7 +1021,7 @@ const CarryStockView = () => {
         </div>
 
         {/* ══════════════════════════════════════════════════════════════════
-            PRODUCTS MODAL - FIXED: Now uses modalUsedTab for filtering
+            PRODUCTS MODAL
         ══════════════════════════════════════════════════════════════════ */}
         {isProductsModalOpen &&
           ReactDOM.createPortal(
@@ -905,47 +1039,47 @@ const CarryStockView = () => {
                 </button>
 
                 <div className="mb-5">
-                  <h2 className="text-xl font-semibold text-gray-800">
+                  <h2
+                    className={`${isMobileView ? "text-base" : "text-xl"} font-semibold text-gray-800`}
+                  >
                     Products for MR:{" "}
                     <span className="text-indigo-600">{selectedMrName}</span>
                   </h2>
-                  {/* Modal filter tabs - using modalUsedTab state */}
+
                   <div className="flex flex-wrap gap-2 mt-6 mb-1">
                     {[
                       {
                         key: "all",
                         label: "All",
                         count: modalTabStats.all,
-                        active: "bg-indigo-600 text-white",
-                        badge: "bg-white text-indigo-600",
                       },
                       {
                         key: "partial",
                         label: "Partial Used",
                         count: modalTabStats.partial,
-                        active: "bg-yellow-500 text-white",
-                        badge: "bg-white text-yellow-600",
                       },
                       {
                         key: "full",
                         label: "Full Used",
                         count: modalTabStats.full,
-                        active: "bg-red-600 text-white",
-                        badge: "bg-white text-red-600",
                       },
-                    ].map(({ key, label, count, active, badge }) => (
+                    ].map(({ key, label, count }) => (
                       <button
                         key={key}
-                        onClick={() => setModalUsedTab(key)} // FIX: Using modalUsedTab setter
-                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${
-                          modalUsedTab === key // FIX: Checking modalUsedTab
-                            ? active
-                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        onClick={() => setModalUsedTab(key)}
+                        className={`${isMobileView ? "px-1 py-1.5 text-[10px]" : "px-4 py-2 text-sm"} rounded-lg font-medium transition-all duration-200 cursor-pointer flex items-center gap-2 ${
+                          modalUsedTab === key
+                            ? "bg-blue-600 text-white shadow-md"
+                            : "bg-gray-200 text-gray-700 hover:bg-gray-300"
                         }`}
                       >
                         {label}
                         <span
-                          className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${modalUsedTab === key ? badge : "bg-gray-300 text-gray-700"}`}
+                          className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${
+                            modalUsedTab === key
+                              ? "bg-white text-blue-600"
+                              : "bg-gray-400 text-white"
+                          }`}
                         >
                           {count}
                         </span>
@@ -954,7 +1088,7 @@ const CarryStockView = () => {
                   </div>
                 </div>
 
-                {filteredModalProducts.length === 0 ? ( // FIX: Using filtered products
+                {filteredModalProducts.length === 0 ? (
                   <div className="text-center py-12 text-gray-400">
                     No products found for this filter.
                   </div>
@@ -963,26 +1097,28 @@ const CarryStockView = () => {
                     <table className="w-full text-sm border-collapse">
                       <thead className="bg-gray-100 text-gray-700">
                         <tr>
-                          <th className="px-4 py-3 text-left font-medium">#</th>
-                          <th className="px-4 py-3 text-left font-medium">
+                          <th className="px-4 py-3 text-left font-medium text-xs">
+                            #
+                          </th>
+                          <th className="px-4 py-3 text-left font-medium text-xs">
                             Product Details
                           </th>
-                          <th className="px-4 py-3 text-center font-medium">
+                          <th className="px-4 py-3 text-center font-medium text-xs">
                             Quantity
                           </th>
-                          <th className="px-4 py-3 text-center font-medium">
+                          <th className="px-4 py-3 text-center font-medium text-xs">
                             Utilization
                           </th>
-                          <th className="px-4 py-3 text-center font-medium">
+                          <th className="px-4 py-3 text-center font-medium text-xs">
                             Status
                           </th>
-                          <th className="px-4 py-3 text-center font-medium">
+                          <th className="px-4 py-3 text-center font-medium text-xs">
                             Actions
                           </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredModalProducts.map((product, idx) => { // FIX: Using filtered products
+                        {filteredModalProducts.map((product, idx) => {
                           const assignedQty = product.assignedQty ?? 0;
                           const remainingQty = product.remainingQty ?? 0;
                           const usedQty =
@@ -997,17 +1133,16 @@ const CarryStockView = () => {
                               key={product.id || idx}
                               className={`hover:bg-gray-50 ${idx < filteredModalProducts.length - 1 ? "border-b" : ""}`}
                             >
-                              <td className="px-4 py-3 text-gray-500">
+                              <td className="px-4 py-3 text-gray-500 text-xs">
                                 {idx + 1}
                               </td>
 
                               <td className="px-4 py-3 text-left">
-                                <div className="font-semibold text-gray-900">
-                                  {product.productName}
+                                <div className="font-semibold text-gray-900 text-sm">
+                                  {capitalizeFirstLetter(product.productName)}
                                 </div>
                               </td>
 
-                              {/* Assigned / Remaining / Used */}
                               <td className="px-4 py-3 text-center">
                                 <div className="inline-block text-xs space-y-0.5 min-w-[110px] text-left">
                                   <div className="flex justify-between gap-4">
@@ -1037,12 +1172,10 @@ const CarryStockView = () => {
                                 </div>
                               </td>
 
-                              {/* Utilization bar */}
                               <td className="px-4 py-3 text-center">
                                 <UtilizationBar value={utilization} />
                               </td>
 
-                              {/* Status */}
                               <td className="px-4 py-3 text-center">
                                 <StatusBadge product={product} />
                               </td>
@@ -1071,12 +1204,13 @@ const CarryStockView = () => {
                 )}
 
                 <div className="mt-6 flex justify-between items-center border-t border-gray-200 pt-4">
-                  <div className="text-sm text-gray-500">
-                    Showing {filteredModalProducts.length} of {selectedMrProducts.length} products
+                  <div className="text-xs text-gray-500">
+                    Showing {filteredModalProducts.length} of{" "}
+                    {selectedMrProducts.length} products
                   </div>
                   <button
                     onClick={() => setIsProductsModalOpen(false)}
-                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-5 py-2 rounded-lg cursor-pointer text-sm"
                   >
                     Close
                   </button>
@@ -1103,20 +1237,24 @@ const CarryStockView = () => {
                 >
                   <X size={20} />
                 </button>
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                <h2
+                  className={`${isMobileView ? "text-base" : "text-xl"} font-semibold text-gray-800 mb-4`}
+                >
                   Stock Details
                 </h2>
 
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                  <h3
+                    className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-700 mb-3`}
+                  >
                     MR Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-gray-600">
                         MR Name
                       </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm">
                         {selectedStock?.mrName || "-"}
                       </p>
                     </div>
@@ -1124,24 +1262,26 @@ const CarryStockView = () => {
                 </div>
 
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                  <h3
+                    className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-700 mb-3`}
+                  >
                     Product Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-gray-600">
                         Product Name
                       </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm">
                         {selectedStock?.productName || "-"}
                       </p>
                     </div>
                     {selectedStock?.lc > 0 && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-600">
+                        <label className="block text-xs font-medium text-gray-600">
                           LC Rate
                         </label>
-                        <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm">
                           {selectedStock.lc}
                         </p>
                       </div>
@@ -1150,12 +1290,14 @@ const CarryStockView = () => {
                 </div>
 
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                  <h3
+                    className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-700 mb-3`}
+                  >
                     Stock Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-gray-600">
                         Assigned Quantity
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
@@ -1163,7 +1305,7 @@ const CarryStockView = () => {
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-gray-600">
                         Remaining Quantity
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold text-green-700">
@@ -1171,7 +1313,7 @@ const CarryStockView = () => {
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-gray-600">
                         Used Quantity
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold text-orange-600">
@@ -1184,7 +1326,7 @@ const CarryStockView = () => {
                       </p>
                     </div>
                     <div className="md:col-span-3">
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
                         Utilization
                       </label>
                       <UtilizationBar
@@ -1201,23 +1343,25 @@ const CarryStockView = () => {
                 </div>
 
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                  <h3
+                    className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-700 mb-3`}
+                  >
                     Additional Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-gray-600">
                         Assigned Date
                       </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm">
                         {formatDate(selectedStock?.assignedDate) || "-"}
                       </p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-600">
+                      <label className="block text-xs font-medium text-gray-600">
                         Status
                       </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 text-sm">
                         {selectedStock?.status || "-"}
                       </p>
                     </div>
@@ -1226,14 +1370,16 @@ const CarryStockView = () => {
 
                 {selectedStock?.invoiceNumbers?.length > 0 && (
                   <div className="mb-6">
-                    <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    <h3
+                      className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-700 mb-3`}
+                    >
                       Related Invoices
                     </h3>
                     <div className="flex flex-wrap gap-2">
                       {selectedStock.invoiceNumbers.map((inv, i) => (
                         <span
                           key={i}
-                          className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                          className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs"
                         >
                           {inv}
                         </span>
@@ -1245,7 +1391,7 @@ const CarryStockView = () => {
                 <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
                   <button
                     onClick={() => setIsViewModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer text-sm"
                   >
                     Close
                   </button>

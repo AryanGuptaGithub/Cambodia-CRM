@@ -7,13 +7,15 @@ import {
   ChevronRight as ChevronRightIcon,
   Edit,
   RotateCcw,
+  Menu,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Custom Dropdown Component
+// Custom Dropdown Component - Made responsive
 const CustomDropdown = ({
   value,
   onChange,
@@ -42,18 +44,21 @@ const CustomDropdown = ({
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full border border-gray-300 rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center ${
-          disabled
+        className={`w-full border border-gray-300 rounded-md px-2 py-1.5 md:px-3 md:py-2 text-left focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center text-sm md:text-base ${disabled
             ? "cursor-not-allowed opacity-60"
             : "cursor-pointer hover:border-gray-400"
-        } ${!value ? "text-gray-500" : "text-gray-900"}`}
+          } ${!value ? "text-gray-500" : "text-gray-900"}`}
       >
-        <span className="truncate">
+        <span className="truncate text-xs md:text-sm">
           {selectedOption ? selectedOption.label : placeholder}
         </span>
         {!disabled && (
           <span className="text-gray-400 flex-shrink-0 ml-2">
-            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            {isOpen ? (
+              <ChevronUp size={14} className="md:w-4 md:h-4" />
+            ) : (
+              <ChevronDown size={14} className="md:w-4 md:h-4" />
+            )}
           </span>
         )}
       </button>
@@ -61,7 +66,7 @@ const CustomDropdown = ({
       {isOpen && !disabled && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
           {options.length === 0 ? (
-            <div className="px-3 py-2 text-gray-500 text-sm">
+            <div className="px-3 py-2 text-gray-500 text-xs md:text-sm">
               No options available
             </div>
           ) : (
@@ -75,13 +80,12 @@ const CustomDropdown = ({
                     setIsOpen(false);
                   }
                 }}
-                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 ${
-                  value === option.value
+                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 text-xs md:text-sm ${value === option.value
                     ? "bg-indigo-100 text-indigo-900 font-medium"
                     : option.disabled
-                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                    : "text-gray-900"
-                } `}
+                      ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      : "text-gray-900"
+                  } `}
               >
                 {option.label}
                 {option.disabled && (
@@ -96,404 +100,7 @@ const CustomDropdown = ({
   );
 };
 
-// EditSequenceModal with UNIQUE SEQUENCE ENFORCEMENT + VISUAL FEEDBACK
-// EditSequenceModal with UNIQUE SEQUENCE ENFORCEMENT + VISUAL FEEDBACK
-// const EditSequenceModal = ({
-//   isOpen,
-//   onClose,
-//   tab,
-//   siblings,
-//   onSave,
-//   onSwap,
-//   onReset,
-// }) => {
-//   const [localSequences, setLocalSequences] = useState({});
-//   const [swapSelections, setSwapSelections] = useState({
-//     firstTab: null,
-//     secondTab: null,
-//   });
-//   const [manualAssignments, setManualAssignments] = useState([]);
-//   const [collectionOfAssignedSequence, setCollectionOfAssignedSequence] = useState(new Set());
-
-//   // Initialize assignments when modal opens
-//   useEffect(() => {
-//     if (isOpen && siblings) {
-//       const initialSequences = {};
-//       const initialAssignments = siblings.map((sibling) => ({
-//         tabId: sibling.tabId,
-//         name: sibling.name,
-//         currentSequence: sibling.virtualSequence,
-//         assignedSequence: sibling.virtualSequence,
-//       }));
-
-//       siblings.forEach((sibling) => {
-//         initialSequences[sibling.tabId] = sibling.virtualSequence;
-//       });
-
-//       setLocalSequences(initialSequences);
-//       setManualAssignments(initialAssignments);
-//       setSwapSelections({ firstTab: null, secondTab: null });
-
-//       // Initialize collection with current sequences
-//       const initialAssigned = new Set(
-//         siblings
-//           .filter(sibling => sibling.virtualSequence !== null && sibling.virtualSequence !== undefined)
-//           .map(sibling => sibling.virtualSequence)
-//       );
-//       setCollectionOfAssignedSequence(initialAssigned);
-//     }
-//   }, [isOpen, siblings]);
-
-//   if (!isOpen) return null;
-
-//   // Generate dropdown options for a specific row (exclude taken sequences)
-//   const getOptionsForRow = (currentTabId) => {
-//     const maxSeq = siblings.length;
-
-//     // Use collectionOfAssignedSequence to determine taken sequences
-//     const takenSequences = new Set(collectionOfAssignedSequence);
-
-//     // Remove current tab's assigned sequence from taken sequences so it can select its own value
-//     const currentAssignment = manualAssignments.find(a => a.tabId === currentTabId);
-//     if (currentAssignment && currentAssignment.assignedSequence) {
-//       takenSequences.delete(currentAssignment.assignedSequence);
-//     }
-
-//     const options = Array.from({ length: maxSeq }, (_, i) => {
-//       const seq = i + 1;
-//       const isTakenByOthers = takenSequences.has(seq);
-
-//       return {
-//         value: seq,
-//         label: seq.toString(),
-//         disabled: isTakenByOthers,
-//       };
-//     });
-
-//     return options;
-//   };
-
-//   const handleSequenceChange = (tabId, newSequence) => {
-//     const seq = parseInt(newSequence, 10);
-
-//     // Update local sequences
-//     setLocalSequences((prev) => ({ ...prev, [tabId]: seq }));
-
-//     // Update manual assignments
-//     setManualAssignments((prev) =>
-//       prev.map((a) => (a.tabId === tabId ? { ...a, assignedSequence: seq } : a))
-//     );
-
-//     // Update collection of assigned sequences
-//     setCollectionOfAssignedSequence(prev => {
-//       const newCollection = new Set(prev);
-
-//       // Remove the old sequence for this tab (if any)
-//       const oldSequence = localSequences[tabId];
-//       if (oldSequence) {
-//         newCollection.delete(oldSequence);
-//       }
-
-//       // Add the new sequence
-//       newCollection.add(seq);
-
-//       return newCollection;
-//     });
-//   };
-
-//   const handleSwapSelectionChange = (field, tabId) => {
-//     setSwapSelections((prev) => ({
-//       ...prev,
-//       [field]: tabId,
-//     }));
-//   };
-
-//   const handleSwap = () => {
-//     if (
-//       swapSelections.firstTab &&
-//       swapSelections.secondTab &&
-//       swapSelections.firstTab !== swapSelections.secondTab
-//     ) {
-//       const t1 = swapSelections.firstTab;
-//       const t2 = swapSelections.secondTab;
-//       const s1 = localSequences[t1];
-//       const s2 = localSequences[t2];
-
-//       setLocalSequences((prev) => ({
-//         ...prev,
-//         [t1]: s2,
-//         [t2]: s1,
-//       }));
-
-//       setManualAssignments((prev) =>
-//         prev.map((a) => {
-//           if (a.tabId === t1) return { ...a, assignedSequence: s2 };
-//           if (a.tabId === t2) return { ...a, assignedSequence: s1 };
-//           return a;
-//         })
-//       );
-
-//       // Update collection for swap
-//       setCollectionOfAssignedSequence(prev => {
-//         const newCollection = new Set(prev);
-//         newCollection.delete(s1);
-//         newCollection.delete(s2);
-//         newCollection.add(s1);
-//         newCollection.add(s2);
-//         return newCollection;
-//       });
-
-//       setSwapSelections({ firstTab: null, secondTab: null });
-//       onSwap([t1, t2]);
-//     }
-//   };
-
-//   const handleSave = () => {
-//     const updates = Object.entries(localSequences).map(
-//       ([tabId, virtualSequence]) => ({
-//         tabId,
-//         virtualSequence,
-//       })
-//     );
-//     onSave(updates);
-//   };
-
-//   const handleReset = () => {
-//     onReset();
-//     onClose();
-//   };
-
-//   const swapTabOptions =
-//     siblings?.map((s) => ({
-//       value: s.tabId,
-//       label: s.name,
-//       disabled: false,
-//     })) || [];
-
-//   return (
-//     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-//       <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[80vh] overflow-y-auto">
-//         <div className="flex justify-between items-center mb-4">
-//           <h3 className="text-lg font-semibold">
-//             Edit Sequences for {tab?.name}'s Group
-//           </h3>
-//           <button
-//             onClick={onClose}
-//             className="text-gray-500 hover:text-gray-700"
-//           >
-//             ×
-//           </button>
-//         </div>
-
-//         {/* Swap Section */}
-//         <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-//           <div className="flex items-center gap-2 mb-3">
-//             <Edit size={20} className="text-yellow-600" />
-//             <h4 className="font-medium text-yellow-800">Swap Sequences</h4>
-//           </div>
-//           <p className="text-sm text-yellow-700 mb-3">
-//             Select two different tabs to swap their sequences
-//           </p>
-//           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-//             <div>
-//               <label className="block text-sm font-medium text-gray-700 mb-1">
-//                 First Tab
-//               </label>
-//               <CustomDropdown
-//                 value={swapSelections.firstTab}
-//                 onChange={(value) =>
-//                   handleSwapSelectionChange("firstTab", value)
-//                 }
-//                 options={swapTabOptions}
-//                 placeholder="Select first tab"
-//                 disabled={false}
-//               />
-//             </div>
-//             <div>
-//               <label className="block text-sm font-medium text-gray-700 mb-1">
-//                 Second Tab
-//               </label>
-//               <CustomDropdown
-//                 value={swapSelections.secondTab}
-//                 onChange={(value) =>
-//                   handleSwapSelectionChange("secondTab", value)
-//                 }
-//                 options={swapTabOptions}
-//                 placeholder="Select second tab"
-//                 disabled={false}
-//               />
-//             </div>
-//           </div>
-
-//           {(swapSelections.firstTab || swapSelections.secondTab) && (
-//             <div className="mb-3 p-3 bg-white border border-gray-200 rounded">
-//               <h5 className="text-sm font-medium text-gray-700 mb-2">
-//                 Selected for Swap:
-//               </h5>
-//               <div className="flex gap-4 text-sm">
-//                 {swapSelections.firstTab && (
-//                   <div>
-//                     <span className="font-medium">First:</span>{" "}
-//                     {
-//                       siblings?.find((s) => s.tabId === swapSelections.firstTab)
-//                         ?.name
-//                     }
-//                     <span className="ml-2 text-gray-500">
-//                       (Current: {localSequences[swapSelections.firstTab]})
-//                     </span>
-//                   </div>
-//                 )}
-//                 {swapSelections.secondTab && (
-//                   <div>
-//                     <span className="font-medium">Second:</span>{" "}
-//                     {
-//                       siblings?.find(
-//                         (s) => s.tabId === swapSelections.secondTab
-//                       )?.name
-//                     }
-//                     <span className="ml-2 text-gray-500">
-//                       (Current: {localSequences[swapSelections.secondTab]})
-//                     </span>
-//                   </div>
-//                 )}
-//               </div>
-//             </div>
-//           )}
-
-//           <button
-//             onClick={handleSwap}
-//             disabled={
-//               !swapSelections.firstTab ||
-//               !swapSelections.secondTab ||
-//               swapSelections.firstTab === swapSelections.secondTab
-//             }
-//             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-//           >
-//             <Edit size={16} />
-//             Swap Selected Tabs
-//           </button>
-//         </div>
-
-//         {/* Manual Sequence Assignment */}
-//         <div className="mb-6">
-//           <h4 className="font-medium mb-3">Manual Sequence Assignment</h4>
-
-//           <div className="mb-4 bg-white border border-gray-200 rounded-lg overflow-hidden">
-//             <table className="min-w-full divide-y divide-gray-200">
-//               <thead className="bg-gray-50">
-//                 <tr>
-//                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-//                     Tab Name
-//                   </th>
-//                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-//                     Current Sequence
-//                   </th>
-//                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-//                     Assigned Sequence
-//                   </th>
-//                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-//                     Select New Sequence
-//                   </th>
-//                 </tr>
-//               </thead>
-//               <tbody className="bg-white divide-y divide-gray-200">
-//                 {manualAssignments.map((assignment) => {
-//                   const rowOptions = getOptionsForRow(assignment.tabId);
-
-//                   return (
-//                     <tr key={assignment.tabId} className="hover:bg-gray-50">
-//                       <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-//                         {assignment.name}
-//                       </td>
-//                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-//                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-//                           {assignment.currentSequence}
-//                         </span>
-//                       </td>
-//                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-//                         <span
-//                           className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-//                             assignment.assignedSequence ===
-//                             assignment.currentSequence
-//                               ? "bg-gray-100 text-gray-800"
-//                               : "bg-green-100 text-green-800"
-//                           }`}
-//                         >
-//                           {assignment.assignedSequence}
-//                           {assignment.assignedSequence !==
-//                             assignment.currentSequence && (
-//                             <span className="ml-1">✓</span>
-//                           )}
-//                         </span>
-//                       </td>
-//                       <td className="px-4 py-3 text-sm text-gray-500">
-//                         <CustomDropdown
-//                           value={assignment.assignedSequence}
-//                           onChange={(value) =>
-//                             handleSequenceChange(assignment.tabId, value)
-//                           }
-//                           options={rowOptions}
-//                           placeholder="Select sequence"
-//                         />
-//                       </td>
-//                     </tr>
-//                   );
-//                 })}
-//               </tbody>
-//             </table>
-//           </div>
-
-//           {/* Legend */}
-//           <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-//             <div className="flex items-center gap-4 text-xs">
-//               <div className="flex items-center gap-1">
-//                 <div className="w-3 h-3 bg-blue-100 border border-blue-300 rounded"></div>
-//                 <span className="text-gray-600">Current Sequence</span>
-//               </div>
-//               <div className="flex items-center gap-1">
-//                 <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div>
-//                 <span className="text-gray-600">Modified Sequence</span>
-//               </div>
-//               <div className="flex items-center gap-1">
-//                 <div className="w-3 h-3 bg-gray-100 border border-gray-300 rounded"></div>
-//                 <span className="text-gray-600">Unchanged Sequence</span>
-//               </div>
-//               <div className="flex items-center gap-1">
-//                 <div className="w-3 h-3 bg-red-100 border border-red-300 rounded"></div>
-//                 <span className="text-gray-600">Taken Sequence (Disabled)</span>
-//               </div>
-//             </div>
-//           </div>
-//         </div>
-
-//         {/* Action Buttons */}
-//         <div className="flex justify-between gap-3">
-//           <button
-//             onClick={handleReset}
-//             className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 flex items-center gap-2"
-//           >
-//             <RotateCcw size={16} />
-//             Reset to Default
-//           </button>
-//           <div className="flex gap-3">
-//             <button
-//               onClick={onClose}
-//               className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-//             >
-//               Cancel
-//             </button>
-//             <button
-//               onClick={handleSave}
-//               className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2"
-//             >
-//               Save Changes
-//             </button>
-//           </div>
-//         </div>
-//       </div>
-//     </div>
-//   );
-// };
+// EditSequenceModal with UNIQUE SEQUENCE ENFORCEMENT + VISUAL FEEDBACK - Made responsive
 const EditSequenceModal = ({
   isOpen,
   onClose,
@@ -509,10 +116,9 @@ const EditSequenceModal = ({
     secondTab: null,
   });
   const [manualAssignments, setManualAssignments] = useState([]);
-  const [assignedSequences, setAssignedSequences] = useState(new Set()); // Track assigned sequences
-  const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false); // Track if user made any changes
+  const [assignedSequences, setAssignedSequences] = useState(new Set());
+  const [hasUserMadeChanges, setHasUserMadeChanges] = useState(false);
 
-  // Initialize assignments when modal opens
   useEffect(() => {
     if (isOpen && siblings) {
       const initialSequences = {};
@@ -520,7 +126,7 @@ const EditSequenceModal = ({
         tabId: sibling.tabId,
         name: sibling.name,
         currentSequence: sibling.virtualSequence,
-        assignedSequence: sibling.virtualSequence, // Start with current sequence
+        assignedSequence: sibling.virtualSequence,
       }));
 
       siblings.forEach((sibling) => {
@@ -531,37 +137,31 @@ const EditSequenceModal = ({
       setManualAssignments(initialAssignments);
       setSwapSelections({ firstTab: null, secondTab: null });
       setHasUserMadeChanges(false);
-
-      // Start with empty assigned sequences - only track user changes
       setAssignedSequences(new Set());
     }
   }, [isOpen, siblings]);
 
   if (!isOpen) return null;
 
-  // Generate dropdown options for a specific row (exclude taken sequences)
   const getOptionsForRow = (currentTabId) => {
     const maxSeq = siblings.length;
 
-    // Get current assignment for this tab
     const currentAssignment = manualAssignments.find(
-      (a) => a.tabId === currentTabId
+      (a) => a.tabId === currentTabId,
     );
     const currentAssignedSequence = currentAssignment?.assignedSequence;
 
-    // Create a set of sequences that are already assigned to OTHER tabs
     const sequencesTakenByOthers = new Set(
       manualAssignments
         .filter(
           (a) =>
             a.tabId !== currentTabId &&
             a.assignedSequence !== null &&
-            a.assignedSequence !== undefined
+            a.assignedSequence !== undefined,
         )
-        .map((a) => a.assignedSequence)
+        .map((a) => a.assignedSequence),
     );
 
-    // Also include sequences from the assignedSequences set that are from user changes
     assignedSequences.forEach((seq) => {
       if (seq !== currentAssignedSequence) {
         sequencesTakenByOthers.add(seq);
@@ -570,16 +170,14 @@ const EditSequenceModal = ({
 
     const options = Array.from({ length: maxSeq }, (_, i) => {
       const seq = i + 1;
-
-      // Sequence is taken if it's assigned to another tab AND it's not the current tab's current assignment
       const isTaken =
         sequencesTakenByOthers.has(seq) && seq !== currentAssignedSequence;
 
       return {
         value: seq,
         label: seq.toString(),
-        disabled: false, // Always enable all options
-        taken: isTaken, // Mark if taken for styling
+        disabled: false,
+        taken: isTaken,
       };
     });
 
@@ -589,9 +187,8 @@ const EditSequenceModal = ({
   const handleSequenceChange = (tabId, newSequence) => {
     const seq = parseInt(newSequence, 10);
     const oldSequence = localSequences[tabId];
-    // Check if this sequence is already assigned to another tab
     const isSequenceTaken = manualAssignments.some(
-      (a) => a.tabId !== tabId && a.assignedSequence === seq
+      (a) => a.tabId !== tabId && a.assignedSequence === seq,
     );
 
     if (isSequenceTaken) {
@@ -602,58 +199,45 @@ const EditSequenceModal = ({
 
       setManualAssignments((prev) => {
         const updated = prev.map((a) =>
-          a.tabId === tabId ? { ...a, assignedSequence: null } : a
+          a.tabId === tabId ? { ...a, assignedSequence: null } : a,
         );
         return updated;
       });
 
-      // Remove from assigned sequences if it was there
       setAssignedSequences((prev) => {
         const newSet = new Set(prev);
-
         if (oldSequence) {
           newSet.delete(oldSequence);
         }
-
         return newSet;
       });
     } else {
-      // Update local sequences
       setLocalSequences((prev) => {
         const updated = { ...prev, [tabId]: seq };
         return updated;
       });
 
-      // Update manual assignments
       setManualAssignments((prev) => {
         const updated = prev.map((a) =>
-          a.tabId === tabId ? { ...a, assignedSequence: seq } : a
+          a.tabId === tabId ? { ...a, assignedSequence: seq } : a,
         );
-
         return updated;
       });
 
-      // Update assigned sequences set - only track user-assigned sequences
       setAssignedSequences((prev) => {
         const newSet = new Set(prev);
-
         if (oldSequence && oldSequence !== seq) {
           newSet.delete(oldSequence);
         }
-
-        // Add the new sequence (only if it's different from the original)
         const originalAssignment = manualAssignments.find(
-          (a) => a.tabId === tabId
+          (a) => a.tabId === tabId,
         )?.currentSequence;
-
         if (seq && seq !== originalAssignment) {
           newSet.add(seq);
         }
-
         return newSet;
       });
     }
-
     setHasUserMadeChanges(true);
   };
 
@@ -675,42 +259,32 @@ const EditSequenceModal = ({
       const s1 = localSequences[t1];
       const s2 = localSequences[t2];
 
-      // Update local sequences
       setLocalSequences((prev) => ({
         ...prev,
         [t1]: s2,
         [t2]: s1,
       }));
 
-      // Update manual assignments
       setManualAssignments((prev) =>
         prev.map((a) => {
           if (a.tabId === t1) return { ...a, assignedSequence: s2 };
           if (a.tabId === t2) return { ...a, assignedSequence: s1 };
           return a;
-        })
+        }),
       );
 
-      // Update assigned sequences for swap
       setAssignedSequences((prev) => {
         const newSet = new Set(prev);
-
-        // For swap, we need to check if these sequences were user-assigned
         const t1Original = manualAssignments.find(
-          (a) => a.tabId === t1
+          (a) => a.tabId === t1,
         )?.currentSequence;
         const t2Original = manualAssignments.find(
-          (a) => a.tabId === t2
+          (a) => a.tabId === t2,
         )?.currentSequence;
-
-        // Remove old assignments if they were user-assigned
         if (s1 !== t1Original) newSet.delete(s1);
         if (s2 !== t2Original) newSet.delete(s2);
-
-        // Add new assignments if they differ from original
         if (s2 !== t1Original) newSet.add(s2);
         if (s1 !== t2Original) newSet.add(s1);
-
         return newSet;
       });
 
@@ -725,7 +299,7 @@ const EditSequenceModal = ({
       ([tabId, virtualSequence]) => ({
         tabId,
         virtualSequence,
-      })
+      }),
     );
     onSave(updates);
   };
@@ -743,32 +317,34 @@ const EditSequenceModal = ({
     })) || [];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[80vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 md:p-4">
+      <div className="bg-white rounded-lg p-3 md:p-6 w-full max-w-[95%] md:max-w-4xl max-h-[90vh] md:max-h-[80vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-3 md:mb-4">
+          <h3 className="text-base md:text-lg font-semibold">
             Edit Sequences for {tab?.name}'s Group
           </h3>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
+            className="text-gray-500 hover:text-gray-700 text-xl md:text-2xl"
           >
             ×
           </button>
         </div>
 
-        {/* Swap Section */}
-        <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <div className="flex items-center gap-2 mb-3">
-            <Edit size={20} className="text-yellow-600" />
-            <h4 className="font-medium text-yellow-800">Swap Sequences</h4>
+        {/* Swap Section - Responsive */}
+        <div className="mb-4 md:mb-6 p-3 md:p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <div className="flex items-center gap-2 mb-2 md:mb-3">
+            <Edit size={16} className="md:w-5 md:h-5 text-yellow-600" />
+            <h4 className="font-medium text-yellow-800 text-sm md:text-base">
+              Swap Sequences
+            </h4>
           </div>
-          <p className="text-sm text-yellow-700 mb-3">
+          <p className="text-xs md:text-sm text-yellow-700 mb-2 md:mb-3">
             Select two different tabs to swap their sequences
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 mb-3 md:mb-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1">
                 First Tab
               </label>
               <CustomDropdown
@@ -782,7 +358,7 @@ const EditSequenceModal = ({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1">
                 Second Tab
               </label>
               <CustomDropdown
@@ -798,11 +374,11 @@ const EditSequenceModal = ({
           </div>
 
           {(swapSelections.firstTab || swapSelections.secondTab) && (
-            <div className="mb-3 p-3 bg-white border border-gray-200 rounded">
-              <h5 className="text-sm font-medium text-gray-700 mb-2">
+            <div className="mb-2 md:mb-3 p-2 md:p-3 bg-white border border-gray-200 rounded">
+              <h5 className="text-xs md:text-sm font-medium text-gray-700 mb-1 md:mb-2">
                 Selected for Swap:
               </h5>
-              <div className="flex gap-4 text-sm">
+              <div className="flex flex-wrap gap-2 md:gap-4 text-xs md:text-sm">
                 {swapSelections.firstTab && (
                   <div>
                     <span className="font-medium">First:</span>{" "}
@@ -810,7 +386,7 @@ const EditSequenceModal = ({
                       siblings?.find((s) => s.tabId === swapSelections.firstTab)
                         ?.name
                     }
-                    <span className="ml-2 text-gray-500">
+                    <span className="ml-1 md:ml-2 text-gray-500">
                       (Current: {localSequences[swapSelections.firstTab]})
                     </span>
                   </div>
@@ -820,10 +396,10 @@ const EditSequenceModal = ({
                     <span className="font-medium">Second:</span>{" "}
                     {
                       siblings?.find(
-                        (s) => s.tabId === swapSelections.secondTab
+                        (s) => s.tabId === swapSelections.secondTab,
                       )?.name
                     }
-                    <span className="ml-2 text-gray-500">
+                    <span className="ml-1 md:ml-2 text-gray-500">
                       (Current: {localSequences[swapSelections.secondTab]})
                     </span>
                   </div>
@@ -839,19 +415,21 @@ const EditSequenceModal = ({
               !swapSelections.secondTab ||
               swapSelections.firstTab === swapSelections.secondTab
             }
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-3 py-1.5 md:px-4 md:py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2 text-sm md:text-base"
           >
-            <Edit size={16} />
+            <Edit size={14} className="md:w-4 md:h-4" />
             Swap Selected Tabs
           </button>
         </div>
 
-        {/* Manual Sequence Assignment */}
-        <div className="mb-6">
-          <h4 className="font-medium mb-3">Manual Sequence Assignment</h4>
+        {/* Manual Sequence Assignment - Responsive Table */}
+        <div className="mb-4 md:mb-6">
+          <h4 className="font-medium mb-2 md:mb-3 text-sm md:text-base">
+            Manual Sequence Assignment
+          </h4>
 
-          {/* Debug Info - You can remove this in production */}
-          <div className="mb-2 p-2 bg-gray-100 rounded text-xs">
+          {/* Debug Info - Hidden on mobile, visible on desktop */}
+          <div className="hidden md:block mb-2 p-2 bg-gray-100 rounded text-xs">
             <strong>User-Assigned Sequences:</strong>{" "}
             {Array.from(assignedSequences)
               .sort((a, b) => a - b)
@@ -861,7 +439,71 @@ const EditSequenceModal = ({
             )}
           </div>
 
-          <div className="mb-4 bg-white border border-gray-200 rounded-lg overflow-hidden">
+          {/* Mobile View - Card Layout */}
+          <div className="block md:hidden space-y-3 mb-4">
+            {manualAssignments.map((assignment) => {
+              const rowOptions = getOptionsForRow(assignment.tabId);
+              const isUserModified =
+                assignment.assignedSequence !== assignment.currentSequence;
+
+              return (
+                <div
+                  key={assignment.tabId}
+                  className="bg-white border border-gray-200 rounded-lg p-3"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="font-medium text-gray-900 text-sm">
+                      {assignment.name}
+                    </div>
+                    <span
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${assignment.assignedSequence ===
+                          assignment.currentSequence
+                          ? "bg-gray-100 text-gray-800"
+                          : assignment.assignedSequence === null
+                            ? "bg-red-100 text-red-800"
+                            : "bg-green-100 text-green-800"
+                        }`}
+                    >
+                      {assignment.assignedSequence === null
+                        ? "Not set"
+                        : assignment.assignedSequence}
+                      {isUserModified &&
+                        assignment.assignedSequence !== null && (
+                          <span className="ml-1">✓</span>
+                        )}
+                      {assignment.assignedSequence === null && (
+                        <span className="ml-1">⚠️</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-2 text-xs">
+                    <div>
+                      <span className="text-gray-500">Current Sequence:</span>
+                      <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 ml-2">
+                        {assignment.currentSequence}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-gray-500">Select New:</span>
+                      <div className="mt-1">
+                        <CustomDropdown
+                          value={assignment.assignedSequence}
+                          onChange={(value) =>
+                            handleSequenceChange(assignment.tabId, value)
+                          }
+                          options={rowOptions}
+                          placeholder="Select"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop View - Table Layout */}
+          <div className="hidden md:block mb-4 bg-white border border-gray-200 rounded-lg overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -897,13 +539,12 @@ const EditSequenceModal = ({
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                         <span
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            !isUserModified
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${!isUserModified
                               ? "bg-gray-100 text-gray-800"
                               : assignment.assignedSequence === null
-                              ? "bg-red-100 text-red-800"
-                              : "bg-green-100 text-green-800"
-                          }`}
+                                ? "bg-red-100 text-red-800"
+                                : "bg-green-100 text-green-800"
+                            }`}
                         >
                           {assignment.assignedSequence === null
                             ? "Not set"
@@ -934,53 +575,52 @@ const EditSequenceModal = ({
             </table>
           </div>
 
-          {/* Legend */}
-          <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-            <div className="flex items-center gap-4 text-xs">
+          {/* Legend - Responsive */}
+          <div className="bg-gray-50 p-2 md:p-3 rounded-lg border border-gray-200">
+            <div className="flex flex-wrap items-center gap-2 md:gap-4 text-xs">
               <div className="flex items-center gap-1">
-                <div className="w-3 h-3 bg-blue-100 border border-blue-300 rounded"></div>
-                <span className="text-gray-600">Current Sequence</span>
+                <div className="w-2 h-2 md:w-3 md:h-3 bg-blue-100 border border-blue-300 rounded"></div>
+                <span className="text-gray-600 text-xs">Current</span>
               </div>
               <div className="flex items-center gap-1">
-                <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div>
-                <span className="text-gray-600">Modified Sequence</span>
+                <div className="w-2 h-2 md:w-3 md:h-3 bg-green-100 border border-green-300 rounded"></div>
+                <span className="text-gray-600 text-xs">Modified</span>
               </div>
               <div className="flex items-center gap-1">
-                <div className="w-3 h-3 bg-gray-100 border border-gray-300 rounded"></div>
-                <span className="text-gray-600">Unchanged Sequence</span>
+                <div className="w-2 h-2 md:w-3 md:h-3 bg-gray-100 border border-gray-300 rounded"></div>
+                <span className="text-gray-600 text-xs">Unchanged</span>
               </div>
               <div className="flex items-center gap-1">
-                <div className="w-3 h-3 bg-red-100 border border-red-300 rounded"></div>
-                <span className="text-gray-600">Taken Sequence (Not Set)</span>
+                <div className="w-2 h-2 md:w-3 md:h-3 bg-red-100 border border-red-300 rounded"></div>
+                <span className="text-gray-600 text-xs">Not Set</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex justify-between gap-3">
+        {/* Action Buttons - Responsive */}
+        <div className="flex flex-col-reverse sm:flex-row justify-between gap-2 md:gap-3">
           <button
             onClick={handleReset}
-            className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 flex items-center gap-2"
+            className="px-3 py-1.5 md:px-4 md:py-2 bg-gray-500 text-white rounded hover:bg-gray-600 flex items-center justify-center gap-2 text-sm md:text-base"
           >
-            <RotateCcw size={16} />
+            <RotateCcw size={14} className="md:w-4 md:h-4" />
             Reset to Default
           </button>
-          <div className="flex gap-3">
+          <div className="flex gap-2 md:gap-3">
             <button
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
+              className="px-3 py-1.5 md:px-4 md:py-2 border border-gray-300 rounded hover:bg-gray-50 text-sm md:text-base"
             >
               Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={!hasUserMadeChanges}
-              className={`px-4 py-2 rounded hover:bg-green-700 flex items-center gap-2 ${
-                hasUserMadeChanges
+              className={`px-3 py-1.5 md:px-4 md:py-2 rounded hover:bg-green-700 flex items-center gap-2 text-sm md:text-base ${hasUserMadeChanges
                   ? "bg-green-600 text-white cursor-pointer"
                   : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
-              }`}
+                }`}
             >
               Save Changes
             </button>
@@ -1002,11 +642,21 @@ const HTabsManipulation = () => {
   const [initialized, setInitialized] = useState(false);
   const [editModal, setEditModal] = useState({ isOpen: false, tab: null });
 
-  // Find any tab with the target sequence in the same parent group
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
   const findTabWithSequence = (
     tabsArray,
     targetSequence,
-    currentParentId = null
+    currentParentId = null,
   ) => {
     for (const tab of tabsArray) {
       const tabParentId = tab.parentTabId || "root";
@@ -1021,7 +671,7 @@ const HTabsManipulation = () => {
         const found = findTabWithSequence(
           tab.children,
           targetSequence,
-          currentParentId
+          currentParentId,
         );
         if (found) return found;
       }
@@ -1029,7 +679,6 @@ const HTabsManipulation = () => {
     return null;
   };
 
-  // Build hierarchy from sequence data
   const buildHierarchyFromSequenceData = (sequenceData) => {
     if (!sequenceData || !sequenceData.data?.groups) return [];
     const allTabs = [];
@@ -1078,7 +727,7 @@ const HTabsManipulation = () => {
   const calculateParentCheckboxState = (children) => {
     if (!children || children.length === 0) return false;
     const visibleChildren = children.filter(
-      (child) => child.isVisible === true
+      (child) => child.isVisible === true,
     );
     if (visibleChildren.length === 0) {
       return false;
@@ -1096,7 +745,7 @@ const HTabsManipulation = () => {
         const parentCheckboxState =
           calculateParentCheckboxState(updatedChildren);
         const hasAnyVisibleChild = updatedChildren.some(
-          (child) => child.isVisible === true
+          (child) => child.isVisible === true,
         );
         return {
           ...tab,
@@ -1114,7 +763,7 @@ const HTabsManipulation = () => {
       setLoading(true);
       if (selectedReportType === "Hide/Show Tabs") {
         const visibleResponse = await axios.get(
-          `${backendUrl}/api/h-tabs/visible`
+          `${backendUrl}/api/h-tabs/visible`,
         );
         let visibilityMap = {};
         if (
@@ -1133,7 +782,7 @@ const HTabsManipulation = () => {
           });
         }
         const hierarchyResponse = await axios.get(
-          `${backendUrl}/api/h-tabs/hierarchy`
+          `${backendUrl}/api/h-tabs/hierarchy`,
         );
         let hierarchyData = [];
         if (hierarchyResponse.data.success) {
@@ -1170,14 +819,14 @@ const HTabsManipulation = () => {
         setTabHierarchy(hierarchyWithParentStates);
       } else {
         const sequenceResponse = await axios.get(
-          `${backendUrl}/api/h-tabs/virtual-sequences`
+          `${backendUrl}/api/h-tabs/virtual-sequences`,
         );
         if (
           sequenceResponse.data?.success &&
           sequenceResponse.data?.data?.groups
         ) {
           const sequenceHierarchy = buildHierarchyFromSequenceData(
-            sequenceResponse.data
+            sequenceResponse.data,
           );
           setTabHierarchy(sequenceHierarchy);
         }
@@ -1198,7 +847,7 @@ const HTabsManipulation = () => {
     };
     if (tab.children && tab.children.length > 0) {
       updatedTab.children = tab.children.map((child) =>
-        updateAllChildrenVisibility(child, isVisible)
+        updateAllChildrenVisibility(child, isVisible),
       );
     }
     return updatedTab;
@@ -1208,7 +857,7 @@ const HTabsManipulation = () => {
     if (selectedReportType !== "Hide/Show Tabs") {
       showToast(
         "warning",
-        "Parent toggle is only available in Hide/Show Tabs mode"
+        "Parent toggle is only available in Hide/Show Tabs mode",
       );
       return;
     }
@@ -1259,13 +908,13 @@ const HTabsManipulation = () => {
             updates: allUpdates,
             timestamp: Date.now(),
           },
-        })
+        }),
       );
       localStorage.setItem("tabVisibilityUpdated", Date.now().toString());
       sessionStorage.setItem("forceSidebarRefresh", Date.now().toString());
       showToast(
         "success",
-        `${parentTab.name} and ALL child tabs ${isVisible ? "shown" : "hidden"}`
+        `${parentTab.name} and ALL child tabs ${isVisible ? "shown" : "hidden"}`,
       );
     } catch (error) {
       showToast("error", "Failed to update parent tab visibility");
@@ -1277,7 +926,7 @@ const HTabsManipulation = () => {
     if (selectedReportType !== "Hide/Show Tabs") {
       showToast(
         "warning",
-        "Tab visibility toggle is only available in Hide/Show Tabs mode"
+        "Tab visibility toggle is only available in Hide/Show Tabs mode",
       );
       return;
     }
@@ -1319,13 +968,13 @@ const HTabsManipulation = () => {
             updates: updatePayload,
             timestamp: Date.now(),
           },
-        })
+        }),
       );
       localStorage.setItem("tabVisibilityUpdated", Date.now().toString());
       sessionStorage.setItem("forceSidebarRefresh", Date.now().toString());
       showToast(
         "success",
-        `${childTab.name} ${isVisible ? "shown" : "hidden"}`
+        `${childTab.name} ${isVisible ? "shown" : "hidden"}`,
       );
     } catch (error) {
       showToast("error", "Failed to update child tab visibility");
@@ -1333,7 +982,6 @@ const HTabsManipulation = () => {
     }
   };
 
-  // Get siblings for a tab (only tabs with same parent)
   const getSiblingsForTab = (tab, tabsArray) => {
     const parentId = tab.parentTabId || "root";
     const findSiblings = (tabs, targetParentId) => {
@@ -1346,7 +994,7 @@ const HTabsManipulation = () => {
         if (currentTab.children && currentTab.children.length > 0) {
           const childSiblings = findSiblings(
             currentTab.children,
-            targetParentId
+            targetParentId,
           );
           siblings = siblings.concat(childSiblings);
         }
@@ -1356,7 +1004,6 @@ const HTabsManipulation = () => {
     return findSiblings(tabsArray, parentId);
   };
 
-  // Handle sequence updates from modal
   const handleSequenceUpdates = async (updates) => {
     try {
       setSequenceLoading(true);
@@ -1364,7 +1011,7 @@ const HTabsManipulation = () => {
         `${backendUrl}/api/h-tabs/virtual-sequence`,
         {
           updates: updates,
-        }
+        },
       );
       if (updateResponse.data.success) {
         showToast("success", "Sequences updated successfully");
@@ -1373,7 +1020,7 @@ const HTabsManipulation = () => {
       } else {
         showToast(
           "error",
-          updateResponse.data.message || "Failed to update sequences"
+          updateResponse.data.message || "Failed to update sequences",
         );
       }
     } catch (error) {
@@ -1386,7 +1033,6 @@ const HTabsManipulation = () => {
     }
   };
 
-  // Handle swap from modal
   const handleSwap = async (tabIds) => {
     if (tabIds.length === 2) {
       try {
@@ -1396,7 +1042,7 @@ const HTabsManipulation = () => {
           {
             tabId1: tabIds[0],
             tabId2: tabIds[1],
-          }
+          },
         );
         if (swapResponse.data.success) {
           showToast("success", "Sequences swapped successfully");
@@ -1404,7 +1050,7 @@ const HTabsManipulation = () => {
         } else {
           showToast(
             "error",
-            swapResponse.data.message || "Failed to swap sequences"
+            swapResponse.data.message || "Failed to swap sequences",
           );
         }
       } catch (error) {
@@ -1418,7 +1064,6 @@ const HTabsManipulation = () => {
     }
   };
 
-  // Handle reset to default for sequences
   const handleResetSequences = async () => {
     try {
       setSequenceLoading(true);
@@ -1432,52 +1077,54 @@ const HTabsManipulation = () => {
     }
   };
 
-  // Open edit modal
   const openEditModal = (tab) => {
     setEditModal({ isOpen: true, tab });
   };
 
-  // Close edit modal
   const closeEditModal = () => {
     setEditModal({ isOpen: false, tab: null });
   };
 
+  // Responsive Hide/Show Tab Hierarchy
   const renderHideShowTabHierarchy = (tabsArray, level = 0) => {
     if (!tabsArray || tabsArray.length === 0) {
       return (
-        <div className="text-center py-6 text-gray-500">
-          <EyeOff size={32} className="mx-auto mb-2 text-gray-400" />
-          <p>No tabs available</p>
+        <div className="text-center py-4 md:py-6 text-gray-500">
+          <EyeOff
+            size={24}
+            className="md:w-8 md:h-8 mx-auto mb-1 md:mb-2 text-gray-400"
+          />
+          <p className="text-sm md:text-base">No tabs available</p>
         </div>
       );
     }
     return tabsArray.map((tab) => {
       const isParent = tab.children && tab.children.length > 0;
       const checkboxState = isParent ? tab._checkboxState : tab.isVisible;
+      const marginLeft = level === 0 ? "ml-0" : "ml-4 md:ml-6";
+
       return (
-        <div key={tab._id || tab.tabId} className="mb-1">
+        <div key={tab._id || tab.tabId} className="mb-1 md:mb-2">
           <div
-            className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-200 group ${
-              level === 0
+            className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg transition-all duration-200 group ${level === 0
                 ? "bg-white border border-gray-300 shadow-sm hover:shadow-md"
                 : "bg-gray-50 border border-gray-200 hover:bg-gray-100"
-            } ${!tab.isVisible ? "opacity-70 bg-gray-100" : ""}`}
-            style={{ marginLeft: `${level * 24}px` }}
+              } ${!tab.isVisible ? "opacity-70 bg-gray-100" : ""} ${marginLeft}`}
           >
             {isParent ? (
               <button
                 onClick={() => toggleExpand(tab.tabId)}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 transition-colors flex-shrink-0"
+                className="flex items-center justify-center w-5 h-5 md:w-6 md:h-6 rounded hover:bg-gray-200 transition-colors flex-shrink-0"
                 title={expandedTabs[tab.tabId] ? "Collapse" : "Expand"}
               >
                 {expandedTabs[tab.tabId] ? (
-                  <ChevronDown size={16} />
+                  <ChevronDown size={14} className="md:w-4 md:h-4" />
                 ) : (
-                  <ChevronRightIcon size={16} />
+                  <ChevronRightIcon size={14} className="md:w-4 md:h-4" />
                 )}
               </button>
             ) : (
-              <div className="w-6 h-6 flex items-center justify-center">
+              <div className="w-5 h-5 md:w-6 md:h-6 flex items-center justify-center">
                 <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
               </div>
             )}
@@ -1499,59 +1146,57 @@ const HTabsManipulation = () => {
                   handleChildTabToggle(tab, newValue);
                 }
               }}
-              className="w-4 h-4 cursor-pointer text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              className="w-3.5 h-3.5 md:w-4 md:h-4 cursor-pointer text-blue-600 focus:ring-blue-500 border-gray-300 rounded flex-shrink-0"
               id={`checkbox-${tab.tabId}`}
             />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 md:gap-2 flex-wrap">
                 <label
                   htmlFor={`checkbox-${tab.tabId}`}
-                  className={`font-semibold truncate cursor-pointer ${
-                    level === 0
-                      ? "text-gray-900 text-base"
-                      : "text-gray-800 text-sm"
-                  } ${!tab.isVisible ? "text-gray-500" : ""}`}
+                  className={`font-semibold truncate cursor-pointer text-sm md:text-base ${level === 0 ? "text-gray-900" : "text-gray-800"
+                    } ${!tab.isVisible ? "text-gray-500" : ""}`}
                 >
                   {tab.name}
                 </label>
                 {isParent && (
-                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] md:text-xs bg-purple-100 text-purple-700 px-1.5 md:px-2 py-0.5 rounded-full">
                     {tab.children.length} children
                   </span>
                 )}
                 {checkboxState === "indeterminate" && (
-                  <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] md:text-xs bg-yellow-100 text-yellow-700 px-1.5 md:px-2 py-0.5 rounded-full">
                     Partial
                   </span>
                 )}
               </div>
               {tab.description && (
                 <div
-                  className={`text-sm mt-1 ${
-                    !tab.isVisible ? "text-gray-400" : "text-gray-600"
-                  } line-clamp-2`}
+                  className={`text-xs md:text-sm mt-0.5 md:mt-1 ${!tab.isVisible ? "text-gray-400" : "text-gray-600"
+                    } line-clamp-1 md:line-clamp-2`}
                 >
                   {tab.description}
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
               <span
-                className={`px-3 py-1 text-xs font-medium rounded-full border ${
-                  tab.isVisible
+                className={`px-2 md:px-3 py-0.5 md:py-1 text-[10px] md:text-xs font-medium rounded-full border ${tab.isVisible
                     ? "bg-green-50 text-green-700 border-green-200"
                     : "bg-red-50 text-red-700 border-red-200"
-                }`}
+                  }`}
               >
-                {tab.isVisible ? (
-                  <span className="flex items-center gap-1">
-                    <Eye size={12} /> Visible
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1">
-                    <EyeOff size={12} /> Hidden
-                  </span>
-                )}
+                <span className="hidden sm:inline-flex items-center gap-1">
+                  {tab.isVisible ? (
+                    <>
+                      <Eye size={10} className="md:w-3 md:h-3" /> Visible
+                    </>
+                  ) : (
+                    <>
+                      <EyeOff size={10} className="md:w-3 md:h-3" /> Hidden
+                    </>
+                  )}
+                </span>
+                <span className="sm:hidden">{tab.isVisible ? "V" : "H"}</span>
               </span>
             </div>
           </div>
@@ -1565,85 +1210,87 @@ const HTabsManipulation = () => {
     });
   };
 
-  // Recursive function to render sequence hierarchy
+  // Responsive Sequence Number Hierarchy
   const renderSequenceNumberHierarchy = (tabsArray, level = 0) => {
     if (!tabsArray || tabsArray.length === 0) {
       return (
-        <div className="text-center py-6 text-gray-500">
-          <EyeOff size={32} className="mx-auto mb-2 text-gray-400" />
-          <p>No tabs available for sequence management</p>
+        <div className="text-center py-4 md:py-6 text-gray-500">
+          <EyeOff
+            size={24}
+            className="md:w-8 md:h-8 mx-auto mb-1 md:mb-2 text-gray-400"
+          />
+          <p className="text-sm md:text-base">
+            No tabs available for sequence management
+          </p>
         </div>
       );
     }
     return tabsArray.map((tab) => {
       const isParent = tab.children && tab.children.length > 0;
+      const marginLeft = level === 0 ? "ml-0" : "ml-4 md:ml-6";
+
       return (
-        <div key={tab._id || tab.tabId} className="mb-1">
+        <div key={tab._id || tab.tabId} className="mb-1 md:mb-2">
           <div
-            className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-200 group ${
-              level === 0
+            className={`flex items-center gap-2 md:gap-3 p-2 md:p-3 rounded-lg transition-all duration-200 group ${level === 0
                 ? "bg-white border border-gray-300 shadow-sm hover:shadow-md"
                 : "bg-gray-50 border border-gray-200 hover:bg-gray-100"
-            }`}
-            style={{ marginLeft: `${level * 24}px` }}
+              } ${marginLeft}`}
           >
             {isParent ? (
               <button
                 onClick={() => toggleExpand(tab.tabId)}
-                className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 transition-colors flex-shrink-0"
+                className="flex items-center justify-center w-5 h-5 md:w-6 md:h-6 rounded hover:bg-gray-200 transition-colors flex-shrink-0"
                 title={expandedTabs[tab.tabId] ? "Collapse" : "Expand"}
               >
                 {expandedTabs[tab.tabId] ? (
-                  <ChevronDown size={16} />
+                  <ChevronDown size={14} className="md:w-4 md:h-4" />
                 ) : (
-                  <ChevronRightIcon size={16} />
+                  <ChevronRightIcon size={14} className="md:w-4 md:h-4" />
                 )}
               </button>
             ) : (
-              <div className="w-6 h-6 flex items-center justify-center">
+              <div className="w-5 h-5 md:w-6 md:h-6 flex items-center justify-center">
                 <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 md:gap-2 flex-wrap">
                 <span
-                  className={`font-semibold truncate ${
-                    level === 0
-                      ? "text-gray-900 text-base"
-                      : "text-gray-800 text-sm"
-                  }`}
+                  className={`font-semibold truncate text-sm md:text-base ${level === 0 ? "text-gray-900" : "text-gray-800"
+                    }`}
                 >
                   {tab.name}
                 </span>
                 {isParent && (
-                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] md:text-xs bg-purple-100 text-purple-700 px-1.5 md:px-2 py-0.5 rounded-full">
                     {tab.children.length} children
                   </span>
                 )}
                 {level > 0 && (
-                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                    Parent: {tab.parentTabId}
+                  <span className="text-[10px] md:text-xs bg-blue-100 text-blue-700 px-1.5 md:px-2 py-0.5 rounded-full truncate max-w-[100px]">
+                    Parent: {tab.parentTabId?.slice(-6)}
                   </span>
                 )}
               </div>
               {tab.description && (
-                <div className="text-sm mt-1 text-gray-600 line-clamp-2">
+                <div className="text-xs md:text-sm mt-0.5 md:mt-1 text-gray-600 line-clamp-1 md:line-clamp-2">
                   {tab.description}
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
               <div className="text-center">
-                <div className="text-xs text-gray-500 mb-1">
-                  Current Sequence
+                <div className="text-[8px] md:text-xs text-gray-500 mb-0.5 md:mb-1">
+                  Sequence
                 </div>
-                <div className="px-3 py-1 rounded text-sm font-medium bg-blue-100 text-blue-800">
-                  {tab.virtualSequence || "Not Set"}
+                <div className="px-1.5 py-0.5 md:px-3 md:py-1 rounded text-xs md:text-sm font-medium bg-blue-100 text-blue-800">
+                  {tab.virtualSequence || "—"}
                 </div>
               </div>
               <Edit
-                size={20}
-                className="cursor-pointer text-indigo-600 hover:text-indigo-800 mt-5"
+                size={16}
+                className="md:w-5 md:h-5 cursor-pointer text-indigo-600 hover:text-indigo-800 mt-3 md:mt-5 flex-shrink-0"
                 title="Edit sequences for this group"
                 onClick={() => openEditModal(tab)}
               />
@@ -1659,11 +1306,10 @@ const HTabsManipulation = () => {
     });
   };
 
-  // Enhanced reset to default - resets both visibility and sequences
   const handleResetToDefault = async () => {
     if (
       confirm(
-        "Are you sure you want to reset ALL tabs to default visibility and sequences?"
+        "Are you sure you want to reset ALL tabs to default visibility and sequences?",
       )
     ) {
       try {
@@ -1675,7 +1321,7 @@ const HTabsManipulation = () => {
         window.dispatchEvent(
           new CustomEvent("tabVisibilityChanged", {
             detail: { reset: true, timestamp: Date.now() },
-          })
+          }),
         );
       } catch (error) {
         showToast("error", "Failed to reset tabs");
@@ -1714,16 +1360,54 @@ const HTabsManipulation = () => {
     }
   }, [tabHierarchy, initialized]);
 
-  // Get siblings and available sequences for modal
   const modalSiblings = editModal.tab
     ? getSiblingsForTab(editModal.tab, tabHierarchy)
     : [];
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold text-gray-800">HTabs Manipulation</h1>
-        <div className="flex gap-2">
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {/* Sidebar (mobile only) */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* MOBILE Header */}
+      {isMobileView && (
+        <div className="flex justify-between items-center mb-3 bg-gray-200 p-2 border-gray-200 rounded-2xl">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <h1 className="text-base font-bold text-gray-800">
+              HTabs Manipulation
+            </h1>
+          </div>
+          <button
+            onClick={handleResetToDefault}
+            className="px-3 py-1.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-1 text-xs"
+            disabled={loading}
+          >
+            <RotateCcw size={12} />
+            Reset All
+          </button>
+        </div>
+      )}
+
+      {/* DESKTOP Header */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-800">
+              HTabs Manipulation
+            </h1>
+          </div>
           <button
             onClick={handleResetToDefault}
             className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors flex items-center gap-2"
@@ -1733,19 +1417,19 @@ const HTabsManipulation = () => {
             Reset All to Default
           </button>
         </div>
-      </div>
+      )}
 
-      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
-        <div className="flex flex-wrap gap-2 mb-4">
+      {/* Info Cards - Responsive */}
+      <div className="bg-white p-3 md:p-4 rounded-xl shadow-md mb-4 md:mb-6 border border-gray-200">
+        <div className="flex flex-wrap gap-2 mb-3 md:mb-4">
           {reportTypes.map((type) => (
             <button
               key={type}
               onClick={() => setSelectedReportType(type)}
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                selectedReportType === type
+              className={`px-3 py-1.5 md:px-4 md:py-2 rounded-lg transition-colors text-sm md:text-base ${selectedReportType === type
                   ? "bg-indigo-600 text-white shadow-md"
                   : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
+                }`}
             >
               {type}
             </button>
@@ -1753,77 +1437,64 @@ const HTabsManipulation = () => {
         </div>
 
         {selectedReportType === "Hide/Show Tabs" && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <div className="flex items-center gap-2 text-blue-800">
-              <Eye size={16} />
-              <span className="font-medium">Visibility Status:</span>
-              <span>
-                Checked = Visible on Sidebar, Unchecked = Hidden from Sidebar
-              </span>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 md:p-3">
+            <div className="flex flex-wrap items-center gap-1 md:gap-2 text-blue-800 text-xs md:text-sm">
+              <Eye size={12} className="md:w-4 md:h-4" />
+              <span className="font-medium">Visibility:</span>
+              <span>Checked = Visible</span>
             </div>
-            <div className="flex items-center gap-2 text-yellow-800 mt-1">
-              <span className="font-medium">Partial Selection:</span>
-              <span>Some children visible, some hidden</span>
+            <div className="flex flex-wrap items-center gap-1 md:gap-2 text-yellow-800 mt-0.5 md:mt-1 text-xs md:text-sm">
+              <span className="font-medium">Partial:</span>
+              <span>Some children visible</span>
             </div>
-            <div className="flex items-center gap-2 text-green-800 mt-1">
-              <span className="font-medium">Auto Parent Hide:</span>
-              <span>
-                Parent automatically hides when all children are hidden
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-purple-800 mt-1">
-              <span className="font-medium">Cascade Effect:</span>
-              <span>Parent toggle affects ALL children and sub-children</span>
+            <div className="flex flex-wrap items-center gap-1 md:gap-2 text-purple-800 mt-0.5 md:mt-1 text-xs md:text-sm">
+              <span className="font-medium">Cascade:</span>
+              <span>Parent toggles affect ALL children</span>
             </div>
           </div>
         )}
 
         {selectedReportType === "Sequence Number" && (
-          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-            <div className="flex items-center gap-2 text-purple-800">
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 md:p-3">
+            <div className="flex flex-wrap items-center gap-1 md:gap-2 text-purple-800 text-xs md:text-sm">
               <span className="font-medium">Sequence Management:</span>
-              <span>Click edit icon to open sequence management modal</span>
+              <span>Click edit icon to open modal</span>
             </div>
-            <div className="flex items-center gap-2 text-blue-800 mt-1">
-              <span className="font-medium">Modal Features:</span>
-              <span>
-                Swap sequences between tabs or manually assign sequences
-              </span>
+            <div className="flex flex-wrap items-center gap-1 md:gap-2 text-blue-800 mt-0.5 md:mt-1 text-xs md:text-sm">
+              <span className="font-medium">Features:</span>
+              <span>Swap sequences or assign manually</span>
             </div>
-            <div className="flex items-center gap-2 text-green-800 mt-1">
-              <span className="font-medium">Parent Restrictions:</span>
-              <span>
-                Root tabs can only swap with root tabs, children with children
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-indigo-800 mt-1">
-              <span className="font-medium">Reset Options:</span>
-              <span>Reset individual groups or all sequences to default</span>
+            <div className="flex flex-wrap items-center gap-1 md:gap-2 text-green-800 mt-0.5 md:mt-1 text-xs md:text-sm">
+              <span className="font-medium">Restrictions:</span>
+              <span>Root with root, children with children</span>
             </div>
           </div>
         )}
       </div>
 
-      <div className="bg-white rounded-xl shadow-md border border-gray-200 mb-6">
-        <div className="p-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-800">
+      {/* Main Content Area - Responsive */}
+      <div className="bg-white rounded-xl shadow-md border border-gray-200 mb-4 md:mb-6">
+        <div className="p-3 md:p-4 border-b border-gray-200">
+          <h2 className="text-base md:text-lg font-semibold text-gray-800">
             {selectedReportType === "Hide/Show Tabs"
               ? "Tab Visibility Management"
               : "Tab Sequence Management"}
           </h2>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-xs md:text-sm text-gray-600 mt-1">
             {selectedReportType === "Hide/Show Tabs"
-              ? "Manage tab visibility using the checkbox hierarchy. Parent tabs automatically hide when all children are hidden and affect ALL nested children."
-              : "Manage tab sequences in hierarchical view. Click the edit icon to open sequence management modal."}
+              ? "Manage tab visibility using the checkbox hierarchy."
+              : "Click the edit icon to open sequence management modal."}
           </p>
         </div>
         {loading ? (
-          <div className="p-8 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="text-gray-600 mt-2">Loading tab data...</p>
+          <div className="p-6 md:p-8 text-center">
+            <div className="animate-spin rounded-full h-6 w-6 md:h-8 md:w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="text-gray-600 mt-2 text-sm md:text-base">
+              Loading tab data...
+            </p>
           </div>
         ) : (
-          <div className="p-4 max-h-[600px] overflow-y-auto">
+          <div className="p-2 md:p-4 max-h-[500px] md:max-h-[600px] overflow-y-auto">
             {selectedReportType === "Hide/Show Tabs"
               ? renderHideShowTabHierarchy(tabHierarchy)
               : renderSequenceNumberHierarchy(tabHierarchy)}

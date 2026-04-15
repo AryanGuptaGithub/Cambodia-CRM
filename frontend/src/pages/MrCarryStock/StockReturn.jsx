@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import {
   Plus,
   Trash2,
@@ -7,6 +13,8 @@ import {
   Search,
   Package,
   CheckCircle,
+  Menu,
+  Filter,
 } from "lucide-react";
 import { showToast } from "../../utils/toast";
 import ReactDOM from "react-dom";
@@ -17,6 +25,7 @@ import SearchableDropdown from "../../components/common/SearchableDropdown";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import { getVisiblePages } from "../../utils/useVisiblePages";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const returnsPerPage = 9;
@@ -33,7 +42,7 @@ const getAuthHeaders = () => {
 };
 
 // Create Stock Return Component
-const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
+const CreateStockReturn = ({ onClose, onSuccess, mrList, isMobileView }) => {
   const [selectedMr, setSelectedMr] = useState("");
   const [mrStock, setMrStock] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -95,15 +104,14 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
       const response = await axios.get(
         `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
-        { 
+        {
           params: { mrName },
-          ...getAuthHeaders()
-        }
+          ...getAuthHeaders(),
+        },
       );
 
       if (response.data.success) {
         const stockItems = response.data.data || [];
-        // Transform to the format needed by the component
         const transformed = stockItems.map((item) => ({
           stockRecordId: `${item.mrId || item.mrName}_${item.productId}`,
           mrId: item.mrId || item.mrName,
@@ -176,7 +184,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       return;
     }
 
-    // Parse quantity
     const parsedQty = parseInt(returnQty, 10);
     if (
       isNaN(parsedQty) ||
@@ -185,7 +192,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     ) {
       showToast(
         "error",
-        `Invalid quantity. Must be between 1 and ${selectedProduct.remainingQty}`
+        `Invalid quantity. Must be between 1 and ${selectedProduct.remainingQty}`,
       );
       return;
     }
@@ -195,20 +202,18 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       return;
     }
 
-    // Check if product already exists in return items
     const existingItemIndex = returnItems.findIndex(
-      (item) => item.productId === selectedProduct.productId
+      (item) => item.productId === selectedProduct.productId,
     );
 
     if (existingItemIndex > -1) {
-      // Update existing item
       const updatedItems = [...returnItems];
       const newQty = updatedItems[existingItemIndex].returnQty + parsedQty;
 
       if (newQty > selectedProduct.remainingQty) {
         showToast(
           "error",
-          `Total quantity exceeds available stock: ${selectedProduct.remainingQty}`
+          `Total quantity exceeds available stock: ${selectedProduct.remainingQty}`,
         );
         return;
       }
@@ -217,10 +222,9 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       setReturnItems(updatedItems);
       showToast(
         "success",
-        `Updated ${selectedProduct.productName} quantity to ${newQty}`
+        `Updated ${selectedProduct.productName} quantity to ${newQty}`,
       );
     } else {
-      // Add new item
       const item = {
         mrId: selectedProduct.mrId,
         productId: selectedProduct.productId,
@@ -234,7 +238,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       setReturnItems([...returnItems, item]);
     }
 
-    // Reset form for next item
     setSelectedProduct(null);
     setReturnQty("1");
     setReturnDate(new Date());
@@ -270,9 +273,8 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       return;
     }
 
-    // Get MR details
     const selectedMrObj = mrList.find(
-      (mr) => mr.mrName === selectedMr || mr.mrCode === selectedMr
+      (mr) => mr.mrName === selectedMr || mr.mrCode === selectedMr,
     );
 
     if (!selectedMrObj) {
@@ -305,7 +307,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       const response = await axios.post(
         `${backendUrl}/api/stock-return`,
         returnData,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
 
       if (response.data.success) {
@@ -325,24 +327,22 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         "error",
         error.response?.data?.message ||
           error.response?.data?.error ||
-          "Failed to create stock return"
+          "Failed to create stock return",
       );
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Calculate totals
   const totalQuantity = returnItems.reduce(
     (sum, item) => sum + item.returnQty,
-    0
+    0,
   );
   const totalValue = returnItems.reduce(
     (sum, item) => sum + item.returnQty * (item.costPrice || 0),
-    0
+    0,
   );
 
-  // Prepare options for dropdowns
   const mrOptions = mrList.map((mr) => ({
     value: mr.mrName,
     label: `${mr.mrName} ${mr.mrCode ? `(${mr.mrCode})` : ""}`,
@@ -359,11 +359,19 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     }));
 
   return (
-    <div className="bg-white p-6 rounded-xl max-w-4xl w-full">
-      <h2 className="text-2xl font-bold mb-6">New Stock Return</h2>
+    <div
+      className={`${isMobileView ? "p-4" : "p-6"} bg-white rounded-xl max-w-4xl w-full`}
+    >
+      <h2 className={`${isMobileView ? "text-lg" : "text-2xl"} font-bold mb-4`}>
+        New Stock Return
+      </h2>
 
       <div className="mb-4">
-        <label className="block text-sm font-medium mb-2">Select MR</label>
+        <label
+          className={`block ${isMobileView ? "text-xs" : "text-sm"} font-medium mb-2`}
+        >
+          Select MR
+        </label>
         <SearchableDropdown
           options={mrOptions}
           value={selectedMr}
@@ -375,7 +383,9 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       {selectedMr && (
         <>
           <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">
+            <label
+              className={`block ${isMobileView ? "text-xs" : "text-sm"} font-medium mb-2`}
+            >
               Select Product
             </label>
             <SearchableDropdown
@@ -388,16 +398,22 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
             />
 
             {mrStock.length === 0 && !loading && (
-              <p className="mt-2 text-sm text-gray-500">
+              <p
+                className={`mt-2 ${isMobileView ? "text-[10px]" : "text-sm"} text-gray-500`}
+              >
                 No available stock found for this MR
               </p>
             )}
           </div>
 
           {selectedProduct && (
-            <div className="grid grid-cols-3 gap-4 mb-4">
+            <div
+              className={`grid ${isMobileView ? "grid-cols-1 gap-3" : "grid-cols-3 gap-4"} mb-4`}
+            >
               <div>
-                <label className="block text-sm font-medium mb-2">
+                <label
+                  className={`block ${isMobileView ? "text-xs" : "text-sm"} font-medium mb-2`}
+                >
                   Quantity (1 - {selectedProduct.remainingQty})
                 </label>
                 <input
@@ -405,12 +421,14 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
                   value={returnQty}
                   onChange={handleQtyChange}
                   onBlur={handleQtyBlur}
-                  className="w-full border rounded px-3 py-2"
+                  className={`w-full border rounded px-3 py-2 ${isMobileView ? "text-sm" : ""}`}
                   placeholder="Enter quantity"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">
+                <label
+                  className={`block ${isMobileView ? "text-xs" : "text-sm"} font-medium mb-2`}
+                >
                   Return Date
                 </label>
                 <DatePicker
@@ -418,15 +436,15 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
                   onChange={setReturnDate}
                   dateFormat="yyyy-MM-dd"
                   maxDate={new Date()}
-                  className="w-full border rounded px-3 py-2"
+                  className={`w-full border rounded px-3 py-2 ${isMobileView ? "text-sm" : ""}`}
                 />
               </div>
-              <div className="flex items-end">
+              <div className={isMobileView ? "" : "flex items-end"}>
                 <button
                   onClick={handleAddItem}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2"
+                  className={`bg-blue-600 text-white rounded-lg flex items-center gap-2 ${isMobileView ? "px-3 py-2 text-sm w-full justify-center" : "px-4 py-2"}`}
                 >
-                  <Plus size={18} /> Add Item
+                  <Plus size={isMobileView ? 16 : 18} /> Add Item
                 </button>
               </div>
             </div>
@@ -434,73 +452,107 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
           {returnItems.length > 0 && (
             <div className="mb-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">
+              <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
+                <h3
+                  className={`${isMobileView ? "text-sm" : "text-lg"} font-semibold`}
+                >
                   Added Items ({returnItems.length})
                 </h3>
-                <div className="text-sm text-gray-600">
+                <div
+                  className={`${isMobileView ? "text-[10px]" : "text-sm"} text-gray-600`}
+                >
                   Total: {totalQuantity} items | Value: ${totalValue.toFixed(2)}
                 </div>
               </div>
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="p-3 text-left">Product</th>
-                    <th className="p-3 text-left">Qty</th>
-                    <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-left">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {returnItems.map((item, index) => (
-                    <tr key={index} className="border-b">
-                      <td className="p-3">{item.productName}</td>
-                      <td className="p-3">{item.returnQty} box(es)</td>
-                      <td className="p-3">
-                        {formatDateToReadable(item.returnDate)}
-                      </td>
-                      <td className="p-3">
-                        <button
-                          onClick={() => handleRemoveItem(index)}
-                          className="text-red-600"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th
+                        className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} text-left`}
+                      >
+                        Product
+                      </th>
+                      <th
+                        className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} text-left`}
+                      >
+                        Qty
+                      </th>
+                      <th
+                        className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} text-left`}
+                      >
+                        Date
+                      </th>
+                      <th
+                        className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} text-left`}
+                      >
+                        Action
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {returnItems.map((item, index) => (
+                      <tr key={index} className="border-b">
+                        <td
+                          className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                        >
+                          {item.productName}
+                        </td>
+                        <td
+                          className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                        >
+                          {item.returnQty} box(es)
+                        </td>
+                        <td
+                          className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                        >
+                          {formatDateToReadable(item.returnDate)}
+                        </td>
+                        <td className={`${isMobileView ? "p-2" : "p-3"}`}>
+                          <button
+                            onClick={() => handleRemoveItem(index)}
+                            className="text-red-600"
+                          >
+                            <Trash2 size={isMobileView ? 16 : 18} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </>
       )}
 
       <div className="mb-4">
-        <label className="block text-sm font-medium mb-2">
+        <label
+          className={`block ${isMobileView ? "text-xs" : "text-sm"} font-medium mb-2`}
+        >
           Remarks (Optional)
         </label>
         <textarea
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
           rows={3}
-          className="w-full border rounded px-3 py-2"
+          className={`w-full border rounded px-3 py-2 ${isMobileView ? "text-sm" : ""}`}
           placeholder="Add any notes about this return..."
         />
       </div>
 
-      <div className="flex justify-end gap-4">
+      <div className="flex justify-end gap-3">
         <button
           onClick={onClose}
           disabled={submitting}
-          className="px-5 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50"
+          className={`px-4 py-2 border rounded-lg hover:bg-gray-100 disabled:opacity-50 ${isMobileView ? "text-sm" : ""}`}
         >
           Cancel
         </button>
         <button
           onClick={handleSubmit}
           disabled={submitting || returnItems.length === 0 || !selectedMrId}
-          className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
+          className={`px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2 ${isMobileView ? "text-sm" : ""}`}
         >
           {submitting ? (
             <>
@@ -509,7 +561,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
             </>
           ) : (
             <>
-              <CheckCircle size={18} /> Submit
+              <CheckCircle size={isMobileView ? 16 : 18} /> Submit
             </>
           )}
         </button>
@@ -532,12 +584,23 @@ const StockReturn = () => {
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
 
+  // Mobile detection
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
   // Fetch MR list
   const fetchMRList = useCallback(async () => {
     try {
       const response = await axios.get(
         `${backendUrl}/api/stock-transfer-to-mr/mrs`,
-        getAuthHeaders()
+        getAuthHeaders(),
       );
 
       if (response.data.success) {
@@ -562,19 +625,22 @@ const StockReturn = () => {
           limit: returnsPerPage,
           search: searchTerm || undefined,
         },
-        ...getAuthHeaders()
+        ...getAuthHeaders(),
       });
       if (response.data.success) {
         const data = response.data.data || [];
         setReturnsHistory(data);
       } else {
-        showToast("error", response.data.message || "Failed to load returns history");
+        showToast(
+          "error",
+          response.data.message || "Failed to load returns history",
+        );
         setReturnsHistory([]);
       }
     } catch (error) {
       showToast(
         "error",
-        error.response?.data?.message || "Failed to load returns history"
+        error.response?.data?.message || "Failed to load returns history",
       );
       setReturnsHistory([]);
     } finally {
@@ -611,7 +677,7 @@ const StockReturn = () => {
         r.mrName?.toLowerCase().includes(lowerSearch) ||
         r.mrCode?.toLowerCase().includes(lowerSearch) ||
         r.returnId?.toLowerCase().includes(lowerSearch) ||
-        r.status?.toLowerCase().includes(lowerSearch)
+        r.status?.toLowerCase().includes(lowerSearch),
     );
   }, [returnsHistory, searchTerm]);
 
@@ -620,15 +686,18 @@ const StockReturn = () => {
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentReturns = filteredReturns.slice(
     (currentPage - 1) * returnsPerPage,
-    currentPage * returnsPerPage
+    currentPage * returnsPerPage,
   );
+
+  // Check if table has entries
+  const hasTableEntries = filteredReturns.length > 0;
 
   // Selection handlers
   const toggleSelect = useCallback((returnItem) => {
     setSelected((prev) =>
       prev.some((r) => r.id === returnItem._id)
         ? prev.filter((r) => r.id !== returnItem._id)
-        : [...prev, { id: returnItem._id, name: returnItem.mrName }]
+        : [...prev, { id: returnItem._id, name: returnItem.mrName }],
     );
   }, []);
 
@@ -637,10 +706,10 @@ const StockReturn = () => {
       setSelected(
         checked
           ? currentReturns.map((r) => ({ id: r._id, name: r.mrName }))
-          : []
+          : [],
       );
     },
-    [currentReturns]
+    [currentReturns],
   );
 
   // Delete selected returns (Admin only)
@@ -650,7 +719,6 @@ const StockReturn = () => {
       return;
     }
 
-    // Check if all selected are pending
     const pendingReturns = selected.filter((s) => {
       const returnItem = returnsHistory.find((r) => r._id === s.id);
       return returnItem?.status === "Pending";
@@ -674,8 +742,8 @@ const StockReturn = () => {
           `${backendUrl}/api/stock-return/bulk`,
           {
             data: { ids: selected.map((s) => s.id) },
-            ...getAuthHeaders()
-          }
+            ...getAuthHeaders(),
+          },
         );
 
         if (response.data.success) {
@@ -689,7 +757,8 @@ const StockReturn = () => {
         } else {
           showToast(
             "error",
-            error.response?.data?.message || "Failed to delete selected returns."
+            error.response?.data?.message ||
+              "Failed to delete selected returns.",
           );
         }
       }
@@ -714,7 +783,7 @@ const StockReturn = () => {
       try {
         const response = await axios.delete(
           `${backendUrl}/api/stock-return/${returnItem._id}`,
-          getAuthHeaders()
+          getAuthHeaders(),
         );
 
         if (response.data.success) {
@@ -727,7 +796,7 @@ const StockReturn = () => {
         } else {
           showToast(
             "error",
-            error.response?.data?.message || "Failed to delete return."
+            error.response?.data?.message || "Failed to delete return.",
           );
         }
       }
@@ -748,7 +817,7 @@ const StockReturn = () => {
       const response = await axios.put(
         `${backendUrl}/api/stock-return/${selectedReturn._id}/status`,
         { status, rejectedReason },
-        getAuthHeaders()
+        getAuthHeaders(),
       );
 
       if (response.data.success) {
@@ -758,9 +827,15 @@ const StockReturn = () => {
       }
     } catch (error) {
       if (error.response?.status === 403) {
-        showToast("error", "Access denied. Only Admin can update return status.");
+        showToast(
+          "error",
+          "Access denied. Only Admin can update return status.",
+        );
       } else {
-        showToast("error", error.response?.data?.message || "Failed to update status");
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to update status",
+        );
       }
     }
   };
@@ -791,7 +866,7 @@ const StockReturn = () => {
 
     return (
       <span
-        className={`px-2 py-1 rounded-full text-xs ${getStatusColor(status)}`}
+        className={`px-2 py-1 rounded-full ${isMobileView ? "text-[10px]" : "text-xs"} ${getStatusColor(status)}`}
       >
         {status}
       </span>
@@ -809,7 +884,13 @@ const StockReturn = () => {
     });
   };
 
-  if (loading) {
+  // Clear all filters
+  const clearFilters = () => {
+    setSearchTerm("");
+    setCurrentPage(1);
+  };
+
+  if (loading && currentPage === 1) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
@@ -821,61 +902,136 @@ const StockReturn = () => {
   }
 
   return (
-    <div className="p-6">
-      <div className="container">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-4">
-          <div className="flex gap-3">
+    <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* Mobile Header */}
+      {isMobileView && (
+        <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
+          <div className="flex items-center gap-2">
             <button
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
             >
-              <Plus size={18} /> New Stock Return
+              <Menu size={20} className="text-gray-700" />
             </button>
-            {selected.length > 0 && (
-              <button
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-                onClick={handleDeleteSelected}
-              >
-                <Trash2 size={18} /> Delete
-              </button>
-            )}
+            
+            <h1 className="text-sm font-bold text-gray-800">Stock Returns</h1>
           </div>
-          {returnsHistory.length > 0 && (
-            <div className="flex items-center gap-8">
-              <p className="text-lg font-semibold text-gray-700">
-                Total Returns:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredReturns.length}
-                </span>
-              </p>
-              <div className="relative w-full md:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                />
-                <input
-                  type="text"
-                  placeholder="Search returns..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-                />
-              </div>
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-50 text-blue-700 px-1 py-0.5 rounded-full text-sm font-medium">
+              Total Records: {filteredReturns.length}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Search Bar - Only show when table has entries */}
+      {isMobileView && hasTableEntries && (
+        <div className="relative mb-3">
+          <input
+            type="text"
+            placeholder="Search returns..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full text-sm"
+          />
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            size={15}
+          />
+          {searchTerm && (
+            <button
+              onClick={clearFilters}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+            >
+              <X size={14} />
+            </button>
           )}
         </div>
+      )}
+
+      <div className="container">
+        {/* Header - Desktop */}
+        {!isMobileView && (
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex gap-3">
+              <button
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={() => setIsCreateModalOpen(true)}
+              >
+                <Plus size={18} /> New Stock Return
+              </button>
+              {selected.length > 0 && (
+                <button
+                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                  onClick={handleDeleteSelected}
+                >
+                  <Trash2 size={18} /> Delete
+                </button>
+              )}
+            </div>
+            {/* Desktop Search - Only show when table has entries */}
+            {hasTableEntries && (
+              <div className="flex items-center gap-8">
+                <p className="text-lg font-semibold text-gray-700">
+                  Total Returns:{" "}
+                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                    {filteredReturns.length}
+                  </span>
+                </p>
+                <div className="relative w-full md:w-72">
+                  <Search
+                    className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                    size={16}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Search returns..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Mobile Action Buttons - Only Delete button, No Add button */}
+        {isMobileView && selected.length > 0 && (
+          <div className="mb-3">
+            <button
+              className="flex items-center justify-center gap-2 w-full bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer text-sm"
+              onClick={handleDeleteSelected}
+            >
+              <Trash2 size={16} /> Delete Selected ({selected.length})
+            </button>
+          </div>
+        )}
 
         {/* Returns History Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+          <table
+            className={`w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center ${isMobileView ? "min-w-[600px]" : ""}`}
+          >
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                <th className="p-3">
-                  <div className="flex items-center gap-4">
+                <th className={`${isMobileView ? "p-2 text-[10px]" : "p-3"}`}>
+                  <div className="flex items-center gap-2">
                     {currentReturns.length > 0 && (
                       <input
                         type="checkbox"
@@ -886,21 +1042,50 @@ const StockReturn = () => {
                         onChange={(e) => toggleSelectAll(e.target.checked)}
                       />
                     )}
-                    <span className="text-sm font-medium">MR Name</span>
+                    <span
+                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium`}
+                    >
+                      MR Name
+                    </span>
                   </div>
                 </th>
-                <th className="p-3 text-sm font-medium">Return Date</th>
-                <th className="p-3 text-sm font-medium"># Products</th>
-                <th className="p-3 text-sm font-medium">Total Qty</th>
-                <th className="p-3 text-sm font-medium">Total Value</th>
-                <th className="p-3 text-sm font-medium">Status</th>
-                <th className="p-3 text-sm font-medium">Actions</th>
+                <th
+                  className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`}
+                >
+                  Return Date
+                </th>
+                <th
+                  className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`}
+                >
+                  Products
+                </th>
+                <th
+                  className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`}
+                >
+                  Total Qty
+                </th>
+                {!isMobileView && (
+                  <th className="p-3 text-sm font-medium">Total Value</th>
+                )}
+                <th
+                  className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`}
+                >
+                  Status
+                </th>
+                <th
+                  className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium`}
+                >
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {currentReturns.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-4 text-center text-gray-500">
+                  <td
+                    colSpan={isMobileView ? 6 : 8}
+                    className="p-4 text-center text-gray-500"
+                  >
                     No returns found.
                   </td>
                 </tr>
@@ -910,7 +1095,7 @@ const StockReturn = () => {
                   const totalQty =
                     returnItem.items?.reduce(
                       (sum, item) => sum + (item.returnQty || 0),
-                      0
+                      0,
                     ) || 0;
                   const totalValue = returnItem.totalValue || 0;
 
@@ -921,63 +1106,79 @@ const StockReturn = () => {
                         idx < currentReturns.length - 1 ? "border-b" : ""
                       }`}
                     >
-                      <td className="p-3">
-                        <div className="flex items-center gap-4">
+                      <td className={`${isMobileView ? "p-2" : "p-3"}`}>
+                        <div className="flex items-center gap-2">
                           <input
                             type="checkbox"
                             checked={selected.some(
-                              (s) => s.id === returnItem._id
+                              (s) => s.id === returnItem._id,
                             )}
                             onChange={() => toggleSelect(returnItem)}
                             disabled={returnItem.status !== "Pending"}
                           />
-                          <span className="capitalize">
+                          <span
+                            className={`capitalize ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                          >
                             {displayValue(returnItem.mrName)}
                           </span>
                         </div>
                       </td>
 
-                      <td className="p-3">
+                      <td
+                        className={`${isMobileView ? "p-2 text-[10px]" : "p-3"}`}
+                      >
                         {formatDate(returnItem.returnDate) || "--"}
                       </td>
-                      <td className="p-3">
-                        <div className="flex items-center justify-center gap-3">
-                          <span className="font-medium">{productCount}</span>
+                      <td className={`${isMobileView ? "p-2" : "p-3"}`}>
+                        <div className="flex items-center justify-center gap-2">
+                          <span
+                            className={`font-medium ${isMobileView ? "text-[10px]" : "text-sm"}`}
+                          >
+                            {productCount}
+                          </span>
                           <button
                             className="text-purple-600 hover:text-purple-800 cursor-pointer"
                             onClick={() => handleViewProducts(returnItem)}
                             title="View Products"
                           >
-                            <Package size={18} />
+                            <Package size={isMobileView ? 14 : 18} />
                           </button>
                         </div>
                       </td>
-                      <td className="p-3">{totalQty}</td>
-                      <td className="p-3">
-                        <span className="font-medium text-green-700">
-                          ${formatCurrency(totalValue)}
-                        </span>
+                      <td
+                        className={`${isMobileView ? "p-2 text-[10px]" : "p-3"}`}
+                      >
+                        {totalQty}
                       </td>
-                      <td className="p-3">
+                      {!isMobileView && (
+                        <td className="p-3">
+                          <span className="font-medium text-green-700">
+                            ${formatCurrency(totalValue)}
+                          </span>
+                        </td>
+                      )}
+                      <td className={`${isMobileView ? "p-2" : "p-3"}`}>
                         <StatusBadge status={returnItem.status} />
                       </td>
-                      <td className="p-3 flex items-center justify-center gap-3">
-                        <button
-                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                          onClick={() => handleView(returnItem)}
-                          title="View"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        {returnItem.status === "Pending" && (
+                      <td className={`${isMobileView ? "p-2" : "p-3"}`}>
+                        <div className="flex items-center justify-center gap-2">
                           <button
-                            className="text-red-600 hover:text-red-800 cursor-pointer"
-                            onClick={() => deleteReturn(returnItem)}
-                            title="Delete"
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                            onClick={() => handleView(returnItem)}
+                            title="View"
                           >
-                            <Trash2 size={18} />
+                            <Eye size={isMobileView ? 14 : 18} />
                           </button>
-                        )}
+                          {returnItem.status === "Pending" && (
+                            <button
+                              className="text-red-600 hover:text-red-800 cursor-pointer"
+                              onClick={() => deleteReturn(returnItem)}
+                              title="Delete"
+                            >
+                              <Trash2 size={isMobileView ? 14 : 18} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -986,19 +1187,26 @@ const StockReturn = () => {
             </tbody>
           </table>
 
-          {/* Pagination */}
+          {/* Pagination - Only show when there are entries and more than 1 page */}
           {filteredReturns.length > returnsPerPage && (
-            <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
-              <div className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * returnsPerPage + 1} to{" "}
-                {Math.min(currentPage * returnsPerPage, filteredReturns.length)}{" "}
-                of {filteredReturns.length} entries
-              </div>
-              <div className="flex items-center gap-2">
+            <div
+              className={`mt-4 p-4 flex flex-col sm:flex-row justify-between items-center gap-3 bg-gray-50 border-t ${isMobileView ? "flex-col" : ""}`}
+            >
+              {!isMobileView && (
+                <div className="text-xs text-gray-600">
+                  Showing {(currentPage - 1) * returnsPerPage + 1} to{" "}
+                  {Math.min(
+                    currentPage * returnsPerPage,
+                    filteredReturns.length,
+                  )}{" "}
+                  of {filteredReturns.length} entries
+                </div>
+              )}
+              <div className="flex items-center gap-1 flex-wrap justify-center">
                 <button
                   onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                   disabled={currentPage === 1}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                  className={`px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer ${isMobileView ? "text-[10px]" : "text-sm"}`}
                 >
                   Prev
                 </button>
@@ -1007,12 +1215,12 @@ const StockReturn = () => {
                     key={index}
                     onClick={() => typeof p === "number" && setCurrentPage(p)}
                     disabled={p === "..."}
-                    className={`px-3 py-1 rounded ${
+                    className={`px-2 py-1 rounded ${isMobileView ? "text-[10px]" : "text-sm"} ${
                       p === "..."
                         ? "bg-gray-200 cursor-not-allowed"
                         : currentPage === p
-                        ? "bg-blue-600 text-white cursor-pointer"
-                        : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+                          ? "bg-blue-600 text-white cursor-pointer"
+                          : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
                     }`}
                   >
                     {p}
@@ -1023,7 +1231,7 @@ const StockReturn = () => {
                     setCurrentPage((p) => Math.min(p + 1, totalPages))
                   }
                   disabled={currentPage === totalPages}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                  className={`px-2 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer ${isMobileView ? "text-[10px]" : "text-sm"}`}
                 >
                   Next
                 </button>
@@ -1035,11 +1243,13 @@ const StockReturn = () => {
         {/* Create Modal */}
         {isCreateModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50">
-              <div className="bg-white p-6 rounded-xl max-w-4xl w-full relative overflow-y-auto max-h-[90vh]">
+            <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50 p-4">
+              <div
+                className={`bg-white rounded-xl relative overflow-y-auto max-h-[90vh] ${isMobileView ? "max-w-full w-full" : "max-w-4xl"}`}
+              >
                 <button
                   onClick={() => setIsCreateModalOpen(false)}
-                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 z-10"
                 >
                   <X size={24} />
                 </button>
@@ -1047,151 +1257,216 @@ const StockReturn = () => {
                   onClose={() => setIsCreateModalOpen(false)}
                   onSuccess={fetchReturnsHistory}
                   mrList={mrList}
+                  isMobileView={isMobileView}
                 />
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         {/* View Modal */}
         {isViewModalOpen &&
           selectedReturn &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50">
-              <div className="bg-white p-6 rounded-xl max-w-4xl w-full relative overflow-y-auto max-h-[90vh]">
+            <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50 p-4">
+              <div
+                className={`bg-white rounded-xl relative overflow-y-auto max-h-[90vh] ${isMobileView ? "max-w-full w-full" : "max-w-4xl"} ${isMobileView ? "p-4" : "p-6"}`}
+              >
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
                   <X size={24} />
                 </button>
 
-                <h2 className="text-2xl font-bold mb-6">Return Details</h2>
+                <h2
+                  className={`${isMobileView ? "text-lg" : "text-2xl"} font-bold mb-4`}
+                >
+                  Return Details
+                </h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                   <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label
+                      className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium mb-1`}
+                    >
                       Return ID
                     </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50 font-mono">
+                    <p
+                      className={`border rounded-lg px-3 py-2 bg-gray-50 font-mono ${isMobileView ? "text-xs" : "text-sm"}`}
+                    >
                       {displayValue(selectedReturn.returnId)}
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label
+                      className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium mb-1`}
+                    >
                       MR Name
                     </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50">
+                    <p
+                      className={`border rounded-lg px-3 py-2 bg-gray-50 ${isMobileView ? "text-xs" : "text-sm"}`}
+                    >
                       {displayValue(selectedReturn.mrName)}
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">
-                      MR ID
-                    </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50 font-mono">
-                      {displayValue(selectedReturn.mrId)}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label
+                      className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium mb-1`}
+                    >
                       Return Date
                     </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50">
+                    <p
+                      className={`border rounded-lg px-3 py-2 bg-gray-50 ${isMobileView ? "text-xs" : "text-sm"}`}
+                    >
                       {formatDate(selectedReturn.returnDate)}
                     </p>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">
+                    <label
+                      className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium mb-1`}
+                    >
                       Status
                     </label>
                     <div className="border rounded-lg px-3 py-2 bg-gray-50">
                       <StatusBadge status={selectedReturn.status} />
                     </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Total Value
-                    </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50 font-medium text-green-700">
-                      ${formatCurrency(selectedReturn.totalValue)}
-                    </p>
-                  </div>
+                  {!isMobileView && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          MR ID
+                        </label>
+                        <p className="border rounded-lg px-3 py-2 bg-gray-50 font-mono text-sm">
+                          {displayValue(selectedReturn.mrId)}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Total Value
+                        </label>
+                        <p className="border rounded-lg px-3 py-2 bg-gray-50 font-medium text-green-700 text-sm">
+                          ${formatCurrency(selectedReturn.totalValue)}
+                        </p>
+                      </div>
+                    </>
+                  )}
                   {selectedReturn.approvedAt && (
                     <div>
-                      <label className="block text-sm font-medium mb-1">
+                      <label
+                        className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium mb-1`}
+                      >
                         Approved At
                       </label>
-                      <p className="border rounded-lg px-3 py-2 bg-gray-50">
+                      <p
+                        className={`border rounded-lg px-3 py-2 bg-gray-50 ${isMobileView ? "text-xs" : "text-sm"}`}
+                      >
                         {formatDate(selectedReturn.approvedAt)}
                       </p>
                     </div>
                   )}
                   {selectedReturn.rejectedReason && (
                     <div className="col-span-2">
-                      <label className="block text-sm font-medium mb-1">
+                      <label
+                        className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium mb-1`}
+                      >
                         Rejection Reason
                       </label>
-                      <p className="border rounded-lg px-3 py-2 bg-gray-50">
+                      <p
+                        className={`border rounded-lg px-3 py-2 bg-gray-50 ${isMobileView ? "text-xs" : "text-sm"}`}
+                      >
                         {selectedReturn.rejectedReason}
                       </p>
                     </div>
                   )}
                 </div>
 
-                <h3 className="text-lg font-semibold mb-4">
+                <h3
+                  className={`${isMobileView ? "text-sm" : "text-lg"} font-semibold mb-3`}
+                >
                   Return Items ({selectedReturn.items?.length || 0})
                 </h3>
-                <table className="w-full mb-6">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="p-3 text-left">Product</th>
-                      <th className="p-3 text-left">Return Qty</th>
-                      <th className="p-3 text-left">Return Date</th>
-                      <th className="p-3 text-left">Cost Price</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedReturn.items?.map((item, index) => (
-                      <tr key={index} className="border-b">
-                        <td className="p-3">
-                          <div>
-                            <p className="font-medium">{item.productName}</p>
-                          </div>
-                        </td>
-                        <td className="p-3">{item.returnQty} box(es)</td>
-                        <td className="p-3">{formatDate(item.returnDate)}</td>
-                        <td className="p-3">
-                          <span className="text-green-700">
-                            ${formatCurrency(item.costPrice)}
-                          </span>
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full mb-4">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th
+                          className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} text-left`}
+                        >
+                          Product
+                        </th>
+                        <th
+                          className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} text-left`}
+                        >
+                          Return Qty
+                        </th>
+                        <th
+                          className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} text-left`}
+                        >
+                          Return Date
+                        </th>
+                        {!isMobileView && (
+                          <th className="p-3 text-left">Cost Price</th>
+                        )}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {selectedReturn.items?.map((item, index) => (
+                        <tr key={index} className="border-b">
+                          <td
+                            className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                          >
+                            <p className="font-medium">{item.productName}</p>
+                          </td>
+                          <td
+                            className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                          >
+                            {item.returnQty} box(es)
+                          </td>
+                          <td
+                            className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                          >
+                            {formatDate(item.returnDate)}
+                          </td>
+                          {!isMobileView && (
+                            <td className="p-3">
+                              <span className="text-green-700">
+                                ${formatCurrency(item.costPrice)}
+                              </span>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
                 {selectedReturn.remarks && (
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium mb-1">
+                  <div className="mb-4">
+                    <label
+                      className={`block ${isMobileView ? "text-[10px]" : "text-sm"} font-medium mb-1`}
+                    >
                       Remarks
                     </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50 whitespace-pre-line">
+                    <p
+                      className={`border rounded-lg px-3 py-2 bg-gray-50 whitespace-pre-line ${isMobileView ? "text-xs" : "text-sm"}`}
+                    >
                       {selectedReturn.remarks}
                     </p>
                   </div>
                 )}
 
-                <div className="flex justify-between items-center pt-4 border-t">
+                <div className="flex justify-between items-center pt-3 border-t">
                   <button
                     onClick={() => setIsViewModalOpen(false)}
-                    className="px-5 py-2 border rounded-lg hover:bg-gray-100"
+                    className={`px-4 py-2 border rounded-lg hover:bg-gray-100 ${isMobileView ? "text-sm" : ""}`}
                   >
                     Close
                   </button>
 
                   {selectedReturn.status === "Pending" && (
-                    <div className="flex gap-3">
+                    <div className="flex gap-2">
                       <button
                         onClick={() => {
                           const reason = prompt("Enter rejection reason:");
@@ -1199,15 +1474,15 @@ const StockReturn = () => {
                             handleStatusUpdate("Rejected", reason);
                           }
                         }}
-                        className="px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
+                        className={`px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer ${isMobileView ? "text-sm" : ""}`}
                       >
                         Reject
                       </button>
                       <button
                         onClick={() => handleStatusUpdate("Approved")}
-                        className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 cursor-pointer"
+                        className={`px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 cursor-pointer ${isMobileView ? "text-sm" : ""}`}
                       >
-                        <CheckCircle size={18} />
+                        <CheckCircle size={isMobileView ? 16 : 18} />
                         Approve
                       </button>
                     </div>
@@ -1215,29 +1490,53 @@ const StockReturn = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
+
+        {/* Product Modal */}
         {isProductModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50">
-              <div className="bg-white p-6 rounded-xl max-w-4xl w-full relative overflow-y-auto max-h-[90vh]">
+            <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50 p-4">
+              <div
+                className={`bg-white rounded-xl relative overflow-y-auto max-h-[90vh] ${isMobileView ? "max-w-full w-full p-4" : "max-w-4xl p-6"}`}
+              >
                 <button
                   onClick={() => setIsProductModalOpen(false)}
-                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
                   <X size={24} />
                 </button>
 
-                <h2 className="text-2xl font-bold mb-6">Product Details</h2>
+                <h2
+                  className={`${isMobileView ? "text-lg" : "text-2xl"} font-bold mb-4`}
+                >
+                  Product Details
+                </h2>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                  <table
+                    className={`w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm ${isMobileView ? "min-w-[400px]" : ""}`}
+                  >
                     <thead className="bg-gray-100 text-gray-700 border-b">
                       <tr>
-                        <th className="p-3">Product Name</th>
-                        <th className="p-3">Return Qty</th>
-                        <th className="p-3">Return Date</th>
-                        <th className="p-3">Cost Price</th>
+                        <th
+                          className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} font-medium`}
+                        >
+                          Product Name
+                        </th>
+                        <th
+                          className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} font-medium`}
+                        >
+                          Return Qty
+                        </th>
+                        <th
+                          className={`${isMobileView ? "p-2 text-[10px]" : "p-3"} font-medium`}
+                        >
+                          Return Date
+                        </th>
+                        {!isMobileView && (
+                          <th className="p-3 font-medium">Cost Price</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
@@ -1251,16 +1550,28 @@ const StockReturn = () => {
                                 : "border-b"
                             }`}
                           >
-                            <td className="p-3">{item.productName}</td>
-                            <td className="p-3">{item.returnQty} box(es)</td>
-                            <td className="p-3">
+                            <td
+                              className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                            >
+                              {item.productName}
+                            </td>
+                            <td
+                              className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                            >
+                              {item.returnQty} box(es)
+                            </td>
+                            <td
+                              className={`${isMobileView ? "p-2 text-xs" : "p-3"}`}
+                            >
                               {formatDate(item.returnDate)}
                             </td>
-                            <td className="p-3">
-                              <span className="text-green-700">
-                                ${formatCurrency(item.costPrice)}
-                              </span>
-                            </td>
+                            {!isMobileView && (
+                              <td className="p-3">
+                                <span className="text-green-700">
+                                  ${formatCurrency(item.costPrice)}
+                                </span>
+                              </td>
+                            )}
                           </tr>
                         ))
                       ) : (
@@ -1277,17 +1588,17 @@ const StockReturn = () => {
                   </table>
                 </div>
 
-                <div className="mt-6 flex justify-end">
+                <div className="mt-4 flex justify-end">
                   <button
                     onClick={() => setIsProductModalOpen(false)}
-                    className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg"
+                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg text-sm"
                   >
                     Close
                   </button>
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
       </div>
     </div>

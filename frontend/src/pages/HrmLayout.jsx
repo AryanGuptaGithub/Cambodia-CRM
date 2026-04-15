@@ -15,12 +15,12 @@ const HrmLayout = () => {
   }, []);
   
   // Check if the current route is the Holidays page
-  const isHolidaysPage = location.pathname === '/hrm/holidays' || 
-                        location.pathname.includes('/holidays');
+    const isHolidaysPage = location.pathname === '/hrm/dashboard' || 
+                        location.pathname.includes('/dashboard');
   
   const layoutClass = (isHolidaysPage && isMobileView) 
-    ? "h-full" 
-    : "h-full p-4";
+    ? "h-full p-4" 
+    : "h-full";
   
   return (
     <div className={layoutClass}>

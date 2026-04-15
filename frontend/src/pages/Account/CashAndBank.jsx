@@ -8,6 +8,8 @@ import {
   Settings,
   Upload,
   FileSpreadsheet,
+  Menu,
+  Eye,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
@@ -18,6 +20,7 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import * as XLSX from "xlsx";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 7;
@@ -310,7 +313,6 @@ const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
         const ps = s.paymentStatus?.toLowerCase() || "";
         return ps === "cash" || ps === "paid";
       });
-      // For cash sale, exclude invoices already used
       filteredSales = filteredSales.filter(
         (s) => !usedInvoiceNumbers.has(s.invoiceNumber),
       );
@@ -319,7 +321,6 @@ const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
         const ps = s.paymentStatus?.toLowerCase() || "";
         const isPending = s.pendingAmountPaid?.toLowerCase() !== "paid";
         const hasDue = (s.dueAmount || 0) > 0;
-        // For credit collection, do NOT filter out invoices with existing transactions
         return (
           isPending &&
           (ps === "credit" ||
@@ -330,7 +331,6 @@ const useInvoiceOptions = (categoryName = "", editInvoiceNumber = "") => {
         );
       });
     } else {
-      // Other categories: exclude used invoices
       filteredSales = sales.filter(
         (s) => !usedInvoiceNumbers.has(s.invoiceNumber),
       );
@@ -391,11 +391,9 @@ const resolveEditFormData = (
   const findId = (options, rawValue) => {
     if (!rawValue || rawValue === "--" || rawValue === "") return "";
 
-    // Try direct value match (ID)
     const byId = options.find((o) => o.value === rawValue);
     if (byId) return byId.value;
 
-    // Fallback: match by label (this fixes most edit issues)
     const byLabel = options.find(
       (o) =>
         o.label?.toLowerCase().trim() === String(rawValue).toLowerCase().trim(),
@@ -441,7 +439,6 @@ const resolveEditFormData = (
     customerName: editData.customerName || "",
     customerAddress: editData.customerAddress || "",
     remarks: editData.remarks || "",
-    // For remittance, these will be populated from the actual transaction if needed
     lossCharges: "",
     lossRemarks: "",
   };
@@ -475,12 +472,10 @@ const AddTransactionModal = ({
   const [invoiceCheckLoading, setInvoiceCheckLoading] = useState(false);
   const [invoiceDueAmount, setInvoiceDueAmount] = useState(0);
 
-  // --- Address resolution state ---
   const [customerById, setCustomerById] = useState({});
   const [customerByCode, setCustomerByCode] = useState({});
   const [customerByName, setCustomerByName] = useState({});
 
-  // Helper: pick a non-empty address from an object
   const pickAddress = (obj) => {
     if (!obj) return "";
     const candidates = [
@@ -501,7 +496,6 @@ const AddTransactionModal = ({
     return "";
   };
 
-  // Build lookup maps from raw customers
   const buildCustomerMaps = (custRaw) => {
     const byId = {},
       byCode = {},
@@ -520,7 +514,6 @@ const AddTransactionModal = ({
     return { byId, byCode, byName };
   };
 
-  // Resolve address using the maps
   const resolveAddress = (sale, byId, byCode, byName) => {
     const fromSale = pickAddress(sale);
     if (fromSale) return fromSale;
@@ -546,7 +539,6 @@ const AddTransactionModal = ({
     return "";
   };
 
-  // Track whether options are loaded enough to resolve edit data
   const optionsReady =
     categoryOptions.length > 0 && destinationOptions.length > 0;
 
@@ -646,9 +638,6 @@ const AddTransactionModal = ({
     [getInvoiceOptions],
   );
 
-  // ============================================================================
-  // Define form fields dynamically (including remittance loss charges)
-  // ============================================================================
   const formFields = useMemo(() => {
     const baseFields = [
       {
@@ -668,7 +657,7 @@ const AddTransactionModal = ({
       },
       {
         key: "amount",
-        label: "Amount ($)", // will be overridden in render for remittance
+        label: "Amount ($)",
         type: "number",
         required: true,
         layout: "half",
@@ -680,7 +669,6 @@ const AddTransactionModal = ({
     ];
 
     if (requiresSupplier) {
-      // Insert supplier field after categoryType
       baseFields.splice(1, 0, {
         key: "supplier",
         label: "Supplier Name",
@@ -691,7 +679,6 @@ const AddTransactionModal = ({
         layout: "half",
       });
       if (isRemittance) {
-        // Insert source account field after supplier
         baseFields.splice(2, 0, {
           key: "source",
           label: "Source Account",
@@ -700,7 +687,6 @@ const AddTransactionModal = ({
           options: sourceOptions,
           layout: "half",
         });
-        // Insert loss charges and remarks for remittance
         baseFields.splice(3, 0, {
           key: "lossCharges",
           label: "Bank charges ($)",
@@ -894,7 +880,6 @@ const AddTransactionModal = ({
     };
   };
 
-  // Edit mode initialization
   useEffect(() => {
     if (!isOpen) return;
 
@@ -925,7 +910,6 @@ const AddTransactionModal = ({
     }
   }, [isOpen, isEdit, optionsReady, supplierOptions.length, editData?._id]);
 
-  // Fetch customers when modal opens (for address resolution)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -947,7 +931,6 @@ const AddTransactionModal = ({
     fetchCustomers();
   }, [isOpen]);
 
-  // Source balance sync
   useEffect(() => {
     if (form.source) {
       const selected = sourceOptions.find((o) => o.value === form.source);
@@ -957,7 +940,6 @@ const AddTransactionModal = ({
     }
   }, [form.source, sourceOptions]);
 
-  // Destination balance sync
   useEffect(() => {
     if (form.destination) {
       const selected = destinationOptions.find(
@@ -969,7 +951,6 @@ const AddTransactionModal = ({
     }
   }, [form.destination, destinationOptions]);
 
-  // Auto-calculate finalAmount for deposits
   useEffect(() => {
     if (isDeposit) {
       const amount = parseFloat(form.amount) || 0;
@@ -1067,7 +1048,6 @@ const AddTransactionModal = ({
       if (requiresInvoiceDropdown) {
         const saleRecord = findSaleByInvoice(invoiceNumber);
         if (saleRecord) {
-          // For credit collection, allow multiple transactions, so skip global check.
           const isCreditCollection = getCategoryName
             .toLowerCase()
             .includes("credit collection");
@@ -1097,7 +1077,6 @@ const AddTransactionModal = ({
             isCreditCollection ? saleRecord.dueAmount || 0 : 0,
           );
 
-          // Resolve customer address
           const resolvedAddress = resolveAddress(
             saleRecord,
             customerById,
@@ -1309,9 +1288,6 @@ const AddTransactionModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  // ============================================================================
-  // Numeric and date handlers
-  // ============================================================================
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
@@ -1351,14 +1327,10 @@ const AddTransactionModal = ({
     handleInputChange(field, parseDateFromInput(e.target.value));
   };
 
-  // ============================================================================
-  // SUBMIT: Complete logic for both remittance and other categories
-  // ============================================================================
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
 
-    // --- REMITTANCE HANDLING (with loss charges) ---
     if (isRemittance) {
       const lossCharges = parseFloat(form.lossCharges) || 0;
       const amount = parseFloat(form.amount) || 0;
@@ -1368,7 +1340,6 @@ const AddTransactionModal = ({
         return;
       }
 
-      // Get source account name
       const sourceAccountName = sourceOptions.find(
         (opt) => opt.value === form.source,
       )?.label;
@@ -1382,7 +1353,6 @@ const AddTransactionModal = ({
         (opt) => opt.value === form.supplier,
       )?.label;
 
-      // Base payload for the remittance transaction
       const remittancePayload = {
         categoryType: getCategoryName,
         date: form.date,
@@ -1401,10 +1371,9 @@ const AddTransactionModal = ({
         invoiceDate: null,
       };
 
-      // If there are loss charges, create a withdraw transaction as well
       if (lossCharges > 0) {
         const withdrawPayload = {
-          categoryType: "Withdraw", // Ensure this category exists in CategoryType master
+          categoryType: "Withdraw",
           date: form.date,
           amount: lossCharges,
           exchangeLoss: 0,
@@ -1443,7 +1412,6 @@ const AddTransactionModal = ({
           );
         }
       } else {
-        // No loss charges – just a single remittance
         try {
           const response = await axios.post(
             `${backendUrl}/api/transactions`,
@@ -1461,10 +1429,7 @@ const AddTransactionModal = ({
           );
         }
       }
-    }
-    // --- OTHER CATEGORIES (ORIGINAL LOGIC) ---
-    else {
-      // Build payload as per original code (unchanged)
+    } else {
       const amount = parseFloat(form.amount) || 0;
       const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
       const finalAmount = isDeposit ? amount - exchangeLoss : amount;
@@ -1581,9 +1546,6 @@ const AddTransactionModal = ({
     }
   };
 
-  // ============================================================================
-  // Render form field with dynamic label for amount
-  // ============================================================================
   const renderFormField = (field) => {
     const value = form[field.key] || "";
     const fieldError = errors[field.key];
@@ -1846,7 +1808,7 @@ const AddTransactionModal = ({
 };
 
 // ============================================================================
-// ImportExcelModal — unchanged
+// ImportExcelModal
 // ============================================================================
 const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
   const [uploading, setUploading] = useState(false);
@@ -2108,7 +2070,7 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
 };
 
 // ============================================================================
-// CashAndBank Component (unchanged from your original)
+// CashAndBank Component
 // ============================================================================
 const CashAndBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
@@ -2143,10 +2105,23 @@ const CashAndBank = () => {
     "actions",
   ]);
 
-  // Store all transactions once
   const [allTransactions, setAllTransactions] = useState([]);
-  // Store destinations separately
   const [destinations, setDestinations] = useState([]);
+
+  // Mobile detection and sidebar state
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // View modal state for mobile
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [viewingTransaction, setViewingTransaction] = useState(null);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const {
     categoryOptions,
@@ -2265,7 +2240,6 @@ const CashAndBank = () => {
     );
   }, [selectedItems, chunkedItems]);
 
-  // Fetch all transactions once and store them
   const fetchTransactions = async () => {
     try {
       setLoading(true);
@@ -2302,7 +2276,6 @@ const CashAndBank = () => {
     fetchTransactions();
   }, []);
 
-  // Update total amount for the current tab when activeTab or destinations change
   useEffect(() => {
     const matchingDestination = destinations?.find(
       (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),
@@ -2310,19 +2283,16 @@ const CashAndBank = () => {
     setTotalAmountTab(matchingDestination?.totalAmount || 0);
   }, [activeTab, destinations]);
 
-  // Filtering: when search term is present, ignore tab and search across all transactions by invoice number
   useEffect(() => {
     if (!allTransactions.length) return;
 
     let filtered = [...allTransactions];
 
     if (searchTerm.trim() !== "") {
-      // Search across all accounts
       filtered = filtered.filter((item) =>
         item.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()),
       );
     } else {
-      // No search term: apply tab filter
       filtered = filtered.filter((item) => {
         let txType = item.transactionType?.toLowerCase() || "";
         if (txType === "expense") txType = "withdraw";
@@ -2356,7 +2326,6 @@ const CashAndBank = () => {
     setData(filtered.slice(startIndex, startIndex + ITEMS_PER_PAGE));
   }, [allTransactions, activeTab, searchTerm, currentPage]);
 
-  // Helper functions (unchanged)
   const currentData = data || [];
 
   const handleAddTransaction = async (transactionData, isEdit = false) => {
@@ -2368,7 +2337,7 @@ const CashAndBank = () => {
         );
         if (response.data.success) {
           showToast("success", "Transaction updated successfully");
-          fetchTransactions(); // refresh all data
+          fetchTransactions();
           refetchDropdownOptions();
         }
       } else {
@@ -2379,6 +2348,11 @@ const CashAndBank = () => {
     } catch {
       showToast("error", "Failed to save transaction");
     }
+  };
+
+  const handleView = (transaction) => {
+    setViewingTransaction(transaction);
+    setIsViewModalOpen(true);
   };
 
   const handleEdit = (transaction) => {
@@ -2450,6 +2424,13 @@ const CashAndBank = () => {
     if (field.id === "actions") {
       return (
         <div className="flex items-center justify-center gap-3 min-w-[150px]">
+          <button
+            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+            title="View"
+            onClick={() => handleView(item)}
+          >
+            <Eye size={18} />
+          </button>
           <button
             className="text-green-600 hover:text-green-800 cursor-pointer"
             title="Edit"
@@ -2585,81 +2566,409 @@ const CashAndBank = () => {
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setCurrentPage(1);
-    setSearchTerm(""); // clear search when switching tabs
+    setSearchTerm("");
     setSelected([]);
     refetchDropdownOptions();
   };
   const accountTypes = ["Cash Balance", "Personal Account", "Company Account"];
 
-  return (
-    <div className="p-6">
-      <div className="container">
-        <div className="mb-4 text-gray-600 text-sm">
-          Dashboard <span className="mx-2">{">"}</span> Cash & Bank
-        </div>
+  // Mobile card view component with View button - Shows Final Amount with color coding
+  const MobileTransactionCard = ({ item, index }) => {
+    // Calculate color based on transaction type (same logic as desktop)
+    const txType = item.transactionType?.toLowerCase() || "";
+    const sourceName =
+      typeof item.source === "object"
+        ? item.source?.name?.toLowerCase() || ""
+        : (item.source || "").toLowerCase();
+    const destName =
+      typeof item.destination === "object"
+        ? item.destination?.name?.toLowerCase() || ""
+        : (item.destination || "").toLowerCase();
+    const activeTabLower = activeTab.toLowerCase();
 
-        {(optionsLoading || loading) && (
-          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-              <span className="text-blue-700">
-                {loading
-                  ? "Loading transactions..."
-                  : "Loading dropdown options..."}
-              </span>
-            </div>
+    const isNeg =
+      txType === "remittance" ||
+      txType === "payment outward" ||
+      ((txType === "withdraw" || txType === "deposit") &&
+        sourceName === activeTabLower);
+    const isPos =
+      (txType === "withdraw" || txType === "deposit") &&
+      destName === activeTabLower;
+    const val = item.finalAmount || item.amount || 0;
+
+    const amountColor = isNeg
+      ? "text-red-600"
+      : isPos
+        ? "text-green-700"
+        : val >= 0
+          ? "text-green-700"
+          : "text-red-600";
+
+    return (
+      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
+        <div className="flex justify-between items-start mb-3">
+          <div className="flex-1">
+            <h3 className="font-semibold text-gray-800 text-lg">
+              Invoice: {item.invoiceNumber || "NA"}
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Category:{" "}
+              {typeof item.categoryType === "string"
+                ? item.categoryType
+                : item.categoryType?.name || "--"}
+            </p>
           </div>
-        )}
-        {optionsError && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <span className="text-red-700">
-              Error loading dropdown options: {optionsError}
+          <button
+            onClick={() => handleView(item)}
+            className="p-2 rounded-lg transition-colors text-blue-600 hover:bg-blue-100 cursor-pointer"
+            title="View Details"
+          >
+            <Eye size={18} />
+          </button>
+        </div>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-600">Final Amount:</span>
+            <span className={`font-bold ${amountColor}`}>
+              ${(item.finalAmount || item.amount || 0).toFixed(2)}
             </span>
           </div>
-        )}
+          <div className="flex justify-between">
+            <span className="text-gray-600">Source:</span>
+            <span className="text-gray-800 font-medium">
+              {typeof item.source === "object"
+                ? item.source?.name || "--"
+                : item.source || "--"}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-600">Destination:</span>
+            <span className="text-gray-800 font-medium">
+              {typeof item.destination === "object"
+                ? item.destination?.name || "--"
+                : item.destination || "--"}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-600">Date:</span>
+            <span className="text-gray-800">
+              {item.date ? formatDateToReadable(item.date) : "--"}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-          <div className="flex gap-3 items-center">
+  // View Details Modal for mobile - Shows Final Amount with color coding
+  const ViewDetailsModal = () => {
+    if (!viewingTransaction) return null;
+
+    const tx = viewingTransaction;
+
+    // Calculate color based on transaction type (same logic as desktop)
+    const txType = tx.transactionType?.toLowerCase() || "";
+    const sourceName =
+      typeof tx.source === "object"
+        ? tx.source?.name?.toLowerCase() || ""
+        : (tx.source || "").toLowerCase();
+    const destName =
+      typeof tx.destination === "object"
+        ? tx.destination?.name?.toLowerCase() || ""
+        : (tx.destination || "").toLowerCase();
+    const activeTabLower = activeTab.toLowerCase();
+
+    const isNeg =
+      txType === "remittance" ||
+      txType === "payment outward" ||
+      ((txType === "withdraw" || txType === "deposit") &&
+        sourceName === activeTabLower);
+    const isPos =
+      (txType === "withdraw" || txType === "deposit") &&
+      destName === activeTabLower;
+    const val = tx.finalAmount || tx.amount || 0;
+
+    const amountColor = isNeg
+      ? "text-red-600"
+      : isPos
+        ? "text-green-700"
+        : val >= 0
+          ? "text-green-700"
+          : "text-red-600";
+
+    return ReactDOM.createPortal(
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
+        <div className="bg-white w-full max-w-md rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+          <div className="sticky top-0 bg-white border-b px-4 py-3 flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-800">
+              Transaction Details
+            </h2>
             <button
-              onClick={() => setIsModalOpen(true)}
-              disabled={optionsLoading || categoryOptions.length === 0}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => {
+                setIsViewModalOpen(false);
+                setViewingTransaction(null);
+              }}
+              className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              <Plus size={18} /> Add New Transaction
+              <X size={20} />
             </button>
-            <button
-              onClick={() => setIsImportModalOpen(true)}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-            >
-              <Upload size={18} /> Import Excel
-            </button>
-            {selected.length > 0 && (
-              <button
-                onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              >
-                <Trash2 size={18} /> Delete Selected ({selected.length})
-              </button>
+          </div>
+
+          <div className="p-4 space-y-4">
+            <div className="border-b pb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Invoice Number
+              </label>
+              <p className="text-sm font-semibold text-gray-900">
+                {tx.invoiceNumber || "NA"}
+              </p>
+            </div>
+
+            <div className="border-b pb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Category Type
+              </label>
+              <p className="text-sm text-gray-900">
+                {typeof tx.categoryType === "string"
+                  ? tx.categoryType
+                  : tx.categoryType?.name || "--"}
+              </p>
+            </div>
+
+            <div className="border-b pb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Final Amount
+              </label>
+              <p className={`text-lg font-bold ${amountColor}`}>
+                ${(tx.finalAmount || tx.amount || 0).toFixed(2)}
+              </p>
+            </div>
+
+            {tx.exchangeLoss > 0 && (
+              <div className="border-b pb-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Bank Charges
+                </label>
+                <p className="text-sm text-red-600">
+                  ${(tx.exchangeLoss || 0).toFixed(2)}
+                </p>
+              </div>
+            )}
+
+            <div className="border-b pb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Source Account
+              </label>
+              <p className="text-sm text-gray-900">
+                {typeof tx.source === "object"
+                  ? tx.source?.name || "--"
+                  : tx.source || "--"}
+              </p>
+            </div>
+
+            <div className="border-b pb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Destination Account
+              </label>
+              <p className="text-sm text-gray-900">
+                {typeof tx.destination === "object"
+                  ? tx.destination?.name || "--"
+                  : tx.destination || "--"}
+              </p>
+            </div>
+
+            <div className="border-b pb-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">
+                Date
+              </label>
+              <p className="text-sm text-gray-900">
+                {tx.date ? formatDateToReadable(tx.date) : "--"}
+              </p>
+            </div>
+
+            {tx.invoiceDate && tx.invoiceDate !== "NA" && (
+              <div className="border-b pb-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Invoice Date
+                </label>
+                <p className="text-sm text-gray-900">
+                  {formatDateToReadable(tx.invoiceDate)}
+                </p>
+              </div>
+            )}
+
+            {tx.customerName && (
+              <div className="border-b pb-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Customer Name
+                </label>
+                <p className="text-sm text-gray-900">{tx.customerName}</p>
+              </div>
+            )}
+
+            {tx.customerAddress && (
+              <div className="border-b pb-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Customer Address
+                </label>
+                <p className="text-sm text-gray-900">{tx.customerAddress}</p>
+              </div>
+            )}
+
+            {tx.remarks && (
+              <div className="border-b pb-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Remarks
+                </label>
+                <p className="text-sm text-gray-900 whitespace-pre-wrap">
+                  {tx.remarks}
+                </p>
+              </div>
+            )}
+
+            {tx.supplier && (
+              <div className="border-b pb-3">
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Supplier
+                </label>
+                <p className="text-sm text-gray-900">{tx.supplier}</p>
+              </div>
             )}
           </div>
-          <div className="flex gap-3 items-center">
+
+          <div className="sticky bottom-0 bg-gray-50 border-t px-4 py-3 flex justify-end">
             <button
-              className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => setIsColumnModalOpen(true)}
+              onClick={() => {
+                setIsViewModalOpen(false);
+                setViewingTransaction(null);
+              }}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
             >
-              <Settings size={18} /> Add / Remove Column
-            </button>
-            <button
-              onClick={handleExport}
-              disabled={exportLoading || currentData.length === 0}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
-            >
-              <Download size={18} />
-              {exportLoading ? "Exporting..." : "Export"}
+              Close
             </button>
           </div>
         </div>
+      </div>,
+      document.body,
+    );
+  };
 
+  return (
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* Mobile Header with Hamburger Menu */}
+      {isMobileView && (
+        <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <h1 className="text-sm font-bold text-gray-800">Cash & Bank</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Balance: ${totalAmountTab.toFixed(2)}
+          </div>
+        </div>
+      )}
+
+      {/* Desktop Header */}
+      {!isMobileView && (
+        <>
+          {(optionsLoading || loading) && (
+            <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                <span className="text-blue-700">
+                  {loading
+                    ? "Loading transactions..."
+                    : "Loading dropdown options..."}
+                </span>
+              </div>
+            </div>
+          )}
+          {optionsError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <span className="text-red-700">
+                Error loading dropdown options: {optionsError}
+              </span>
+            </div>
+          )}
+
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
+            <div className="flex gap-3 items-center">
+              <button
+                onClick={() => setIsModalOpen(true)}
+                disabled={optionsLoading || categoryOptions.length === 0}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus size={18} /> Add New Transaction
+              </button>
+              <button
+                onClick={() => setIsImportModalOpen(true)}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              >
+                <Upload size={18} /> Import Excel
+              </button>
+              {selected.length > 0 && (
+                <button
+                  onClick={handleDeleteSelected}
+                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                >
+                  <Trash2 size={18} /> Delete Selected ({selected.length})
+                </button>
+              )}
+            </div>
+            <div className="flex gap-3 items-center">
+              <button
+                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={() => setIsColumnModalOpen(true)}
+              >
+                <Settings size={18} /> Add / Remove Column
+              </button>
+              <button
+                onClick={handleExport}
+                disabled={exportLoading || currentData.length === 0}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+              >
+                <Download size={18} />
+                {exportLoading ? "Exporting..." : "Export"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Mobile Tab Buttons */}
+      {isMobileView && (
+        <div className="flex gap-1 mb-4 overflow-x-auto pb-2">
+          {accountTypes.map((tab) => (
+            <button
+              key={`tab-${tab}`}
+              onClick={() => handleTabChange(tab)}
+              className={`px-2 py-2 rounded-lg capitalize transition-colors whitespace-nowrap text-[9px] ${
+                activeTab === tab
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Desktop Tabs */}
+      {!isMobileView && (
         <div className="flex justify-between items-center mb-6">
           <div className="flex gap-2 flex-1">
             {accountTypes.map((tab) => (
@@ -2702,24 +3011,50 @@ const CashAndBank = () => {
             </div>
           </div>
         </div>
+      )}
 
-        {/* Show a hint when search is active */}
-        {searchTerm.trim() !== "" && (
-          <div className="mb-4 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm">
-            🔍 Showing results from all accounts for invoice number:{" "}
-            <strong>{searchTerm}</strong>
-          </div>
-        )}
-
-        <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
-          <h3 className="text-lg font-semibold text-gray-800 mb-1">
-            {activeTab} Summary
-          </h3>
-          <div className="text-2xl font-bold text-indigo-700">
-            ${totalAmountTab.toFixed(2)}
-          </div>
+      {/* Mobile Search */}
+      {isMobileView && (
+        <div className="relative mb-4">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+            size={16}
+            onClick={() => inputRef.current?.focus()}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search by Invoice Number"
+            value={searchTerm}
+            onChange={handleSearchChange}
+            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+          />
         </div>
+      )}
 
+      {/* Show a hint when search is active */}
+      {searchTerm.trim() !== "" && (
+        <div className="mb-4 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm">
+          🔍 Showing results from all accounts for invoice number:{" "}
+          <strong>{searchTerm}</strong>
+        </div>
+      )}
+
+      <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
+        <h3
+          className={`text-lg font-semibold text-gray-800 mb-1 ${isMobileView ? "text-xs" : "text-lg"}`}
+        >
+          {activeTab} Summary
+        </h3>
+        <div
+          className={`text-2xl font-bold text-indigo-700 ${isMobileView ? "text-base" : "text-2xl"}`}
+        >
+          ${totalAmountTab.toFixed(2)}
+        </div>
+      </div>
+
+      {/* Desktop Table View */}
+      {!isMobileView && (
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -2808,48 +3143,6 @@ const CashAndBank = () => {
             </tbody>
           </table>
 
-          {/* {currentData.length > 1 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Prev
-              </button>
-              {visiblePages.map((page, idx) =>
-                page === "..." ? (
-                  <span
-                    key={`ellipsis-${idx}`}
-                    className="px-3 py-1 text-gray-500 select-none"
-                  >
-                    ...
-                  </span>
-                ) : (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ),
-              )}
-              <button
-                onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                }
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Next
-              </button>
-            </div>
-          )} */}
           {totalPages > 1 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
               <button
@@ -2893,163 +3186,220 @@ const CashAndBank = () => {
             </div>
           )}
         </div>
+      )}
 
-        {isColumnModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={handleColumnCancel}
+      {/* Mobile Card View */}
+      {isMobileView && (
+        <>
+          {currentData.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              {loading
+                ? "Loading transactions..."
+                : searchTerm
+                  ? "No transactions match your search."
+                  : "No transactions found."}
+            </div>
+          ) : (
+            currentData.map((item, index) => (
+              <MobileTransactionCard
+                key={item._id || index}
+                item={item}
+                index={index}
               />
-              <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2 className="text-xl font-semibold mb-4">
-                  {activeColumnTab === "add" ? "Add Columns" : "Remove Columns"}
-                </h2>
-                <div className="flex w-full gap-2 mb-4">
-                  <button
-                    onClick={() => {
-                      setActiveColumnTab("add");
-                      setSelectedItems([]);
-                      setAllSelected(false);
-                    }}
-                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${
-                      activeColumnTab === "add"
-                        ? "bg-green-600 text-white"
-                        : "bg-gray-200 text-gray-700"
-                    }`}
-                  >
-                    Add Columns ({availableColumns.length})
-                  </button>
-                  <button
-                    onClick={() => {
-                      setActiveColumnTab("remove");
-                      setSelectedItems([]);
-                      setAllSelected(false);
-                    }}
-                    className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${
-                      activeColumnTab === "remove"
-                        ? "bg-red-600 text-white"
-                        : "bg-gray-200 text-gray-700"
-                    }`}
-                  >
-                    Remove Columns ({removableColumns.length})
-                  </button>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                  {chunkedItems.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      {chunkedItems.flat().length > 0 && (
-                        <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
-                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
-                            <input
-                              type="checkbox"
-                              checked={allSelected}
-                              onChange={() => toggleItem("all")}
-                            />
-                            Select All
-                          </label>
-                          <div className="flex-1"></div>
-                        </div>
-                      )}
-                      {chunkedItems.map((pair, index) => (
-                        <div key={index} className="flex gap-4">
-                          {pair.map(({ id, name }) => (
-                            <label
-                              key={id}
-                              className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedItems.includes(id)}
-                                onChange={() => toggleItem(id)}
-                              />
-                              <span className="flex-1">{name}</span>
-                            </label>
-                          ))}
-                          {pair.length === 1 && <div className="flex-1"></div>}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      {activeColumnTab === "add"
-                        ? "All available columns are already in the table."
-                        : "No columns available to remove."}
-                    </div>
-                  )}
-                </div>
-                <div className="mt-4 pt-4 border-t flex justify-between items-center">
-                  <button
-                    onClick={handleColumnReset}
-                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
-                  >
-                    Reset to Default
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleColumnCancel}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleColumnSave}
-                      disabled={selectedItems.length === 0}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    >
-                      Save Changes
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>,
-            document.body,
+            ))
           )}
 
-        <AddTransactionModal
-          key="add-modal"
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          activeTab={activeTab}
-          onAddTransaction={handleAddTransaction}
-          categoryOptions={categoryOptions}
-          sourceOptions={sourceOptions}
-          destinationOptions={destinationOptions}
-          supplierOptions={supplierOptions}
-          loadingSuppliers={loadingSuppliers}
-          currentData={currentData}
-        />
-        <AddTransactionModal
-          key="edit-modal"
-          isOpen={isEditModalOpen}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            setEditingTransaction(null);
-          }}
-          activeTab={activeTab}
-          onAddTransaction={handleAddTransaction}
-          editData={editingTransaction}
-          isEdit={true}
-          categoryOptions={categoryOptions}
-          sourceOptions={sourceOptions}
-          destinationOptions={destinationOptions}
-          supplierOptions={supplierOptions}
-          loadingSuppliers={loadingSuppliers}
-          currentData={currentData}
-        />
-        <ImportExcelModal
-          isOpen={isImportModalOpen}
-          onClose={() => setIsImportModalOpen(false)}
-          activeTab={activeTab}
-          onImportComplete={() => {
-            fetchTransactions();
-            refetchDropdownOptions();
-          }}
-        />
-      </div>
+          {/* Mobile Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex justify-center items-center gap-2">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+              >
+                ← Prev
+              </button>
+              <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-sm"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* View Details Modal for Mobile */}
+      <ViewDetailsModal />
+
+      {/* Column Modal */}
+      {isColumnModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={handleColumnCancel}
+            />
+            <div
+              className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-semibold mb-4">
+                {activeColumnTab === "add" ? "Add Columns" : "Remove Columns"}
+              </h2>
+              <div className="flex w-full gap-2 mb-4">
+                <button
+                  onClick={() => {
+                    setActiveColumnTab("add");
+                    setSelectedItems([]);
+                    setAllSelected(false);
+                  }}
+                  className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${
+                    activeColumnTab === "add"
+                      ? "bg-green-600 text-white"
+                      : "bg-gray-200 text-gray-700"
+                  }`}
+                >
+                  Add Columns ({availableColumns.length})
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveColumnTab("remove");
+                    setSelectedItems([]);
+                    setAllSelected(false);
+                  }}
+                  className={`w-1/2 px-4 py-2 font-medium text-center rounded-lg ${
+                    activeColumnTab === "remove"
+                      ? "bg-red-600 text-white"
+                      : "bg-gray-200 text-gray-700"
+                  }`}
+                >
+                  Remove Columns ({removableColumns.length})
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {chunkedItems.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-3">
+                    {chunkedItems.flat().length > 0 && (
+                      <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
+                        <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            onChange={() => toggleItem("all")}
+                          />
+                          Select All
+                        </label>
+                        <div className="flex-1"></div>
+                      </div>
+                    )}
+                    {chunkedItems.map((pair, index) => (
+                      <div key={index} className="flex gap-4">
+                        {pair.map(({ id, name }) => (
+                          <label
+                            key={id}
+                            className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedItems.includes(id)}
+                              onChange={() => toggleItem(id)}
+                            />
+                            <span className="flex-1">{name}</span>
+                          </label>
+                        ))}
+                        {pair.length === 1 && <div className="flex-1"></div>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    {activeColumnTab === "add"
+                      ? "All available columns are already in the table."
+                      : "No columns available to remove."}
+                  </div>
+                )}
+              </div>
+              <div className="mt-4 pt-4 border-t flex justify-between items-center">
+                <button
+                  onClick={handleColumnReset}
+                  className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
+                >
+                  Reset to Default
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleColumnCancel}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleColumnSave}
+                    disabled={selectedItems.length === 0}
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {/* Add Transaction Modal */}
+      <AddTransactionModal
+        key="add-modal"
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        activeTab={activeTab}
+        onAddTransaction={handleAddTransaction}
+        categoryOptions={categoryOptions}
+        sourceOptions={sourceOptions}
+        destinationOptions={destinationOptions}
+        supplierOptions={supplierOptions}
+        loadingSuppliers={loadingSuppliers}
+        currentData={currentData}
+      />
+
+      {/* Edit Transaction Modal */}
+      <AddTransactionModal
+        key="edit-modal"
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingTransaction(null);
+        }}
+        activeTab={activeTab}
+        onAddTransaction={handleAddTransaction}
+        editData={editingTransaction}
+        isEdit={true}
+        categoryOptions={categoryOptions}
+        sourceOptions={sourceOptions}
+        destinationOptions={destinationOptions}
+        supplierOptions={supplierOptions}
+        loadingSuppliers={loadingSuppliers}
+        currentData={currentData}
+      />
+
+      {/* Import Excel Modal */}
+      <ImportExcelModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        activeTab={activeTab}
+        onImportComplete={() => {
+          fetchTransactions();
+          refetchDropdownOptions();
+        }}
+      />
     </div>
   );
 };

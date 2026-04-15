@@ -21,6 +21,7 @@ import {
   Box,
   ArrowDownCircle,
   User,
+  Menu,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getVisiblePages } from "../utils/useVisiblePages.jsx";
@@ -29,6 +30,7 @@ import axios from "axios";
 import { showToast } from "../utils/toast.jsx";
 import { confirmDialog } from "../utils/confirmationDialog.js";
 import SearchableDropdown from "../components/common/SearchableDropdown";
+import Sidebar from "../components/Sidebar";
 
 const ITEMS_PER_PAGE = 9;
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -40,6 +42,17 @@ const isReceiveType = (transferType) =>
 const StockTransfer = () => {
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Mobile detection and sidebar state
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const [activeTab, setActiveTab] = useState(() => {
     if (location.state && location.state.activeTab)
@@ -778,7 +791,6 @@ const StockTransfer = () => {
   // ── Resolve MR name from mrId using mrList / mrListFromStock ─────────────
   const resolveMRName = useCallback(
     (transfer) => {
-      // First try the stored name fields
       const storedName =
         transfer.stockTransferToMr ||
         transfer.stockTransferFromMrToMain ||
@@ -786,14 +798,12 @@ const StockTransfer = () => {
 
       if (storedName) return storedName;
 
-      // Try to look up by mrId in mrListFromStock
       if (transfer.mrId) {
         const fromStock = mrListFromStock.find(
           (mr) => mr.mrId === transfer.mrId || mr._id === transfer.mrId,
         );
         if (fromStock?.mrName) return fromStock.mrName;
 
-        // Try staff list
         const fromStaff = mrList.find((mr) => mr._id === transfer.mrId);
         if (fromStaff)
           return (
@@ -859,6 +869,9 @@ const StockTransfer = () => {
     () => getVisiblePages(currentPage, totalPages),
     [currentPage, totalPages],
   );
+
+  // Check if table has entries
+  const hasTableEntries = filteredTransfers.length > 0;
 
   const handleSelectRow = (id) =>
     setSelectedRows((prev) =>
@@ -1380,80 +1393,111 @@ const StockTransfer = () => {
   const mrAddProductOptions = getAvailableProductOptions(form.items, true);
 
   return (
-    <div className="p-6">
-      <div className="mb-4 text-gray-600 text-sm">
-        Dashboard <span className="mx-2">{">"}</span> Stock Transfer
-      </div>
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {isMobileView && (
+        <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <h1 className="text-sm font-bold text-gray-800">Stock Transfer</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-50 text-blue-700 px-1 py-0.5 rounded-full text-sm font-medium">
+              Total Records: {filteredTransfers.length}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isMobileView && (
+        <div className="mb-4 text-gray-600 text-sm">
+          Dashboard <span className="mx-2">{">"}</span> Stock Transfer
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
           Error: {error}
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div className="flex gap-3">
-          <button
-            onClick={handleNavigateToForm}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Plus size={18} /> Add New Stock Transfer
-          </button>
-          {selectedRows.length > 0 && (
+      {/* Action Buttons - Hidden on mobile */}
+      {!isMobileView && (
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div className="flex gap-3 flex-wrap">
             <button
-              onClick={handleDelete}
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              onClick={handleNavigateToForm}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md cursor-pointer px-4 py-2"
             >
-              <Trash2 size={18} /> Delete Selected ({selectedRows.length})
+              <Plus size={18} /> Add New Stock Transfer
             </button>
-          )}
+            {selectedRows.length > 0 && (
+              <button
+                onClick={handleDelete}
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-md cursor-pointer px-4 py-2"
+              >
+                <Trash2 size={18} /> Delete Selected ({selectedRows.length})
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div className="flex gap-3">
           <button
             onClick={() => handleTabChange("general")}
-            className={`px-5 py-2 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 ${activeTab === "general" ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-5 py-2"} rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 ${activeTab === "general" ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
           >
-            <Truck size={18} /> General Transfer
+            <Truck size={isMobileView ? 14 : 18} /> General Transfer
           </button>
           <button
             onClick={() => handleTabChange("mr")}
-            className={`px-5 py-2 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 ${activeTab === "mr" ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+            className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-5 py-2"} rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-2 ${activeTab === "mr" ? "bg-indigo-600 text-white shadow-md" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
           >
-            <Users size={18} /> Stock Transfer To MR
+            <Users size={isMobileView ? 14 : 18} /> Stock Transfer To MR
           </button>
         </div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
-          <p className="text-base font-semibold text-gray-700 whitespace-nowrap">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-medium">
-              {filteredTransfers.length}
-            </span>
-          </p>
-          <div className="relative w-full lg:w-60">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={() => inputRef.current?.focus()}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder={
-                activeTab === "general"
-                  ? "Search by Stock Transfer No, Remarks, Source/Destination"
-                  : "Search by Stock Transfer No, Remarks, MR Name"
-              }
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-            />
+
+        {/* Search Input - Only show when table has entries */}
+        {hasTableEntries && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
+            <div className={`relative ${isMobileView ? "w-full" : "w-60"}`}>
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={isMobileView ? 14 : 16}
+                onClick={() => inputRef.current?.focus()}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder={
+                  activeTab === "general"
+                    ? "Search by Stock Transfer No, Remarks, Source/Destination"
+                    : "Search by Stock Transfer No, Remarks, MR Name"
+                }
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className={`pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none ${isMobileView ? "text-xs" : ""}`}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ── Main Table ───────────────────────────────────────────────────────── */}
@@ -1461,7 +1505,9 @@ const StockTransfer = () => {
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 min-w-[150px] text-sm font-medium">
+              <th
+                className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[150px] text-sm"} font-medium`}
+              >
                 <div className="flex items-center gap-4">
                   {currentTransfers.length > 0 && (
                     <input
@@ -1477,18 +1523,36 @@ const StockTransfer = () => {
                   <span>Stock Transfer No</span>
                 </div>
               </th>
-              <th className="p-3 min-w-[150px] text-sm font-medium">
+              <th
+                className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[150px] text-sm"} font-medium`}
+              >
                 {activeTab === "general" ? "Source/Destination" : "MR Name"}
               </th>
-              <th className="p-3 min-w-[100px] text-sm font-medium">Type</th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">Date</th>
-              <th className="p-3 min-w-[150px] text-sm font-medium">
+              <th
+                className={`p-3 ${isMobileView ? "min-w-[80px] text-xs" : "min-w-[100px] text-sm"} font-medium`}
+              >
+                Type
+              </th>
+              <th
+                className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[120px] text-sm"} font-medium`}
+              >
+                Date
+              </th>
+              <th
+                className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[150px] text-sm"} font-medium`}
+              >
                 Total Selling Price ($)
               </th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">
+              <th
+                className={`p-3 ${isMobileView ? "min-w-[80px] text-xs" : "min-w-[120px] text-sm"} font-medium`}
+              >
                 # Products
               </th>
-              <th className="p-3 min-w-[150px] text-sm font-medium">Actions</th>
+              <th
+                className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[150px] text-sm"} font-medium`}
+              >
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1517,26 +1581,34 @@ const StockTransfer = () => {
                     key={item._id}
                     className={`hover:bg-gray-50 ${index + 1 === currentTransfers.length ? "" : "border-b"}`}
                   >
-                    <td className="p-3 min-w-[150px]">
+                    <td
+                      className={`p-3 ${isMobileView ? "min-w-[100px]" : "min-w-[150px]"}`}
+                    >
                       <div className="flex items-center gap-4">
                         <input
                           type="checkbox"
                           checked={selectedRows.includes(item._id)}
                           onChange={() => handleSelectRow(item._id)}
                         />
-                        <span className="font-medium text-indigo-600">
+                        <span
+                          className={`font-medium text-indigo-600 ${isMobileView ? "text-xs" : ""}`}
+                        >
                           {item.invoiceNo || "N/A"}
                         </span>
                       </div>
                     </td>
-                    <td className="p-3 min-w-[150px]">
+                    <td
+                      className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[150px]"}`}
+                    >
                       {activeTab === "general"
                         ? item.transferType === "send"
                           ? item.destination || "Main Warehouse"
                           : item.source || "Main Warehouse"
                         : resolveMRName(item)}
                     </td>
-                    <td className="p-3 min-w-[100px]">
+                    <td
+                      className={`p-3 ${isMobileView ? "min-w-[80px]" : "min-w-[100px]"}`}
+                    >
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-medium ${item.transferType === "send" ? "bg-green-100 text-green-800" : isReceiveType(item.transferType) ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-800"}`}
                       >
@@ -1549,53 +1621,83 @@ const StockTransfer = () => {
                               : "General"}
                       </span>
                     </td>
-                    <td className="p-3 min-w-[120px]">
+                    <td
+                      className={`p-3 ${isMobileView ? "min-w-[100px] text-xs" : "min-w-[120px]"}`}
+                    >
                       {formatDateToReadable(item.date)}
                     </td>
-                    <td className="p-3 min-w-[150px] font-medium">
+                    <td
+                      className={`p-3 ${isMobileView ? "min-w-[100px]" : "min-w-[150px]"} font-medium`}
+                    >
                       <div className="flex items-center justify-center gap-1">
-                        <DollarSign size={14} className="text-green-600" />
-                        <span className="text-green-700">
+                        <DollarSign
+                          size={isMobileView ? 12 : 14}
+                          className="text-green-600"
+                        />
+                        <span
+                          className={`text-green-700 ${isMobileView ? "text-xs" : ""}`}
+                        >
                           {formatCurrency(displayTotal)}
                         </span>
                       </div>
                     </td>
-                    <td className="p-3 min-w-[120px]">
+                    <td
+                      className={`p-3 ${isMobileView ? "min-w-[80px]" : "min-w-[120px]"}`}
+                    >
                       <div className="flex items-center justify-center gap-3">
-                        <span className="font-medium">{productCount}</span>
+                        <span
+                          className={`font-medium ${isMobileView ? "text-xs" : ""}`}
+                        >
+                          {productCount}
+                        </span>
                         <button
                           className="text-purple-600 hover:text-purple-800 cursor-pointer"
                           onClick={() => handleViewProducts(item)}
                           title="View Products"
                         >
-                          <Package size={18} />
+                          <Package size={isMobileView ? 14 : 18} />
                         </button>
                       </div>
                     </td>
-                    <td className="p-3 min-w-[150px]">
-                      <div className="flex items-center justify-center gap-3">
-                        <button
-                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                          onClick={() => handleView(item)}
-                          title="View Details"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        <button
-                          className="text-green-600 hover:text-green-800 cursor-pointer"
-                          onClick={() => handleEdit(item)}
-                          title="Edit"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button
-                          className="text-red-600 hover:text-red-800 cursor-pointer"
-                          onClick={() => handleDeleteSingle(item)}
-                          title="Delete"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
+                    <td
+                      className={`p-3 ${isMobileView ? "min-w-[100px]" : "min-w-[150px]"}`}
+                    >
+                      {/* Mobile: Only show View button (Eye), Hide Edit and Delete */}
+                      {isMobileView ? (
+                        <div className="flex items-center justify-center">
+                          <button
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                            onClick={() => handleView(item)}
+                            title="View Details"
+                          >
+                            <Eye size={18} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-3">
+                          <button
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                            onClick={() => handleView(item)}
+                            title="View Details"
+                          >
+                            <Eye size={18} />
+                          </button>
+                          <button
+                            className="text-green-600 hover:text-green-800 cursor-pointer"
+                            onClick={() => handleEdit(item)}
+                            title="Edit"
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button
+                            className="text-red-600 hover:text-red-800 cursor-pointer"
+                            onClick={() => handleDeleteSingle(item)}
+                            title="Delete"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1603,30 +1705,36 @@ const StockTransfer = () => {
             )}
           </tbody>
         </table>
-        {currentTransfers.length > 0 && (
+        {currentTransfers.length > 0 && totalPages > 1 && (
           <div className="mt-4 p-5 flex flex-wrap justify-start gap-2">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
             >
               Prev
             </button>
-            <div className="flex gap-1">
-              {visiblePages.map((pg) => (
-                <button
-                  key={pg}
-                  onClick={() => setCurrentPage(pg)}
-                  className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${currentPage === pg ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
-                >
-                  {pg}
-                </button>
-              ))}
-            </div>
+            {!isMobileView ? (
+              <div className="flex gap-1">
+                {visiblePages.map((pg) => (
+                  <button
+                    key={pg}
+                    onClick={() => setCurrentPage(pg)}
+                    className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${currentPage === pg ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
+                  >
+                    {pg}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <span className="px-3 py-1 text-sm text-gray-700 font-medium">
+                Page {currentPage} of {totalPages}
+              </span>
+            )}
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
-              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
             >
               Next
             </button>
@@ -1634,9 +1742,7 @@ const StockTransfer = () => {
         )}
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          MR STOCK SELECT MODAL (Edit flow)
-      ════════════════════════════════════════════════════════════════════════ */}
+      {/* ── MR Stock Selection Modal ─────────────────────────────────────────── */}
       {isMrStockSelectModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 flex justify-center items-center z-[60]">
@@ -1801,7 +1907,7 @@ const StockTransfer = () => {
       {/* ── View Modal ────────────────────────────────────────────────────────── */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50 px-4 py-5">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={closeViewModal}
@@ -1813,7 +1919,9 @@ const StockTransfer = () => {
               >
                 <X size={20} />
               </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              <h2
+                className={`${isMobileView ? "text-base" : "text-xl"} font-semibold text-gray-800 mb-4`}
+              >
                 View{" "}
                 {activeTab === "general" ? "Stock Transfer" : "MR Transfer"}
               </h2>
@@ -1841,268 +1949,656 @@ const StockTransfer = () => {
                   </span>
                 </div>
               )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Stock Transfer No
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 font-medium text-indigo-600">
-                    {form.invoiceNo || "-"}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Date
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.date ? formatDateToReadable(form.date) : "-"}
-                  </p>
-                </div>
-                {activeTab === "general" ? (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Transfer Type
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {form.transferType || "-"}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        {form.transferType === "send"
-                          ? "Destination"
-                          : "Source"}
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {form.transferType === "send"
-                          ? form.destination || "-"
-                          : form.source || "-"}
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Transfer Type
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {isReceiveType(form.transferType) ? "Receive" : "Send"}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        MR Name
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {currentMRInfo?.mrName ||
-                          form.stockTransferToMr ||
-                          form.stockTransferFromMrToMain ||
-                          form.mrName ||
-                          "-"}
-                      </p>
-                    </div>
-                  </>
-                )}
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-600">
-                    Remarks
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.remarks || "-"}
-                  </p>
-                </div>
 
-                {/* ── View: MR Receive type — show stockInMRHand table ─────────── */}
-                {activeTab === "mr" && isReceiveType(form.transferType) ? (
-                  <div className="md:col-span-2">
-                    <h3 className="text-lg font-medium text-gray-800 mb-3">
-                      Stock In MR Hand (qty &gt; 0)
-                    </h3>
-                    {mrStockLoading ? (
-                      <div className="text-center py-4 text-gray-500 animate-pulse">
-                        Loading MR stock...
-                      </div>
-                    ) : mrStockData.length === 0 ? (
-                      <div className="text-center py-6 border-2 border-dashed border-gray-300 rounded-lg text-gray-500">
-                        <Package
-                          size={32}
-                          className="mx-auto mb-2 text-gray-300"
-                        />
-                        No stock with quantity &gt; 0 found for this MR.
-                      </div>
+              {/* Mobile View - Custom Layout */}
+              {isMobileView ? (
+                <div className="max-h-[65vh] overflow-y-auto">
+                  {/* Row 1: Stock Transfer No and Date */}
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-600">
+                        Stock Transfer No
+                      </label>
+                      <p className="border px-2 py-1.5 rounded-lg bg-gray-100 font-medium text-indigo-600 text-[10px]">
+                        {form.invoiceNo || "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-gray-600">
+                        Date
+                      </label>
+                      <p className="border px-2 py-1.5 rounded-lg bg-gray-100 text-[10px]">
+                        {form.date ? formatDateToReadable(form.date) : "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Transfer Type and MR Name (or Source/Destination) */}
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    {activeTab === "general" ? (
+                      <>
+                        <div>
+                          <label className="text-[10px] font-medium text-gray-600">
+                            Transfer Type
+                          </label>
+                          <p className="border px-2 py-1.5 rounded-lg bg-gray-100 capitalize text-[10px]">
+                            {form.transferType || "-"}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-gray-600">
+                            {form.transferType === "send"
+                              ? "Destination"
+                              : "Source"}
+                          </label>
+                          <p className="border px-2 py-1.5 rounded-lg bg-gray-100 capitalize text-[10px]">
+                            {form.transferType === "send"
+                              ? form.destination || "-"
+                              : form.source || "-"}
+                          </p>
+                        </div>
+                      </>
                     ) : (
+                      <>
+                        <div>
+                          <label className="text-[10px] font-medium text-gray-600">
+                            Transfer Type
+                          </label>
+                          <p className="border px-2 py-1.5 rounded-lg bg-gray-100 capitalize text-[10px]">
+                            {isReceiveType(form.transferType)
+                              ? "Receive"
+                              : "Send"}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-gray-600">
+                            MR Name
+                          </label>
+                          <p className="border px-2 py-1.5 rounded-lg bg-gray-100 text-[10px]">
+                            {currentMRInfo?.mrName ||
+                              form.stockTransferToMr ||
+                              form.stockTransferFromMrToMain ||
+                              form.mrName ||
+                              "-"}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Row 3: Remarks */}
+                  <div className="mb-4">
+                    <label className="text-[10px] font-medium text-gray-600">
+                      Remarks
+                    </label>
+                    <p className="border px-2 py-1.5 rounded-lg bg-gray-100 capitalize text-[10px]">
+                      {form.remarks || "-"}
+                    </p>
+                  </div>
+
+                  {/* ── View: MR Receive type — show stockInMRHand table ─────────── */}
+                  {activeTab === "mr" && isReceiveType(form.transferType) ? (
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-800 mb-2">
+                        Stock In MR Hand (qty &gt; 0)
+                      </h3>
+                      {mrStockLoading ? (
+                        <div className="text-center py-3 text-gray-500 animate-pulse text-[10px]">
+                          Loading MR stock...
+                        </div>
+                      ) : mrStockData.length === 0 ? (
+                        <div className="text-center py-4 border-2 border-dashed border-gray-300 rounded-lg text-gray-500">
+                          <Package
+                            size={24}
+                            className="mx-auto mb-1 text-gray-300"
+                          />
+                          <p className="text-[10px]">
+                            No stock with quantity &gt; 0 found for this MR.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto border rounded-lg mb-4">
+                          <table className="w-full">
+                            <thead className="bg-blue-50 text-blue-800">
+                              <tr>
+                                <th className="px-2 py-1 text-[9px] text-left font-semibold">
+                                  Product Name
+                                </th>
+                                <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                  Assigned Qty
+                                </th>
+                                <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                  In Hand
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {mrStockData.map((p, idx) => (
+                                <tr
+                                  key={p.productId || idx}
+                                  className={`border-t ${idx % 2 === 0 ? "bg-white" : "bg-gray-50"}`}
+                                >
+                                  <td className="px-2 py-1 text-[9px] font-medium text-gray-800">
+                                    {p.productName}
+                                  </td>
+                                  <td className="px-2 py-1 text-[9px] text-center">
+                                    <span className="inline-flex items-center justify-center bg-purple-100 text-purple-700 text-[8px] font-semibold px-1.5 py-0.5 rounded-full">
+                                      {p.assignedQuantity || 0}
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-1 text-[9px] text-center">
+                                    <span className="inline-flex items-center justify-center bg-green-100 text-green-700 text-[8px] font-semibold px-1.5 py-0.5 rounded-full">
+                                      {p.quantity || 0}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      <h3 className="text-sm font-medium text-gray-800 mt-3 mb-2">
+                        Returned Products ({form.items?.length || 0})
+                      </h3>
+
+                      {/* Mobile Table format for Returned Products */}
                       <div className="overflow-x-auto border rounded-lg">
-                        <table className="w-full text-sm">
+                        <table className="w-full min-w-[450px]">
                           <thead className="bg-blue-50 text-blue-800">
                             <tr>
-                              <th className="px-4 py-2 text-left font-semibold">
-                                Product Name
+                              <th className="px-2 py-1 text-[9px] text-left font-semibold">
+                                Product
                               </th>
-                              <th className="px-4 py-2 text-center font-semibold">
-                                Assigned Qty
+                              <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                Qty
                               </th>
-                              <th className="px-4 py-2 text-center font-semibold">
-                                Quantity (in hand)
+                              <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                Price
+                              </th>
+                              <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                Total
                               </th>
                             </tr>
                           </thead>
                           <tbody>
-                            {mrStockData.map((p, idx) => (
-                              <tr
-                                key={p.productId || idx}
-                                className={`border-t ${idx % 2 === 0 ? "bg-white" : "bg-gray-50"}`}
-                              >
-                                <td className="px-4 py-2 font-medium text-gray-800">
-                                  {p.productName}
-                                </td>
-                                <td className="px-4 py-2 text-center">
-                                  <span className="inline-flex items-center justify-center bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-1 rounded-full">
-                                    {p.assignedQuantity || 0}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-2 text-center">
-                                  <span className="inline-flex items-center justify-center bg-green-100 text-green-700 text-xs font-semibold px-2 py-1 rounded-full">
-                                    {p.quantity || 0}
-                                  </span>
+                            {form.items && form.items.length > 0 ? (
+                              form.items.map((item, index) => {
+                                const productCost =
+                                  (item.sellingPrice || 0) *
+                                  (item.boxQuantity || 0);
+                                return (
+                                  <tr
+                                    key={item._id || index}
+                                    className={`border-t ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}
+                                  >
+                                    <td className="px-2 py-2 text-[9px] font-medium text-gray-800">
+                                      {item.productName || "-"}
+                                    </td>
+                                    <td className="px-2 py-2 text-[9px] text-center">
+                                      <span className="inline-flex items-center justify-center bg-purple-100 text-purple-700 text-[8px] font-semibold px-1.5 py-0.5 rounded-full">
+                                        {item.boxQuantity || 0}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2 text-[9px] text-center">
+                                      <span className="text-green-600 font-medium">
+                                        ${formatCurrency(item.sellingPrice)}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2 text-[9px] text-center">
+                                      <span className="text-green-700 font-semibold">
+                                        ${formatCurrency(productCost)}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td
+                                  colSpan={4}
+                                  className="px-3 py-4 text-center text-gray-500 text-[9px]"
+                                >
+                                  No items
                                 </td>
                               </tr>
-                            ))}
+                            )}
                           </tbody>
                         </table>
                       </div>
-                    )}
+                    </div>
+                  ) : (
+                    /* ── View: non-receive — normal items list ───────────────────── */
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-800 mb-2">
+                        Products ({form.items?.length || 0})
+                      </h3>
 
-                    <h3 className="text-lg font-medium text-gray-800 mt-5 mb-3">
-                      Returned Products ({form.items?.length || 0})
-                    </h3>
-                    <div className="space-y-4 max-h-60 overflow-y-auto border rounded-lg p-4">
-                      {form.items && form.items.length > 0 ? (
-                        form.items.map((item, index) => {
-                          const productCost =
-                            (item.sellingPrice || 0) * (item.boxQuantity || 0);
-                          return (
-                            <div
-                              key={item._id || index}
-                              className="border-b pb-4 last:border-b-0 bg-blue-50 p-3 rounded-lg"
-                            >
-                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Product Name
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white">
-                                    {item.productName || "-"}
-                                  </p>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Returned Qty
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
-                                    <Box size={14} className="text-gray-500" />
-                                    {item.boxQuantity || 0}
-                                  </p>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Selling Price ($)
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
-                                    <DollarSign
-                                      size={14}
-                                      className="text-green-600"
-                                    />
-                                    {formatCurrency(item.sellingPrice)}
-                                  </p>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Total Selling Price ($)
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white font-medium text-green-700">
-                                    ${formatCurrency(productCost)}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <p className="text-gray-500 text-center">No items</p>
-                      )}
+                      {/* Mobile Table format for Products */}
+                      <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full min-w-[450px]">
+                          <thead className="bg-gray-100 text-gray-700">
+                            <tr>
+                              <th className="px-2 py-1 text-[9px] text-left font-semibold">
+                                Product
+                              </th>
+                              <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                Qty
+                              </th>
+                              <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                Price
+                              </th>
+                              <th className="px-2 py-1 text-[9px] text-center font-semibold">
+                                Total
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {form.items && form.items.length > 0 ? (
+                              form.items.map((item, index) => {
+                                const productCost =
+                                  (item.sellingPrice || 0) *
+                                  (item.boxQuantity || 0);
+                                return (
+                                  <tr
+                                    key={item._id || index}
+                                    className={`border-t ${index % 2 === 0 ? "bg-white" : "bg-gray-50"}`}
+                                  >
+                                    <td className="px-2 py-2 text-[9px] font-medium text-gray-800">
+                                      {item.productName || "-"}
+                                    </td>
+                                    <td className="px-2 py-2 text-[9px] text-center">
+                                      <span className="inline-flex items-center justify-center bg-purple-100 text-purple-700 text-[8px] font-semibold px-1.5 py-0.5 rounded-full">
+                                        {item.boxQuantity || 0}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2 text-[9px] text-center">
+                                      <span className="text-green-600 font-medium">
+                                        ${formatCurrency(item.sellingPrice)}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2 text-[9px] text-center">
+                                      <span className="text-green-700 font-semibold">
+                                        ${formatCurrency(productCost)}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td
+                                  colSpan={4}
+                                  className="px-3 py-4 text-center text-gray-500 text-[9px]"
+                                >
+                                  No items
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
+                  )}
+                </div>
+              ) : (
+                /* DESKTOP VIEW - Original Layout (unchanged) */
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto">
+                  <div>
+                    <label
+                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                    >
+                      Stock Transfer No
+                    </label>
+                    <p
+                      className={`border px-3 py-2 rounded-lg bg-gray-100 font-medium text-indigo-600 ${isMobileView ? "text-xs" : ""}`}
+                    >
+                      {form.invoiceNo || "-"}
+                    </p>
                   </div>
-                ) : (
-                  /* ── View: non-receive — normal items list ───────────────────── */
+                  <div>
+                    <label
+                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                    >
+                      Date
+                    </label>
+                    <p
+                      className={`border px-3 py-2 rounded-lg bg-gray-100 ${isMobileView ? "text-xs" : ""}`}
+                    >
+                      {form.date ? formatDateToReadable(form.date) : "-"}
+                    </p>
+                  </div>
+                  {activeTab === "general" ? (
+                    <>
+                      <div>
+                        <label
+                          className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                        >
+                          Transfer Type
+                        </label>
+                        <p
+                          className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${isMobileView ? "text-xs" : ""}`}
+                        >
+                          {form.transferType || "-"}
+                        </p>
+                      </div>
+                      <div>
+                        <label
+                          className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                        >
+                          {form.transferType === "send"
+                            ? "Destination"
+                            : "Source"}
+                        </label>
+                        <p
+                          className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${isMobileView ? "text-xs" : ""}`}
+                        >
+                          {form.transferType === "send"
+                            ? form.destination || "-"
+                            : form.source || "-"}
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label
+                          className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                        >
+                          Transfer Type
+                        </label>
+                        <p
+                          className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${isMobileView ? "text-xs" : ""}`}
+                        >
+                          {isReceiveType(form.transferType)
+                            ? "Receive"
+                            : "Send"}
+                        </p>
+                      </div>
+                      <div>
+                        <label
+                          className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                        >
+                          MR Name
+                        </label>
+                        <p
+                          className={`border px-3 py-2 rounded-lg bg-gray-100 ${isMobileView ? "text-xs" : ""}`}
+                        >
+                          {currentMRInfo?.mrName ||
+                            form.stockTransferToMr ||
+                            form.stockTransferFromMrToMain ||
+                            form.mrName ||
+                            "-"}
+                        </p>
+                      </div>
+                    </>
+                  )}
                   <div className="md:col-span-2">
-                    <h3 className="text-lg font-medium text-gray-800 mb-3">
-                      Products ({form.items?.length || 0})
-                    </h3>
-                    <div className="space-y-4 max-h-60 overflow-y-auto border rounded-lg p-4">
-                      {form.items && form.items.length > 0 ? (
-                        form.items.map((item, index) => {
-                          const productCost =
-                            (item.sellingPrice || 0) * (item.boxQuantity || 0);
-                          return (
-                            <div
-                              key={item._id || index}
-                              className="border-b pb-4 last:border-b-0 bg-gray-50 p-3 rounded-lg"
-                            >
-                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Product Name
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white">
-                                    {item.productName || "-"}
-                                  </p>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Box Quantity
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
-                                    <Box size={14} className="text-gray-500" />
-                                    {item.boxQuantity || 0}
-                                  </p>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Selling Price ($)
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
-                                    <DollarSign
-                                      size={14}
-                                      className="text-green-600"
-                                    />
-                                    {formatCurrency(item.sellingPrice)}
-                                  </p>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    Total Selling Price ($)
-                                  </label>
-                                  <p className="px-3 py-2 rounded bg-white font-medium text-green-700">
-                                    ${formatCurrency(productCost)}
-                                  </p>
+                    <label
+                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                    >
+                      Remarks
+                    </label>
+                    <p
+                      className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${isMobileView ? "text-xs" : ""}`}
+                    >
+                      {form.remarks || "-"}
+                    </p>
+                  </div>
+
+                  {/* ── View: MR Receive type — show stockInMRHand table ─────────── */}
+                  {activeTab === "mr" && isReceiveType(form.transferType) ? (
+                    <div className="md:col-span-2">
+                      <h3
+                        className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-800 mb-3`}
+                      >
+                        Stock In MR Hand (qty &gt; 0)
+                      </h3>
+                      {mrStockLoading ? (
+                        <div className="text-center py-4 text-gray-500 animate-pulse">
+                          Loading MR stock...
+                        </div>
+                      ) : mrStockData.length === 0 ? (
+                        <div className="text-center py-6 border-2 border-dashed border-gray-300 rounded-lg text-gray-500">
+                          <Package
+                            size={32}
+                            className="mx-auto mb-2 text-gray-300"
+                          />
+                          No stock with quantity &gt; 0 found for this MR.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto border rounded-lg">
+                          <table className="w-full">
+                            <thead className="bg-blue-50 text-blue-800">
+                              <tr>
+                                <th
+                                  className={`${isMobileView ? "px-2 py-1 text-[10px]" : "px-4 py-2"} text-left font-semibold`}
+                                >
+                                  Product Name
+                                </th>
+                                <th
+                                  className={`${isMobileView ? "px-2 py-1 text-[10px]" : "px-4 py-2"} text-center font-semibold`}
+                                >
+                                  Assigned Qty
+                                </th>
+                                <th
+                                  className={`${isMobileView ? "px-2 py-1 text-[10px]" : "px-4 py-2"} text-center font-semibold`}
+                                >
+                                  Quantity (in hand)
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {mrStockData.map((p, idx) => (
+                                <tr
+                                  key={p.productId || idx}
+                                  className={`border-t ${idx % 2 === 0 ? "bg-white" : "bg-gray-50"}`}
+                                >
+                                  <td
+                                    className={`${isMobileView ? "px-2 py-1 text-[10px]" : "px-4 py-2"} font-medium text-gray-800`}
+                                  >
+                                    {p.productName}
+                                  </td>
+                                  <td
+                                    className={`${isMobileView ? "px-2 py-1 text-[10px]" : "px-4 py-2"} text-center`}
+                                  >
+                                    <span className="inline-flex items-center justify-center bg-purple-100 text-purple-700 text-[10px] font-semibold px-2 py-1 rounded-full">
+                                      {p.assignedQuantity || 0}
+                                    </span>
+                                  </td>
+                                  <td
+                                    className={`${isMobileView ? "px-2 py-1 text-[10px]" : "px-4 py-2"} text-center`}
+                                  >
+                                    <span className="inline-flex items-center justify-center bg-green-100 text-green-700 text-[10px] font-semibold px-2 py-1 rounded-full">
+                                      {p.quantity || 0}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      <h3
+                        className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-800 mt-5 mb-3`}
+                      >
+                        Returned Products ({form.items?.length || 0})
+                      </h3>
+
+                      {/* Desktop Card format for Returned Products */}
+                      <div className="space-y-4 max-h-60 overflow-y-auto border rounded-lg p-4">
+                        {form.items && form.items.length > 0 ? (
+                          form.items.map((item, index) => {
+                            const productCost =
+                              (item.sellingPrice || 0) *
+                              (item.boxQuantity || 0);
+                            return (
+                              <div
+                                key={item._id || index}
+                                className="border-b pb-4 last:border-b-0 bg-blue-50 p-3 rounded-lg"
+                              >
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Product Name
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      {item.productName || "-"}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Returned Qty
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white flex items-center gap-1 ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      <Box
+                                        size={isMobileView ? 12 : 14}
+                                        className="text-gray-500"
+                                      />
+                                      {item.boxQuantity || 0}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Selling Price ($)
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white flex items-center gap-1 ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      <DollarSign
+                                        size={isMobileView ? 12 : 14}
+                                        className="text-green-600"
+                                      />
+                                      {formatCurrency(item.sellingPrice)}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Total Selling Price ($)
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white font-medium text-green-700 ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      ${formatCurrency(productCost)}
+                                    </p>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <p className="text-gray-500 text-center">No items</p>
-                      )}
+                            );
+                          })
+                        ) : (
+                          <p className="text-gray-500 text-center">No items</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    /* ── View: non-receive — normal items list ───────────────────── */
+                    <div className="md:col-span-2">
+                      <h3
+                        className={`${isMobileView ? "text-sm" : "text-lg"} font-medium text-gray-800 mb-3`}
+                      >
+                        Products ({form.items?.length || 0})
+                      </h3>
+
+                      {/* Desktop Card format for Products */}
+                      <div className="space-y-4 max-h-60 overflow-y-auto border rounded-lg p-4">
+                        {form.items && form.items.length > 0 ? (
+                          form.items.map((item, index) => {
+                            const productCost =
+                              (item.sellingPrice || 0) *
+                              (item.boxQuantity || 0);
+                            return (
+                              <div
+                                key={item._id || index}
+                                className="border-b pb-4 last:border-b-0 bg-gray-50 p-3 rounded-lg"
+                              >
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Product Name
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      {item.productName || "-"}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Box Quantity
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white flex items-center gap-1 ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      <Box
+                                        size={isMobileView ? 12 : 14}
+                                        className="text-gray-500"
+                                      />
+                                      {item.boxQuantity || 0}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Selling Price ($)
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white flex items-center gap-1 ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      <DollarSign
+                                        size={isMobileView ? 12 : 14}
+                                        className="text-green-600"
+                                      />
+                                      {formatCurrency(item.sellingPrice)}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <label
+                                      className={`${isMobileView ? "text-[10px]" : "text-sm"} font-medium text-gray-600`}
+                                    >
+                                      Total Selling Price ($)
+                                    </label>
+                                    <p
+                                      className={`px-3 py-2 rounded bg-white font-medium text-green-700 ${isMobileView ? "text-xs" : ""}`}
+                                    >
+                                      ${formatCurrency(productCost)}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <p className="text-gray-500 text-center">No items</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={closeViewModal}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className={`bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer ${isMobileView ? "text-xs" : ""}`}
                 >
                   Close
                 </button>
@@ -2808,12 +3304,16 @@ const StockTransfer = () => {
                     </div>
                   )}
                   <div>
-                    <h2 className="text-xl font-semibold text-gray-800">
+                    <h2
+                      className={`${isMobileView ? "text-base" : "text-xl"} font-semibold text-gray-800`}
+                    >
                       {productModalIsReceive
                         ? "Returned Products"
                         : "Product Details"}
                     </h2>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p
+                      className={`${isMobileView ? "text-[10px]" : "text-xs"} text-gray-500 mt-0.5`}
+                    >
                       {productModalIsReceive
                         ? "Stock received back from MR to warehouse"
                         : "Products included in this transfer"}
@@ -2841,18 +3341,26 @@ const StockTransfer = () => {
                         className={`border-b ${productModalIsReceive ? "bg-blue-50 text-blue-800" : "bg-gray-100 text-gray-700"}`}
                       >
                         <tr>
-                          <th className="p-3 min-w-[200px] text-sm font-medium text-left">
+                          <th
+                            className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium text-left ${isMobileView ? "min-w-[120px]" : "min-w-[200px]"}`}
+                          >
                             Product Name
                           </th>
-                          <th className="p-3 min-w-[140px] text-sm font-medium">
+                          <th
+                            className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium ${isMobileView ? "min-w-[80px]" : "min-w-[140px]"}`}
+                          >
                             {productModalIsReceive
                               ? "Returned Qty"
                               : "Box Quantity"}
                           </th>
-                          <th className="p-3 min-w-[140px] text-sm font-medium">
+                          <th
+                            className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium ${isMobileView ? "min-w-[80px]" : "min-w-[140px]"}`}
+                          >
                             Selling Price ($)
                           </th>
-                          <th className="p-3 min-w-[160px] text-sm font-medium">
+                          <th
+                            className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium ${isMobileView ? "min-w-[100px]" : "min-w-[160px]"}`}
+                          >
                             Total Selling Price ($)
                           </th>
                         </tr>
@@ -2870,20 +3378,24 @@ const StockTransfer = () => {
                                   key={product._id || index}
                                   className={`hover:bg-gray-50 ${index + 1 === selectedProducts.length ? "" : "border-b"} ${productModalIsReceive ? "bg-blue-50/30" : ""}`}
                                 >
-                                  <td className="p-3 min-w-[200px] capitalize text-left font-medium text-gray-800">
+                                  <td
+                                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} capitalize text-left font-medium text-gray-800 ${isMobileView ? "min-w-[120px]" : "min-w-[200px]"}`}
+                                  >
                                     {product.productName || "-"}
                                   </td>
-                                  <td className="p-3 min-w-[140px]">
+                                  <td
+                                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} ${isMobileView ? "min-w-[80px]" : "min-w-[140px]"}`}
+                                  >
                                     <div className="flex items-center justify-center gap-1">
                                       {productModalIsReceive ? (
-                                        <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1 rounded-full gap-1">
-                                          <ArrowDownCircle size={12} />
+                                        <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 text-[10px] font-semibold px-2 py-1 rounded-full gap-1">
+                                          <ArrowDownCircle size={10} />
                                           {product.boxQuantity || 0}
                                         </span>
                                       ) : (
                                         <>
                                           <Box
-                                            size={14}
+                                            size={isMobileView ? 12 : 14}
                                             className="text-gray-500"
                                           />
                                           {product.boxQuantity || 0}
@@ -2891,19 +3403,23 @@ const StockTransfer = () => {
                                       )}
                                     </div>
                                   </td>
-                                  <td className="p-3 min-w-[140px]">
+                                  <td
+                                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} ${isMobileView ? "min-w-[80px]" : "min-w-[140px]"}`}
+                                  >
                                     <div className="flex items-center justify-center gap-1">
                                       <DollarSign
-                                        size={14}
+                                        size={isMobileView ? 12 : 14}
                                         className="text-green-600"
                                       />
                                       {formatCurrency(product.sellingPrice)}
                                     </div>
                                   </td>
-                                  <td className="p-3 min-w-[160px] font-medium">
+                                  <td
+                                    className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} font-medium ${isMobileView ? "min-w-[100px]" : "min-w-[160px]"}`}
+                                  >
                                     <div className="flex items-center justify-center gap-1">
                                       <DollarSign
-                                        size={14}
+                                        size={isMobileView ? 12 : 14}
                                         className="text-green-700"
                                       />
                                       {formatCurrency(productCost)}
@@ -2916,17 +3432,19 @@ const StockTransfer = () => {
                               className={`font-semibold border-t-2 ${productModalIsReceive ? "bg-blue-50" : "bg-gray-50"}`}
                             >
                               <td
-                                className="p-3 min-w-[200px] text-right"
+                                className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} text-right`}
                                 colSpan={3}
                               >
                                 {productModalIsReceive
                                   ? "Total Return Value:"
                                   : "Total Selling Price:"}
                               </td>
-                              <td className="p-3 min-w-[160px]">
+                              <td
+                                className={`${isMobileView ? "p-2 text-[10px]" : "p-3 text-sm"} ${isMobileView ? "min-w-[100px]" : "min-w-[160px]"}`}
+                              >
                                 <div className="flex items-center justify-center gap-1">
                                   <DollarSign
-                                    size={14}
+                                    size={isMobileView ? 12 : 14}
                                     className={
                                       productModalIsReceive
                                         ? "text-blue-700"
@@ -2977,7 +3495,7 @@ const StockTransfer = () => {
               <div className="flex justify-end p-6 border-t">
                 <button
                   onClick={() => setIsProductModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg cursor-pointer transition-colors"
+                  className={`bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg cursor-pointer transition-colors ${isMobileView ? "text-xs" : ""}`}
                 >
                   Close
                 </button>

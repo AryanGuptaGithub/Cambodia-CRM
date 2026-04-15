@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
   Package,
+  Menu,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatDateToReadable } from "../../utils/dateUtil";
@@ -34,6 +35,7 @@ import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import LoadingOverlay from "../../components/Loading";
 import SaleExcelDownload from "../../excels/download/ExcelDownload";
+import Sidebar from "../../components/Sidebar";
 
 const INITIAL_FORM_STATE = {
   _id: null,
@@ -77,9 +79,21 @@ const SaleReturn = () => {
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
   const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
   const [invoiceNumbers, setInvoiceNumbers] = useState([]);
+  
+  // Mobile view states
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const returnsPerPage = 10;
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+  // Detect mobile view
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // Define all available table columns
   const allFields = useMemo(
@@ -148,9 +162,18 @@ const SaleReturn = () => {
     [],
   );
 
-  // Fixed table columns like Sales layout
-  const tableColumns = useMemo(
-    () => [
+  // Table columns based on view
+  const tableColumns = useMemo(() => {
+    if (isMobileView) {
+      return [
+        "invoiceNumber",
+        "customerName",
+        "totalAmount",
+        "paymentStatus",
+        "actions",
+      ];
+    }
+    return [
       "invoiceNumber",
       "invoiceDate",
       "products",
@@ -159,9 +182,8 @@ const SaleReturn = () => {
       "totalAmount",
       "paymentStatus",
       "actions",
-    ],
-    [],
-  );
+    ];
+  }, [isMobileView]);
 
   // Fetch MR, Customer, and Products lists
   useEffect(() => {
@@ -235,7 +257,6 @@ const SaleReturn = () => {
       const data = await res.json();
       setSaleReturns(data.data || []);
 
-      // Extract unique invoice numbers for dropdown
       const uniqueInvoiceNumbers = [
         ...new Set(data.data.map((item) => item.invoiceNumber)),
       ].filter(Boolean);
@@ -271,7 +292,6 @@ const SaleReturn = () => {
         [name]: value,
       };
 
-      // Calculate due amount when paid amount changes
       if (name === "paidAmount") {
         const paidAmount = parseFloat(value) || 0;
         const totalAmount = parseFloat(prevForm.totalAmount) || 0;
@@ -279,7 +299,6 @@ const SaleReturn = () => {
         updatedForm.dueAmount = dueAmount.toFixed(2);
       }
 
-      // Calculate due date when credit days changes
       if (name === "creditDays" && prevForm.invoiceDate) {
         const creditDays = parseInt(value) || 0;
         const invoiceDate = new Date(prevForm.invoiceDate);
@@ -299,12 +318,10 @@ const SaleReturn = () => {
         [fieldName]: date ? date.toISOString().split("T")[0] : "",
       };
 
-      // Set delivery date when invoice date changes
       if (fieldName === "invoiceDate" && date) {
         updatedForm.deliveryDate = date.toISOString().split("T")[0];
       }
 
-      // Calculate due date when invoice date changes and credit days exist
       if (fieldName === "invoiceDate" && date && prevForm.creditDays) {
         const dueDate = new Date(date);
         dueDate.setDate(dueDate.getDate() + parseInt(prevForm.creditDays));
@@ -319,7 +336,6 @@ const SaleReturn = () => {
     e.preventDefault();
 
     try {
-      // ✅ Get token
       const token = localStorage.getItem("token");
 
       const response = await fetch(
@@ -328,13 +344,11 @@ const SaleReturn = () => {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`, // ✅ Added here
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(form),
         },
       );
-
-      // if (!response.ok) throw new Error("Failed to update sale return");
 
       const result = await response.json();
 
@@ -394,7 +408,6 @@ const SaleReturn = () => {
 
     if (confirm.isConfirmed) {
       try {
-        // ✅ Get token
         const token = localStorage.getItem("token");
 
         const res = await axios.delete(`${backendUrl}/api/sales-return`, {
@@ -431,7 +444,6 @@ const SaleReturn = () => {
 
     if (confirm.isConfirmed) {
       try {
-        // ✅ Get token
         const token = localStorage.getItem("token");
 
         const res = await axios.delete(`${backendUrl}/api/sales-return/${id}`, {
@@ -474,13 +486,11 @@ const SaleReturn = () => {
     setIsViewModalOpen(true);
   };
 
-  // Function to open product details modal for viewing
   const handleProductCountClick = (saleReturn) => {
     setSelectedSaleProducts(saleReturn.products || []);
     setIsProductModalOpen(true);
   };
 
-  // Get field value from sale return object
   const getFieldValue = (saleReturn, dbName) => {
     if (
       ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].includes(
@@ -506,7 +516,6 @@ const SaleReturn = () => {
     return saleReturn[dbName] ?? "--";
   };
 
-  // Helper function to handle numeric input
   const handleNumericInputChange = (e, onChangeHandler) => {
     const { name, value } = e.target;
     if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
@@ -514,7 +523,6 @@ const SaleReturn = () => {
     }
   };
 
-  // Calculate product totals
   const calculateProductTotals = (products) => {
     if (!products || !Array.isArray(products))
       return {
@@ -536,20 +544,17 @@ const SaleReturn = () => {
     return totals;
   };
 
-  // Function to open product edit modal from edit form
   const openProductEditModal = (product, index) => {
     setCurrentProduct({ ...product });
     setCurrentProductIndex(index);
     setIsProductEditModalOpen(true);
   };
 
-  // Function to update product in the main form
   const updateProductInForm = () => {
     setForm((prev) => {
       const updatedProducts = [...prev.products];
       updatedProducts[currentProductIndex] = currentProduct;
 
-      // Recalculate totals after product update
       const totals = calculateProductTotals(updatedProducts);
 
       return {
@@ -577,61 +582,109 @@ const SaleReturn = () => {
   const productTotals = calculateProductTotals(form.products);
 
   return (
-    <div className="p-6">
-      <div className="container">
-        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-          <div className="flex gap-3 items-center">
-            <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => navigate("/salelayout/salereturn/new")}
-            >
-              <UserPlus size={18} /> Add New Sales Return
-            </button>
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
 
-            {selected.length > 0 && (
+      {/* Mobile Header */}
+      {isMobileView && (
+        <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <Package className="w-5 h-5 text-indigo-600" />
+            <h1 className="text-base font-bold text-gray-800">Sales Return</h1>
+          </div>
+          <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-medium">
+            Total Records: {filteredReturns.length}
+          </div>
+        </div>
+      )}
+
+      <div className="container">
+        {/* Desktop Header - Only show on desktop */}
+        {!isMobileView && (
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
+            <div className="flex gap-3 items-center">
               <button
-                onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={() => navigate("/salelayout/salereturn/new")}
               >
-                <Trash2 size={18} /> Delete
+                <UserPlus size={18} /> Add New Sales Return
               </button>
-            )}
+
+              {selected.length > 0 && (
+                <button
+                  onClick={handleDeleteSelected}
+                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                >
+                  <Trash2 size={18} /> Delete
+                </button>
+              )}
+              {saleReturns.length > 0 && (
+                <SaleExcelDownload
+                  type="salesreturn"
+                  modalTitle="Download Sales Return Report"
+                  buttonText="Download Sales Return Excel"
+                  successMessage="Sales Return Excel downloaded successfully!"
+                  filePrefix="sales_return_summary"
+                />
+              )}
+            </div>
             {saleReturns.length > 0 && (
-              <SaleExcelDownload
-                type="salesreturn"
-                modalTitle="Download Sales Return Report"
-                buttonText="Download Sales Return Excel"
-                successMessage="Sales Return Excel downloaded successfully!"
-                filePrefix="sales_return_summary"
-              />
+              <div className="flex items-center gap-8">
+                <p className="text-lg font-semibold text-gray-700">
+                  Total Count:{" "}
+                  <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                    {filteredReturns.length}
+                  </span>
+                </p>
+                <div className="relative w-full md:w-72">
+                  <Search
+                    className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                    size={16}
+                    onClick={() => inputRef.current?.focus()}
+                  />
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Search invoice, customer, product..."
+                    value={searchTerm}
+                    onChange={handleSearchChange}
+                    className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                  />
+                </div>
+              </div>
             )}
           </div>
-          {saleReturns.length > 0 && (
-            <div className="flex items-center gap-8">
-              <p className="text-lg font-semibold text-gray-700">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredReturns.length}
-                </span>
-              </p>
-              <div className="relative w-full md:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                  onClick={() => inputRef.current?.focus()}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search invoice, customer, product..."
-                  value={searchTerm}
-                  onChange={handleSearchChange}
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-                />
-              </div>
-            </div>
-          )}
-        </div>
+        )}
+
+        {/* Mobile Search Bar */}
+        {isMobileView && saleReturns.length > 0 && (
+          <div className="relative mb-4">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+              size={14}
+            />
+            <input
+              type="text"
+              placeholder="Search invoice, customer..."
+              value={searchTerm}
+              onChange={handleSearchChange}
+              className="pl-9 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+            />
+          </div>
+        )}
 
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
@@ -642,9 +695,11 @@ const SaleReturn = () => {
                   .map((item) => (
                     <th
                       key={item.id}
-                      className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
+                      className={`${
+                        isMobileView ? "p-2 text-xs" : "p-3 text-sm"
+                      } whitespace-nowrap min-w-[100px] font-medium`}
                     >
-                      {item.id === "invoiceNumber" ? (
+                      {item.id === "invoiceNumber" && !isMobileView ? (
                         <div className="flex items-center gap-4">
                           {currentReturns.length > 0 && (
                             <input
@@ -673,7 +728,7 @@ const SaleReturn = () => {
                 <tr>
                   <td
                     colSpan={tableColumns.length}
-                    className="p-4 text-center text-gray-500"
+                    className="p-4 text-center text-gray-500 text-sm"
                   >
                     No sale returns found.
                   </td>
@@ -694,20 +749,29 @@ const SaleReturn = () => {
                       .map((item) => (
                         <td
                           key={item.id}
-                          className="p-3 whitespace-nowrap min-w-[120px]"
+                          className={`${
+                            isMobileView ? "p-2 text-xs" : "p-3 text-sm"
+                          } whitespace-nowrap min-w-[100px]`}
                         >
                           {item.id === "invoiceNumber" ? (
-                            <div className="flex items-center gap-4">
-                              <input
-                                type="checkbox"
-                                checked={selected.includes(ret._id)}
-                                onChange={() => toggleSelect(ret)}
-                              />
-                              <span className="capitalize">
+                            <div className="flex items-center gap-2 md:gap-4">
+                              {!isMobileView && (
+                                <input
+                                  type="checkbox"
+                                  checked={selected.includes(ret._id)}
+                                  onChange={() => toggleSelect(ret)}
+                                />
+                              )}
+                              <span className="capitalize font-medium">
                                 {ret.invoiceNumber}
                               </span>
+                              {isMobileView && (
+                                <div className="text-xs text-gray-400 mt-0.5">
+                                  {formatDateToReadable(ret.invoiceDate)}
+                                </div>
+                              )}
                             </div>
-                          ) : item.id === "products" ? (
+                          ) : item.id === "products" && !isMobileView ? (
                             <button
                               onClick={() => handleProductCountClick(ret)}
                               className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
@@ -719,31 +783,37 @@ const SaleReturn = () => {
                               </span>
                             </button>
                           ) : item.id === "actions" ? (
-                            <div className="flex items-center justify-center gap-3 min-w-[150px]">
+                            <div className="flex items-center justify-center gap-2 min-w-[100px]">
                               <button
                                 className="text-blue-600 hover:text-blue-800 cursor-pointer"
                                 onClick={() => viewReturnSale(ret)}
                                 title="View"
                               >
-                                <Eye size={18} />
+                                <Eye size={isMobileView ? 16 : 18} />
                               </button>
-                              <button
-                                className="text-green-600 hover:text-green-800 cursor-pointer"
-                                onClick={() => editReturnSale(ret)}
-                                title="Edit"
-                              >
-                                <Edit size={18} />
-                              </button>
-                              <button
-                                className="text-red-600 hover:text-red-800 cursor-pointer"
-                                onClick={() =>
-                                  handleDeleteSingle(ret._id, ret.invoiceNumber)
-                                }
-                                title="Delete"
-                              >
-                                <Trash2 size={18} />
-                              </button>
+                              {!isMobileView && (
+                                <>
+                                  <button
+                                    className="text-green-600 hover:text-green-800 cursor-pointer"
+                                    onClick={() => editReturnSale(ret)}
+                                    title="Edit"
+                                  >
+                                    <Edit size={18} />
+                                  </button>
+                                  <button
+                                    className="text-red-600 hover:text-red-800 cursor-pointer"
+                                    onClick={() =>
+                                      handleDeleteSingle(ret._id, ret.invoiceNumber)
+                                    }
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </>
+                              )}
                             </div>
+                          ) : item.id === "totalAmount" ? (
+                            `$${getFieldValue(ret, item.dbName)}`
                           ) : (
                             getFieldValue(ret, item.dbName)
                           )}
@@ -755,30 +825,37 @@ const SaleReturn = () => {
             </tbody>
           </table>
 
+          {/* Pagination */}
           {currentReturns.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
+            <div className={`mt-4 p-3 md:p-5 flex ${isMobileView ? "justify-center" : "justify-start"} gap-1 md:gap-2 flex-wrap`}>
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-xs md:text-sm"
               >
                 Prev
               </button>
 
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                (page) => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ),
+              {!isMobileView ? (
+                Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                  (page) => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-2 md:px-3 py-1 rounded cursor-pointer text-xs md:text-sm ${
+                        currentPage === page
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ),
+                )
+              ) : (
+                <span className="px-3 py-1 text-xs text-gray-700 font-medium">
+                  Page {currentPage} of {totalPages}
+                </span>
               )}
 
               <button
@@ -786,7 +863,7 @@ const SaleReturn = () => {
                   setCurrentPage((prev) => Math.min(prev + 1, totalPages))
                 }
                 disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-2 md:px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer text-xs md:text-sm"
               >
                 Next
               </button>
@@ -794,7 +871,7 @@ const SaleReturn = () => {
           )}
         </div>
 
-        {/* Product Details Modal */}
+        {/* Product Details Modal - Keep as is */}
         {isProductModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -938,6 +1015,7 @@ const SaleReturn = () => {
             document.body,
           )}
 
+        {/* View Modal */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -946,7 +1024,7 @@ const SaleReturn = () => {
                 onClick={() => setIsViewModalOpen(false)}
               />
 
-              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <div className="bg-white w-full max-w-4xl p-4 md:p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -954,12 +1032,12 @@ const SaleReturn = () => {
                   <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                <h2 className="text-lg md:text-xl font-semibold text-gray-800 mb-4">
                   View Sales Return Record - {form.invoiceNumber || "N/A"}
                 </h2>
 
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                  <h3 className="text-base md:text-lg font-medium text-gray-700 mb-3">
                     Record Information
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -978,10 +1056,10 @@ const SaleReturn = () => {
                       ["Payment Status", "paymentStatus"],
                     ].map(([label, key]) => (
                       <div key={key}>
-                        <label className="block text-sm font-medium text-gray-600">
+                        <label className="block text-xs md:text-sm font-medium text-gray-600">
                           {label}
                         </label>
-                        <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                        <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize text-sm">
                           {form[key]
                             ? [
                                 "recordingDate",
@@ -991,7 +1069,7 @@ const SaleReturn = () => {
                               ].includes(key)
                               ? formatDateToReadable(form[key])
                               : key === "totalAmount"
-                                ? `${Math.ceil(form[key] || 0).toLocaleString()}`
+                                ? `$${Math.ceil(form[key] || 0).toLocaleString()}`
                                 : form[key]
                             : "-"}
                         </p>
@@ -1002,7 +1080,7 @@ const SaleReturn = () => {
 
                 {/* Product List Section */}
                 <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                  <h3 className="text-base md:text-lg font-medium text-gray-700 mb-3">
                     Product Information
                   </h3>
 
@@ -1013,14 +1091,14 @@ const SaleReturn = () => {
                           key={index}
                           className="border rounded-lg p-4 bg-gray-50"
                         >
-                          <div className="flex justify-between items-center mb-2">
+                          <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
                             <div className="flex-1">
-                              <h4 className="text-lg font-semibold text-gray-800 capitalize">
+                              <h4 className="text-base md:text-lg font-semibold text-gray-800 capitalize">
                                 {product.productName || `Product ${index + 1}`}
                               </h4>
                             </div>
                             <button
-                              className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer text-sm"
+                              className="bg-blue-500 hover:bg-blue-600 text-white px-3 md:px-4 py-2 rounded-lg cursor-pointer text-xs md:text-sm"
                               onClick={() => toggleProductView(index)}
                             >
                               {expandedProductIndex === index
@@ -1045,10 +1123,10 @@ const SaleReturn = () => {
                                 ["Used Amount", "usedAmount"],
                               ].map(([label, key]) => (
                                 <div key={key}>
-                                  <label className="block text-sm font-medium text-gray-600">
+                                  <label className="block text-xs md:text-sm font-medium text-gray-600">
                                     {label}
                                   </label>
-                                  <p className="border px-3 py-2 rounded-lg bg-white">
+                                  <p className="border px-3 py-2 rounded-lg bg-white text-sm">
                                     {product[key] ?? 0}
                                   </p>
                                 </div>
@@ -1067,32 +1145,32 @@ const SaleReturn = () => {
 
                 {/* Products Summary */}
                 <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-600 mb-2">
+                  <label className="block text-xs md:text-sm font-medium text-gray-600 mb-2">
                     Products Summary
                   </label>
                   <div className="border rounded-lg p-4 bg-gray-50">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-600">
+                        <label className="block text-xs md:text-sm font-medium text-gray-600">
                           Total Products
                         </label>
-                        <p className="text-lg font-semibold">
+                        <p className="text-base md:text-lg font-semibold">
                           {form.products?.length || 0}
                         </p>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-600">
+                        <label className="block text-xs md:text-sm font-medium text-gray-600">
                           Total Return Quantity
                         </label>
-                        <p className="text-lg font-semibold">
+                        <p className="text-base md:text-lg font-semibold">
                           {productTotals.totalReturnQuantity}
                         </p>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-600">
+                        <label className="block text-xs md:text-sm font-medium text-gray-600">
                           Total Used Quantity
                         </label>
-                        <p className="text-lg font-semibold">
+                        <p className="text-base md:text-lg font-semibold">
                           {productTotals.totalUsedQty}
                         </p>
                       </div>
@@ -1102,10 +1180,10 @@ const SaleReturn = () => {
 
                 {/* Remark Section */}
                 <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-600">
+                  <label className="block text-xs md:text-sm font-medium text-gray-600">
                     Remark
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize text-sm">
                     {form.remark || "-"}
                   </p>
                 </div>
@@ -1123,7 +1201,8 @@ const SaleReturn = () => {
             document.body,
           )}
 
-        {isEditModalOpen &&
+        {/* Edit Modal - Only show on desktop */}
+        {!isMobileView && isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
@@ -1168,7 +1247,7 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Invoice Number - Changed to SearchableDropdown */}
+                  {/* Invoice Number */}
                   <div>
                     <label className="block text-sm font-medium">
                       Invoice Number <span className="text-red-500">*</span>
@@ -1202,7 +1281,7 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* MR Name - Using SearchableDropdown */}
+                  {/* MR Name */}
                   <div>
                     <label className="block text-sm font-medium">MR Name</label>
                     <SearchableDropdown
@@ -1214,7 +1293,7 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Customer Name - Using SearchableDropdown */}
+                  {/* Customer Name */}
                   <div>
                     <label className="block text-sm font-medium">
                       Customer Name
@@ -1233,7 +1312,7 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Credit Days - ✅ FIXED: type="text" with numeric input only */}
+                  {/* Credit Days */}
                   <div>
                     <label className="block text-sm font-medium">
                       Credit Days
@@ -1351,7 +1430,7 @@ const SaleReturn = () => {
                         form.products.map((product, index) => (
                           <div
                             key={`edit-product-${index}`}
-                            className="flex items-center justify-between p-3 bg-white rounded border border-gray-300"
+                            className="flex items-center justify-between p-3 bg-white rounded border border-gray-300 flex-wrap gap-2"
                           >
                             <div className="flex-1">
                               <span className="font-medium text-gray-700">
@@ -1433,7 +1512,7 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Footer buttons - full width */}
+                  {/* Footer buttons */}
                   <div className="md:col-span-3 mt-6 flex justify-end gap-3 border-t pt-6">
                     <button
                       type="button"
@@ -1458,7 +1537,7 @@ const SaleReturn = () => {
             document.body,
           )}
 
-        {/* Product Edit Modal (from Edit Form) */}
+        {/* Product Edit Modal */}
         {isProductEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1479,7 +1558,6 @@ const SaleReturn = () => {
                 </h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Product Name */}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium">
                       Product Name
@@ -1501,7 +1579,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Sales Quantity - DISABLED */}
                   <div>
                     <label className="block text-sm font-medium">
                       Sales Quantity
@@ -1515,7 +1592,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Bonus Quantity - DISABLED */}
                   <div>
                     <label className="block text-sm font-medium">
                       Bonus Quantity
@@ -1529,7 +1605,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Total Quantity */}
                   <div>
                     <label className="block text-sm font-medium">
                       Total Quantity
@@ -1542,7 +1617,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Return Quantity */}
                   <div>
                     <label className="block text-sm font-medium">
                       Return Quantity
@@ -1565,7 +1639,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Used Quantity - DISABLED */}
                   <div>
                     <label className="block text-sm font-medium">
                       Used Quantity
@@ -1579,7 +1652,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Selling Price - DISABLED */}
                   <div>
                     <label className="block text-sm font-medium">
                       Selling Price
@@ -1593,7 +1665,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Amount */}
                   <div>
                     <label className="block text-sm font-medium">Amount</label>
                     <InputField
@@ -1604,7 +1675,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Discount - DISABLED */}
                   <div>
                     <label className="block text-sm font-medium">
                       Discount
@@ -1618,7 +1688,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Net Selling Amount */}
                   <div>
                     <label className="block text-sm font-medium">
                       Net Selling Amount
@@ -1631,7 +1700,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Used Price - DISABLED */}
                   <div>
                     <label className="block text-sm font-medium">
                       Used Price
@@ -1645,7 +1713,6 @@ const SaleReturn = () => {
                     />
                   </div>
 
-                  {/* Used Amount */}
                   <div>
                     <label className="block text-sm font-medium">
                       Used Amount
@@ -1659,7 +1726,6 @@ const SaleReturn = () => {
                   </div>
                 </div>
 
-                {/* Footer buttons */}
                 <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
                   <button
                     type="button"

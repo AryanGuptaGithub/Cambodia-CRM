@@ -1152,7 +1152,7 @@ const Customer = () => {
       <div className="container mx-auto">
         {/* Mobile Header */}
         {isMobileView && (
-          <div className="flex justify-between items-center mb-3">
+          <div className="flex justify-between items-center mb-3 bg-gray-200 rounded-2xl p-2">
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-2 rounded-full bg-gray-100 active:bg-gray-200"

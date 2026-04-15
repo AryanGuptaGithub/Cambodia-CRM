@@ -5,13 +5,14 @@ import React, {
   useEffect,
   useRef,
 } from "react";
-import { Plus, Edit, Trash2, Loader, Search, X } from "lucide-react";
+import { Plus, Edit, Trash2, Loader, Search, X, Menu } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { confirmDialog } from "../../utils/confirmationDialog.js";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
 import ReactDOM from "react-dom";
+import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -62,6 +63,17 @@ const Expenses = () => {
   const inputRef = useRef(null);
   const expensesPerPage = 10;
   const navigate = useNavigate();
+
+  // Mobile detection and sidebar state
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -143,6 +155,7 @@ const Expenses = () => {
     indexOfLastExpense,
   );
   const totalPages = Math.ceil(filteredExpenses.length / expensesPerPage);
+  const showPagination = filteredExpenses.length > expensesPerPage;
 
   const formatCurrency = useCallback((amt) => {
     return new Intl.NumberFormat("en-US", {
@@ -356,6 +369,49 @@ const Expenses = () => {
     return result;
   };
 
+  // Mobile card view component (without edit and delete buttons)
+  const MobileExpenseCard = ({ exp, index }) => (
+    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
+      <div className="flex justify-between items-start mb-3">
+        <div className="flex-1">
+          <p className="text-sm text-gray-500 mt-1">
+            Source Account:{" "}
+            {exp.sourceAccount?.name ||
+              (typeof exp.sourceAccount === "string"
+                ? exp.sourceAccount
+                : getSafeValue(exp, "sourceAccount.name", "Unknown"))}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            Category:{" "}
+            {exp.category?.category ||
+              (typeof exp.category === "string"
+                ? getCategoryName(exp.category)
+                : getSafeValue(exp, "category.category", "Unknown"))}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="font-bold text-green-600 text-lg">
+            ${formatCurrency(exp.amount || 0)}
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2 text-sm">
+        <div className="flex">
+          <span className="text-gray-600 w-24">Description:</span>
+          <span className="text-gray-800 flex-1">
+            {exp.description || exp.remarks || "-"}
+          </span>
+        </div>
+        <div className="flex">
+          <span className="text-gray-600 w-24">Date:</span>
+          <span className="text-gray-800 flex-1">
+            {exp.date ? formatDateToReadable(exp.date) : "-"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+
   if (loading && expenses.length === 0) {
     return (
       <div className="p-6 flex justify-center items-center h-64">
@@ -366,7 +422,78 @@ const Expenses = () => {
   }
 
   return (
-    <div className="p-6">
+    <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
+      {/* Sidebar for mobile */}
+      {isMobileView && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          toggleSidebar={() => setSidebarOpen(false)}
+          isMobile={true}
+        />
+      )}
+
+      {/* Mobile Header with Hamburger Menu */}
+      {isMobileView && (
+        <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-2 rounded-full bg-gray-100 active:bg-gray-200"
+            >
+              <Menu size={20} className="text-gray-700" />
+            </button>
+            <h1 className="text-base font-bold text-gray-800">Expenses</h1>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop Header */}
+      {!isMobileView && (
+        <div className="flex justify-between items-center mb-6">
+          <button
+            onClick={() => navigate("/expenselayout/expenses/new")}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
+          >
+            <Plus size={18} /> Add New Expense
+          </button>
+
+          <div className="relative w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={() => inputRef.current?.focus()}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search by Source Account, Category, Description, Amount, or Date..."
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              value={searchQuery}
+              onChange={handleSearchChange}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Search Bar */}
+      {isMobileView && (
+        <div className="relative mb-4">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+            size={16}
+            onClick={() => inputRef.current?.focus()}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search expenses..."
+            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 text-sm"
+            value={searchQuery}
+            onChange={handleSearchChange}
+          />
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
           <strong>Error:</strong> {error}
@@ -379,33 +506,8 @@ const Expenses = () => {
         </div>
       )}
 
-      <div className="flex justify-between items-center mb-6">
-        <button
-          onClick={() => navigate("/expenselayout/expenses/new")}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
-        >
-          <Plus size={18} /> Add New Expense
-        </button>
-
-        {/* Search input is always visible */}
-        <div className="relative w-72">
-          <Search
-            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-            size={16}
-            onClick={() => inputRef.current?.focus()}
-          />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search by Source Account, Category, Description, Amount, or Date..."
-            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            value={searchQuery}
-            onChange={handleSearchChange}
-          />
-        </div>
-      </div>
-
-      <div className="bg-white shadow rounded-xl overflow-hidden w-full">
+      {/* Desktop Table View */}
+      <div className="hidden md:block bg-white shadow rounded-xl overflow-hidden w-full">
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
@@ -522,8 +624,30 @@ const Expenses = () => {
         </table>
       </div>
 
-      {currentExpenses.length > 0 && (
-        <div className="mt-6 flex justify-start gap-2 text-sm">
+      {/* Mobile Card View */}
+      <div className="md:hidden">
+        {currentExpenses.length > 0 ? (
+          currentExpenses.map((exp, idx) => (
+            <MobileExpenseCard
+              key={exp._id}
+              exp={exp}
+              index={(currentPage - 1) * expensesPerPage + idx + 1}
+            />
+          ))
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            {searchQuery
+              ? "No matching expenses found."
+              : expenses.length === 0
+                ? "No expenses added yet."
+                : "No data available"}
+          </div>
+        )}
+      </div>
+
+      {/* Pagination - Only show when needed */}
+      {showPagination && (
+        <div className="mt-6 flex flex-wrap justify-center md:justify-start gap-2 text-sm">
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
@@ -531,21 +655,29 @@ const Expenses = () => {
           >
             ← Prev
           </button>
-          <div className="flex gap-1">
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
-              <button
-                key={pg}
-                onClick={() => setCurrentPage(pg)}
-                className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
-                  currentPage === pg
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                {pg}
-              </button>
-            ))}
-          </div>
+
+          {!isMobileView ? (
+            <div className="flex gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+                <button
+                  key={pg}
+                  onClick={() => setCurrentPage(pg)}
+                  className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
+                    currentPage === pg
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  }`}
+                >
+                  {pg}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className="px-3 py-2 text-sm text-gray-700 font-medium">
+              Page {currentPage} of {totalPages}
+            </span>
+          )}
+
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
@@ -557,28 +689,61 @@ const Expenses = () => {
       )}
 
       {filteredExpenses.length > 0 && (
-        <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
-          <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div
+          className={`${
+            isMobileView
+              ? "mt-4 p-3 mb-2" // Mobile: mt-4, p-3, mb-2 (reduced from gap-6)
+              : "mt-6 p-6 mb-6" // Desktop: original spacing
+          } bg-blue-50 rounded-lg border border-blue-200`}
+        >
+          <h3
+            className={`font-semibold text-blue-800 text-lg ${
+              isMobileView ? "text-center mb-2" : "mb-4"
+            }`}
+          >
+            Summary
+          </h3>
+          <div className={`grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-6`}>
             <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">
+              <div
+                className={`font-bold text-blue-600 ${
+                  isMobileView ? "text-xl" : "text-2xl"
+                }`}
+              >
                 {filteredExpenses.length}
               </div>
-              <div className="text-sm text-blue-800">Total Expenses</div>
+              <div
+                className={`text-blue-800 ${
+                  isMobileView ? "text-xs" : "text-sm"
+                }`}
+              >
+                Total Expenses
+              </div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">
+              <div
+                className={`font-bold text-green-600 ${
+                  isMobileView ? "text-xl" : "text-2xl"
+                }`}
+              >
                 ${" "}
                 {formatCurrency(
                   filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0),
                 )}
               </div>
-              <div className="text-sm text-green-800">Total Amount</div>
+              <div
+                className={`text-green-800 ${
+                  isMobileView ? "text-xs" : "text-sm"
+                }`}
+              >
+                Total Amount
+              </div>
             </div>
           </div>
         </div>
       )}
 
+      {/* Edit Modal - remains the same */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
