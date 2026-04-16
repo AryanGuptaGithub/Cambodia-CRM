@@ -39,8 +39,21 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
 const safe = (v) => (typeof v === "number" ? v : 0);
 
+// Helper: get year-to-date range as string "1 Jan - 16 Apr"
+const getYearToDateRange = () => {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1);
+  const end = now;
+  const format = (d) =>
+    `${d.getDate()} ${d.toLocaleString("default", { month: "short" })}`;
+  return `${format(start)} – ${format(end)}`;
+};
+
+// Helper: all time range
+const getAllTimeRange = () => "All time";
+
 // --------------------------------------------------------------
-// DateFilterModal — defined OUTSIDE so it never re-mounts
+// DateFilterModal
 // --------------------------------------------------------------
 const DateFilterModal = ({
   isOpen,
@@ -109,11 +122,7 @@ const DateFilterModal = ({
             <button
               onClick={onApply}
               disabled={!startDate || !endDate}
-              className={`flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg ${
-                !startDate || !endDate
-                  ? "bg-gray-300 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700"
-              }`}
+              className={`flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg ${!startDate || !endDate ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
             >
               Apply
             </button>
@@ -212,7 +221,6 @@ const MiniRecentExpenses = ({
       expenseTableData[0],
     );
   }, [expenseTableData]);
-
   const top5 = expenseTableData.slice(0, 5);
 
   if (loadingExpenseData)
@@ -525,7 +533,6 @@ const MiniCreditSalePanel = ({
       ),
     [creditSaleData],
   );
-
   if (loadingCreditSaleData)
     return <p className="text-gray-500 text-center py-3 text-sm">Loading...</p>;
   if (!creditSaleData.length)
@@ -534,7 +541,6 @@ const MiniCreditSalePanel = ({
         No credit sale data
       </p>
     );
-
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-2 mb-3">
@@ -632,7 +638,6 @@ const MiniCompanyBalance = ({
       pill: "bg-orange-50",
     },
   ];
-
   if (loadingCompanyBalance)
     return (
       <div className="space-y-2">
@@ -647,7 +652,6 @@ const MiniCompanyBalance = ({
         No account data found
       </p>
     );
-
   return (
     <div className="space-y-2">
       <div className="bg-teal-50 border border-teal-200 rounded-lg p-3">
@@ -734,7 +738,6 @@ const MobileSidePanel = ({
     },
     "Company Balance": { title: "Account Balances", icon: Building2 },
   };
-
   const current = config[activeTable];
   if (!current) return null;
 
@@ -784,9 +787,7 @@ const MobileSidePanel = ({
         return null;
     }
   };
-
   const Icon = current.icon;
-
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mt-4">
       <div className="flex items-center gap-2 mb-3">
@@ -806,10 +807,13 @@ const MobileDashboard = () => {
   const location = useLocation();
   const { stockData, totalPayroll, mrList } = useDashboardData();
 
-  // ── Card value state (updates with sub-tab changes like desktop) ──
+  // Sales totals for each period
   const [todaySales, setTodaySales] = useState(0);
   const [monthlySales, setMonthlySales] = useState(0);
+  const [yearSales, setYearSales] = useState(0);
+  const [allSales, setAllSales] = useState(0);
   const [customSalesTotal, setCustomSalesTotal] = useState(0);
+
   const [companyBalance, setCompanyBalance] = useState(0);
   const [overdueTotal, setOverdueTotal] = useState(0);
   const [creditSaleTotal, setCreditSaleTotal] = useState(0);
@@ -849,7 +853,7 @@ const MobileDashboard = () => {
   const [companyBalanceAccounts, setCompanyBalanceAccounts] = useState([]);
   const [loadingCompanyBalance, setLoadingCompanyBalance] = useState(false);
 
-  // ── Custom date filter state (mirrors desktop) ──
+  // Custom date filter state
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [selectedCardForFilter, setSelectedCardForFilter] = useState(null);
   const [modalStartDate, setModalStartDate] = useState("");
@@ -874,10 +878,6 @@ const MobileDashboard = () => {
 
   const dateRanges = getDateRanges();
   const prevMonthRanges = getPreviousMonthRanges();
-  const currentMonthName = new Date().toLocaleString("default", {
-    month: "long",
-    year: "numeric",
-  });
   const outOfStockCount = stockData?.outOfStockCount ?? 0;
 
   // Mobile detection
@@ -888,13 +888,9 @@ const MobileDashboard = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Body scroll lock
   useEffect(() => {
-    if (isMobileView && sidebarOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
+    if (isMobileView && sidebarOpen) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
     return () => {
       document.body.style.overflow = "";
     };
@@ -904,98 +900,7 @@ const MobileDashboard = () => {
     if (isMobileView && sidebarOpen) setSidebarOpen(false);
   }, [location.pathname, isMobileView]);
 
-  // Initial fetch
-  useEffect(() => {
-    const init = async () => {
-      setDataLoading(true);
-      try {
-        setUsername(localStorage.getItem("username") || "User");
-        const [
-          salesRes,
-          monthRes,
-          balanceRes,
-          overdueRes,
-          creditRes,
-          expenseMonthRes,
-        ] = await Promise.allSettled([
-          axios.get(`${backendUrl}/api/sales/table-data`, {
-            params: { period: "Today" },
-          }),
-          axios.get(`${backendUrl}/api/sales/table-data`, {
-            params: { period: "Month" },
-          }),
-          axios.get(`${backendUrl}/api/accounts/balance`),
-          axios.get(`${backendUrl}/api/overdue`, {
-            params: { currentDate: new Date().toISOString() },
-          }),
-          axios.get(`${backendUrl}/api/sales/credit-sale-not-received`, {
-            params: { period: "month" },
-          }),
-          axios.get(`${backendUrl}/api/expenses`, {
-            params: { period: "Month" },
-          }),
-        ]);
-
-        if (salesRes.status === "fulfilled" && salesRes.value.data?.success)
-          setTodaySales(
-            (salesRes.value.data.data || []).reduce(
-              (s, x) => s + safe(x.amount),
-              0,
-            ),
-          );
-        if (monthRes.status === "fulfilled" && monthRes.value.data?.success)
-          setMonthlySales(
-            (monthRes.value.data.data || []).reduce(
-              (s, x) => s + safe(x.amount),
-              0,
-            ),
-          );
-        if (
-          balanceRes.status === "fulfilled" &&
-          balanceRes.value.data?.success
-        ) {
-          setCompanyBalance(balanceRes.value.data.totalBalance || 0);
-          setCompanyBalanceAccounts(
-            (balanceRes.value.data.accounts || []).map((a) => ({
-              ...a,
-              transactions: a.transactions || [],
-            })),
-          );
-        }
-        if (overdueRes.status === "fulfilled" && overdueRes.value.data?.success)
-          setOverdueTotal(
-            (overdueRes.value.data.data || []).reduce(
-              (s, x) => s + safe(x.dueAmount || x.overdueAmount),
-              0,
-            ),
-          );
-        if (creditRes.status === "fulfilled" && creditRes.value.data?.success)
-          setCreditSaleTotal(parseFloat(creditRes.value.data.totalAmount) || 0);
-        if (expenseMonthRes.status === "fulfilled")
-          setMonthlyExpense(
-            (expenseMonthRes.value.data.data || []).reduce(
-              (sum, ex) => sum + safe(ex.amount),
-              0,
-            ),
-          );
-
-        // Load initial table data
-        await fetchSalesData("Today");
-      } catch (err) {
-        console.error("MobileDashboard init error:", err);
-      } finally {
-        setDataLoading(false);
-      }
-    };
-    init();
-  }, []);
-
-  useEffect(() => {
-    setCurrentPayrollTotal(totalPayroll || 0);
-  }, [totalPayroll]);
-
-  // ── Fetchers — all update card values like desktop does ──
-
+  // ----- Fetch functions -----
   const fetchSalesData = async (period = "Today", startDate, endDate) => {
     try {
       setLoadingSalesData(true);
@@ -1016,13 +921,14 @@ const MobileDashboard = () => {
       });
       const data = res.data.success ? res.data.data : [];
       setSalesTableData(data);
-
-      // ── Update the card value for the active period (mirrors desktop) ──
       const total = data.reduce((s, x) => s + safe(x.amount), 0);
       if (period === "Today") setTodaySales(total);
       else if (period === "Month") setMonthlySales(total);
+      else if (period === "Year") setYearSales(total);
+      else if (period === "All") setAllSales(total);
       else if (period === "Custom") setCustomSalesTotal(total);
-    } catch {
+    } catch (err) {
+      console.error("fetchSalesData error", err);
       setSalesTableData([]);
     } finally {
       setLoadingSalesData(false);
@@ -1051,10 +957,10 @@ const MobileDashboard = () => {
           category: ex.category?.category || ex.category || "Unknown",
         })),
       );
-      // ── Update card value ──
       const total = raw.reduce((sum, ex) => sum + safe(ex.amount), 0);
       if (period === "Month") setMonthlyExpense(total);
-    } catch {
+    } catch (err) {
+      console.error(err);
       setExpenseTableData([]);
     } finally {
       setLoadingExpenseData(false);
@@ -1069,13 +975,13 @@ const MobileDashboard = () => {
     try {
       setLoadingPayrollData(true);
       let params = {};
-      const cur = new Date();
       if (period === "Custom") {
         params.period = "custom";
         params.startDate =
           startDate || customDateRanges["Total Payroll"]?.start;
         params.endDate = endDate || customDateRanges["Total Payroll"]?.end;
       } else if (period === "Prev Month") {
+        const cur = new Date();
         let pm = cur.getMonth() - 1,
           y = cur.getFullYear();
         if (pm < 0) {
@@ -1084,7 +990,7 @@ const MobileDashboard = () => {
         }
         params.period = `${y}-${String(pm + 1).padStart(2, "0")}`;
       } else if (period === "YTD") {
-        params.period = `${cur.getFullYear()}-YTD`;
+        params.period = `${new Date().getFullYear()}-YTD`;
       }
       const res = await axios.get(`${backendUrl}/api/hrm/payroll`, { params });
       const payrolls = res.data?.data || [];
@@ -1092,7 +998,8 @@ const MobileDashboard = () => {
       setCurrentPayrollTotal(
         payrolls.reduce((s, i) => s + (i.netSalary || 0), 0),
       );
-    } catch {
+    } catch (err) {
+      console.error(err);
       setPayrollTableData([]);
     } finally {
       setLoadingPayrollData(false);
@@ -1114,10 +1021,10 @@ const MobileDashboard = () => {
               : Math.max(0, inv.totalAmount - (inv.paidAmount || 0)),
         }));
         setOverdueTableData(data);
-        // ── Update card value ──
         setOverdueTotal(data.reduce((s, x) => s + safe(x.overdueAmount), 0));
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setOverdueTableData([]);
     } finally {
       setLoadingOverdueData(false);
@@ -1143,11 +1050,12 @@ const MobileDashboard = () => {
       );
       if (res.data.success) {
         setCreditSaleTableData(res.data.data || []);
-        // ── Update card value ──
         setCreditSaleTotal(parseFloat(res.data.totalAmount) || 0);
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setCreditSaleTableData([]);
+      setCreditSaleTotal(0);
     } finally {
       setLoadingCreditSaleData(false);
     }
@@ -1166,14 +1074,15 @@ const MobileDashboard = () => {
           })),
         );
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setCompanyBalanceAccounts([]);
     } finally {
       setLoadingCompanyBalance(false);
     }
   };
 
-  // ── Date filter handlers ──
+  // Date filter handlers
   const handleDateFilterClick = (cardId, e) => {
     if (e) {
       e.preventDefault();
@@ -1213,7 +1122,6 @@ const MobileDashboard = () => {
       ...prev,
       [selectedCardForFilter]: true,
     }));
-
     switch (selectedCardForFilter) {
       case "Total Sales":
         setActiveSalesSubTab("Custom");
@@ -1270,19 +1178,76 @@ const MobileDashboard = () => {
     }
   };
 
-  // ── Card click → set active table + fetch data like desktop ──
+  // Sub‑tab change handlers
+  const handleSalesSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Total Sales"]) {
+        handleDateFilterClick("Total Sales");
+        return;
+      }
+      fetchSalesData("Custom");
+    } else {
+      setIsCustomDateActive((prev) => ({ ...prev, "Total Sales": false }));
+      fetchSalesData(t);
+    }
+    setActiveSalesSubTab(t);
+  };
+
+  const handleExpenseSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Total Expense"]) {
+        handleDateFilterClick("Total Expense");
+        return;
+      }
+      fetchExpenseData("Custom");
+    } else {
+      setIsCustomDateActive((prev) => ({ ...prev, "Total Expense": false }));
+      fetchExpenseData(t);
+    }
+    setActiveExpenseSubTab(t);
+  };
+
+  const handlePayrollSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Total Payroll"]) {
+        handleDateFilterClick("Total Payroll");
+        return;
+      }
+      fetchPayrollData("Custom");
+    } else {
+      setIsCustomDateActive((prev) => ({ ...prev, "Total Payroll": false }));
+      fetchPayrollData(t);
+    }
+    setActivePayrollSubTab(t);
+  };
+
+  const handleCreditSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Pending Collection"]) {
+        handleDateFilterClick("Pending Collection");
+        return;
+      }
+      fetchCreditSaleData("Custom");
+    } else {
+      setIsCustomDateActive((prev) => ({
+        ...prev,
+        "Pending Collection": false,
+      }));
+      fetchCreditSaleData(t);
+    }
+    setActiveCreditSubTab(t);
+  };
+
+  // Card click handler
   const handleCardClick = (tableName, cardKey) => {
     setActiveTable(tableName);
     setActiveCardKey(cardKey);
-
     switch (tableName) {
-      case "Sales": {
-        const sub =
-          cardKey === "currentMonthSale" ? "Month" : activeSalesSubTab;
-        if (cardKey === "currentMonthSale") setActiveSalesSubTab("Month");
-        fetchSalesData(isCustomDateActive["Total Sales"] ? "Custom" : sub);
+      case "Sales":
+        fetchSalesData(
+          isCustomDateActive["Total Sales"] ? "Custom" : activeSalesSubTab,
+        );
         break;
-      }
       case "Expenses":
         fetchExpenseData(
           isCustomDateActive["Total Expense"] ? "Custom" : activeExpenseSubTab,
@@ -1314,121 +1279,152 @@ const MobileDashboard = () => {
     }
   };
 
-  // ── Sub-tab handlers — update card values on change (like desktop) ──
-  const handleSalesSubTabChange = (t) => {
-    if (t === "Custom") {
-      if (!isCustomDateActive["Total Sales"]) {
-        handleDateFilterClick("Total Sales");
-        return;
-      }
-      fetchSalesData("Custom");
-    } else {
-      setIsCustomDateActive((p) => ({ ...p, "Total Sales": false }));
-      fetchSalesData(t);
-    }
-    setActiveSalesSubTab(t);
-  };
-
-  const handleExpenseSubTabChange = (t) => {
-    if (t === "Custom") {
-      if (!isCustomDateActive["Total Expense"]) {
-        handleDateFilterClick("Total Expense");
-        return;
-      }
-      fetchExpenseData("Custom");
-    } else {
-      setIsCustomDateActive((p) => ({ ...p, "Total Expense": false }));
-      fetchExpenseData(t);
-    }
-    setActiveExpenseSubTab(t);
-  };
-
-  const handlePayrollSubTabChange = (t) => {
-    if (t === "Custom") {
-      if (!isCustomDateActive["Total Payroll"]) {
-        handleDateFilterClick("Total Payroll");
-        return;
-      }
-      fetchPayrollData("Custom");
-    } else {
-      setIsCustomDateActive((p) => ({ ...p, "Total Payroll": false }));
-      fetchPayrollData(t);
-    }
-    setActivePayrollSubTab(t);
-  };
-
-  const handleCreditSubTabChange = (t) => {
-    if (t === "Custom") {
-      if (!isCustomDateActive["Pending Collection"]) {
-        handleDateFilterClick("Pending Collection");
-        return;
-      }
-      fetchCreditSaleData("Custom");
-    } else {
-      setIsCustomDateActive((p) => ({ ...p, "Pending Collection": false }));
-      fetchCreditSaleData(t);
-    }
-    setActiveCreditSubTab(t);
-  };
-
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
     setSelectedMRProducts(products);
     setShowProductsModal(true);
   };
 
-  // ── Sub-tab pills with Custom + filter icon ──
-  const SubTabs = ({ tabs, active, onChange, filterKey }) => (
-    <div className="flex gap-1 mb-1 overflow-x-auto no-scrollbar pb-1 items-center">
-      {tabs.map((t) => (
-        <button
-          key={t}
-          onClick={() => onChange(t)}
-          className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-            active === t
-              ? "bg-blue-600 text-white shadow-sm"
-              : "bg-white text-gray-600 border border-gray-200"
-          }`}
-        >
-          {t}
-        </button>
-      ))}
-      {/* Custom filter button */}
-      {filterKey && (
-        <button
-          onClick={() => onChange("Custom")}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-            active === "Custom"
-              ? "bg-blue-600 text-white shadow-sm"
-              : "bg-white text-gray-600 border border-gray-200"
-          }`}
-        >
-          <Filter size={11} />
-          {isCustomDateActive[filterKey] && customDateRanges[filterKey]?.start
-            ? `${customDateRanges[filterKey].start} – ${customDateRanges[filterKey].end}`
-            : "Custom"}
-        </button>
-      )}
-      {/* Clear custom filter */}
-      {filterKey && isCustomDateActive[filterKey] && (
-        <button
-          onClick={(e) => handleClearDateFilter(filterKey, e)}
-          className="flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-200 whitespace-nowrap"
-        >
-          <X size={11} />
-          Clear
-        </button>
-      )}
-    </div>
-  );
-
-  // ── Derive the card value to show based on active sub-tab ──
-  const getSalesCardValue = () => {
-    if (activeCardKey === "currentMonthSale") return monthlySales;
-    if (activeSalesSubTab === "Month") return monthlySales;
-    if (activeSalesSubTab === "Custom") return customSalesTotal;
-    return todaySales; // Today / Year / All show today's as headline
+  const getCurrentSalesTotal = () => {
+    if (activeCardKey !== "totalSales") return todaySales;
+    switch (activeSalesSubTab) {
+      case "Today":
+        return todaySales;
+      case "Month":
+        return monthlySales;
+      case "Year":
+        return yearSales;
+      case "All":
+        return allSales;
+      case "Custom":
+        return customSalesTotal;
+      default:
+        return todaySales;
+    }
   };
+
+  // Sub-tabs component with dynamic labels
+  const SubTabs = ({ tabs, active, onChange, filterKey }) => {
+    const getTabLabel = (tab) => {
+      if (tab === "Year" && active === "Year") return getYearToDateRange();
+      if (tab === "All" && active === "All") return getAllTimeRange();
+      return tab;
+    };
+    return (
+      <div className="flex gap-1 mb-1 overflow-x-auto no-scrollbar pb-1 items-center">
+        {tabs.map((t) => (
+          <button
+            key={t}
+            onClick={() => onChange(t)}
+            className={`px-2 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+              active === t
+                ? "bg-blue-600 text-white shadow-sm"
+                : "bg-white text-gray-600 border border-gray-200"
+            }`}
+          >
+            {getTabLabel(t)}
+          </button>
+        ))}
+        {filterKey && (
+          <button
+            onClick={() => onChange("Custom")}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap ${
+              active === "Custom"
+                ? "bg-blue-600 text-white shadow-sm"
+                : "bg-white text-gray-600 border border-gray-200"
+            }`}
+          >
+            <Filter size={11} />
+            {isCustomDateActive[filterKey] && customDateRanges[filterKey]?.start
+              ? `${customDateRanges[filterKey].start} – ${customDateRanges[filterKey].end}`
+              : "Custom"}
+          </button>
+        )}
+        {filterKey && isCustomDateActive[filterKey] && (
+          <button
+            onClick={(e) => handleClearDateFilter(filterKey, e)}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-200 whitespace-nowrap"
+          >
+            <X size={11} /> Clear
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // Cards definition
+  const cards = [
+    {
+      key: "totalSales",
+      table: "Sales",
+      label:
+        activeCardKey === "totalSales" && activeSalesSubTab !== "Today"
+          ? `Sales (${activeSalesSubTab === "Year" ? getYearToDateRange() : activeSalesSubTab})`
+          : "Total Sales (Today)",
+      value: getCurrentSalesTotal(),
+      icon: ShoppingCart,
+      color: "#2563EB",
+    },
+    {
+      key: "currentMonthSale",
+      table: "Sales",
+      label: "Current Month Sale",
+      value: monthlySales,
+      icon: TrendingUp,
+      color: "#EA580C",
+    },
+    {
+      key: "stock",
+      table: "Stock in Hands",
+      label: "Stock in Hands",
+      value: stockData?.totalStockValue || 0,
+      icon: Package,
+      color: "#0D9488",
+    },
+    {
+      key: "expense",
+      table: "Expenses",
+      label:
+        activeTable === "Expenses"
+          ? `Expense (${activeExpenseSubTab})`
+          : "Total Expense",
+      value: monthlyExpense,
+      icon: DollarSign,
+      color: "#9333EA",
+    },
+    {
+      key: "payroll",
+      table: "Total Payroll",
+      label: "Total Payroll",
+      value: currentPayrollTotal,
+      icon: DollarSign,
+      color: "#2563EB",
+    },
+    {
+      key: "overdue",
+      table: "Overdue",
+      label: "Overdue",
+      value: overdueTotal,
+      icon: AlertCircle,
+      color: "#DC2626",
+    },
+    {
+      key: "pending",
+      table: "Credit Sale Cash Not Receive",
+      label: "Pending Collection",
+      value: creditSaleTotal,
+      icon: CreditCard,
+      color: "#4F46E5",
+    },
+    {
+      key: "companyBalance",
+      table: "Company Balance",
+      label: "Company Balance",
+      value: companyBalance,
+      icon: DollarSign,
+      color: "#0D9488",
+    },
+  ];
 
   // Table renderer
   const renderTable = () => {
@@ -1438,7 +1434,10 @@ const MobileDashboard = () => {
           <>
             {activeCardKey === "currentMonthSale" ? (
               <div className="mb-4 text-sm font-medium text-gray-600">
-                {currentMonthName}
+                {new Date().toLocaleString("default", {
+                  month: "long",
+                  year: "numeric",
+                })}
               </div>
             ) : (
               <SubTabs
@@ -1537,79 +1536,115 @@ const MobileDashboard = () => {
     }
   };
 
-  // ── Cards — values update dynamically ──
-  const cards = [
-    {
-      key: "totalSales",
-      table: "Sales",
-      label:
-        activeTable === "Sales" && activeSalesSubTab !== "Today"
-          ? `Sales (${activeSalesSubTab})`
-          : "Total Sales (Today)",
-      value: activeTable === "Sales" ? getSalesCardValue() : todaySales,
-      icon: ShoppingCart,
-      color: "#2563EB",
-    },
-    {
-      key: "currentMonthSale",
-      table: "Sales",
-      label: "Current Month Sale",
-      value: monthlySales,
-      icon: TrendingUp,
-      color: "#EA580C",
-    },
-    {
-      key: "stock",
-      table: "Stock in Hands",
-      label: "Stock in Hands",
-      value: stockData?.totalStockValue || 0,
-      icon: Package,
-      color: "#0D9488",
-    },
-    {
-      key: "expense",
-      table: "Expenses",
-      label:
-        activeTable === "Expenses"
-          ? `Expense (${activeExpenseSubTab})`
-          : "Total Expense",
-      value: monthlyExpense,
-      icon: DollarSign,
-      color: "#9333EA",
-    },
-    {
-      key: "payroll",
-      table: "Total Payroll",
-      label: "Total Payroll",
-      value: currentPayrollTotal,
-      icon: DollarSign,
-      color: "#2563EB",
-    },
-    {
-      key: "overdue",
-      table: "Overdue",
-      label: "Overdue",
-      value: overdueTotal,
-      icon: AlertCircle,
-      color: "#DC2626",
-    },
-    {
-      key: "pending",
-      table: "Credit Sale Cash Not Receive",
-      label: "Pending Collection",
-      value: creditSaleTotal,
-      icon: CreditCard,
-      color: "#4F46E5",
-    },
-    {
-      key: "companyBalance",
-      table: "Company Balance",
-      label: "Company Balance",
-      value: companyBalance,
-      icon: DollarSign,
-      color: "#0D9488",
-    },
-  ];
+  // Initial data load
+  useEffect(() => {
+    const init = async () => {
+      setDataLoading(true);
+      try {
+        setUsername(localStorage.getItem("username") || "User");
+        const [
+          salesToday,
+          salesMonth,
+          balanceRes,
+          overdueRes,
+          creditRes,
+          expenseMonthRes,
+        ] = await Promise.allSettled([
+          axios.get(`${backendUrl}/api/sales/table-data`, {
+            params: { period: "Today" },
+          }),
+          axios.get(`${backendUrl}/api/sales/table-data`, {
+            params: { period: "Month" },
+          }),
+          axios.get(`${backendUrl}/api/accounts/balance`),
+          axios.get(`${backendUrl}/api/overdue`, {
+            params: { currentDate: new Date().toISOString() },
+          }),
+          axios.get(`${backendUrl}/api/sales/credit-sale-not-received`, {
+            params: { period: "month" },
+          }),
+          axios.get(`${backendUrl}/api/expenses`, {
+            params: { period: "Month" },
+          }),
+        ]);
+        if (salesToday.status === "fulfilled" && salesToday.value.data?.success)
+          setTodaySales(
+            (salesToday.value.data.data || []).reduce(
+              (s, x) => s + safe(x.amount),
+              0,
+            ),
+          );
+        if (salesMonth.status === "fulfilled" && salesMonth.value.data?.success)
+          setMonthlySales(
+            (salesMonth.value.data.data || []).reduce(
+              (s, x) => s + safe(x.amount),
+              0,
+            ),
+          );
+        Promise.allSettled([
+          axios.get(`${backendUrl}/api/sales/table-data`, {
+            params: { period: "Year" },
+          }),
+          axios.get(`${backendUrl}/api/sales/table-data`, {
+            params: { period: "All" },
+          }),
+        ]).then(([yearRes, allRes]) => {
+          if (yearRes.status === "fulfilled" && yearRes.value.data?.success)
+            setYearSales(
+              (yearRes.value.data.data || []).reduce(
+                (s, x) => s + safe(x.amount),
+                0,
+              ),
+            );
+          if (allRes.status === "fulfilled" && allRes.value.data?.success)
+            setAllSales(
+              (allRes.value.data.data || []).reduce(
+                (s, x) => s + safe(x.amount),
+                0,
+              ),
+            );
+        });
+        if (
+          balanceRes.status === "fulfilled" &&
+          balanceRes.value.data?.success
+        ) {
+          setCompanyBalance(balanceRes.value.data.totalBalance || 0);
+          setCompanyBalanceAccounts(
+            (balanceRes.value.data.accounts || []).map((a) => ({
+              ...a,
+              transactions: a.transactions || [],
+            })),
+          );
+        }
+        if (overdueRes.status === "fulfilled" && overdueRes.value.data?.success)
+          setOverdueTotal(
+            (overdueRes.value.data.data || []).reduce(
+              (s, x) => s + safe(x.dueAmount || x.overdueAmount),
+              0,
+            ),
+          );
+        if (creditRes.status === "fulfilled" && creditRes.value.data?.success)
+          setCreditSaleTotal(parseFloat(creditRes.value.data.totalAmount) || 0);
+        if (expenseMonthRes.status === "fulfilled")
+          setMonthlyExpense(
+            (expenseMonthRes.value.data.data || []).reduce(
+              (sum, ex) => sum + safe(ex.amount),
+              0,
+            ),
+          );
+        await fetchSalesData("Today");
+      } catch (err) {
+        console.error("MobileDashboard init error:", err);
+      } finally {
+        setDataLoading(false);
+      }
+    };
+    init();
+  }, []);
+
+  useEffect(() => {
+    setCurrentPayrollTotal(totalPayroll || 0);
+  }, [totalPayroll]);
 
   if (dataLoading) {
     return (
@@ -1631,9 +1666,7 @@ const MobileDashboard = () => {
           isMobile={true}
         />
       )}
-
       <div className="flex-1 overflow-y-auto pb-8 px-4 space-y-4">
-        {/* Header */}
         <div className="bg-white rounded-2xl px-4 py-2.5 shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-2">
             {isMobileView && (
@@ -1715,7 +1748,6 @@ const MobileDashboard = () => {
         />
       </div>
 
-      {/* Date Filter Modal — stable external component */}
       <DateFilterModal
         isOpen={showDateFilter}
         cardLabel={selectedCardForFilter}
