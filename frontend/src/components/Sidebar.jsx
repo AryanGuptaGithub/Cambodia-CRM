@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Home,
   Users,
@@ -48,6 +48,7 @@ import {
   RefreshCw,
   BanknoteIcon,
   X,
+  LogOut, // ← added logout icon
 } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -278,6 +279,7 @@ const getUserRole = () => {
 
 function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
   const location = useLocation();
+  const navigate = useNavigate(); // ← for logout redirect
 
   // On desktop, sidebar is always "shown" (controlled by width).
   // On mobile, sidebar visibility is controlled by isOpen prop.
@@ -385,6 +387,22 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
       className={`w-4 h-4 flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
     />
   );
+
+  // ── Logout handler ──────────────────────────────────────────────────────
+  const handleLogout = () => {
+    // Clear all authentication related data
+    localStorage.removeItem("token");
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("user");
+    localStorage.removeItem("auth");
+    localStorage.removeItem("userData");
+    localStorage.removeItem("currentUser");
+    sessionStorage.clear(); // optional, clear session as well
+    // Close mobile drawer if open
+    if (isMobile && isOpen) toggleSidebar();
+    // Redirect to login page
+    navigate("/login");
+  };
 
   // ── Shared nav content ───────────────────────────────────────────────────
   const navContent = (
@@ -1125,6 +1143,18 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
             </div>
           )}
         </nav>
+      )}
+
+      {isMobile && (
+        <div className="border-t border-gray-700 p-3 flex-shrink-0">
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-3 w-full p-2 rounded-md bg-red-600 text-white hover:bg-white hover:text-black hover:shadow-md transition-all duration-200"
+          >
+            <LogOut className="w-5 h-5" />
+            <span>Logout</span>
+          </button>
+        </div>
       )}
     </div>
   );

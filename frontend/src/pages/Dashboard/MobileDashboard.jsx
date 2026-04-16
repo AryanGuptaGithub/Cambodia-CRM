@@ -23,6 +23,7 @@ import {
   Calendar,
   Clock,
   Filter,
+  X,
 } from "lucide-react";
 import { SalesTable } from "./SalesTable";
 import { PayrollTable } from "./PayrollTable";
@@ -37,6 +38,91 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
 const safe = (v) => (typeof v === "number" ? v : 0);
+
+// --------------------------------------------------------------
+// DateFilterModal — defined OUTSIDE so it never re-mounts
+// --------------------------------------------------------------
+const DateFilterModal = ({
+  isOpen,
+  cardLabel,
+  startDate,
+  endDate,
+  onStartDateChange,
+  onEndDateChange,
+  onApply,
+  onClose,
+}) => {
+  if (!isOpen || !cardLabel) return null;
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-4"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        className="bg-white rounded-xl p-5 w-full max-w-sm mx-auto shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+            <Calendar size={15} className="text-blue-600" />
+            Custom Date — {cardLabel}
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Start Date
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              max={endDate || undefined}
+              onChange={(e) => onStartDateChange(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              End Date
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate || undefined}
+              onChange={(e) => onEndDateChange(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onApply}
+              disabled={!startDate || !endDate}
+              className={`flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg ${
+                !startDate || !endDate
+                  ? "bg-gray-300 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // --------------------------------------------------------------
 // MiniRecentSales
@@ -713,16 +799,17 @@ const MobileSidePanel = ({
 };
 
 // --------------------------------------------------------------
-// MAIN MOBILE DASHBOARD (with reduced header size)
+// MAIN MOBILE DASHBOARD
 // --------------------------------------------------------------
 const MobileDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { stockData, totalPayroll, mrList } = useDashboardData();
 
-  // Data state
+  // ── Card value state (updates with sub-tab changes like desktop) ──
   const [todaySales, setTodaySales] = useState(0);
   const [monthlySales, setMonthlySales] = useState(0);
+  const [customSalesTotal, setCustomSalesTotal] = useState(0);
   const [companyBalance, setCompanyBalance] = useState(0);
   const [overdueTotal, setOverdueTotal] = useState(0);
   const [creditSaleTotal, setCreditSaleTotal] = useState(0);
@@ -762,6 +849,24 @@ const MobileDashboard = () => {
   const [companyBalanceAccounts, setCompanyBalanceAccounts] = useState([]);
   const [loadingCompanyBalance, setLoadingCompanyBalance] = useState(false);
 
+  // ── Custom date filter state (mirrors desktop) ──
+  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [selectedCardForFilter, setSelectedCardForFilter] = useState(null);
+  const [modalStartDate, setModalStartDate] = useState("");
+  const [modalEndDate, setModalEndDate] = useState("");
+  const [isCustomDateActive, setIsCustomDateActive] = useState({
+    "Total Sales": false,
+    "Total Expense": false,
+    "Total Payroll": false,
+    "Pending Collection": false,
+  });
+  const [customDateRanges, setCustomDateRanges] = useState({
+    "Total Sales": { start: "", end: "" },
+    "Total Expense": { start: "", end: "" },
+    "Total Payroll": { start: "", end: "" },
+    "Pending Collection": { start: "", end: "" },
+  });
+
   // Modal
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedMRName, setSelectedMRName] = useState("");
@@ -783,7 +888,7 @@ const MobileDashboard = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Body scroll lock when sidebar is open on mobile
+  // Body scroll lock
   useEffect(() => {
     if (isMobileView && sidebarOpen) {
       document.body.style.overflow = "hidden";
@@ -874,7 +979,8 @@ const MobileDashboard = () => {
             ),
           );
 
-        fetchSalesData("Today");
+        // Load initial table data
+        await fetchSalesData("Today");
       } catch (err) {
         console.error("MobileDashboard init error:", err);
       } finally {
@@ -888,14 +994,34 @@ const MobileDashboard = () => {
     setCurrentPayrollTotal(totalPayroll || 0);
   }, [totalPayroll]);
 
-  // Fetchers
-  const fetchSalesData = async (period = "Today") => {
+  // ── Fetchers — all update card values like desktop does ──
+
+  const fetchSalesData = async (period = "Today", startDate, endDate) => {
     try {
       setLoadingSalesData(true);
+      const periodMap = {
+        Today: "Today",
+        Month: "Month",
+        Year: "Year",
+        All: "All",
+        Custom: "custom",
+      };
+      const params = { period: periodMap[period] || period };
+      if (period === "Custom") {
+        params.startDate = startDate || customDateRanges["Total Sales"]?.start;
+        params.endDate = endDate || customDateRanges["Total Sales"]?.end;
+      }
       const res = await axios.get(`${backendUrl}/api/sales/table-data`, {
-        params: { period },
+        params,
       });
-      setSalesTableData(res.data.success ? res.data.data : []);
+      const data = res.data.success ? res.data.data : [];
+      setSalesTableData(data);
+
+      // ── Update the card value for the active period (mirrors desktop) ──
+      const total = data.reduce((s, x) => s + safe(x.amount), 0);
+      if (period === "Today") setTodaySales(total);
+      else if (period === "Month") setMonthlySales(total);
+      else if (period === "Custom") setCustomSalesTotal(total);
     } catch {
       setSalesTableData([]);
     } finally {
@@ -903,12 +1029,21 @@ const MobileDashboard = () => {
     }
   };
 
-  const fetchExpenseData = async (period = "Month") => {
+  const fetchExpenseData = async (period = "Month", startDate, endDate) => {
     try {
       setLoadingExpenseData(true);
-      const res = await axios.get(`${backendUrl}/api/expenses`, {
-        params: { period },
-      });
+      const params = {
+        period:
+          { Month: "Month", Year: "Year", All: "All", Custom: "custom" }[
+            period
+          ] || period,
+      };
+      if (period === "Custom") {
+        params.startDate =
+          startDate || customDateRanges["Total Expense"]?.start;
+        params.endDate = endDate || customDateRanges["Total Expense"]?.end;
+      }
+      const res = await axios.get(`${backendUrl}/api/expenses`, { params });
       const raw = res.data.data || [];
       setExpenseTableData(
         raw.map((ex) => ({
@@ -916,6 +1051,9 @@ const MobileDashboard = () => {
           category: ex.category?.category || ex.category || "Unknown",
         })),
       );
+      // ── Update card value ──
+      const total = raw.reduce((sum, ex) => sum + safe(ex.amount), 0);
+      if (period === "Month") setMonthlyExpense(total);
     } catch {
       setExpenseTableData([]);
     } finally {
@@ -923,12 +1061,21 @@ const MobileDashboard = () => {
     }
   };
 
-  const fetchPayrollData = async (period = "Prev Month") => {
+  const fetchPayrollData = async (
+    period = "Prev Month",
+    startDate,
+    endDate,
+  ) => {
     try {
       setLoadingPayrollData(true);
       let params = {};
       const cur = new Date();
-      if (period === "Prev Month") {
+      if (period === "Custom") {
+        params.period = "custom";
+        params.startDate =
+          startDate || customDateRanges["Total Payroll"]?.start;
+        params.endDate = endDate || customDateRanges["Total Payroll"]?.end;
+      } else if (period === "Prev Month") {
         let pm = cur.getMonth() - 1,
           y = cur.getFullYear();
         if (pm < 0) {
@@ -958,16 +1105,18 @@ const MobileDashboard = () => {
       const res = await axios.get(`${backendUrl}/api/overdue`, {
         params: { currentDate: new Date().toISOString() },
       });
-      if (res.data.success)
-        setOverdueTableData(
-          res.data.data.map((inv) => ({
-            ...inv,
-            overdueAmount:
-              inv.dueAmount > 0
-                ? inv.dueAmount
-                : Math.max(0, inv.totalAmount - (inv.paidAmount || 0)),
-          })),
-        );
+      if (res.data.success) {
+        const data = res.data.data.map((inv) => ({
+          ...inv,
+          overdueAmount:
+            inv.dueAmount > 0
+              ? inv.dueAmount
+              : Math.max(0, inv.totalAmount - (inv.paidAmount || 0)),
+        }));
+        setOverdueTableData(data);
+        // ── Update card value ──
+        setOverdueTotal(data.reduce((s, x) => s + safe(x.overdueAmount), 0));
+      }
     } catch {
       setOverdueTableData([]);
     } finally {
@@ -975,16 +1124,26 @@ const MobileDashboard = () => {
     }
   };
 
-  const fetchCreditSaleData = async (period = "Month") => {
+  const fetchCreditSaleData = async (period = "Month", startDate, endDate) => {
     try {
       setLoadingCreditSaleData(true);
-      const bp = { Today: "today", Month: "month", Year: "year" }[period];
+      let params = {};
+      if (period === "Custom") {
+        params.period = "custom";
+        params.startDate =
+          startDate || customDateRanges["Pending Collection"]?.start;
+        params.endDate = endDate || customDateRanges["Pending Collection"]?.end;
+      } else {
+        const bp = { Today: "today", Month: "month", Year: "year" }[period];
+        if (bp) params.period = bp;
+      }
       const res = await axios.get(
         `${backendUrl}/api/sales/credit-sale-not-received`,
-        { params: bp ? { period: bp } : {} },
+        { params },
       );
       if (res.data.success) {
         setCreditSaleTableData(res.data.data || []);
+        // ── Update card value ──
         setCreditSaleTotal(parseFloat(res.data.totalAmount) || 0);
       }
     } catch {
@@ -1014,25 +1173,87 @@ const MobileDashboard = () => {
     }
   };
 
-  // Handlers
-  const handleViewProducts = (mrName, products) => {
-    setSelectedMRName(mrName);
-    setSelectedMRProducts(products);
-    setShowProductsModal(true);
+  // ── Date filter handlers ──
+  const handleDateFilterClick = (cardId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setSelectedCardForFilter(cardId);
+    const saved = customDateRanges[cardId];
+    if (saved?.start && saved?.end) {
+      setModalStartDate(saved.start);
+      setModalEndDate(saved.end);
+    } else {
+      const today = new Date();
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      setModalStartDate(firstDay.toISOString().split("T")[0]);
+      setModalEndDate(lastDay.toISOString().split("T")[0]);
+    }
+    setShowDateFilter(true);
   };
 
-  const handleCardClick = (tableName, cardKey) => {
-    setActiveTable(tableName);
-    setActiveCardKey(cardKey);
+  const handleCloseDateFilter = () => {
+    setShowDateFilter(false);
+    setSelectedCardForFilter(null);
+  };
 
-    if (tableName === "Sales") {
-      const sub = cardKey === "currentMonthSale" ? "Month" : "Today";
-      setActiveSalesSubTab(sub);
-      fetchSalesData(sub);
+  const handleApplyDateFilter = () => {
+    if (!selectedCardForFilter || !modalStartDate || !modalEndDate) return;
+    if (modalStartDate > modalEndDate) {
+      alert("Start date cannot be after end date");
       return;
     }
-    switch (tableName) {
-      case "Expenses":
+    setCustomDateRanges((prev) => ({
+      ...prev,
+      [selectedCardForFilter]: { start: modalStartDate, end: modalEndDate },
+    }));
+    setIsCustomDateActive((prev) => ({
+      ...prev,
+      [selectedCardForFilter]: true,
+    }));
+
+    switch (selectedCardForFilter) {
+      case "Total Sales":
+        setActiveSalesSubTab("Custom");
+        fetchSalesData("Custom", modalStartDate, modalEndDate);
+        break;
+      case "Total Expense":
+        setActiveExpenseSubTab("Custom");
+        fetchExpenseData("Custom", modalStartDate, modalEndDate);
+        break;
+      case "Total Payroll":
+        setActivePayrollSubTab("Custom");
+        fetchPayrollData("Custom", modalStartDate, modalEndDate);
+        break;
+      case "Pending Collection":
+        setActiveCreditSubTab("Custom");
+        fetchCreditSaleData("Custom", modalStartDate, modalEndDate);
+        break;
+      default:
+        break;
+    }
+    setShowDateFilter(false);
+    setSelectedCardForFilter(null);
+  };
+
+  const handleClearDateFilter = (cardId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setIsCustomDateActive((prev) => ({ ...prev, [cardId]: false }));
+    setCustomDateRanges((prev) => ({
+      ...prev,
+      [cardId]: { start: "", end: "" },
+    }));
+    switch (cardId) {
+      case "Total Sales":
+        setActiveSalesSubTab("Today");
+        fetchSalesData("Today");
+        break;
+      case "Total Expense":
         setActiveExpenseSubTab("Month");
         fetchExpenseData("Month");
         break;
@@ -1040,12 +1261,47 @@ const MobileDashboard = () => {
         setActivePayrollSubTab("Prev Month");
         fetchPayrollData("Prev Month");
         break;
+      case "Pending Collection":
+        setActiveCreditSubTab("Month");
+        fetchCreditSaleData("Month");
+        break;
+      default:
+        break;
+    }
+  };
+
+  // ── Card click → set active table + fetch data like desktop ──
+  const handleCardClick = (tableName, cardKey) => {
+    setActiveTable(tableName);
+    setActiveCardKey(cardKey);
+
+    switch (tableName) {
+      case "Sales": {
+        const sub =
+          cardKey === "currentMonthSale" ? "Month" : activeSalesSubTab;
+        if (cardKey === "currentMonthSale") setActiveSalesSubTab("Month");
+        fetchSalesData(isCustomDateActive["Total Sales"] ? "Custom" : sub);
+        break;
+      }
+      case "Expenses":
+        fetchExpenseData(
+          isCustomDateActive["Total Expense"] ? "Custom" : activeExpenseSubTab,
+        );
+        break;
+      case "Total Payroll":
+        fetchPayrollData(
+          isCustomDateActive["Total Payroll"] ? "Custom" : activePayrollSubTab,
+        );
+        break;
       case "Overdue":
         fetchOverdueData();
         break;
       case "Credit Sale Cash Not Receive":
-        setActiveCreditSubTab("Month");
-        fetchCreditSaleData("Month");
+        fetchCreditSaleData(
+          isCustomDateActive["Pending Collection"]
+            ? "Custom"
+            : activeCreditSubTab,
+        );
         break;
       case "Stock in Hands":
         setActiveStockSubTab("all");
@@ -1053,23 +1309,126 @@ const MobileDashboard = () => {
       case "Company Balance":
         fetchCompanyBalance();
         break;
+      default:
+        break;
     }
   };
 
-  // Sub-tab pills
-  const SubTabs = ({ tabs, active, onChange }) => (
-    <div className="flex gap-2 mb-1 overflow-x-auto no-scrollbar pb-1">
+  // ── Sub-tab handlers — update card values on change (like desktop) ──
+  const handleSalesSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Total Sales"]) {
+        handleDateFilterClick("Total Sales");
+        return;
+      }
+      fetchSalesData("Custom");
+    } else {
+      setIsCustomDateActive((p) => ({ ...p, "Total Sales": false }));
+      fetchSalesData(t);
+    }
+    setActiveSalesSubTab(t);
+  };
+
+  const handleExpenseSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Total Expense"]) {
+        handleDateFilterClick("Total Expense");
+        return;
+      }
+      fetchExpenseData("Custom");
+    } else {
+      setIsCustomDateActive((p) => ({ ...p, "Total Expense": false }));
+      fetchExpenseData(t);
+    }
+    setActiveExpenseSubTab(t);
+  };
+
+  const handlePayrollSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Total Payroll"]) {
+        handleDateFilterClick("Total Payroll");
+        return;
+      }
+      fetchPayrollData("Custom");
+    } else {
+      setIsCustomDateActive((p) => ({ ...p, "Total Payroll": false }));
+      fetchPayrollData(t);
+    }
+    setActivePayrollSubTab(t);
+  };
+
+  const handleCreditSubTabChange = (t) => {
+    if (t === "Custom") {
+      if (!isCustomDateActive["Pending Collection"]) {
+        handleDateFilterClick("Pending Collection");
+        return;
+      }
+      fetchCreditSaleData("Custom");
+    } else {
+      setIsCustomDateActive((p) => ({ ...p, "Pending Collection": false }));
+      fetchCreditSaleData(t);
+    }
+    setActiveCreditSubTab(t);
+  };
+
+  const handleViewProducts = (mrName, products) => {
+    setSelectedMRName(mrName);
+    setSelectedMRProducts(products);
+    setShowProductsModal(true);
+  };
+
+  // ── Sub-tab pills with Custom + filter icon ──
+  const SubTabs = ({ tabs, active, onChange, filterKey }) => (
+    <div className="flex gap-1 mb-1 overflow-x-auto no-scrollbar pb-1 items-center">
       {tabs.map((t) => (
         <button
           key={t}
           onClick={() => onChange(t)}
-          className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${active === t ? "bg-blue-600 text-white shadow-sm" : "bg-white text-gray-600 border border-gray-200"}`}
+          className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+            active === t
+              ? "bg-blue-600 text-white shadow-sm"
+              : "bg-white text-gray-600 border border-gray-200"
+          }`}
         >
           {t}
         </button>
       ))}
+      {/* Custom filter button */}
+      {filterKey && (
+        <button
+          onClick={() => onChange("Custom")}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+            active === "Custom"
+              ? "bg-blue-600 text-white shadow-sm"
+              : "bg-white text-gray-600 border border-gray-200"
+          }`}
+        >
+          <Filter size={11} />
+          {isCustomDateActive[filterKey] && customDateRanges[filterKey]?.start
+            ? `${customDateRanges[filterKey].start} – ${customDateRanges[filterKey].end}`
+            : "Custom"}
+        </button>
+      )}
+      {/* Clear custom filter */}
+      {filterKey && isCustomDateActive[filterKey] && (
+        <button
+          onClick={(e) => handleClearDateFilter(filterKey, e)}
+          className="flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-200 whitespace-nowrap"
+        >
+          <X size={11} />
+          Clear
+        </button>
+      )}
     </div>
   );
+
+  // ── Derive the card value to show based on active sub-tab ──
+  const getSalesCardValue = () => {
+    if (activeCardKey === "currentMonthSale") return monthlySales;
+    if (activeSalesSubTab === "Month") return monthlySales;
+    if (activeSalesSubTab === "Custom") return customSalesTotal;
+    return todaySales; // Today / Year / All show today's as headline
+  };
 
   // Table renderer
   const renderTable = () => {
@@ -1085,10 +1444,8 @@ const MobileDashboard = () => {
               <SubTabs
                 tabs={["Today", "Month", "Year", "All"]}
                 active={activeSalesSubTab}
-                onChange={(t) => {
-                  setActiveSalesSubTab(t);
-                  fetchSalesData(t);
-                }}
+                onChange={handleSalesSubTabChange}
+                filterKey="Total Sales"
               />
             )}
             <SalesTable
@@ -1107,10 +1464,8 @@ const MobileDashboard = () => {
             <SubTabs
               tabs={["Month", "Year", "All"]}
               active={activeExpenseSubTab}
-              onChange={(t) => {
-                setActiveExpenseSubTab(t);
-                fetchExpenseData(t);
-              }}
+              onChange={handleExpenseSubTabChange}
+              filterKey="Total Expense"
             />
             <ExpenseTable
               expenseTableData={expenseTableData}
@@ -1127,10 +1482,8 @@ const MobileDashboard = () => {
             <SubTabs
               tabs={["Prev Month", "YTD"]}
               active={activePayrollSubTab}
-              onChange={(t) => {
-                setActivePayrollSubTab(t);
-                fetchPayrollData(t);
-              }}
+              onChange={handlePayrollSubTabChange}
+              filterKey="Total Payroll"
             />
             <PayrollTable
               payrollData={payrollTableData}
@@ -1162,10 +1515,8 @@ const MobileDashboard = () => {
             <SubTabs
               tabs={["Today", "Month", "Year"]}
               active={activeCreditSubTab}
-              onChange={(t) => {
-                setActiveCreditSubTab(t);
-                fetchCreditSaleData(t);
-              }}
+              onChange={handleCreditSubTabChange}
+              filterKey="Pending Collection"
             />
             <CreditSaleTable
               creditSaleData={creditSaleTableData}
@@ -1186,12 +1537,16 @@ const MobileDashboard = () => {
     }
   };
 
+  // ── Cards — values update dynamically ──
   const cards = [
     {
       key: "totalSales",
       table: "Sales",
-      label: "Total Sales",
-      value: todaySales,
+      label:
+        activeTable === "Sales" && activeSalesSubTab !== "Today"
+          ? `Sales (${activeSalesSubTab})`
+          : "Total Sales (Today)",
+      value: activeTable === "Sales" ? getSalesCardValue() : todaySales,
       icon: ShoppingCart,
       color: "#2563EB",
     },
@@ -1214,7 +1569,10 @@ const MobileDashboard = () => {
     {
       key: "expense",
       table: "Expenses",
-      label: "Total Expense",
+      label:
+        activeTable === "Expenses"
+          ? `Expense (${activeExpenseSubTab})`
+          : "Total Expense",
       value: monthlyExpense,
       icon: DollarSign,
       color: "#9333EA",
@@ -1275,7 +1633,7 @@ const MobileDashboard = () => {
       )}
 
       <div className="flex-1 overflow-y-auto pb-8 px-4 space-y-4">
-        {/* Reduced Header Size - Changed from py-4 to py-2.5 */}
+        {/* Header */}
         <div className="bg-white rounded-2xl px-4 py-2.5 shadow-sm flex items-center justify-between">
           <div className="flex items-center gap-2">
             {isMobileView && (
@@ -1318,11 +1676,15 @@ const MobileDashboard = () => {
             <button
               key={card.key}
               onClick={() => handleCardClick(card.table, card.key)}
-              className={`rounded-2xl p-4 shadow-sm text-left active:bg-gray-50 transition-colors ${activeCardKey === card.key ? "bg-gray-200 border border-gray-200" : "bg-white"}`}
+              className={`rounded-2xl p-4 shadow-sm text-left active:bg-gray-50 transition-colors ${
+                activeCardKey === card.key
+                  ? "bg-gray-200 border border-gray-300"
+                  : "bg-white"
+              }`}
             >
               <div className="flex items-center gap-1.5 mb-1">
                 <card.icon size={14} style={{ color: card.color }} />
-                <p className="text-xs text-gray-500 font-medium">
+                <p className="text-xs text-gray-500 font-medium truncate">
                   {card.label}
                 </p>
               </div>
@@ -1352,6 +1714,18 @@ const MobileDashboard = () => {
           onViewProducts={handleViewProducts}
         />
       </div>
+
+      {/* Date Filter Modal — stable external component */}
+      <DateFilterModal
+        isOpen={showDateFilter}
+        cardLabel={selectedCardForFilter}
+        startDate={modalStartDate}
+        endDate={modalEndDate}
+        onStartDateChange={setModalStartDate}
+        onEndDateChange={setModalEndDate}
+        onApply={handleApplyDateFilter}
+        onClose={handleCloseDateFilter}
+      />
 
       <ProductsModal
         showModal={showProductsModal}
