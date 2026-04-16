@@ -1,13 +1,25 @@
 const CACHE_NAME = "healthcare-crm-v1";
-const STATIC_ASSETS = ["/", "/index.html", "/mainlogo.png", "/favicon.ico"];
+const OFFLINE_URL = "/offline.html";
 
-// Install event - cache static assets
+// Assets to cache immediately
+const PRECACHE_ASSETS = [
+  "/",
+  "/index.html",
+  "/offline.html",
+  "/mainlogo.png",
+  "/favicon.ico",
+  "/manifest.json",
+];
+
+// Install event - precache critical assets
 self.addEventListener("install", (event) => {
+  console.log("Service Worker installing...");
   event.waitUntil(
     caches
       .open(CACHE_NAME)
       .then((cache) => {
-        return cache.addAll(STATIC_ASSETS);
+        console.log("Caching preloaded assets");
+        return cache.addAll(PRECACHE_ASSETS);
       })
       .then(() => self.skipWaiting()),
   );
@@ -15,6 +27,7 @@ self.addEventListener("install", (event) => {
 
 // Activate event - clean up old caches
 self.addEventListener("activate", (event) => {
+  console.log("Service Worker activating...");
   event.waitUntil(
     caches
       .keys()
@@ -22,6 +35,7 @@ self.addEventListener("activate", (event) => {
         return Promise.all(
           cacheNames.map((cacheName) => {
             if (cacheName !== CACHE_NAME) {
+              console.log("Deleting old cache:", cacheName);
               return caches.delete(cacheName);
             }
           }),
@@ -33,73 +47,91 @@ self.addEventListener("activate", (event) => {
 
 // Fetch event - network first, then cache
 self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
   // Skip non-GET requests
-  if (event.request.method !== "GET") {
-    return fetch(event.request);
+  if (request.method !== "GET") {
+    return fetch(request);
   }
 
-  // Skip API requests
-  if (event.request.url.includes("/api/")) {
-    return fetch(event.request);
+  // Skip API requests (don't cache them)
+  if (url.pathname.startsWith("/api/")) {
+    return fetch(request);
   }
 
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // Cache successful responses
-        if (response && response.status === 200) {
-          const responseToCache = response.clone();
+  // Skip Chrome extension requests
+  if (url.protocol === "chrome-extension:") {
+    return;
+  }
+
+  // Handle navigation requests (HTML pages)
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          // Cache the fetched page
+          const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
+            cache.put(request, responseClone);
           });
+          return response;
+        })
+        .catch(() => {
+          // If network fails, serve cached page or offline page
+          return caches.match(request).then((cachedResponse) => {
+            if (cachedResponse) {
+              return cachedResponse;
+            }
+            return caches.match(OFFLINE_URL);
+          });
+        }),
+    );
+    return;
+  }
+
+  // For static assets (CSS, JS, images)
+  if (url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|gif|ico|woff2)$/)) {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        if (cachedResponse) {
+          // Return cached version and update in background
+          fetch(request).then((response) => {
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, response);
+            });
+          });
+          return cachedResponse;
         }
-        return response;
-      })
-      .catch(() => {
-        // Return cached response if offline
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          // Return offline page for navigation requests
-          if (event.request.mode === "navigate") {
-            return caches.match("/index.html");
-          }
-          return new Response("Offline - Check your internet connection", {
-            status: 503,
-            statusText: "Service Unavailable",
+        return fetch(request).then((response) => {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(request, responseClone);
           });
+          return response;
         });
       }),
+    );
+    return;
+  }
+
+  // Default: network first
+  event.respondWith(
+    fetch(request)
+      .then((response) => {
+        const responseClone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(request, responseClone);
+        });
+        return response;
+      })
+      .catch(() => caches.match(request)),
   );
 });
 
-// Handle push notifications (optional)
-self.addEventListener("push", (event) => {
-  const options = {
-    body: event.data.text(),
-    icon: "/icons/icon-192x192.png",
-    badge: "/icons/icon-72x72.png",
-    vibrate: [200, 100, 200],
-    data: {
-      dateOfArrival: Date.now(),
-      primaryKey: 1,
-    },
-    actions: [
-      {
-        action: "explore",
-        title: "View Details",
-        icon: "/icons/icon-96x96.png",
-      },
-      {
-        action: "close",
-        title: "Close",
-        icon: "/icons/icon-96x96.png",
-      },
-    ],
-  };
-
-  event.waitUntil(
-    self.registration.showNotification("HealthCare CRM", options),
-  );
+// Handle messages from client
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });

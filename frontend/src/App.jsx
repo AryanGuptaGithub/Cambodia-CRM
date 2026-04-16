@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import ProtectedRoute from "./components/ProtectedRoute";
+import InstallPWA from "./components/InstallPWA";
 
 // Layout components
 import DashboardLayout from "./pages/DashboardLayout";
@@ -370,6 +371,7 @@ function App() {
           </Route>
         </Route>
       </Routes>
+      <InstallPWA />
     </>
   );
 }

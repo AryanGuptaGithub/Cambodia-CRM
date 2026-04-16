@@ -3,8 +3,124 @@ import dotenv from "dotenv";
 import cors from "cors";
 import connectDB from "./utils/db.js";
 import bodyParser from "body-parser";
+import path from "path";
+import { fileURLToPath } from "url";
+import compression from "compression";
+import helmet from "helmet";
+import morgan from "morgan";
+import rateLimit from "express-rate-limit";
+import fs from "fs";
 
-// Import all routes
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// ==================== HELPER FUNCTION TO FIND FRONTEND BUILD ====================
+function findFrontendBuild() {
+  const possiblePaths = [
+    path.join(__dirname, "../../frontend/dist"),
+    path.join(__dirname, "../frontend/dist"),
+    path.join(process.cwd(), "frontend/dist"),
+    path.join(__dirname, "../dist"),
+    path.join(process.cwd(), "dist"),
+  ];
+
+  for (const buildPath of possiblePaths) {
+    const indexPath = path.join(buildPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      console.log(`✅ Found frontend build at: ${buildPath}`);
+      return buildPath;
+    }
+  }
+
+  console.warn("⚠️ Frontend build not found! Static files will not be served.");
+  return null;
+}
+
+// ==================== MIDDLEWARE ====================
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+
+app.use(compression());
+app.use(morgan(process.env.NODE_ENV === "production" ? "tiny" : "combined"));
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: "Too many requests from this IP, please try again later.",
+});
+app.use("/api/", limiter);
+
+app.use(bodyParser.json({ limit: "10mb" }));
+app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:3000",
+  "https://fcrmcambodia.healthcarese.asia",
+  "https://www.fcrmcambodia.healthcarese.asia",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        process.env.NODE_ENV !== "production"
+      ) {
+        callback(null, true);
+      } else {
+        console.log(`Blocked CORS request from: ${origin}`);
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  }),
+);
+
+connectDB(process.env.MONGODB_URI);
+
+// PWA Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+
+  if (
+    req.url === "/manifest.json" ||
+    req.url === "/service-worker.js" ||
+    req.url === "/sw.js"
+  ) {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  }
+
+  next();
+});
+
+if (process.env.NODE_ENV !== "production") {
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
+  });
+}
+
+// ==================== IMPORT ALL ROUTES ====================
 import customerRoutes from "./routers/master/customers.js";
 import suppilerRoutes from "./routers/master/supplier.js";
 import product from "./routers/projectManager/product.js";
@@ -69,142 +185,66 @@ import outstanding from "./routers/sale/outstanding.js";
 import averagePrice from "./routers/reports/averagePrice.js";
 import mrAdvanceRoutes from "./routers/hrm/mrAdvance.js";
 import customerRepeateRate from "./routers/reports/customerRepeatRate.js";
-
-// Import StockInHand routes
 import stockInHandRoutes from "./routers/reports/stockInHand.js";
 
-dotenv.config();
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Middleware
-app.use(bodyParser.json({ limit: "10mb" }));
-app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
-
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://fcrmcambodia.healthcarese.asia",
-  "http://fcrmcambodia.healthcarese.asia",
-];
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true,
-  }),
-);
-
-connectDB(process.env.MONGODB_URI);
-app.use(express.json());
-
-// Debugging middleware
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path}`);
-  next();
+// ==================== API ROUTES ====================
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development",
+  });
 });
 
-// ============================================
-// ROUTES REGISTRATION
-// ============================================
-
-// Auth Routes
+// Auth and main API routes
 app.use("/api", authRoutes);
-
-// Master Data Routes
 app.use("/api/customers", customerRoutes);
 app.use("/api/suppliers", suppilerRoutes);
 app.use("/api/zones", zone);
 app.use("/api/business-types", businessTypes);
-
-// Staff Routes
 app.use("/api/staff", staff);
-
-// Product Management Routes
 app.use("/api/products", product);
 app.use("/api/price-lists", priceList);
 app.use("/api/product-types", productType);
 app.use("/api/product-packing-types", productPackingType);
-
-// Sales Routes
 app.use("/api/sales", sales);
 app.use("/api/sales-return", SalesReturn);
 app.use("/api/sales-summary", SaleSummaryReport);
 app.use("/api/outstanding", outstanding);
-
-// Purchase Routes
 app.use("/api/purchase", purcharse);
 app.use("/api/purchase-return", purchaseReturn);
 app.use("/api/purchase-out", PurchaseOut);
-
-// Stock Management Routes
 app.use("/api/stock-adjustment", stockAdjustment);
 app.use("/api/stock-transfer", stockTransfer);
 app.use("/api/stock-transfer-to-mr", stockTransferToMR);
 app.use("/api/stock-return", StockReturn);
 app.use("/api/order-status", orderStatus);
-
-// Stock In Hand Routes
 app.use("/api/stock-in-hand", stockInHandRoutes);
-
-// HRM Advance Routes
 app.use("/api/hrm/mr-advance", mrAdvanceRoutes);
-
-// Accounts Routes
 app.use("/api/accounts", Accounts);
 app.use("/api/transactions", Transaction);
 app.use("/api/mr-cash", mrCash);
-
-// Expense Routes
 app.use("/api/expense-categories", addExpenseCategary);
 app.use("/api/expenses", addExpense);
-
-// ============================================
-// REPORTS ROUTES - IMPORTANT FOR AVERAGE PRICE
-// ============================================
-
-// Payment Reports
 app.use("/api/reports/payments", payments);
-
-// Daily Reports
 app.use("/api/reports/daily-sample", dailySample);
 app.use("/api/reports/daily-summary", dailySummary);
 app.use("/api/reports/daily-reports", dailyReports);
-
-// Sales Reports
 app.use("/api/reports/cash-sales", cashSaleReports);
 app.use("/api/reports/remittance", remittance);
 app.use("/api/reports/total-expense", totalExpense);
-
-// MR Reports
 app.use("/api/reports/mr-wise-outstanding", mrWiseOutStanding);
 app.use("/api/reports/mr-wise-sales", mrWiseSale);
-
-// Customer Reports
 app.use("/api/reports/new-customers", newCustomer);
 app.use("/api/reports/customer-retention", customerRetention);
 app.use("/api/reports/customer-repeate", customerRepeateRate);
 app.use("/api/reports/zone-wise-customers", zoneWiseCustomer);
 app.use("/api/reports/province-wise-customers", provinceWiseCustomerRoutes);
 app.use("/api/reports/customer-expectation-ratio", customerExpentationRatio);
-
-// Geographic Reports
 app.use("/api/reports/province-wise-sales", provinceWiseSaleRoutes);
-
-// Stock Reports
 app.use("/api/reports/stock-in-hand", stockInHand);
 app.use("/api/reports/expiry-stock", expiryStockReport);
 app.use("/api/reports/product-report", productReport);
-
-// Financial Reports
 app.use("/api/reports/sales-and-salary", saleAndSalary);
 app.use("/api/reports/profit-and-loss", profitAndLoss);
 app.use("/api/reports/outstanding-collections", outstandingCollections);
@@ -212,63 +252,121 @@ app.use("/api/reports/salary-cogs-ratio", salaryCogsRatio);
 app.use("/api/reports/operation-cost-sales-ratio", operationCostSalesRatio);
 app.use("/api/reports/operation-cost-cogs-ratio", operationCostCOGSRatio);
 app.use("/api/reports/tour-expense-sales", tourExpenseSales);
-
-// ============================================
-
 app.use("/api/reports/average-price", averagePrice);
-
-// Settings Routes
 app.use("/api/company-profile", companyProfile);
 app.use("/api/h-tabs", hTabsRoutes);
-
-// HRM Routes
 app.use("/api/hrm/holidays", Holiday);
 app.use("/api/hrm/payroll-export", payrollExport);
 app.use("/api/hrm/payroll", Payroll);
 app.use("/api/hrm/dashboard", hrmDashboard);
 app.use("/api/hrm/leaves", leaves);
 app.use("/api/hrm/mr-basic-payrolls", mrBasicPayrollRoutes);
-
-// Other Routes
 app.use("/api/overdue", overdue);
 
-// ============================================
-// TEST ROUTE TO VERIFY REPORTS ARE WORKING
-// ============================================
 app.get("/api/test", (req, res) => {
   res.json({
     success: true,
     message: "API is working",
-    availableEndpoints: {
-      averagePrice: "/api/reports/average-price",
-      stockInHand: "/api/stock-in-hand",
-      stockAdjustment: "/api/stock-adjustment",
-    },
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString(),
   });
 });
 
-// 404 Handler - Keep this at the end
-app.use((req, res) => {
-  console.log(`❌ 404 Not Found: ${req.method} ${req.path}`);
-  res.status(404).json({
-    success: false,
-    message: `Route ${req.method} ${req.path} not found`,
+// ==================== SERVE FRONTEND STATIC FILES ====================
+const frontendBuildPath = findFrontendBuild();
+
+if (frontendBuildPath && process.env.NODE_ENV === "production") {
+  app.use(
+    express.static(frontendBuildPath, {
+      maxAge: "1y",
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith(".html")) {
+          res.setHeader("Cache-Control", "no-cache");
+        }
+      },
+    }),
+  );
+
+  app.get("/manifest.json", (req, res) => {
+    const manifestPath = path.join(frontendBuildPath, "manifest.json");
+    if (fs.existsSync(manifestPath)) {
+      res.setHeader("Content-Type", "application/manifest+json");
+      res.setHeader("Cache-Control", "no-cache");
+      res.sendFile(manifestPath);
+    } else {
+      res.status(404).json({ error: "Manifest not found" });
+    }
   });
+
+  app.get("/service-worker.js", (req, res) => {
+    const swPath = path.join(frontendBuildPath, "service-worker.js");
+    if (fs.existsSync(swPath)) {
+      res.setHeader("Content-Type", "application/javascript");
+      res.setHeader("Cache-Control", "no-cache");
+      res.sendFile(swPath);
+    } else {
+      const altPath = path.join(frontendBuildPath, "sw.js");
+      if (fs.existsSync(altPath)) {
+        res.sendFile(altPath);
+      } else {
+        res.status(404).json({ error: "Service worker not found" });
+      }
+    }
+  });
+
+  // ✅ FIXED: Correct wildcard syntax for SPA fallback
+  app.get("*splat", (req, res) => {
+    if (req.path.startsWith("/api")) {
+      return res.status(404).json({
+        success: false,
+        message: `API endpoint not found: ${req.method} ${req.path}`,
+      });
+    }
+
+    if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2|json)$/)) {
+      return res.status(404).send("File not found");
+    }
+
+    const indexPath = path.join(frontendBuildPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send("Frontend build not found.");
+    }
+  });
+} else if (process.env.NODE_ENV === "production") {
+  console.error("❌ Frontend build not found!");
+}
+
+// ✅ FIXED: Correct wildcard syntax for 404 API handler
+// Instead of app.use("/api/*", ...), use a middleware that checks path prefix
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    return res.status(404).json({
+      success: false,
+      message: `API endpoint not found: ${req.method} ${req.originalUrl}`,
+    });
+  }
+  next();
 });
 
-// Error Handler
+// ==================== GLOBAL ERROR HANDLER ====================
 app.use((err, req, res, next) => {
   console.error("❌ Error:", err);
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal server error",
+    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 });
 
+// ==================== START SERVER ====================
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(
-    `📊 Reports endpoint: http://localhost:${PORT}/api/reports/average-price`,
-  );
-  console.log(`📦 Stock endpoint: http://localhost:${PORT}/api/stock-in-hand`);
+  console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🔐 Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`✅ Health check: http://localhost:${PORT}/health`);
+
+  if (frontendBuildPath) {
+    console.log(`📁 Serving frontend from: ${frontendBuildPath}`);
+  }
 });

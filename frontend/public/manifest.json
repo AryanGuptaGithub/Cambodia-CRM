@@ -4,11 +4,15 @@
   "description": "Healthcare Customer Relationship Management System",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
   "theme_color": "#0891b2",
   "background_color": "#ffffff",
-  "orientation": "portrait",
+  "orientation": "any",
   "scope": "/",
   "categories": ["business", "health", "productivity"],
+  "launch_handler": {
+    "client_mode": ["focus-existing", "auto"]
+  },
   "icons": [
     {
       "src": "/icons/icon-72x72.png",
@@ -61,11 +65,18 @@
   ],
   "screenshots": [
     {
-      "src": "/screenshots/mobile-home.png",
-      "sizes": "1080x1920",
+      "src": "/screenshots/desktop-dashboard.png",
+      "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Home Screen"
+      "label": "Dashboard View"
+    },
+    {
+      "src": "/screenshots/mobile-dashboard.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Mobile Dashboard"
     }
   ],
   "shortcuts": [
@@ -77,10 +88,17 @@
       "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
     },
     {
-      "name": "Sales",
+      "name": "Sales Report",
       "short_name": "Sales",
-      "description": "View Sales",
+      "description": "View Sales Reports",
       "url": "/sales",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Customer List",
+      "short_name": "Customers",
+      "description": "View Customer List",
+      "url": "/customers",
       "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
     },
     {
@@ -90,5 +108,7 @@
       "url": "/reports",
       "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
     }
-  ]
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
 }
