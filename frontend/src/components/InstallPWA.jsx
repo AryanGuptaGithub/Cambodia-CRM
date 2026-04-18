@@ -1,71 +1,60 @@
 import React, { useState, useEffect } from "react";
-import { Modal, Button, Space, message } from "antd";
+import { Modal, Button, Space } from "antd";
 import { DownloadOutlined, CloseOutlined } from "@ant-design/icons";
+import { toast } from "react-toastify";
 
 const InstallPWA = () => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [showInstallModal, setShowInstallModal] = useState(false);
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
-    // Check if already installed
+    // If already installed as standalone, do nothing
     const isStandalone =
       window.matchMedia("(display-mode: standalone)").matches ||
       window.navigator.standalone === true;
-    setIsInstalled(isStandalone);
+    if (isStandalone) return;
 
-    // Listen for install prompt
-    const handleBeforeInstallPrompt = (e) => {
-      e.preventDefault();
+    // If user already dismissed, do nothing
+    if (localStorage.getItem("pwaDismissed")) return;
+
+    const handler = (e) => {
+      e.preventDefault(); // Stop Chrome's mini-infobar
       setDeferredPrompt(e);
-
-      // Don't show if already installed or dismissed
-      const hasDismissed = localStorage.getItem("pwaDismissed");
-      if (!isStandalone && !hasDismissed) {
-        setTimeout(() => setShowInstallModal(true), 3000);
-      }
+      // Show our custom modal after a short delay
+      setTimeout(() => setShowModal(true), 2000);
     };
 
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("beforeinstallprompt", handler);
 
-    // Listen for app installed event
     window.addEventListener("appinstalled", () => {
-      setIsInstalled(true);
-      setShowInstallModal(false);
-      message.success("✅ App installed successfully!");
+      setShowModal(false);
+      setDeferredPrompt(null);
+      toast.success("✅ App installed successfully!");
     });
 
-    return () => {
-      window.removeEventListener(
-        "beforeinstallprompt",
-        handleBeforeInstallPrompt,
-      );
-    };
+    return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
   const handleInstall = async () => {
     if (!deferredPrompt) return;
-
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-
     if (outcome === "accepted") {
-      message.success("Installing app...");
-      setShowInstallModal(false);
+      toast.success("Installing app...");
     } else {
-      message.info("Installation cancelled");
+      toast.info("Installation cancelled");
     }
-
     setDeferredPrompt(null);
+    setShowModal(false);
   };
 
   const handleDismiss = () => {
-    setShowInstallModal(false);
+    setShowModal(false);
     localStorage.setItem("pwaDismissed", "true");
-    message.info("You can install later from browser menu");
   };
 
-  if (isInstalled) return null;
+  // Don't render modal if no prompt is available AND modal not forced open
+  if (!deferredPrompt && !showModal) return null;
 
   return (
     <Modal
@@ -75,7 +64,7 @@ const InstallPWA = () => {
           <span style={{ fontSize: 20 }}>Install App</span>
         </Space>
       }
-      open={showInstallModal}
+      open={showModal}
       onCancel={handleDismiss}
       footer={[
         <Button key="dismiss" onClick={handleDismiss} icon={<CloseOutlined />}>
@@ -96,37 +85,28 @@ const InstallPWA = () => {
     >
       <div style={{ padding: "16px 0" }}>
         <p style={{ fontSize: 16, marginBottom: 16 }}>
-          Install <strong>HealthCare CRM</strong> as an app for:
+          Install <strong>HealthCare CRM</strong> as a desktop app for:
         </p>
-
         <div style={{ display: "flex", gap: 16, marginBottom: 20 }}>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 32 }}>🚀</div>
-            <div style={{ fontSize: 12, marginTop: 8 }}>Faster Access</div>
-          </div>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 32 }}>📴</div>
-            <div style={{ fontSize: 12, marginTop: 8 }}>Offline Support</div>
-          </div>
-          <div style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 32 }}>🪟</div>
-            <div style={{ fontSize: 12, marginTop: 8 }}>Standalone Window</div>
-          </div>
+          {[
+            { icon: "🚀", label: "Faster Access" },
+            { icon: "📴", label: "Offline Support" },
+            { icon: "🪟", label: "Standalone Window" },
+          ].map(({ icon, label }) => (
+            <div key={label} style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ fontSize: 32 }}>{icon}</div>
+              <div style={{ fontSize: 12, marginTop: 8 }}>{label}</div>
+            </div>
+          ))}
         </div>
-
-        <div
-          style={{
-            background: "#f5f5f5",
-            padding: 16,
-            borderRadius: 8,
-            marginTop: 8,
-          }}
-        >
+        <div style={{ background: "#f5f5f5", padding: 16, borderRadius: 8 }}>
           <p style={{ fontWeight: "bold", marginBottom: 8 }}>How to install:</p>
           <ol style={{ margin: 0, paddingLeft: 20 }}>
-            <li>Click the "Install Now" button above</li>
-            <li>Or click the install icon in browser address bar</li>
-            <li>Confirm installation when prompted</li>
+            <li>
+              Click "Install Now" below, <strong>or</strong>
+            </li>
+            <li>Click the install icon (⊕) in Chrome's address bar</li>
+            <li>Confirm when Chrome prompts you</li>
           </ol>
         </div>
       </div>

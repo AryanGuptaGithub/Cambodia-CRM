@@ -134,7 +134,7 @@ const recalculateTotals = (reportItem) => {
 };
 
 // ==================== GET /in-stock ====================
-router.get("/in-stock", protect, allowAdminOnly, async (req, res) => {
+router.get("/in-stock", async (req, res) => {
   try {
     const { name } = req.query;
     const stockList = await ReportInHand.find(
@@ -199,7 +199,7 @@ router.get("/in-stock", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ==================== GET all adjustments ====================
-router.get("/", protect, allowAdminOnly, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const adjustments = await StockAdjustment.find()
       .populate("productId", "productName qtyPerCarton")
@@ -221,7 +221,7 @@ router.get("/", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ==================== GET single adjustment ====================
-router.get("/:id", protect, allowAdminOnly, async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id))
@@ -245,7 +245,7 @@ router.get("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ==================== CREATE adjustment ====================
-router.post("/", protect, allowAdminOnly, async (req, res) => {
+router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -401,7 +401,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ==================== UPDATE adjustment ====================
-router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -552,7 +552,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ==================== DELETE single adjustment ====================
-router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -627,7 +627,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ==================== BULK DELETE ====================
-router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
+router.delete("/bulk", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -703,7 +703,7 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ==================== GET WAREHOUSE SUMMARY ====================
-router.get("/summary/warehouse", protect, allowAdminOnly, async (req, res) => {
+router.get("/summary/warehouse", async (req, res) => {
   try {
     const warehouseSummary = await getWarehouseInventorySummary();
     res.json({ success: true, warehouseSummary });
@@ -722,8 +722,6 @@ router.get("/summary/warehouse", protect, allowAdminOnly, async (req, res) => {
 // ==================== REPAIR: recalc all products ====================
 router.post(
   "/repair/recalc-only",
-  protect,
-  allowAdminOnly,
   async (req, res) => {
     try {
       const allReports = await ReportInHand.find({});

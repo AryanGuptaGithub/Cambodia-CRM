@@ -57,14 +57,17 @@ const Expenses = () => {
     date: "",
   });
   const [updateLoading, setUpdateLoading] = useState(false);
-
   const [categoryBalances, setCategoryBalances] = useState({});
   const [selectedRows, setSelectedRows] = useState([]);
   const inputRef = useRef(null);
   const expensesPerPage = 10;
   const navigate = useNavigate();
 
-  // Mobile detection and sidebar state
+  // ✅ SuperAdmin check
+  const userRole = localStorage.getItem("role")?.toLowerCase();
+  const isSuperAdmin = userRole === "super admin" || userRole === "superadmin";
+
+  // Responsive states
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -86,18 +89,12 @@ const Expenses = () => {
         expensesAPI.fetchSourceAccounts(),
       ]);
 
-      if (!expensesResp.success) {
+      if (!expensesResp.success)
         throw new Error(expensesResp.message || "Failed to fetch expenses");
-      }
-      if (!categoriesResp.success) {
+      if (!categoriesResp.success)
         throw new Error(categoriesResp.message || "Failed to fetch categories");
-      }
 
       const accountsArray = accountsResp?.data || [];
-      if (!Array.isArray(accountsArray)) {
-        console.warn("Source accounts data is not an array, using empty array");
-      }
-
       setExpenses(expensesResp.data);
       setExpenseCategories(categoriesResp.data);
       setSourceAccounts(Array.isArray(accountsArray) ? accountsArray : []);
@@ -127,7 +124,6 @@ const Expenses = () => {
     [expenseCategories],
   );
 
-  // Enhanced filter: search by source account, category, description, amount, and date
   const filteredExpenses = useMemo(() => {
     if (!searchQuery) return expenses;
     const lower = searchQuery.toLowerCase();
@@ -137,7 +133,6 @@ const Expenses = () => {
       const desc = exp.description ?? exp.remarks ?? "";
       const dt = formatDateToReadable(exp.date).toLowerCase();
       const amountStr = (exp.amount ?? 0).toString();
-
       return (
         sourceName.toLowerCase().includes(lower) ||
         catName.toLowerCase().includes(lower) ||
@@ -195,11 +190,14 @@ const Expenses = () => {
 
   const handleDelete = useCallback(
     async (id) => {
+      // ✅ Block SuperAdmin
+      if (isSuperAdmin) {
+        showToast("error", "SuperAdmin cannot delete expenses");
+        return;
+      }
       const exp = expenses.find((e) => e._id === id);
       if (!exp) return;
-
       const sourceName = exp.sourceAccount?.name || "Unknown Account";
-
       const result = await confirmDialog({
         title: "Delete Expense",
         text: `Are you sure you want to delete this expense <b>${
@@ -209,7 +207,6 @@ const Expenses = () => {
         confirmButtonText: "Yes, delete",
         cancelButtonText: "Cancel",
       });
-
       if (result.isConfirmed) {
         try {
           setLoading(true);
@@ -219,12 +216,9 @@ const Expenses = () => {
               "success",
               `Deleted expense <b>${
                 exp.category?.category || "Unknown"
-              }</b> of <b>$${
-                exp.amount
-              }</b> from <b>${sourceName}</b> successfully`,
+              }</b> of <b>$${exp.amount}</b> from <b>${sourceName}</b> successfully`,
             );
             setExpenses((prev) => prev.filter((e) => e._id !== id));
-
             const catId = exp.category?._id || exp.category;
             setCategoryBalances((prevBal) => {
               const clone = { ...prevBal };
@@ -235,24 +229,20 @@ const Expenses = () => {
             throw new Error(delRes.message || "Delete failed");
           }
         } catch (err) {
-          console.error("Delete error:", err);
           showToast("error", `Failed: ${err.message}`);
         } finally {
           setLoading(false);
         }
       }
     },
-    [expenses],
+    [expenses, isSuperAdmin],
   );
 
-  const handleSelectRow = useCallback(
-    (id) => {
-      setSelectedRows((prev) =>
-        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-      );
-    },
-    [setSelectedRows],
-  );
+  const handleSelectRow = useCallback((id) => {
+    setSelectedRows((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }, []);
 
   const handleSelectAll = useCallback(() => {
     if (selectedRows.length === currentExpenses.length) {
@@ -262,30 +252,34 @@ const Expenses = () => {
     }
   }, [currentExpenses, selectedRows]);
 
-  const handleEdit = useCallback((exp) => {
-    setEditingExpense(exp);
-    setEditForm({
-      sourceAccount: exp.sourceAccount?._id || exp.sourceAccount || "",
-      category: exp.category?._id || exp.category || "",
-      description: exp.description || exp.remarks || "",
-      amount: exp.amount?.toString() || "",
-      date: exp.date ? new Date(exp.date).toISOString().split("T")[0] : "",
-    });
-    setIsEditModalOpen(true);
-  }, []);
+  const handleEdit = useCallback(
+    (exp) => {
+      // ✅ Block SuperAdmin
+      if (isSuperAdmin) {
+        showToast("error", "SuperAdmin cannot edit expenses");
+        return;
+      }
+      setEditingExpense(exp);
+      setEditForm({
+        sourceAccount: exp.sourceAccount?._id || exp.sourceAccount || "",
+        category: exp.category?._id || exp.category || "",
+        description: exp.description || exp.remarks || "",
+        amount: exp.amount?.toString() || "",
+        date: exp.date ? new Date(exp.date).toISOString().split("T")[0] : "",
+      });
+      setIsEditModalOpen(true);
+    },
+    [isSuperAdmin],
+  );
 
   const handleUpdateExpense = async (e) => {
     e.preventDefault();
-
-    if (!editingExpense) {
-      return;
-    }
+    if (!editingExpense) return;
 
     const newCat = editForm.category;
     const newAmt = parseFloat(editForm.amount || "0");
     const oldCat = editingExpense.category?._id || editingExpense.category;
     const oldAmt = editingExpense.amount || 0;
-
     const account = sourceAccounts.find(
       (item) => item._id === editForm.sourceAccount,
     );
@@ -294,16 +288,13 @@ const Expenses = () => {
     if (newAmt > avail) {
       showToast(
         "error",
-        `Entered amount $${formatCurrency(
-          newAmt,
-        )} exceeds available $${formatCurrency(avail)}`,
+        `Entered amount $${formatCurrency(newAmt)} exceeds available $${formatCurrency(avail)}`,
       );
       return;
     }
 
     try {
       setUpdateLoading(true);
-
       const payload = {
         sourceAccount: editForm.sourceAccount,
         category: editForm.category,
@@ -311,36 +302,23 @@ const Expenses = () => {
         amount: newAmt,
         date: editForm.date,
       };
-
       const updateRes = await expensesAPI.updateExpense(
         editingExpense._id,
         payload,
       );
-
       if (updateRes.success) {
         showToast("success", "Expense updated successfully");
-
-        setExpenses((prev) => {
-          const updated = prev.map((e) =>
+        setExpenses((prev) =>
+          prev.map((e) =>
             e._id === editingExpense._id ? { ...e, ...payload } : e,
-          );
-          return updated;
-        });
-
+          ),
+        );
         setCategoryBalances((prevBal) => {
           const clone = { ...prevBal };
-
-          if (oldCat) {
-            clone[oldCat] = (clone[oldCat] ?? 0) + oldAmt;
-          }
-
-          if (newCat) {
-            clone[newCat] = (clone[newCat] ?? 0) - newAmt;
-          }
-
+          if (oldCat) clone[oldCat] = (clone[oldCat] ?? 0) + oldAmt;
+          if (newCat) clone[newCat] = (clone[newCat] ?? 0) - newAmt;
           return clone;
         });
-
         await fetchData();
         setIsEditModalOpen(false);
         setEditingExpense(null);
@@ -369,13 +347,13 @@ const Expenses = () => {
     return result;
   };
 
-  // Mobile card view component (without edit and delete buttons)
-  const MobileExpenseCard = ({ exp, index }) => (
+  // ✅ Mobile card - SuperAdmin sees View Only
+  const MobileExpenseCard = ({ exp, onEdit, onDelete }) => (
     <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
-          <p className="text-sm text-gray-500 mt-1">
-            Source Account:{" "}
+          <p className="text-sm text-gray-500">
+            Source:{" "}
             {exp.sourceAccount?.name ||
               (typeof exp.sourceAccount === "string"
                 ? exp.sourceAccount
@@ -395,6 +373,7 @@ const Expenses = () => {
           </p>
         </div>
       </div>
+
       <div className="space-y-2 text-sm">
         <div className="flex">
           <span className="text-gray-600 w-24">Description:</span>
@@ -409,6 +388,30 @@ const Expenses = () => {
           </span>
         </div>
       </div>
+
+      {/* ✅ SuperAdmin sees View Only label, others see Edit/Delete */}
+      {isSuperAdmin ? (
+        <div className="mt-3 pt-2 border-t border-gray-100 text-center">
+          <span className="text-xs bg-gray-100 text-gray-500 px-3 py-1 rounded-full italic">
+            👁️ View Only
+          </span>
+        </div>
+      ) : (
+        <div className="flex justify-end gap-4 mt-3 pt-2 border-t border-gray-100">
+          <button
+            onClick={() => onEdit(exp)}
+            className="text-green-600 hover:text-green-800 p-2 active:bg-green-50 rounded-full"
+          >
+            <Edit size={20} />
+          </button>
+          <button
+            onClick={() => onDelete(exp._id)}
+            className="text-red-600 hover:text-red-800 p-2 active:bg-red-50 rounded-full"
+          >
+            <Trash2 size={20} />
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -423,7 +426,7 @@ const Expenses = () => {
 
   return (
     <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
-      {/* Sidebar for mobile */}
+      {/* ✅ Sidebar for mobile */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -432,7 +435,7 @@ const Expenses = () => {
         />
       )}
 
-      {/* Mobile Header with Hamburger Menu */}
+      {/* ✅ Mobile Header with Hamburger */}
       {isMobileView && (
         <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
           <div className="flex items-center gap-2">
@@ -444,20 +447,31 @@ const Expenses = () => {
             </button>
             <h1 className="text-base font-bold text-gray-800">Expenses</h1>
           </div>
+          {/* ✅ SuperAdmin badge on mobile */}
+          {isSuperAdmin && (
+            <span className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-medium">
+              👁️ View Only
+            </span>
+          )}
         </div>
       )}
 
-      {/* Desktop Header */}
+      {/* ✅ Desktop Header */}
       {!isMobileView && (
-        <div className="flex justify-between items-center mb-6">
-          <button
-            onClick={() => navigate("/expenselayout/expenses/new")}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
-          >
-            <Plus size={18} /> Add New Expense
-          </button>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            {/* ✅ Hide Add button for SuperAdmin */}
+            {!isSuperAdmin && (
+              <button
+                onClick={() => navigate("/expenselayout/expenses/new")}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 w-full sm:w-auto justify-center"
+              >
+                <Plus size={18} /> Add New Expense
+              </button>
+            )}
+          </div>
 
-          <div className="relative w-72">
+          <div className="relative w-full sm:w-96">
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
               size={16}
@@ -475,13 +489,12 @@ const Expenses = () => {
         </div>
       )}
 
-      {/* Mobile Search Bar */}
+      {/* ✅ Mobile Search Bar */}
       {isMobileView && (
         <div className="relative mb-4">
           <Search
-            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
             size={16}
-            onClick={() => inputRef.current?.focus()}
           />
           <input
             ref={inputRef}
@@ -492,6 +505,16 @@ const Expenses = () => {
             onChange={handleSearchChange}
           />
         </div>
+      )}
+
+      {/* ✅ Mobile Add Button - hidden for SuperAdmin */}
+      {isMobileView && !isSuperAdmin && (
+        <button
+          onClick={() => navigate("/expenselayout/expenses/new")}
+          className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 mb-4 text-sm"
+        >
+          <Plus size={16} /> Add New Expense
+        </button>
       )}
 
       {error && (
@@ -506,17 +529,16 @@ const Expenses = () => {
         </div>
       )}
 
-      {/* Desktop Table View */}
-      <div className="hidden md:block bg-white shadow rounded-xl overflow-hidden w-full">
-        <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+      {/* ✅ Desktop Table */}
+      <div className="hidden md:block bg-white shadow rounded-xl overflow-x-auto w-full">
+        <table className="min-w-[800px] w-full border-collapse bg-white rounded-2xl text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 min-w-[120px] text-sm font-medium">
+              <th className="p-3 text-sm font-medium">
                 <div className="flex items-center gap-4">
                   {currentExpenses.length > 0 && (
                     <input
                       type="checkbox"
-                      aria-label="Select all"
                       checked={
                         selectedRows.length === currentExpenses.length &&
                         currentExpenses.length > 0
@@ -527,27 +549,24 @@ const Expenses = () => {
                   <span>Sr</span>
                 </div>
               </th>
-              <th className="p-3 min-w-[150px] text-sm font-medium">
-                Source Account
-              </th>
-              <th className="p-3 min-w-[180px] text-sm font-medium">
-                Expense Category
-              </th>
-              <th className="p-3 min-w-[200px] text-sm font-medium">
-                Description
-              </th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">
-                Amount ($)
-              </th>
-              <th className="p-3 min-w-[150px] text-sm font-medium">Date</th>
-              <th className="p-3 min-w-[150px] text-sm font-medium">Actions</th>
+              <th className="p-3 text-sm font-medium">Source Account</th>
+              <th className="p-3 text-sm font-medium">Expense Category</th>
+              <th className="p-3 text-sm font-medium">Description</th>
+              <th className="p-3 text-sm font-medium">Amount ($)</th>
+              <th className="p-3 text-sm font-medium">Date</th>
+              {/* ✅ Hide Actions column header for SuperAdmin */}
+              {!isSuperAdmin && (
+                <th className="p-3 text-sm font-medium">Actions</th>
+              )}
             </tr>
           </thead>
-
           <tbody>
             {currentExpenses.length === 0 ? (
               <tr>
-                <td colSpan={7} className="p-4 text-center text-gray-500">
+                <td
+                  colSpan={isSuperAdmin ? 7 : 7}
+                  className="p-4 text-center text-gray-500"
+                >
                   {searchQuery
                     ? "No matching expenses found."
                     : expenses.length === 0
@@ -556,82 +575,84 @@ const Expenses = () => {
                 </td>
               </tr>
             ) : (
-              currentExpenses.map((exp, idx) => {
-                return (
-                  <tr
-                    key={exp._id}
-                    className={`hover:bg-gray-50 ${
-                      (idx + 1) % expensesPerPage === 0 ||
-                      idx + 1 === currentExpenses.length
-                        ? ""
-                        : "border-b"
-                    }`}
-                  >
-                    <td className="p-3 min-w-[120px]">
-                      <div className="flex items-center gap-4">
-                        <input
-                          type="checkbox"
-                          checked={selectedRows.includes(exp._id)}
-                          onChange={() => handleSelectRow(exp._id)}
-                        />
-                        <span>
-                          {(currentPage - 1) * expensesPerPage + idx + 1}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-3 capitalize">
-                      {exp.sourceAccount?.name ||
-                        (typeof exp.sourceAccount === "string"
-                          ? exp.sourceAccount
-                          : getSafeValue(exp, "sourceAccount.name", ""))}
-                    </td>
-                    <td className="p-3">
-                      {exp.category?.category ||
-                        (typeof exp.category === "string"
-                          ? getCategoryName(exp.category)
-                          : getSafeValue(exp, "category.category", ""))}
-                    </td>
-                    <td className="p-3">
-                      {exp.description || exp.remarks || ""}
-                    </td>
-                    <td className="p-3 font-semibold">
-                      {formatCurrency(exp.amount || 0)}
-                    </td>
-                    <td className="p-3">
-                      {exp.date ? formatDateToReadable(exp.date) : ""}
-                    </td>
+              currentExpenses.map((exp, idx) => (
+                <tr
+                  key={exp._id}
+                  className={`hover:bg-gray-50 ${
+                    (idx + 1) % expensesPerPage === 0 ||
+                    idx + 1 === currentExpenses.length
+                      ? ""
+                      : "border-b"
+                  }`}
+                >
+                  <td className="p-3">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedRows.includes(exp._id)}
+                        onChange={() => handleSelectRow(exp._id)}
+                      />
+                      <span>
+                        {(currentPage - 1) * expensesPerPage + idx + 1}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="p-3 capitalize">
+                    {exp.sourceAccount?.name ||
+                      (typeof exp.sourceAccount === "string"
+                        ? exp.sourceAccount
+                        : getSafeValue(exp, "sourceAccount.name", ""))}
+                  </td>
+                  <td className="p-3">
+                    {exp.category?.category ||
+                      (typeof exp.category === "string"
+                        ? getCategoryName(exp.category)
+                        : getSafeValue(exp, "category.category", ""))}
+                  </td>
+                  <td className="p-3">
+                    {exp.description || exp.remarks || ""}
+                  </td>
+                  <td className="p-3 font-semibold">
+                    {formatCurrency(exp.amount || 0)}
+                  </td>
+                  <td className="p-3">
+                    {exp.date ? formatDateToReadable(exp.date) : ""}
+                  </td>
+
+                  {!isSuperAdmin && (
                     <td className="p-3">
                       <div className="flex items-center justify-center gap-3">
                         <button
-                          className="text-green-600 hover:text-green-800 cursor-pointer"
+                          className="text-green-600 hover:text-green-800"
                           onClick={() => handleEdit(exp)}
                         >
                           <Edit size={18} />
                         </button>
                         <button
-                          className="text-red-600 hover:text-red-800 cursor-pointer"
+                          className="text-red-600 hover:text-red-800"
                           onClick={() => handleDelete(exp._id)}
                         >
                           <Trash2 size={18} />
                         </button>
                       </div>
                     </td>
-                  </tr>
-                );
-              })
+                  )}
+                </tr>
+              ))
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Mobile Card View */}
+      {/* ✅ Mobile Card View */}
       <div className="md:hidden">
         {currentExpenses.length > 0 ? (
-          currentExpenses.map((exp, idx) => (
+          currentExpenses.map((exp) => (
             <MobileExpenseCard
               key={exp._id}
               exp={exp}
-              index={(currentPage - 1) * expensesPerPage + idx + 1}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
             />
           ))
         ) : (
@@ -645,12 +666,12 @@ const Expenses = () => {
         )}
       </div>
 
-      {/* Pagination - Only show when needed */}
+      {/* Pagination */}
       {showPagination && (
         <div className="mt-6 flex flex-wrap justify-center md:justify-start gap-2 text-sm">
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
+            disabled={currentPage === 1 || loading}
             className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             ← Prev
@@ -662,11 +683,12 @@ const Expenses = () => {
                 <button
                   key={pg}
                   onClick={() => setCurrentPage(pg)}
-                  className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
+                  disabled={loading}
+                  className={`px-3 py-2 rounded-lg min-w-[40px] transition-colors ${
                     currentPage === pg
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                  }`}
+                  } ${loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                 >
                   {pg}
                 </button>
@@ -680,7 +702,7 @@ const Expenses = () => {
 
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
+            disabled={currentPage === totalPages || loading}
             className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             Next →
@@ -688,12 +710,11 @@ const Expenses = () => {
         </div>
       )}
 
+      {/* Summary Box */}
       {filteredExpenses.length > 0 && (
         <div
           className={`${
-            isMobileView
-              ? "mt-4 p-3 mb-2" // Mobile: mt-4, p-3, mb-2 (reduced from gap-6)
-              : "mt-6 p-6 mb-6" // Desktop: original spacing
+            isMobileView ? "mt-6 p-3 mb-2" : "mt-6 p-6 mb-6"
           } bg-blue-50 rounded-lg border border-blue-200`}
         >
           <h3
@@ -703,7 +724,7 @@ const Expenses = () => {
           >
             Summary
           </h3>
-          <div className={`grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-6`}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="text-center">
               <div
                 className={`font-bold text-blue-600 ${
@@ -712,13 +733,7 @@ const Expenses = () => {
               >
                 {filteredExpenses.length}
               </div>
-              <div
-                className={`text-blue-800 ${
-                  isMobileView ? "text-xs" : "text-sm"
-                }`}
-              >
-                Total Expenses
-              </div>
+              <div className="text-blue-800 text-sm">Total Expenses</div>
             </div>
             <div className="text-center">
               <div
@@ -731,30 +746,21 @@ const Expenses = () => {
                   filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0),
                 )}
               </div>
-              <div
-                className={`text-green-800 ${
-                  isMobileView ? "text-xs" : "text-sm"
-                }`}
-              >
-                Total Amount
-              </div>
+              <div className="text-green-800 text-sm">Total Amount</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Edit Modal - remains the same */}
+      {/* ✅ Edit Modal - hidden for SuperAdmin */}
       {isEditModalOpen &&
+        !isSuperAdmin &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsEditModalOpen(false)}
-            />
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
               >
                 <X size={20} />
               </button>
@@ -781,12 +787,11 @@ const Expenses = () => {
                     required
                   >
                     <option value="">Select Account</option>
-                    {Array.isArray(sourceAccounts) &&
-                      sourceAccounts.map((account) => (
-                        <option key={account._id} value={account._id}>
-                          {account.name}
-                        </option>
-                      ))}
+                    {sourceAccounts.map((account) => (
+                      <option key={account._id} value={account._id}>
+                        {account.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -822,16 +827,13 @@ const Expenses = () => {
                     placeholder="0.00"
                     required
                   />
-
                   {editForm.sourceAccount && (
                     <p className="text-sm text-gray-500 mt-1">
                       Available: $
                       {formatCurrency(
-                        (Array.isArray(sourceAccounts)
-                          ? sourceAccounts.find(
-                              (item) => item._id === editForm.sourceAccount,
-                            )?.totalAmount
-                          : 0) ?? 0,
+                        sourceAccounts.find(
+                          (item) => item._id === editForm.sourceAccount,
+                        )?.totalAmount ?? 0,
                       )}
                     </p>
                   )}
@@ -857,33 +859,33 @@ const Expenses = () => {
                   <textarea
                     value={editForm.description}
                     onChange={(e) =>
-                      setEditForm({ ...editForm, description: e.target.value })
+                      setEditForm({
+                        ...editForm,
+                        description: e.target.value,
+                      })
                     }
                     rows={3}
                     className="w-full border px-3 py-2 rounded-lg focus:ring focus:ring-indigo-200"
                     placeholder="Enter expense description..."
-                  ></textarea>
+                  />
                 </div>
                 <div className="md:col-span-2 mt-4 flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsEditModalOpen(false);
-                      setEditingExpense(null);
-                    }}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
                     disabled={updateLoading}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2"
+                    className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg flex items-center gap-2"
                     disabled={updateLoading}
                   >
-                    {updateLoading ? (
+                    {updateLoading && (
                       <Loader className="animate-spin" size={16} />
-                    ) : null}
+                    )}
                     {updateLoading ? "Updating..." : "Update Expense"}
                   </button>
                 </div>

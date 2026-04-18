@@ -21,7 +21,7 @@ import MrCarryStockLayout from "./pages/MrCarryStock/MrCarryStockLayout";
 
 // Dashboard and Main pages
 import Dashboard from "./pages/Dashboard/Dashbaord";
-import MobileDashboard from "./pages/Dashboard/MobileDashboard"; // ← NEW
+import MobileDashboard from "./pages/Dashboard/MobileDashboard";
 import Login from "./pages/Login";
 import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
@@ -129,9 +129,11 @@ import StockTransferForm from "./pages/StockTransferForm";
 import AddStaffMember from "./pages/AddStaffMember";
 import LeaveAndAttendance from "./pages/HRM/LeaveAttendance";
 
+// ✅ FIXED IMPORT
+import UserActivity from "./pages/ActivityLog/UserActivity";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook: detect if the current viewport is mobile (< 1024px)
-// Re-evaluates on window resize so it always stays in sync.
 // ─────────────────────────────────────────────────────────────────────────────
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
@@ -146,9 +148,7 @@ function useIsMobile() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SmartDashboard:
-//   On mobile  → renders MobileDashboard (the app-style UI from the screenshots)
-//   On desktop → renders the normal web Dashboard
+// SmartDashboard: mobile → MobileDashboard, desktop → Dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 function SmartDashboard() {
   const isMobile = useIsMobile();
@@ -173,9 +173,10 @@ function App() {
         >
           <Route index element={<SmartDashboard />} />
           <Route path="dashboard" element={<SmartDashboard />} />
-
-          {/* Dedicated mobile dashboard route (direct link) */}
           <Route path="mobile-dashboard" element={<MobileDashboard />} />
+
+          {/* ✅ FIXED: moved inside protected shell, path matches navigate("/user-activity") */}
+          <Route path="user-activity" element={<UserActivity />} />
 
           <Route path="graph" element={<Graph />} />
           <Route path="onlineorder" element={<OnlineOrders />} />

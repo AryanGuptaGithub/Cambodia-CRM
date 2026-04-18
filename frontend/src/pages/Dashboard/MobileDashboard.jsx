@@ -39,7 +39,6 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 const backendUrl = import.meta.env.VITE_BACKEND_URL || "";
 const safe = (v) => (typeof v === "number" ? v : 0);
 
-// Helper: get year-to-date range as string "1 Jan - 16 Apr"
 const getYearToDateRange = () => {
   const now = new Date();
   const start = new Date(now.getFullYear(), 0, 1);
@@ -49,7 +48,9 @@ const getYearToDateRange = () => {
   return `${format(start)} – ${format(end)}`;
 };
 
-// Helper: all time range
+const role = (localStorage.getItem("role") || "").toLowerCase().trim();
+const isSuperAdmin = role === "super admin";
+
 const getAllTimeRange = () => "All time";
 
 // --------------------------------------------------------------
@@ -122,7 +123,11 @@ const DateFilterModal = ({
             <button
               onClick={onApply}
               disabled={!startDate || !endDate}
-              className={`flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg ${!startDate || !endDate ? "bg-gray-300 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
+              className={`flex-1 px-4 py-2 text-sm font-medium text-white rounded-lg ${
+                !startDate || !endDate
+                  ? "bg-gray-300 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
             >
               Apply
             </button>
@@ -407,7 +412,15 @@ const MiniRecentOverdue = ({
                   {item.mrName || "No MR"}
                 </p>
                 <span
-                  className={`inline-block px-2 py-0.5 mt-1 text-xs rounded-full ${daysOverdue > 90 ? "bg-red-100 text-red-800" : daysOverdue > 60 ? "bg-orange-100 text-orange-800" : daysOverdue > 30 ? "bg-yellow-100 text-yellow-800" : "bg-gray-100 text-gray-800"}`}
+                  className={`inline-block px-2 py-0.5 mt-1 text-xs rounded-full ${
+                    daysOverdue > 90
+                      ? "bg-red-100 text-red-800"
+                      : daysOverdue > 60
+                        ? "bg-orange-100 text-orange-800"
+                        : daysOverdue > 30
+                          ? "bg-yellow-100 text-yellow-800"
+                          : "bg-gray-100 text-gray-800"
+                  }`}
                 >
                   {daysOverdue} days overdue
                 </span>
@@ -506,7 +519,11 @@ const MiniRecentJoins = ({ mrList = [] }) => {
               {formatDateToReadable(mr.date)}
             </p>
             <span
-              className={`inline-block px-2 py-0.5 rounded-full text-xs ${mr.isActive ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+              className={`inline-block px-2 py-0.5 rounded-full text-xs ${
+                mr.isActive
+                  ? "bg-green-100 text-green-800"
+                  : "bg-red-100 text-red-800"
+              }`}
             >
               {mr.isActive ? "Active" : "Inactive"}
             </span>
@@ -787,6 +804,7 @@ const MobileSidePanel = ({
         return null;
     }
   };
+
   const Icon = current.icon;
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mt-4">
@@ -807,7 +825,6 @@ const MobileDashboard = () => {
   const location = useLocation();
   const { stockData, totalPayroll, mrList } = useDashboardData();
 
-  // Sales totals for each period
   const [todaySales, setTodaySales] = useState(0);
   const [monthlySales, setMonthlySales] = useState(0);
   const [yearSales, setYearSales] = useState(0);
@@ -821,13 +838,11 @@ const MobileDashboard = () => {
   const [dataLoading, setDataLoading] = useState(true);
   const [username, setUsername] = useState("User");
 
-  // UI state
   const [activeTable, setActiveTable] = useState("Sales");
   const [activeCardKey, setActiveCardKey] = useState("totalSales");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobileView, setIsMobileView] = useState(false);
 
-  // Table data
   const [salesTableData, setSalesTableData] = useState([]);
   const [loadingSalesData, setLoadingSalesData] = useState(false);
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
@@ -853,7 +868,6 @@ const MobileDashboard = () => {
   const [companyBalanceAccounts, setCompanyBalanceAccounts] = useState([]);
   const [loadingCompanyBalance, setLoadingCompanyBalance] = useState(false);
 
-  // Custom date filter state
   const [showDateFilter, setShowDateFilter] = useState(false);
   const [selectedCardForFilter, setSelectedCardForFilter] = useState(null);
   const [modalStartDate, setModalStartDate] = useState("");
@@ -871,7 +885,6 @@ const MobileDashboard = () => {
     "Pending Collection": { start: "", end: "" },
   });
 
-  // Modal
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedMRName, setSelectedMRName] = useState("");
   const [selectedMRProducts, setSelectedMRProducts] = useState([]);
@@ -880,7 +893,6 @@ const MobileDashboard = () => {
   const prevMonthRanges = getPreviousMonthRanges();
   const outOfStockCount = stockData?.outOfStockCount ?? 0;
 
-  // Mobile detection
   useEffect(() => {
     const handleResize = () => setIsMobileView(window.innerWidth < 768);
     handleResize();
@@ -900,7 +912,6 @@ const MobileDashboard = () => {
     if (isMobileView && sidebarOpen) setSidebarOpen(false);
   }, [location.pathname, isMobileView]);
 
-  // ----- Fetch functions -----
   const fetchSalesData = async (period = "Today", startDate, endDate) => {
     try {
       setLoadingSalesData(true);
@@ -1082,7 +1093,6 @@ const MobileDashboard = () => {
     }
   };
 
-  // Date filter handlers
   const handleDateFilterClick = (cardId, e) => {
     if (e) {
       e.preventDefault();
@@ -1178,7 +1188,6 @@ const MobileDashboard = () => {
     }
   };
 
-  // Sub‑tab change handlers
   const handleSalesSubTabChange = (t) => {
     if (t === "Custom") {
       if (!isCustomDateActive["Total Sales"]) {
@@ -1238,7 +1247,6 @@ const MobileDashboard = () => {
     setActiveCreditSubTab(t);
   };
 
-  // Card click handler
   const handleCardClick = (tableName, cardKey) => {
     setActiveTable(tableName);
     setActiveCardKey(cardKey);
@@ -1303,7 +1311,6 @@ const MobileDashboard = () => {
     }
   };
 
-  // Sub-tabs component with dynamic labels
   const SubTabs = ({ tabs, active, onChange, filterKey }) => {
     const getTabLabel = (tab) => {
       if (tab === "Year" && active === "Year") return getYearToDateRange();
@@ -1352,7 +1359,6 @@ const MobileDashboard = () => {
     );
   };
 
-  // Cards definition
   const cards = [
     {
       key: "totalSales",
@@ -1426,7 +1432,6 @@ const MobileDashboard = () => {
     },
   ];
 
-  // Table renderer
   const renderTable = () => {
     switch (activeTable) {
       case "Sales":
@@ -1536,7 +1541,6 @@ const MobileDashboard = () => {
     }
   };
 
-  // Initial data load
   useEffect(() => {
     const init = async () => {
       setDataLoading(true);
@@ -1666,13 +1670,16 @@ const MobileDashboard = () => {
           isMobile={true}
         />
       )}
+
       <div className="flex-1 overflow-y-auto pb-8 px-4 space-y-4">
+        {/* ✅ HEADER */}
         <div className="bg-white rounded-2xl px-4 py-2.5 shadow-sm flex items-center justify-between">
+          {/* LEFT */}
           <div className="flex items-center gap-2">
             {isMobileView && (
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="p-1.5 -ml-1 rounded-full bg-gray-100 active:bg-gray-200 transition-colors"
+                className="p-1.5 -ml-1 rounded-full bg-gray-100 active:bg-gray-200"
               >
                 <Menu size={18} className="text-gray-700" />
               </button>
@@ -1686,15 +1693,17 @@ const MobileDashboard = () => {
               </p>
             </div>
           </div>
-          <span className="text-xl">👋</span>
+
+          {/* ✅ RIGHT — User Activity for super admin, 👋 for others */}
+          <div className="flex items-center gap-2">
+            <span className="text-xl">👋</span>
+          </div>
         </div>
 
+        {/* ALERT */}
         {outOfStockCount > 0 && (
           <div className="bg-red-50 border-l-4 border-red-500 rounded-xl px-4 py-3 flex items-start gap-3">
-            <AlertTriangle
-              size={18}
-              className="text-red-500 mt-0.5 flex-shrink-0"
-            />
+            <AlertTriangle size={18} className="text-red-500" />
             <div>
               <p className="text-red-700 font-semibold text-sm">Stock Alert</p>
               <p className="text-red-600 text-xs">
@@ -1704,22 +1713,19 @@ const MobileDashboard = () => {
           </div>
         )}
 
+        {/* CARDS */}
         <div className="grid grid-cols-2 gap-3">
           {cards.map((card) => (
             <button
               key={card.key}
               onClick={() => handleCardClick(card.table, card.key)}
-              className={`rounded-2xl p-4 shadow-sm text-left active:bg-gray-50 transition-colors ${
-                activeCardKey === card.key
-                  ? "bg-gray-200 border border-gray-300"
-                  : "bg-white"
+              className={`rounded-2xl p-4 shadow-sm text-left ${
+                activeCardKey === card.key ? "bg-gray-200 border" : "bg-white"
               }`}
             >
               <div className="flex items-center gap-1.5 mb-1">
                 <card.icon size={14} style={{ color: card.color }} />
-                <p className="text-xs text-gray-500 font-medium truncate">
-                  {card.label}
-                </p>
+                <p className="text-xs text-gray-500 truncate">{card.label}</p>
               </div>
               <p className="text-lg font-bold" style={{ color: card.color }}>
                 ${formatCurrency(card.value)}
@@ -1728,8 +1734,10 @@ const MobileDashboard = () => {
           ))}
         </div>
 
-        <div className="mt-2">{renderTable()}</div>
+        {/* TABLE */}
+        <div>{renderTable()}</div>
 
+        {/* SIDE PANEL */}
         <MobileSidePanel
           activeTable={activeTable}
           salesTableData={salesTableData}
@@ -1748,6 +1756,7 @@ const MobileDashboard = () => {
         />
       </div>
 
+      {/* MODALS */}
       <DateFilterModal
         isOpen={showDateFilter}
         cardLabel={selectedCardForFilter}

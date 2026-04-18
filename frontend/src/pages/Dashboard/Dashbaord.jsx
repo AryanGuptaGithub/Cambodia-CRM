@@ -6,7 +6,6 @@
   import { SalesTable } from "./SalesTable";
   import { PayrollTable } from "./PayrollTable";
   import { ExpenseTable } from "./ExpenseTable";
-  import { DashboardHeader } from "./DashboardHeader";
   import ProductsModal from "./ProductModal";
   import AllMRsSalaryModal from "./AllMRSalaryModal";
   import { useDashboardData } from "./useDataboardData";
@@ -1152,7 +1151,6 @@
 
     return (
       <div className="p-3 sm:p-4 md:p-6">
-        <DashboardHeader user={user} />
         <div className="w-full overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0">
           <DashboardCards
             activeTab={activeTab}

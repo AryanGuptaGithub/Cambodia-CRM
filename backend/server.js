@@ -11,16 +11,14 @@ import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import fs from "fs";
 
-// Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
-// ==================== HELPER FUNCTION TO FIND FRONTEND BUILD ====================
 function findFrontendBuild() {
   const possiblePaths = [
     path.join(__dirname, "../../frontend/dist"),
@@ -29,34 +27,25 @@ function findFrontendBuild() {
     path.join(__dirname, "../dist"),
     path.join(process.cwd(), "dist"),
   ];
-
   for (const buildPath of possiblePaths) {
-    const indexPath = path.join(buildPath, "index.html");
-    if (fs.existsSync(indexPath)) {
+    if (fs.existsSync(path.join(buildPath, "index.html"))) {
       console.log(`✅ Found frontend build at: ${buildPath}`);
       return buildPath;
     }
   }
-
-  console.warn("⚠️ Frontend build not found! Static files will not be served.");
+  console.warn("⚠️ Frontend build not found!");
   return null;
 }
 
-// ==================== MIDDLEWARE ====================
-
 app.use(
-  helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
-  }),
+  helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }),
 );
-
 app.use(compression());
 app.use(morgan(process.env.NODE_ENV === "production" ? "tiny" : "combined"));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 1000,
   message: "Too many requests from this IP, please try again later.",
 });
 app.use("/api/", limiter);
@@ -68,6 +57,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:3000",
+  "http://localhost:3001",
   "https://fcrmcambodia.healthcarese.asia",
   "https://www.fcrmcambodia.healthcarese.asia",
   process.env.FRONTEND_URL,
@@ -83,7 +73,6 @@ app.use(
       ) {
         callback(null, true);
       } else {
-        console.log(`Blocked CORS request from: ${origin}`);
         callback(new Error("Not allowed by CORS"));
       }
     },
@@ -95,21 +84,14 @@ app.use(
 
 connectDB(process.env.MONGODB_URI);
 
-// PWA Headers Middleware
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-
-  if (
-    req.url === "/manifest.json" ||
-    req.url === "/service-worker.js" ||
-    req.url === "/sw.js"
-  ) {
+  if (["/manifest.json", "/service-worker.js", "/sw.js"].includes(req.url)) {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
   }
-
   next();
 });
 
@@ -186,17 +168,19 @@ import averagePrice from "./routers/reports/averagePrice.js";
 import mrAdvanceRoutes from "./routers/hrm/mrAdvance.js";
 import customerRepeateRate from "./routers/reports/customerRepeatRate.js";
 import stockInHandRoutes from "./routers/reports/stockInHand.js";
+import activityLogRoutes from "./routers/activity/activityLog.js"; 
 
-// ==================== API ROUTES ====================
+// ==================== HEALTH CHECK ====================
 app.get("/health", (req, res) => {
   res.json({
     status: "healthy",
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development",
+    port: PORT,
   });
 });
 
-// Auth and main API routes
+// ==================== API ROUTES ====================
 app.use("/api", authRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/suppliers", suppilerRoutes);
@@ -262,17 +246,13 @@ app.use("/api/hrm/dashboard", hrmDashboard);
 app.use("/api/hrm/leaves", leaves);
 app.use("/api/hrm/mr-basic-payrolls", mrBasicPayrollRoutes);
 app.use("/api/overdue", overdue);
+app.use("/api/activity-logs", activityLogRoutes); 
 
 app.get("/api/test", (req, res) => {
-  res.json({
-    success: true,
-    message: "API is working",
-    environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString(),
-  });
+  res.json({ success: true, message: "API is working", port: PORT });
 });
 
-// ==================== SERVE FRONTEND STATIC FILES ====================
+// ==================== FRONTEND STATIC FILES ====================
 const frontendBuildPath = findFrontendBuild();
 
 if (frontendBuildPath && process.env.NODE_ENV === "production") {
@@ -280,77 +260,54 @@ if (frontendBuildPath && process.env.NODE_ENV === "production") {
     express.static(frontendBuildPath, {
       maxAge: "1y",
       setHeaders: (res, filePath) => {
-        if (filePath.endsWith(".html")) {
+        if (filePath.endsWith(".html"))
           res.setHeader("Cache-Control", "no-cache");
-        }
       },
     }),
   );
 
   app.get("/manifest.json", (req, res) => {
-    const manifestPath = path.join(frontendBuildPath, "manifest.json");
-    if (fs.existsSync(manifestPath)) {
+    const p = path.join(frontendBuildPath, "manifest.json");
+    if (fs.existsSync(p)) {
       res.setHeader("Content-Type", "application/manifest+json");
       res.setHeader("Cache-Control", "no-cache");
-      res.sendFile(manifestPath);
-    } else {
-      res.status(404).json({ error: "Manifest not found" });
-    }
+      res.sendFile(p);
+    } else res.status(404).json({ error: "Manifest not found" });
   });
 
   app.get("/service-worker.js", (req, res) => {
-    const swPath = path.join(frontendBuildPath, "service-worker.js");
-    if (fs.existsSync(swPath)) {
+    const p = path.join(frontendBuildPath, "service-worker.js");
+    if (fs.existsSync(p)) {
       res.setHeader("Content-Type", "application/javascript");
       res.setHeader("Cache-Control", "no-cache");
-      res.sendFile(swPath);
-    } else {
-      const altPath = path.join(frontendBuildPath, "sw.js");
-      if (fs.existsSync(altPath)) {
-        res.sendFile(altPath);
-      } else {
-        res.status(404).json({ error: "Service worker not found" });
-      }
-    }
+      res.sendFile(p);
+    } else res.status(404).json({ error: "Service worker not found" });
   });
 
-  // ✅ FIXED: Correct wildcard syntax for SPA fallback
   app.get("*splat", (req, res) => {
     if (req.path.startsWith("/api")) {
-      return res.status(404).json({
-        success: false,
-        message: `API endpoint not found: ${req.method} ${req.path}`,
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: `Not found: ${req.path}` });
     }
-
     if (req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2|json)$/)) {
       return res.status(404).send("File not found");
     }
-
     const indexPath = path.join(frontendBuildPath, "index.html");
-    if (fs.existsSync(indexPath)) {
-      res.sendFile(indexPath);
-    } else {
-      res.status(404).send("Frontend build not found.");
-    }
+    if (fs.existsSync(indexPath)) res.sendFile(indexPath);
+    else res.status(404).send("Frontend build not found.");
   });
-} else if (process.env.NODE_ENV === "production") {
-  console.error("❌ Frontend build not found!");
 }
 
-// ✅ FIXED: Correct wildcard syntax for 404 API handler
-// Instead of app.use("/api/*", ...), use a middleware that checks path prefix
 app.use((req, res, next) => {
   if (req.path.startsWith("/api")) {
-    return res.status(404).json({
-      success: false,
-      message: `API endpoint not found: ${req.method} ${req.originalUrl}`,
-    });
+    return res
+      .status(404)
+      .json({ success: false, message: `API not found: ${req.originalUrl}` });
   }
   next();
 });
 
-// ==================== GLOBAL ERROR HANDLER ====================
 app.use((err, req, res, next) => {
   console.error("❌ Error:", err);
   res.status(err.status || 500).json({
@@ -365,8 +322,6 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Server running on http://localhost:${PORT}`);
   console.log(`🔐 Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`✅ Health check: http://localhost:${PORT}/health`);
-
-  if (frontendBuildPath) {
-    console.log(`📁 Serving frontend from: ${frontendBuildPath}`);
-  }
+  console.log(`✅ Login API: http://localhost:${PORT}/api/login`);
+  if (frontendBuildPath) console.log(`📁 Frontend: ${frontendBuildPath}`);
 });
