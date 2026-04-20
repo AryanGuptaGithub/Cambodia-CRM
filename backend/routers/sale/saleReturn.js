@@ -7,8 +7,28 @@ import Customer from "../../models/master/customer.js";
 import ExcelJS from "exceljs";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
+
+// Helper function to format dates for Excel
+const formatDateToReadable = (dateString) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
 
 // Helper function to calculate product totals with profit/loss
 const calculateProductTotals = (products) => {
@@ -50,28 +70,16 @@ const calculateProductTotals = (products) => {
   );
 };
 
-// Helper function to format dates for Excel
-const formatDateToReadable = (dateString) => {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-};
-
 // ================== POST / ==================
-router.post("/", async (req, res) => {
+router.post("/", protect, async (req, res) => {
   try {
     const data = req.body;
     const records = Array.isArray(data) ? data : [data];
 
     if (records.length === 0) {
-      return res
-        .status(400)
-        .json({
-          message: "Expected a non‑empty array of sales return records",
-        });
+      return res.status(400).json({
+        message: "Expected a non‑empty array of sales return records",
+      });
     }
 
     const requiredFields = [
@@ -99,7 +107,6 @@ router.post("/", async (req, res) => {
         let customerIdRaw = record.customerId;
         let customerCodeRaw = record.customerCode;
 
-        // If customerId is an object (populated document), extract the _id string
         if (customerIdRaw && typeof customerIdRaw === "object") {
           if (customerIdRaw._id) {
             customerIdRaw = customerIdRaw._id;
@@ -150,18 +157,15 @@ router.post("/", async (req, res) => {
           customerId = customer._id;
         }
 
-        // Replace record.customerId with the resolved ObjectId
         record.customerId = customerId;
         // ---------------------------------
 
-        // Validate products array
         if (!Array.isArray(record.products) || record.products.length === 0) {
           throw new Error(
             `Products array is required and cannot be empty in record ${index + 1}`,
           );
         }
 
-        // Calculate product totals
         const { totalAmount } = calculateProductTotals(record.products);
 
         const amount = parseFloat(record.amount) || 0;
@@ -177,7 +181,6 @@ router.post("/", async (req, res) => {
               )
             : new Date(record.invoiceDate);
 
-        // Map products with proper numeric conversions
         const mappedProducts = record.products.map((p) => ({
           ...p,
           salesQty: Number(p.salesQty) || 0,
@@ -208,8 +211,8 @@ router.post("/", async (req, res) => {
       }),
     );
 
-    // Save to database
     const savedReturns = await SalesReturn.insertMany(processedData);
+
     // Update inventory with return quantities
     const inventoryUpdatePromises = processedData.flatMap((record) =>
       record.products.map(async (product) => {
@@ -282,6 +285,27 @@ router.post("/", async (req, res) => {
     );
 
     await Promise.all(updatePromises);
+
+    // Log activity for each created return
+    for (const savedReturn of savedReturns) {
+      await logActivity(req, {
+        action: "CREATE",
+        actionLabel: `Created Sales Return: ${savedReturn.invoiceNumber}`,
+        tableName: "salesreturns",
+        tableLabel: "Sales Return",
+        recordId: savedReturn._id,
+        referenceNumber: savedReturn.invoiceNumber,
+        newData: {
+          invoiceNumber: savedReturn.invoiceNumber,
+          customerName: savedReturn.customerName,
+          mrName: savedReturn.mrName,
+          totalAmount: savedReturn.totalAmount,
+          productsCount: savedReturn.products.length,
+        },
+        description: `Sales return created for invoice ${savedReturn.invoiceNumber} - Customer: ${toTitleCase(savedReturn.customerName)}`,
+        refField: "invoiceNumber",
+      });
+    }
 
     return res.status(201).json({
       message: `${savedReturns.length} sales return records saved successfully, and related sales updated.`,
@@ -373,7 +397,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ================== PUT /update-product ==================
-router.put("/update-product", async (req, res) => {
+router.put("/update-product", protect, allowAdminOnly, async (req, res) => {
   try {
     const { invoiceNumber, productName, salesQty, bonusQty, returnQuantity } =
       req.body;
@@ -405,6 +429,7 @@ router.put("/update-product", async (req, res) => {
       });
     }
 
+    const previousProductData = { ...saleRecord.products[productIndex] };
     const product = saleRecord.products[productIndex];
 
     const updatedSalesQty =
@@ -478,6 +503,30 @@ router.put("/update-product", async (req, res) => {
       }
     }
 
+    // Log activity
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Product in Sales Return: ${productName}`,
+      tableName: "salesreturns",
+      tableLabel: "Sales Return",
+      recordId: saleRecord._id,
+      referenceNumber: invoiceNumber,
+      previousData: {
+        productName,
+        salesQty: previousProductData.salesQty,
+        bonusQty: previousProductData.bonusQty,
+        returnQuantity: previousProductData.returnQuantity,
+      },
+      newData: {
+        productName,
+        salesQty: updatedSalesQty,
+        bonusQty: updatedBonusQty,
+        returnQuantity: updatedReturnQuantity,
+      },
+      description: `Updated product ${toTitleCase(productName)} in sales return for invoice ${invoiceNumber}`,
+      refField: "invoiceNumber",
+    });
+
     return res.status(200).json({
       success: true,
       message: "Product updated successfully",
@@ -505,6 +554,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Invalid sales return ID" });
     }
 
+    // Get previous record before update
+    const previousRecord = await SalesReturn.findById(id).lean();
+    if (!previousRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Sales return record not found",
+      });
+    }
+
     const requiredFields = [
       "recordingDate",
       "invoiceNumber",
@@ -516,16 +574,14 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
     for (const field of requiredFields) {
       if (updatedData[field] === undefined || updatedData[field] === null) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: `Missing required field: ${field}`,
-          });
+        return res.status(400).json({
+          success: false,
+          message: `Missing required field: ${field}`,
+        });
       }
     }
 
-    // ---- CUSTOMER HANDLING (same robust logic as POST) ----
+    // ---- CUSTOMER HANDLING ----
     let customerId;
     let customerIdRaw = updatedData.customerId;
     let customerCodeRaw = updatedData.customerCode;
@@ -548,23 +604,19 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     } else if (customerIdValue) {
       const customer = await Customer.findOne({ code: customerIdValue });
       if (!customer) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message: `Customer not found with code "${customerIdValue}"`,
-          });
+        return res.status(404).json({
+          success: false,
+          message: `Customer not found with code "${customerIdValue}"`,
+        });
       }
       customerId = customer._id;
     } else if (customerCodeValue) {
       const customer = await Customer.findOne({ code: customerCodeValue });
       if (!customer) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message: `Customer not found with code "${customerCodeValue}"`,
-          });
+        return res.status(404).json({
+          success: false,
+          message: `Customer not found with code "${customerCodeValue}"`,
+        });
       }
       customerId = customer._id;
     } else {
@@ -572,12 +624,10 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         name: updatedData.customerName,
       });
       if (!customer) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message: `Customer not found with name "${updatedData.customerName}"`,
-          });
+        return res.status(404).json({
+          success: false,
+          message: `Customer not found with name "${updatedData.customerName}"`,
+        });
       }
       customerId = customer._id;
     }
@@ -595,7 +645,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         ? new Date(invoiceDate.setDate(invoiceDate.getDate() + creditDays))
         : invoiceDate;
 
-    // Map products with proper numeric conversions
     const mappedProducts = updatedData.products.map((p) => ({
       ...p,
       salesQty: Number(p.salesQty) || 0,
@@ -632,19 +681,37 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Sales return record not found" });
     }
 
-    // Update inventory (adjust for quantity differences)
-    // For simplicity, you may want to fetch the old record and compute differences,
-    // but this is a PUT that replaces the whole document. A common pattern is to
-    // first fetch the old record, then revert its inventory changes and apply new ones.
-    // We'll skip that here for brevity, but you may want to implement similar to POST.
+    // Log activity
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Sales Return: ${updatedReturn.invoiceNumber}`,
+      tableName: "salesreturns",
+      tableLabel: "Sales Return",
+      recordId: updatedReturn._id,
+      referenceNumber: updatedReturn.invoiceNumber,
+      previousData: {
+        invoiceNumber: previousRecord.invoiceNumber,
+        customerName: previousRecord.customerName,
+        mrName: previousRecord.mrName,
+        totalAmount: previousRecord.totalAmount,
+        productsCount: previousRecord.products.length,
+      },
+      newData: {
+        invoiceNumber: updatedReturn.invoiceNumber,
+        customerName: updatedReturn.customerName,
+        mrName: updatedReturn.mrName,
+        totalAmount: updatedReturn.totalAmount,
+        productsCount: updatedReturn.products.length,
+      },
+      description: `Updated sales return for invoice ${updatedReturn.invoiceNumber}`,
+      refField: "invoiceNumber",
+    });
 
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "Sales return updated successfully",
-        data: updatedReturn,
-      });
+    return res.status(200).json({
+      success: true,
+      message: "Sales return updated successfully",
+      data: updatedReturn,
+    });
   } catch (error) {
     console.error("Error updating sales return:", error);
     return res
@@ -729,6 +796,21 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
 
     await Promise.all(inventoryRevertPromises);
 
+    // Log bulk delete activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Sales Return(s)`,
+      tableName: "salesreturns",
+      tableLabel: "Sales Return",
+      previousData: recordsToDelete.map((record) => ({
+        invoiceNumber: record.invoiceNumber,
+        customerName: record.customerName,
+        totalAmount: record.totalAmount,
+      })),
+      description: `Deleted ${result.deletedCount} sales returns. Invoices: ${recordsToDelete.map((r) => r.invoiceNumber).join(", ")}`,
+      refField: "invoiceNumber",
+    });
+
     return res.status(200).json({
       success: true,
       message: `${result.deletedCount} sale return(s) deleted successfully`,
@@ -800,6 +882,28 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     );
 
     await Promise.all(inventoryRevertPromises);
+
+    // Log activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Sales Return: ${recordToDelete.invoiceNumber}`,
+      tableName: "salesreturns",
+      tableLabel: "Sales Return",
+      recordId: recordToDelete._id,
+      referenceNumber: recordToDelete.invoiceNumber,
+      previousData: {
+        invoiceNumber: recordToDelete.invoiceNumber,
+        customerName: recordToDelete.customerName,
+        mrName: recordToDelete.mrName,
+        totalAmount: recordToDelete.totalAmount,
+        products: recordToDelete.products.map((p) => ({
+          productName: p.productName,
+          returnQuantity: p.returnQuantity,
+        })),
+      },
+      description: `Deleted sales return for invoice ${recordToDelete.invoiceNumber} - Customer: ${toTitleCase(recordToDelete.customerName)}`,
+      refField: "invoiceNumber",
+    });
 
     res.status(200).json({
       success: true,

@@ -5,6 +5,7 @@ import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
 
@@ -17,42 +18,38 @@ const fixPrecision = (num) => {
   return Math.round(num * 100) / 100;
 };
 
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
 // ==================== Helper: get best available LC from a ReportInHand ====================
-/**
- * Priority order for cost-per-box fallback when no unitCost provided:
- *   1. currentAvgPrice (computed from recalculateTotals)
- *   2. lc from the most recent "batch" type entry with lc > 0
- *   3. lc from the most recent "add" type entry with lc > 0
- *   4. lc from ANY batch entry with lc > 0 (latest first)
- *   5. 0 if nothing found (caller decides whether to throw)
- */
 const getBestLcFallback = (reportItem) => {
   const batches = reportItem.batches || [];
 
-  // Sort descending by date so we get most recent first
   const sorted = [...batches].sort(
     (a, b) => new Date(b.date || 0) - new Date(a.date || 0),
   );
 
-  // 1. Use currentAvgPrice if it's valid
   if ((reportItem.averagePrice || 0) > 0) {
     return reportItem.averagePrice;
   }
 
-  // 2. Last real purchase batch with lc > 0
   const lastRealBatch = sorted.find(
     (b) =>
       (b.adjustmentType === "batch" || !b.adjustmentType) && (b.lc || 0) > 0,
   );
   if (lastRealBatch) return lastRealBatch.lc;
 
-  // 3. Last "add" adjustment with lc > 0
   const lastAddBatch = sorted.find(
     (b) => b.adjustmentType === "add" && (b.lc || 0) > 0,
   );
   if (lastAddBatch) return lastAddBatch.lc;
 
-  // 4. Any batch with lc > 0
   const anyBatch = sorted.find((b) => (b.lc || 0) > 0);
   if (anyBatch) return anyBatch.lc;
 
@@ -189,12 +186,10 @@ router.get("/in-stock", async (req, res) => {
       .json({ success: true, data: productsWithStock, warehouseSummary });
   } catch (error) {
     console.error("Error fetching products with stock:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch products with stock information.",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch products with stock information.",
+    });
   }
 });
 
@@ -245,7 +240,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // ==================== CREATE adjustment ====================
-router.post("/", async (req, res) => {
+router.post("/", protect, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -284,7 +279,6 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Compute current state BEFORE adding new batch
     recalculateTotals(reportItem);
 
     const adjustmentQty = fixPrecision(Number(boxQuantity));
@@ -300,10 +294,8 @@ router.post("/", async (req, res) => {
 
     if (adjustmentType === "add") {
       if (unitCost && Number(unitCost) > 0) {
-        // ✅ User explicitly provided a cost — use it
         costPerBox = Number(unitCost);
       } else {
-        // ✅ Fallback: averagePrice → last real batch lc → last add lc → any lc
         costPerBox = getBestLcFallback(reportItem);
         if (costPerBox === 0)
           throw new Error(
@@ -312,7 +304,6 @@ router.post("/", async (req, res) => {
       }
       adjustmentAmount = fixPrecision(adjustmentQty * costPerBox);
     } else if (adjustmentType === "remove") {
-      // For remove, always use current averagePrice (or best LC fallback)
       costPerBox =
         (reportItem.averagePrice || 0) > 0
           ? reportItem.averagePrice
@@ -320,7 +311,8 @@ router.post("/", async (req, res) => {
       adjustmentAmount = fixPrecision(adjustmentQty * costPerBox);
     }
 
-    // Push new batch — amount always stored as positive
+    const batchNumber = `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`;
+
     reportItem.batches.push({
       _id: new mongoose.Types.ObjectId(),
       boxes: adjustmentQty,
@@ -330,7 +322,7 @@ router.post("/", async (req, res) => {
       amount: adjustmentAmount,
       date: new Date(),
       adjustmentType: adjustmentType,
-      batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
+      batchNumber: batchNumber,
     });
 
     recalculateTotals(reportItem);
@@ -350,6 +342,26 @@ router.post("/", async (req, res) => {
     await adjustment.save({ session });
     await session.commitTransaction();
     session.endSession();
+
+    // Log activity
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `${adjustmentType === "add" ? "Added" : "Removed"} Stock: ${toTitleCase(product.productName)}`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      recordId: adjustment._id,
+      referenceNumber: batchNumber,
+      newData: {
+        productName: product.productName,
+        adjustmentType,
+        boxQuantity: adjustmentQty,
+        costPerBox,
+        amount: adjustmentAmount,
+        remarks: remarks || "",
+      },
+      description: `${adjustmentType === "add" ? "Added" : "Removed"} ${adjustmentQty} boxes of ${toTitleCase(product.productName)} (${adjustmentType === "add" ? "+" : "-"}${adjustmentAmount})`,
+      refField: "batchNumber",
+    });
 
     const overrideMap = new Map([
       [
@@ -391,17 +403,15 @@ router.post("/", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error creating adjustment:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: error.message || "Failed to create adjustment",
-      });
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to create adjustment",
+    });
   }
 });
 
 // ==================== UPDATE adjustment ====================
-router.put("/:id", async (req, res) => {
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -410,8 +420,13 @@ router.put("/:id", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       throw new Error("Invalid adjustment ID");
 
-    const existing = await StockAdjustment.findById(id).session(session);
-    if (!existing) throw new Error("Adjustment not found");
+    const existingAdjustment = await StockAdjustment.findById(id)
+      .populate("productId", "productName qtyPerCarton")
+      .session(session);
+
+    if (!existingAdjustment) throw new Error("Adjustment not found");
+
+    const previousData = existingAdjustment.toObject();
 
     const { productId, boxQuantity, adjustmentType, remarks, unitCost } =
       req.body;
@@ -438,10 +453,10 @@ router.put("/:id", async (req, res) => {
     // Remove old batch
     const oldBatchIndex = reportItem.batches.findIndex(
       (b) =>
-        b.adjustmentType === existing.adjustmentType &&
-        Number(b.boxes) === existing.boxQuantity &&
+        b.adjustmentType === existingAdjustment.adjustmentType &&
+        Math.abs(Number(b.boxes) - existingAdjustment.boxQuantity) < 0.01 &&
         b.batchNumber?.startsWith(
-          `ADJ-${existing.adjustmentType.toUpperCase()}`,
+          `ADJ-${existingAdjustment.adjustmentType.toUpperCase()}`,
         ),
     );
     if (oldBatchIndex !== -1) reportItem.batches.splice(oldBatchIndex, 1);
@@ -457,7 +472,6 @@ router.put("/:id", async (req, res) => {
       if (unitCost && Number(unitCost) > 0) {
         costPerBox = Number(unitCost);
       } else {
-        // ✅ Fallback to best available LC
         costPerBox = getBestLcFallback(reportItem);
         if (costPerBox === 0)
           throw new Error(
@@ -473,6 +487,8 @@ router.put("/:id", async (req, res) => {
       adjustmentAmount = fixPrecision(newQty * costPerBox);
     }
 
+    const batchNumber = `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`;
+
     reportItem.batches.push({
       _id: new mongoose.Types.ObjectId(),
       boxes: newQty,
@@ -482,7 +498,7 @@ router.put("/:id", async (req, res) => {
       amount: adjustmentAmount,
       date: new Date(),
       adjustmentType: adjustmentType,
-      batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
+      batchNumber: batchNumber,
     });
 
     recalculateTotals(reportItem);
@@ -494,19 +510,45 @@ router.put("/:id", async (req, res) => {
 
     await reportItem.save({ session });
 
-    existing.productId = productId;
-    existing.boxQuantity = newQty;
-    existing.totalQuantity =
+    existingAdjustment.productId = productId;
+    existingAdjustment.boxQuantity = newQty;
+    existingAdjustment.totalQuantity =
       adjustmentType === "add"
         ? newQty * (product.qtyPerCarton || 1)
         : -newQty * (product.qtyPerCarton || 1);
-    existing.adjustmentType = adjustmentType;
-    existing.remarks = remarks || "";
-    existing.updatedAt = new Date();
-    await existing.save({ session });
+    existingAdjustment.adjustmentType = adjustmentType;
+    existingAdjustment.remarks = remarks || "";
+    existingAdjustment.updatedAt = new Date();
+    await existingAdjustment.save({ session });
 
     await session.commitTransaction();
     session.endSession();
+
+    // Log activity
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Stock Adjustment: ${toTitleCase(product.productName)}`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      recordId: existingAdjustment._id,
+      referenceNumber: batchNumber,
+      previousData: {
+        productName: previousData.productId?.productName || "Unknown",
+        adjustmentType: previousData.adjustmentType,
+        boxQuantity: previousData.boxQuantity,
+        remarks: previousData.remarks,
+      },
+      newData: {
+        productName: product.productName,
+        adjustmentType,
+        boxQuantity: newQty,
+        costPerBox,
+        amount: adjustmentAmount,
+        remarks: remarks || "",
+      },
+      description: `Updated adjustment for ${toTitleCase(product.productName)}: ${previousData.adjustmentType} ${previousData.boxQuantity} boxes → ${adjustmentType} ${newQty} boxes`,
+      refField: "batchNumber",
+    });
 
     const overrideMap = new Map([
       [
@@ -522,7 +564,7 @@ router.put("/:id", async (req, res) => {
     res.json({
       success: true,
       message: "Adjustment updated successfully",
-      data: await StockAdjustment.findById(existing._id).populate(
+      data: await StockAdjustment.findById(existingAdjustment._id).populate(
         "productId",
         "productName qtyPerCarton",
       ),
@@ -552,7 +594,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // ==================== DELETE single adjustment ====================
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -561,7 +603,10 @@ router.delete("/:id", async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(id))
       throw new Error("Invalid adjustment ID");
 
-    const adjustment = await StockAdjustment.findById(id).session(session);
+    const adjustment = await StockAdjustment.findById(id)
+      .populate("productId", "productName qtyPerCarton")
+      .session(session);
+
     if (!adjustment) throw new Error("Adjustment not found");
 
     const product = await Product.findById(adjustment.productId).session(
@@ -575,16 +620,21 @@ router.delete("/:id", async (req, res) => {
       },
     }).session(session);
 
+    const previousData = adjustment.toObject();
+
     if (reportItem) {
       const batchIndex = reportItem.batches.findIndex(
         (b) =>
           b.adjustmentType === adjustment.adjustmentType &&
-          Number(b.boxes) === adjustment.boxQuantity &&
+          Math.abs(Number(b.boxes) - adjustment.boxQuantity) < 0.01 &&
           b.batchNumber?.startsWith(
             `ADJ-${adjustment.adjustmentType.toUpperCase()}`,
           ),
       );
-      if (batchIndex !== -1) reportItem.batches.splice(batchIndex, 1);
+      if (batchIndex !== -1) {
+        const removedBatch = reportItem.batches[batchIndex];
+        reportItem.batches.splice(batchIndex, 1);
+      }
 
       recalculateTotals(reportItem);
 
@@ -599,6 +649,25 @@ router.delete("/:id", async (req, res) => {
     await StockAdjustment.findByIdAndDelete(id).session(session);
     await session.commitTransaction();
     session.endSession();
+
+    // Log activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Stock Adjustment: ${toTitleCase(product.productName)}`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      recordId: adjustment._id,
+      referenceNumber: adjustment._id.toString(),
+      previousData: {
+        productName: product.productName,
+        adjustmentType: adjustment.adjustmentType,
+        boxQuantity: adjustment.boxQuantity,
+        remarks: adjustment.remarks,
+        createdAt: adjustment.createdAt,
+      },
+      description: `Deleted ${adjustment.adjustmentType} adjustment for ${toTitleCase(product.productName)}: ${adjustment.boxQuantity} boxes`,
+      refField: "adjustmentId",
+    });
 
     const overrideMap = reportItem
       ? new Map([
@@ -627,7 +696,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // ==================== BULK DELETE ====================
-router.delete("/bulk", async (req, res) => {
+router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -640,10 +709,15 @@ router.delete("/bulk", async (req, res) => {
 
     const adjustments = await StockAdjustment.find({
       _id: { $in: validIds },
-    }).session(session);
+    })
+      .populate("productId", "productName qtyPerCarton")
+      .session(session);
+
+    const previousDataArray = adjustments.map((adj) => adj.toObject());
+
     const byProduct = new Map();
     for (const adj of adjustments) {
-      const key = adj.productId.toString();
+      const key = adj.productId._id.toString();
       if (!byProduct.has(key)) byProduct.set(key, []);
       byProduct.get(key).push(adj);
     }
@@ -664,7 +738,7 @@ router.delete("/bulk", async (req, res) => {
         const batchIndex = reportItem.batches.findIndex(
           (b) =>
             b.adjustmentType === adj.adjustmentType &&
-            Number(b.boxes) === adj.boxQuantity &&
+            Math.abs(Number(b.boxes) - adj.boxQuantity) < 0.01 &&
             b.batchNumber?.startsWith(
               `ADJ-${adj.adjustmentType.toUpperCase()}`,
             ),
@@ -685,6 +759,17 @@ router.delete("/bulk", async (req, res) => {
     }).session(session);
     await session.commitTransaction();
     session.endSession();
+
+    // Log activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Stock Adjustment(s)`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      previousData: previousDataArray,
+      description: `Deleted ${result.deletedCount} stock adjustments. Affected products: ${byProduct.size}`,
+      refField: "adjustmentIds",
+    });
 
     const warehouseSummary = await getWarehouseInventorySummary(
       overrideMap.size > 0 ? overrideMap : null,
@@ -709,19 +794,19 @@ router.get("/summary/warehouse", async (req, res) => {
     res.json({ success: true, warehouseSummary });
   } catch (error) {
     console.error("Error fetching warehouse summary:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch warehouse summary",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch warehouse summary",
+      error: error.message,
+    });
   }
 });
 
 // ==================== REPAIR: recalc all products ====================
 router.post(
   "/repair/recalc-only",
+  protect,
+  allowAdminOnly,
   async (req, res) => {
     try {
       const allReports = await ReportInHand.find({});
@@ -756,6 +841,19 @@ router.post(
           });
         }
       }
+
+      await logActivity(req, {
+        action: "REPAIR",
+        actionLabel: `Recalculated Stock Totals (${updatedCount} products changed)`,
+        tableName: "stockadjustments",
+        tableLabel: "Stock Adjustment",
+        description: `Recalculated ${allReports.length} products. ${updatedCount} had changes.`,
+        newData: {
+          totalProducts: allReports.length,
+          updatedCount,
+          details: details.slice(0, 10),
+        },
+      });
 
       const warehouseSummary = await getWarehouseInventorySummary();
       res.json({
