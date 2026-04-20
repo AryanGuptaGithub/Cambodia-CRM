@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Supplier from "../../models/master/supplier.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
 
@@ -35,7 +36,6 @@ const toTitleCase = (str) => {
 const excelDateToJSDate = (value) => {
   if (!value) return null;
   if (typeof value === "number") {
-    // Excel dates start from 1899-12-30
     const epoch = new Date(1899, 11, 30);
     return new Date(epoch.getTime() + value * 86400000);
   }
@@ -49,7 +49,6 @@ const parseDateString = (dateStr) => {
   const str = dateStr.trim();
   if (str === "") return null;
 
-  // Try DD/MM/YYYY format
   if (str.includes("/")) {
     const parts = str.split("/");
     if (parts.length === 3) {
@@ -61,14 +60,12 @@ const parseDateString = (dateStr) => {
     }
   }
 
-  // Try with dash separator
   if (str.includes("-")) {
     const parts = str.split("-");
     if (parts.length === 3) {
       const first = parseInt(parts[0], 10);
       const second = parseInt(parts[1], 10);
       if (first > 12) {
-        // DD-MM-YYYY
         return new Date(
           parseInt(parts[2], 10),
           parseInt(parts[1], 10) - 1,
@@ -76,14 +73,12 @@ const parseDateString = (dateStr) => {
         );
       } else {
         if (parts[0].length === 4) {
-          // YYYY-MM-DD
           return new Date(
             parts[0],
             parseInt(parts[1], 10) - 1,
             parseInt(parts[2], 10),
           );
         } else {
-          // MM-DD-YYYY
           return new Date(
             parseInt(parts[2], 10),
             parseInt(parts[0], 10) - 1,
@@ -94,7 +89,6 @@ const parseDateString = (dateStr) => {
     }
   }
 
-  // Try parsing as ISO date
   const date = new Date(str);
   return isNaN(date.getTime()) ? null : date;
 };
@@ -191,7 +185,6 @@ router.get("/", async (req, res) => {
 
 /* -------------------------------
    EXPORT All Suppliers as Excel
-   ⚠️ MUST be above GET /:id — otherwise Express treats "export" as an ObjectId
 ------------------------------- */
 router.get("/export", async (req, res) => {
   try {
@@ -226,6 +219,16 @@ router.get("/export", async (req, res) => {
 
     const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 
+    // Log export activity
+    await logActivity(req, {
+      action: "EXPORT",
+      actionLabel: `Exported Supplier List (${suppliers.length} records)`,
+      tableName: "suppliers",
+      tableLabel: "Supplier",
+      description: `Exported ${suppliers.length} suppliers to Excel`,
+      newData: { count: suppliers.length },
+    });
+
     res.setHeader(
       "Content-Disposition",
       "attachment; filename=suppliers_export.xlsx",
@@ -247,7 +250,9 @@ router.get("/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
     if (!supplier) {
-      return res.status(404).json({ success: false, message: "Supplier not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Supplier not found" });
     }
     res.json({ success: true, supplier: formatSupplierResponse(supplier) });
   } catch (err) {
@@ -257,7 +262,6 @@ router.get("/:id", async (req, res) => {
 
 /* -----------------------------
    CREATE Supplier
-   FIX: Now handles siteRegistrationDate, siteRegistrationExpiryDate, enabled
 ----------------------------- */
 router.post("/", async (req, res) => {
   try {
@@ -274,7 +278,7 @@ router.post("/", async (req, res) => {
       enabled,
     } = req.body;
 
-    // Duplicate check (only non‑empty fields)
+    // Duplicate check
     const orConditions = [];
     if (name?.trim()) {
       orConditions.push({ name: name.trim().toLowerCase() });
@@ -289,7 +293,6 @@ router.post("/", async (req, res) => {
       orConditions.push({ contact: contact.trim() });
     }
 
-    // Only check duplicates if we have at least one non-empty field to check
     if (orConditions.length > 0) {
       const existingSupplier = await Supplier.findOne({ $or: orConditions });
       if (existingSupplier) {
@@ -300,9 +303,8 @@ router.post("/", async (req, res) => {
       }
     }
 
-    // Helper: safely parse a date, return null if invalid
     const parseDate = (dateValue) => {
-      if (!dateValue) return undefined; // let model default apply if any
+      if (!dateValue) return undefined;
       const d = new Date(dateValue);
       return isNaN(d.getTime()) ? null : d;
     };
@@ -317,10 +319,23 @@ router.post("/", async (req, res) => {
       panNumber: panNumber?.trim(),
       siteRegistrationDate: parseDate(siteRegistrationDate),
       siteRegistrationExpiryDate: parseDate(siteRegistrationExpiryDate),
-      enabled: enabled !== undefined ? enabled : undefined, // use model default if not provided
+      enabled: enabled !== undefined ? enabled : undefined,
     });
 
     await newSupplier.save();
+
+    // Log create activity
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Created Supplier: ${toTitleCase(newSupplier.name)}`,
+      tableName: "suppliers",
+      tableLabel: "Supplier",
+      recordId: newSupplier._id,
+      referenceNumber: newSupplier.name,
+      newData: newSupplier.toObject(),
+      description: `New supplier ${toTitleCase(newSupplier.name)} added`,
+    });
+
     res.status(201).json({
       success: true,
       message: "Supplier created successfully",
@@ -333,7 +348,7 @@ router.post("/", async (req, res) => {
 });
 
 /* -----------------------------
-   UPDATE Supplier (including dates and enabled)
+   UPDATE Supplier
 ----------------------------- */
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
@@ -350,12 +365,14 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       enabled,
     } = req.body;
 
-    const supplier = await Supplier.findById(req.params.id);
-    if (!supplier) {
-      return res.status(404).json({ success: false, message: "Supplier not found" });
+    // Get previous record before update for logging
+    const previousRecord = await Supplier.findById(req.params.id).lean();
+    if (!previousRecord) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Supplier not found" });
     }
 
-    // Helper: safely parse a date, return null if invalid
     const parseDate = (dateValue) => {
       if (!dateValue) return undefined;
       const d = new Date(dateValue);
@@ -364,14 +381,20 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
     const updateData = {};
     if (name !== undefined) updateData.name = name?.trim().toLowerCase();
-    if (supplierName !== undefined) updateData.supplierName = supplierName?.trim().toLowerCase();
-    if (address !== undefined) updateData.address = address?.trim().toLowerCase();
+    if (supplierName !== undefined)
+      updateData.supplierName = supplierName?.trim().toLowerCase();
+    if (address !== undefined)
+      updateData.address = address?.trim().toLowerCase();
     if (contact !== undefined) updateData.contact = contact?.trim();
     if (email !== undefined) updateData.email = email?.trim().toLowerCase();
     if (gstNumber !== undefined) updateData.gstNumber = gstNumber?.trim();
     if (panNumber !== undefined) updateData.panNumber = panNumber?.trim();
-    if (siteRegistrationDate !== undefined) updateData.siteRegistrationDate = parseDate(siteRegistrationDate);
-    if (siteRegistrationExpiryDate !== undefined) updateData.siteRegistrationExpiryDate = parseDate(siteRegistrationExpiryDate);
+    if (siteRegistrationDate !== undefined)
+      updateData.siteRegistrationDate = parseDate(siteRegistrationDate);
+    if (siteRegistrationExpiryDate !== undefined)
+      updateData.siteRegistrationExpiryDate = parseDate(
+        siteRegistrationExpiryDate,
+      );
     if (enabled !== undefined) updateData.enabled = enabled;
 
     const updatedSupplier = await Supplier.findByIdAndUpdate(
@@ -379,6 +402,19 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       updateData,
       { new: true, runValidators: true },
     );
+
+    // Log update activity
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Supplier: ${toTitleCase(updatedSupplier.name)}`,
+      tableName: "suppliers",
+      tableLabel: "Supplier",
+      recordId: updatedSupplier._id,
+      referenceNumber: updatedSupplier.name,
+      previousData: previousRecord,
+      newData: updatedSupplier.toObject(),
+      description: `Supplier ${toTitleCase(updatedSupplier.name)} was updated`,
+    });
 
     res.json({
       success: true,
@@ -391,15 +427,31 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 /* -----------------------------
-   DELETE Supplier
+   DELETE Single Supplier
 ----------------------------- */
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
     if (!supplier) {
-      return res.status(404).json({ success: false, message: "Supplier not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Supplier not found" });
     }
-    await Supplier.findByIdAndDelete(req.params.id);
+
+    const deletedSupplier = await Supplier.findByIdAndDelete(req.params.id);
+
+    // Log delete activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Supplier: ${toTitleCase(supplier.name)}`,
+      tableName: "suppliers",
+      tableLabel: "Supplier",
+      recordId: supplier._id,
+      referenceNumber: supplier.name,
+      previousData: supplier.toObject(),
+      description: `Supplier ${toTitleCase(supplier.name)} permanently deleted`,
+    });
+
     res.json({ success: true, message: "Supplier deleted successfully" });
   } catch (err) {
     handleServerError(res, err);
@@ -418,10 +470,26 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
         message: "Please provide supplier IDs to delete",
       });
     }
+
+    // Get full documents before deletion for logging
+    const toDelete = await Supplier.find({ _id: { $in: ids } }).lean();
+
     const result = await Supplier.deleteMany({ _id: { $in: ids } });
+
+    // Log bulk delete activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Supplier(s)`,
+      tableName: "suppliers",
+      tableLabel: "Supplier",
+      previousData: toDelete,
+      description: `Deleted ${result.deletedCount} suppliers`,
+    });
+
     res.json({
       success: true,
       message: `${result.deletedCount} supplier(s) deleted successfully`,
+      deletedCount: result.deletedCount,
     });
   } catch (err) {
     handleServerError(res, err);
@@ -429,8 +497,7 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
 });
 
 /* -----------------------------
-   EXCEL Import (OPTIMIZED)
-   FIX: Handles ISO date strings sent from frontend (after parseExcelDateValue fix)
+   EXCEL Import
 ----------------------------- */
 router.post("/import", async (req, res) => {
   try {
@@ -442,7 +509,6 @@ router.post("/import", async (req, res) => {
       });
     }
 
-    // Fetch all existing supplier names into a Set for O(1) lookup
     const allExisting = await Supplier.find({}, { name: 1 }).lean();
     const existingNamesSet = new Set(
       allExisting.map((s) => s.name.toLowerCase()),
@@ -455,7 +521,6 @@ router.post("/import", async (req, res) => {
 
     for (let [index, supplier] of suppliers.entries()) {
       try {
-        // Normalize field names
         const name = (
           supplier.supplierName ||
           supplier.name ||
@@ -478,7 +543,6 @@ router.post("/import", async (req, res) => {
           .toLowerCase()
           .trim();
 
-        // Validate required fields
         if (!name) {
           errors.push(`Row ${index + 1}: Missing supplier name`);
           continue;
@@ -488,7 +552,6 @@ router.post("/import", async (req, res) => {
           continue;
         }
 
-        // Check duplicate in existing DB
         if (existingNamesSet.has(name)) {
           results.push({
             supplier: toTitleCase(name),
@@ -498,21 +561,24 @@ router.post("/import", async (req, res) => {
           continue;
         }
 
-        // ✅ FIX: Parse dates — frontend now sends ISO strings (YYYY-MM-DD)
-        // so new Date() works correctly. Fallback handles legacy formats too.
         let siteRegistrationDate = null;
         if (supplier.siteRegistrationDate) {
-          // Frontend sends "YYYY-MM-DD" string from parseExcelDateValue
           siteRegistrationDate = new Date(supplier.siteRegistrationDate);
 
           if (isNaN(siteRegistrationDate.getTime())) {
-            // Fallback for number (serial) or other formats
             if (typeof supplier.siteRegistrationDate === "number") {
-              siteRegistrationDate = excelDateToJSDate(supplier.siteRegistrationDate);
+              siteRegistrationDate = excelDateToJSDate(
+                supplier.siteRegistrationDate,
+              );
             } else {
-              siteRegistrationDate = parseDateString(supplier.siteRegistrationDate.toString());
+              siteRegistrationDate = parseDateString(
+                supplier.siteRegistrationDate.toString(),
+              );
             }
-            if (!siteRegistrationDate || isNaN(siteRegistrationDate.getTime())) {
+            if (
+              !siteRegistrationDate ||
+              isNaN(siteRegistrationDate.getTime())
+            ) {
               siteRegistrationDate = new Date();
               warnings.push(
                 `Row ${index + 1}: Invalid registration date, using current date`,
@@ -528,15 +594,24 @@ router.post("/import", async (req, res) => {
 
         let siteRegistrationExpiryDate = null;
         if (supplier.siteRegistrationExpiryDate) {
-          siteRegistrationExpiryDate = new Date(supplier.siteRegistrationExpiryDate);
+          siteRegistrationExpiryDate = new Date(
+            supplier.siteRegistrationExpiryDate,
+          );
 
           if (isNaN(siteRegistrationExpiryDate.getTime())) {
             if (typeof supplier.siteRegistrationExpiryDate === "number") {
-              siteRegistrationExpiryDate = excelDateToJSDate(supplier.siteRegistrationExpiryDate);
+              siteRegistrationExpiryDate = excelDateToJSDate(
+                supplier.siteRegistrationExpiryDate,
+              );
             } else {
-              siteRegistrationExpiryDate = parseDateString(supplier.siteRegistrationExpiryDate.toString());
+              siteRegistrationExpiryDate = parseDateString(
+                supplier.siteRegistrationExpiryDate.toString(),
+              );
             }
-            if (!siteRegistrationExpiryDate || isNaN(siteRegistrationExpiryDate.getTime())) {
+            if (
+              !siteRegistrationExpiryDate ||
+              isNaN(siteRegistrationExpiryDate.getTime())
+            ) {
               siteRegistrationExpiryDate = new Date(siteRegistrationDate);
               siteRegistrationExpiryDate.setFullYear(
                 siteRegistrationExpiryDate.getFullYear() + 1,
@@ -569,13 +644,11 @@ router.post("/import", async (req, res) => {
       }
     }
 
-    // Bulk insert new suppliers
     let inserted = [];
     if (toInsert.length > 0) {
       inserted = await Supplier.insertMany(toInsert, { ordered: false });
     }
 
-    // Build results for inserted rows
     inserted.forEach((doc) => {
       results.push({
         supplier: toTitleCase(doc.name),
@@ -587,13 +660,28 @@ router.post("/import", async (req, res) => {
     const createdCount = inserted.length;
     const skippedCount = results.filter((r) => r.status === "skipped").length;
 
+    // Log import activity
+    if (createdCount > 0) {
+      await logActivity(req, {
+        action: "IMPORT",
+        actionLabel: `Bulk Imported ${createdCount} Supplier(s)`,
+        tableName: "suppliers",
+        tableLabel: "Supplier",
+        description: `Imported ${createdCount} suppliers. Duplicates skipped: ${skippedCount}. Errors: ${errors.length}.`,
+        newData: {
+          importedCount: createdCount,
+          duplicateCount: skippedCount,
+          errorCount: errors.length,
+        },
+      });
+    }
+
     let message = `${createdCount} supplier(s) imported successfully.`;
     if (skippedCount > 0)
       message += ` ${skippedCount} supplier(s) skipped (already exist).`;
     if (warnings.length > 0)
       message += ` ${warnings.length} row(s) had date warnings.`;
-    if (errors.length > 0)
-      message += ` ${errors.length} row(s) had errors.`;
+    if (errors.length > 0) message += ` ${errors.length} row(s) had errors.`;
 
     return res.status(200).json({
       message,

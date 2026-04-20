@@ -5,12 +5,8 @@ import Product from "../../models/projectManger/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import { logActivity } from "../activity/activityLog.js";
 
-// ==================== HELPER FUNCTIONS ====================
-
-/**
- * Parse any date input into a Date object set to UTC noon.
- */
 const parseDateToUTCNoon = (dateInput) => {
   if (!dateInput) return null;
 
@@ -103,12 +99,20 @@ const normalizeString = (str) => {
   return str.toString().trim().toLowerCase();
 };
 
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
 // ==================== ENDPOINTS ====================
 
 // GET DROPDOWN PRODUCTS
 router.get("/dropdown", async (req, res) => {
   try {
-    const products = await Product.find({ isActive: true }); // only active products in dropdowns
+    const products = await Product.find({ isActive: true });
     const stockList = await ReportInHand.find();
     const stockMap = new Map();
     stockList.forEach((item) => {
@@ -119,22 +123,10 @@ router.get("/dropdown", async (req, res) => {
       const stock = stockMap.get(product.productName.toLowerCase());
       return {
         ...product.toObject(),
-        productName: product.productName
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        type: product.type
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        supplierName: product.supplierName
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        drugLicense: product.drugLicense
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
+        productName: toTitleCase(product.productName),
+        type: toTitleCase(product.type),
+        supplierName: toTitleCase(product.supplierName),
+        drugLicense: toTitleCase(product.drugLicense),
         batches: stock?.batches || [],
         totalBoxes: stock?.totalBoxes || 0,
         totalAmount: stock?.totalAmount || 0,
@@ -166,22 +158,10 @@ router.get("/", async (req, res) => {
     const products = await Product.find().sort({ productName: 1 });
     const formattedProducts = products.map((product) => ({
       ...product.toObject(),
-      productName: product.productName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      type: product.type
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      supplierName: product.supplierName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      drugLicense: product.drugLicense
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
+      productName: toTitleCase(product.productName),
+      type: toTitleCase(product.type),
+      supplierName: toTitleCase(product.supplierName),
+      drugLicense: toTitleCase(product.drugLicense),
       licenseValidityDate: formatDateUTC(product.licenseValidityDate),
       isActive: product.isActive,
     }));
@@ -210,18 +190,9 @@ router.get("/in-stock", async (req, res) => {
       );
       return {
         ...product.toObject(),
-        productName: product.productName
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        type: product.type
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-        supplierName: product.supplierName
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
+        productName: toTitleCase(product.productName),
+        type: toTitleCase(product.type),
+        supplierName: toTitleCase(product.supplierName),
         inStock: {
           boxes: stock?.totalBoxes || 0,
           status: stock?.totalBoxes > 0 ? "In Stock" : "Out of Stock",
@@ -238,25 +209,23 @@ router.get("/in-stock", async (req, res) => {
   }
 });
 
-// GET PAGINATED PRODUCTS — supports ?status=active|inactive|all (default: all)
+// GET PAGINATED PRODUCTS
 router.get("/paginated", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 9;
     const search = req.query.search || "";
     const type = req.query.type || "";
-    const status = req.query.status || "all"; // "active" | "inactive" | "all"
+    const status = req.query.status || "all";
     const skip = (page - 1) * limit;
 
     const query = {};
 
-    // Status filter
     if (status === "active") {
       query.isActive = true;
     } else if (status === "inactive") {
       query.isActive = false;
     }
-    // "all" → no isActive filter
 
     if (search) {
       query.$or = [
@@ -272,28 +241,16 @@ router.get("/paginated", async (req, res) => {
 
     const total = await Product.countDocuments(query);
     const products = await Product.find(query)
-      .sort({ isActive: -1, productName: 1 }) // active products first
+      .sort({ isActive: -1, productName: 1 })
       .skip(skip)
       .limit(limit);
 
     const formattedProducts = products.map((product) => ({
       ...product.toObject(),
-      productName: product.productName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      type: product.type
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      supplierName: product.supplierName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      drugLicense: product.drugLicense
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
+      productName: toTitleCase(product.productName),
+      type: toTitleCase(product.type),
+      supplierName: toTitleCase(product.supplierName),
+      drugLicense: toTitleCase(product.drugLicense),
       licenseValidityDate: formatDateUTC(product.licenseValidityDate),
       isActive: product.isActive,
     }));
@@ -322,12 +279,7 @@ router.get("/types", async (req, res) => {
     const types = await Product.distinct("type");
     const formattedTypes = types
       .filter((type) => type && type.trim() !== "")
-      .map((type) =>
-        type
-          .split(" ")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" "),
-      )
+      .map((type) => toTitleCase(type))
       .sort();
     res.status(200).json({ success: true, data: formattedTypes });
   } catch (err) {
@@ -338,8 +290,7 @@ router.get("/types", async (req, res) => {
   }
 });
 
-// ── NEW: TOGGLE isActive ───────────────────────────────────────────────────
-// PATCH /api/products/:id/toggle-status
+// ── TOGGLE isActive ───────────────────────────────────────────────────
 router.patch(
   "/:id/toggle-status",
   protect,
@@ -348,19 +299,30 @@ router.patch(
     try {
       const { id } = req.params;
 
-      const product = await Product.findById(id);
-      if (!product) {
+      const previousRecord = await Product.findById(id).lean();
+      if (!previousRecord) {
         return res.status(404).json({ message: "Product not found." });
       }
 
+      const product = await Product.findById(id);
       product.isActive = !product.isActive;
       await product.save();
 
       const label = product.isActive ? "enabled" : "disabled";
-      const displayName = product.productName
-        .split(" ")
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" ");
+      const displayName = toTitleCase(product.productName);
+
+      // Log status toggle activity
+      await logActivity(req, {
+        action: "UPDATE",
+        actionLabel: `${label === "enabled" ? "Enabled" : "Disabled"} Product: ${displayName}`,
+        tableName: "products",
+        tableLabel: "Product",
+        recordId: product._id,
+        referenceNumber: product.productName,
+        previousData: { isActive: previousRecord.isActive },
+        newData: { isActive: product.isActive },
+        description: `Product ${displayName} has been ${label}.`,
+      });
 
       return res.status(200).json({
         message: `Product <b>${displayName}</b> has been ${label}.`,
@@ -373,12 +335,18 @@ router.patch(
     }
   },
 );
-// ──────────────────────────────────────────────────────────────────────────
 
 // UPDATE PRODUCT
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Get previous record before update for logging
+    const previousRecord = await Product.findById(id).lean();
+    if (!previousRecord) {
+      return res.status(404).json({ message: "Product not found." });
+    }
+
     let updatedData = req.body;
 
     if (updatedData.productName)
@@ -399,7 +367,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       );
     }
 
-    // Do NOT allow isActive to be changed via PUT — use PATCH /toggle-status
     delete updatedData.isActive;
 
     const updatedProduct = await Product.findByIdAndUpdate(id, updatedData, {
@@ -411,24 +378,25 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       return res.status(404).json({ message: "Product not found." });
     }
 
+    // Log update activity
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Product: ${toTitleCase(updatedProduct.productName)}`,
+      tableName: "products",
+      tableLabel: "Product",
+      recordId: updatedProduct._id,
+      referenceNumber: updatedProduct.productName,
+      previousData: previousRecord,
+      newData: updatedProduct.toObject(),
+      description: `Product ${toTitleCase(updatedProduct.productName)} was updated`,
+    });
+
     const formattedProduct = {
       ...updatedProduct.toObject(),
-      productName: updatedProduct.productName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      type: updatedProduct.type
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      supplierName: updatedProduct.supplierName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      drugLicense: updatedProduct.drugLicense
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
+      productName: toTitleCase(updatedProduct.productName),
+      type: toTitleCase(updatedProduct.type),
+      supplierName: toTitleCase(updatedProduct.supplierName),
+      drugLicense: toTitleCase(updatedProduct.drugLicense),
       licenseValidityDate: formatDateUTC(updatedProduct.licenseValidityDate),
       isActive: updatedProduct.isActive,
     };
@@ -444,12 +412,28 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const { id } = req.params;
-    const deletedProduct = await Product.findByIdAndDelete(id);
-    if (!deletedProduct) {
+
+    const product = await Product.findById(id);
+    if (!product) {
       return res.status(404).json({ message: "Product not found." });
     }
+
+    const deletedProduct = await Product.findByIdAndDelete(id);
+
+    // Log delete activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Product: ${toTitleCase(product.productName)}`,
+      tableName: "products",
+      tableLabel: "Product",
+      recordId: product._id,
+      referenceNumber: product.productName,
+      previousData: product.toObject(),
+      description: `Product ${toTitleCase(product.productName)} permanently deleted`,
+    });
+
     res.status(200).json({
-      message: `Product <b>${deletedProduct.productName}</b> deleted successfully.`,
+      message: `Product <b>${toTitleCase(product.productName)}</b> deleted successfully.`,
     });
   } catch (error) {
     console.error("Error deleting product:", error);
@@ -467,6 +451,10 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
     if (typeof ids[0] === "object" && ids[0]?.id) {
       ids = ids.map((item) => item.id);
     }
+
+    // Get full documents before deletion for logging
+    const toDelete = await Product.find({ _id: { $in: ids } }).lean();
+
     const objectIds = ids.map((id) => {
       if (!mongoose.Types.ObjectId.isValid(id)) {
         throw new Error(`Invalid ObjectId: ${id}`);
@@ -474,6 +462,17 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
       return new mongoose.Types.ObjectId(id);
     });
     const result = await Product.deleteMany({ _id: { $in: objectIds } });
+
+    // Log bulk delete activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Product(s)`,
+      tableName: "products",
+      tableLabel: "Product",
+      previousData: toDelete,
+      description: `Deleted ${result.deletedCount} products`,
+    });
+
     return res.status(200).json({
       message: `${result.deletedCount} product(s) deleted successfully.`,
     });
@@ -522,25 +521,28 @@ router.post("/add", async (req, res) => {
       lc: lc ? Number(lc) : 0,
       fob: fob ? Number(fob) : 0,
       taxSellingPrice: taxSellingPrice ? Number(taxSellingPrice) : 0,
-      isActive: true, // new products are enabled by default
+      isActive: true,
     });
 
     const savedProduct = await newProduct.save();
 
+    // Log create activity
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Created Product: ${toTitleCase(savedProduct.productName)}`,
+      tableName: "products",
+      tableLabel: "Product",
+      recordId: savedProduct._id,
+      referenceNumber: savedProduct.productName,
+      newData: savedProduct.toObject(),
+      description: `New product ${toTitleCase(savedProduct.productName)} added`,
+    });
+
     const formattedProduct = {
       ...savedProduct.toObject(),
-      productName: savedProduct.productName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      type: savedProduct.type
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
-      supplierName: savedProduct.supplierName
-        .split(" ")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" "),
+      productName: toTitleCase(savedProduct.productName),
+      type: toTitleCase(savedProduct.type),
+      supplierName: toTitleCase(savedProduct.supplierName),
       licenseValidityDate: formatDateUTC(savedProduct.licenseValidityDate),
       isActive: savedProduct.isActive,
     };
@@ -585,6 +587,77 @@ router.get("/all-for-import", async (req, res) => {
   } catch (err) {
     console.error("Error fetching products for import:", err);
     res.status(500).json({ message: "Failed to fetch products." });
+  }
+});
+
+// EXPORT PRODUCTS
+router.get("/export", async (req, res) => {
+  try {
+    const products = await Product.find({}).sort({ productName: 1 }).lean();
+
+    const XLSX = await import("xlsx");
+
+    const worksheetData = [
+      [
+        "Product Name",
+        "Type",
+        "Packing",
+        "Qty Per Box/Strip",
+        "Supplier Name",
+        "Drug License",
+        "License Validity Date",
+        "Selling Price (USD)",
+        "LC (USD)",
+        "FOB (USD)",
+        "Tax Selling Price (USD)",
+        "Remarks",
+        "Status",
+      ],
+      ...products.map((p) => [
+        toTitleCase(p.productName || ""),
+        toTitleCase(p.type || ""),
+        toTitleCase(p.packing || ""),
+        p.qtyPerBoxStrip || 0,
+        toTitleCase(p.supplierName || ""),
+        toTitleCase(p.drugLicense || ""),
+        p.licenseValidityDate ? formatDateUTC(p.licenseValidityDate) : "",
+        p.sellingPrice || 0,
+        p.lc || 0,
+        p.fob || 0,
+        p.taxSellingPrice || 0,
+        toTitleCase(p.remarks || ""),
+        p.isActive ? "Active" : "Inactive",
+      ]),
+    ];
+
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Products");
+
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
+
+    // Log export activity
+    await logActivity(req, {
+      action: "EXPORT",
+      actionLabel: `Exported Product List (${products.length} records)`,
+      tableName: "products",
+      tableLabel: "Product",
+      description: `Exported ${products.length} products to Excel`,
+      newData: { count: products.length },
+    });
+
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=products_export.xlsx",
+    );
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.send(buffer);
+  } catch (err) {
+    console.error("Export error:", err);
+    res.status(500).json({ message: "Failed to export products", ok: false });
   }
 });
 
@@ -717,7 +790,7 @@ router.post("/import", async (req, res) => {
           drugLicense,
           licenseValidityDate,
           remarks,
-          isActive: true, // imported products are enabled by default
+          isActive: true,
         });
       } catch (err) {
         errors.push(`Row ${index + 1}: ${err.message}`);
@@ -740,6 +813,22 @@ router.post("/import", async (req, res) => {
 
     const createdCount = inserted.length;
     const skippedCount = results.filter((r) => r.status === "skipped").length;
+
+    // Log import activity
+    if (createdCount > 0) {
+      await logActivity(req, {
+        action: "IMPORT",
+        actionLabel: `Bulk Imported ${createdCount} Product(s)`,
+        tableName: "products",
+        tableLabel: "Product",
+        description: `Imported ${createdCount} products. Duplicates skipped: ${skippedCount}. Errors: ${errors.length}.`,
+        newData: {
+          importedCount: createdCount,
+          duplicateCount: skippedCount,
+          errorCount: errors.length,
+        },
+      });
+    }
 
     let message = `${createdCount} product(s) imported successfully.`;
     if (skippedCount > 0)
@@ -768,8 +857,5 @@ router.post("/import", async (req, res) => {
     });
   }
 });
-
-// GET /api/reports/in-hand/product/:productName
-
 
 export default router;

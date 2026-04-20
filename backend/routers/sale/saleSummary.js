@@ -12,6 +12,7 @@ import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import XLSX from "xlsx";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
 const importProgressMap = new Map();
@@ -24,6 +25,15 @@ const fixPrecision = (num) => {
 
 const escapeRegexForSearch = (str) =>
   str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
 
 // ==========================================
 // Helper: shouldMergeInvoices
@@ -1968,6 +1978,18 @@ router.post("/create", async (req, res) => {
         console.warn(`⚠️ Failed to update MR Cash: ${mrCashUpdate.error}`);
     }
 
+    // ✅ Log create activity
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Created Sale: ${sale[0].invoiceNumber}`,
+      tableName: "sales",
+      tableLabel: "Sale",
+      recordId: sale[0]._id,
+      referenceNumber: sale[0].invoiceNumber,
+      newData: sale[0].toObject(),
+      description: `New sale invoice ${sale[0].invoiceNumber} created for ${toTitleCase(customerName)}`,
+    });
+
     await session.commitTransaction();
     session.endSession();
 
@@ -2562,6 +2584,79 @@ const processImportWithStockDeduction = async (
     progress.lastUpdated = Date.now();
   }
 };
+
+// ✅ ADD LOG ACTIVITY FOR IMPORT
+router.post("/import-with-stock-deduction", async (req, res) => {
+  let sessionId = null;
+  try {
+    const { invoices, bypassStockCheck = false } = req.body;
+    const invoiceData = (Array.isArray(invoices) ? invoices : []).map(
+      (inv) => ({ ...inv, customerName: inv.customerName || "Unknown" }),
+    );
+    if (!invoiceData.length)
+      return res
+        .status(400)
+        .json({ success: false, message: "No invoices provided" });
+    if (isImportInProgress)
+      return res.status(429).json({
+        success: false,
+        message: "Another import in progress",
+        retryAfter: 30,
+      });
+
+    isImportInProgress = true;
+    sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    importProgressMap.set(sessionId, {
+      sessionId,
+      totalInvoices: invoiceData.length,
+      processedInvoices: 0,
+      successful: 0,
+      failed: 0,
+      duplicateProductsSkipped: 0,
+      progressPercentage: 0,
+      startTime: Date.now(),
+      lastUpdated: Date.now(),
+      completed: false,
+      errors: [],
+      status: "initializing",
+      totalMRCashAdded: 0,
+      totalCostAmount: 0,
+      bypassStockCheck: bypassStockCheck || false,
+    });
+
+    // Start async import process
+    processImportWithStockDeduction(sessionId, invoiceData, bypassStockCheck)
+      .catch((error) => {
+        const progress = importProgressMap.get(sessionId);
+        if (progress) {
+          progress.status = "failed";
+          progress.errors.push({
+            message: "Import failed",
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      })
+      .finally(() => {
+        isImportInProgress = false;
+      });
+
+    res.json({
+      success: true,
+      message: "Import started",
+      sessionId,
+      totalInvoices: invoiceData.length,
+      progressUrl: `/api/sales/import/progress/${sessionId}`,
+      bypassStockCheck: bypassStockCheck || false,
+    });
+  } catch (error) {
+    if (sessionId) importProgressMap.delete(sessionId);
+    isImportInProgress = false;
+    res
+      .status(500)
+      .json({ success: false, message: "Import failed", error: error.message });
+  }
+});
 
 router.post("/fix-stock-amounts", protect, allowAdminOnly, async (req, res) => {
   try {
@@ -3350,77 +3445,6 @@ router.get("/debug/customer/:code", async (req, res) => {
   }
 });
 
-router.post("/import-with-stock-deduction", async (req, res) => {
-  let sessionId = null;
-  try {
-    const { invoices, bypassStockCheck = false } = req.body;
-    const invoiceData = (Array.isArray(invoices) ? invoices : []).map(
-      (inv) => ({ ...inv, customerName: inv.customerName || "Unknown" }),
-    );
-    if (!invoiceData.length)
-      return res
-        .status(400)
-        .json({ success: false, message: "No invoices provided" });
-    if (isImportInProgress)
-      return res.status(429).json({
-        success: false,
-        message: "Another import in progress",
-        retryAfter: 30,
-      });
-
-    isImportInProgress = true;
-    sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    importProgressMap.set(sessionId, {
-      sessionId,
-      totalInvoices: invoiceData.length,
-      processedInvoices: 0,
-      successful: 0,
-      failed: 0,
-      duplicateProductsSkipped: 0,
-      progressPercentage: 0,
-      startTime: Date.now(),
-      lastUpdated: Date.now(),
-      completed: false,
-      errors: [],
-      status: "initializing",
-      totalMRCashAdded: 0,
-      totalCostAmount: 0,
-      bypassStockCheck: bypassStockCheck || false,
-    });
-
-    processImportWithStockDeduction(sessionId, invoiceData, bypassStockCheck)
-      .catch((error) => {
-        const progress = importProgressMap.get(sessionId);
-        if (progress) {
-          progress.status = "failed";
-          progress.errors.push({
-            message: "Import failed",
-            error: error.message,
-            timestamp: new Date().toISOString(),
-          });
-        }
-      })
-      .finally(() => {
-        isImportInProgress = false;
-      });
-
-    res.json({
-      success: true,
-      message: "Import started",
-      sessionId,
-      totalInvoices: invoiceData.length,
-      progressUrl: `/api/sales/import/progress/${sessionId}`,
-      bypassStockCheck: bypassStockCheck || false,
-    });
-  } catch (error) {
-    if (sessionId) importProgressMap.delete(sessionId);
-    isImportInProgress = false;
-    res
-      .status(500)
-      .json({ success: false, message: "Import failed", error: error.message });
-  }
-});
-
 router.post("/mrcash/fix-duplicates", async (req, res) => {
   try {
     const duplicateAdjustments = [
@@ -3590,6 +3614,8 @@ router.get("/payment-status", async (req, res) => {
 });
 
 router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0)
@@ -3597,13 +3623,34 @@ router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
     const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
     if (validIds.length === 0)
       return res.status(400).json({ error: "No valid ObjectIds provided" });
+
+    // Get full documents before deletion for logging
+    const toDelete = await SaleSummary.find({ _id: { $in: validIds } }).lean();
+
     const result = await SaleSummary.deleteMany({ _id: { $in: validIds } });
+
+    // Log bulk delete activity
+    if (result.deletedCount > 0) {
+      await logActivity(req, {
+        action: "DELETE",
+        actionLabel: `Bulk Deleted ${result.deletedCount} Sale(s)`,
+        tableName: "sales",
+        tableLabel: "Sale",
+        previousData: toDelete,
+        description: `Deleted ${result.deletedCount} sale invoices`,
+      });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
     res.status(200).json({
       success: true,
       message: `${result.deletedCount} sale(s) deleted successfully`,
       deletedCount: result.deletedCount,
     });
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     res.status(500).json({ error: error.message || "Batch delete failed" });
   }
 });
@@ -3661,6 +3708,19 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     }
 
     await SaleSummary.findByIdAndDelete(id).session(session);
+
+    // Log delete activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Sale: ${saleToDelete.invoiceNumber}`,
+      tableName: "sales",
+      tableLabel: "Sale",
+      recordId: saleToDelete._id,
+      referenceNumber: saleToDelete.invoiceNumber,
+      previousData: saleToDelete.toObject(),
+      description: `Sale invoice ${saleToDelete.invoiceNumber} permanently deleted`,
+    });
+
     await session.commitTransaction();
     session.endSession();
 
@@ -4212,6 +4272,19 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       { new: true, runValidators: true, session },
     );
 
+    // Log update activity
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Sale: ${updatedSale.invoiceNumber}`,
+      tableName: "sales",
+      tableLabel: "Sale",
+      recordId: updatedSale._id,
+      referenceNumber: updatedSale.invoiceNumber,
+      previousData: originalSale.toObject(),
+      newData: updatedSale.toObject(),
+      description: `Sale invoice ${updatedSale.invoiceNumber} was updated`,
+    });
+
     await session.commitTransaction();
     session.endSession();
     res
@@ -4661,6 +4734,7 @@ router.get("/credit-sale-not-received", async (req, res) => {
   }
 });
 
+// ✅ ADD LOG ACTIVITY FOR EXPORT
 router.post("/download-excel", async (req, res) => {
   try {
     const { period, startDate, endDate, search, tab, saleType } = req.body;
@@ -4775,6 +4849,16 @@ router.post("/download-excel", async (req, res) => {
     const excelBuffer = XLSX.write(workbook, {
       type: "buffer",
       bookType: "xlsx",
+    });
+
+    // Log export activity
+    await logActivity(req, {
+      action: "EXPORT",
+      actionLabel: `Exported Sale List (${sales.length} records)`,
+      tableName: "sales",
+      tableLabel: "Sale",
+      description: `Exported ${sales.length} sale invoices to Excel`,
+      newData: { count: sales.length, period, tab, saleType },
     });
 
     const timestamp = new Date().toISOString().slice(0, 10);

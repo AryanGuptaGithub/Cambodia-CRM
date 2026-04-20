@@ -1,3 +1,4 @@
+// routes/purcharsing/purcharsing.js  –  full file with activity logging
 import express from "express";
 import mongoose from "mongoose";
 import purchaseInventory from "../../models/purcharsing/purchaseInventory.js";
@@ -7,8 +8,13 @@ import ExcelJS from "exceljs";
 import dayjs from "dayjs";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Utility helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 const normalizeProductName = (name) => {
   if (!name || typeof name !== "string") return "";
@@ -71,7 +77,6 @@ const batchExists = (batches, newBatch) =>
   batches.some((existing) => isDuplicateBatch(existing, newBatch));
 
 const calculateTotalsFromBatches = (batches) => {
-  // Only count real batches (adjustmentType === "batch" or undefined)
   const realBatches = batches.filter(
     (b) => !b.adjustmentType || b.adjustmentType === "batch",
   );
@@ -92,26 +97,14 @@ const calculateStockStatus = (boxes) => {
   return "In Stock";
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// updateReportInHand
-// ══════════════════════════════════════════════════════════════════════════════
-// Adds or subtracts a product batch in ReportInHand when a purchase invoice
-// is created, updated, or deleted.
-//
-// BUG FIXED: The original code had a copy-paste error in the newBatch object:
-//
-//   sellingPrice:        ← field declared
-//   amount,              ← but `amount` was assigned as the VALUE (not sellingPrice)
-//
-// This meant:
-//   • `sellingPrice` field in the stored batch = the calculated amount (WRONG)
-//   • `amount` field was never set → stored as undefined/0 (WRONG)
-//
-// Fixed by correctly separating the two fields:
-//   sellingPrice: sellingPrice || 0,
-//   amount: amount,
-// ══════════════════════════════════════════════════════════════════════════════
-const updateReportInHand = async (productData, operation = "add") => {
+// ─────────────────────────────────────────────────────────────────────────────
+// updateReportInHand - UPDATED to handle product updates correctly
+// ─────────────────────────────────────────────────────────────────────────────
+const updateReportInHand = async (
+  productData,
+  operation = "add",
+  oldQty = 0,
+) => {
   try {
     const {
       productName,
@@ -130,30 +123,207 @@ const updateReportInHand = async (productData, operation = "add") => {
       return;
     }
 
-    const qty = Number(quantityPerBoxStrip || 0);
+    const newQty = Number(quantityPerBoxStrip || 0);
     const validSupplier = supplierName?.trim() || "Unknown Supplier";
-
     const standardizedProductName =
       await getStandardizedProductName(productName);
     const finalProductName = normalizeProductName(standardizedProductName);
 
-    if (operation === "add") {
-      // ── Calculate amount correctly ──────────────────────────────────────
-      const lcValue = Number(lc || 0);
-      const amount = qty * lcValue;
+    // For subtract operation or when updating, we need to handle quantity difference
+    if (operation === "subtract") {
+      const existingDoc = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
+      }).lean();
 
-      // ── Build the full batch subdocument ───────────────────────────────
-      // CRITICAL: every field must be explicitly set.
-      // Do NOT use a shorthand like `sellingPrice:\n amount,` — that assigns
-      // the `amount` variable to the `sellingPrice` key, leaving `amount`
-      // unset (undefined → 0 in Mongo).
+      if (!existingDoc) {
+        console.warn(`No stock found for ${finalProductName} to subtract`);
+        return;
+      }
+
+      let remainingToRemove = newQty;
+      const batches = [...(existingDoc.batches || [])];
+      batches.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      const updatedBatches = [];
+      for (const batch of batches) {
+        if (remainingToRemove <= 0) {
+          updatedBatches.push(batch);
+          continue;
+        }
+        if (batch.adjustmentType && batch.adjustmentType !== "batch") {
+          updatedBatches.push(batch);
+          continue;
+        }
+        const available = batch.boxes;
+        if (available <= remainingToRemove) {
+          remainingToRemove -= available;
+        } else {
+          updatedBatches.push({
+            ...batch,
+            boxes: available - remainingToRemove,
+            amount: (available - remainingToRemove) * (batch.lc || 0),
+          });
+          remainingToRemove = 0;
+        }
+      }
+
+      if (remainingToRemove > 0) {
+        console.warn(
+          `Not enough stock to subtract ${newQty} from ${finalProductName}. Only removed ${newQty - remainingToRemove}.`,
+        );
+      }
+
+      const { totalBoxesFromBatches, totalAmount, averagePrice } =
+        calculateTotalsFromBatches(updatedBatches);
+      const totalBoxes =
+        totalBoxesFromBatches +
+        (existingDoc.addStockAdjustment || 0) -
+        (existingDoc.removeStockAdjustment || 0);
+
+      await ReportInHand.updateOne(
+        { _id: existingDoc._id },
+        {
+          $set: {
+            batches: updatedBatches,
+            totalBoxesFromBatches,
+            totalBoxes,
+            totalAmount,
+            averagePrice,
+            status: calculateStockStatus(totalBoxes),
+            updatedAt: new Date(),
+          },
+        },
+      );
+    } else if (operation === "update") {
+      // For update operation: remove old quantity and add new quantity
+      const existingDoc = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
+      }).lean();
+
+      if (!existingDoc) {
+        // If no existing stock, just add the new quantity
+        const lcValue = Number(lc || 0);
+        const amount = newQty * lcValue;
+
+        const newBatch = {
+          boxes: newQty,
+          lc: lcValue,
+          fob: Number(fob || 0),
+          cif: Number(cif || 0),
+          sellingPrice: Number(sellingPrice || 0),
+          amount: amount,
+          expiryDate: expiryDate ? new Date(expiryDate) : null,
+          date: new Date(),
+          _id: new mongoose.Types.ObjectId(),
+          adjustmentType: "batch",
+        };
+
+        const { totalBoxesFromBatches, totalAmount, averagePrice } =
+          calculateTotalsFromBatches([newBatch]);
+        const totalBoxes = totalBoxesFromBatches;
+
+        await ReportInHand.create({
+          productName: finalProductName,
+          supplierName: validSupplier,
+          type: type || "",
+          sellingPrice: Number(sellingPrice || 0),
+          batches: [newBatch],
+          totalBoxesFromBatches,
+          totalBoxes,
+          totalAmount,
+          averagePrice,
+          addStockAdjustment: 0,
+          removeStockAdjustment: 0,
+          status: calculateStockStatus(totalBoxes),
+          minStockLevel: 10,
+        });
+        return;
+      }
+
+      // First, subtract the old quantity
+      let remainingToRemove = oldQty;
+      const batches = [...(existingDoc.batches || [])];
+      batches.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      let updatedBatches = [];
+      for (const batch of batches) {
+        if (remainingToRemove <= 0) {
+          updatedBatches.push(batch);
+          continue;
+        }
+        if (batch.adjustmentType && batch.adjustmentType !== "batch") {
+          updatedBatches.push(batch);
+          continue;
+        }
+        const available = batch.boxes;
+        if (available <= remainingToRemove) {
+          remainingToRemove -= available;
+        } else {
+          updatedBatches.push({
+            ...batch,
+            boxes: available - remainingToRemove,
+            amount: (available - remainingToRemove) * (batch.lc || 0),
+          });
+          remainingToRemove = 0;
+        }
+      }
+
+      // Then, add the new quantity as a new batch
+      if (newQty > 0) {
+        const lcValue = Number(lc || 0);
+        const amount = newQty * lcValue;
+
+        const newBatch = {
+          boxes: newQty,
+          lc: lcValue,
+          fob: Number(fob || 0),
+          cif: Number(cif || 0),
+          sellingPrice: Number(sellingPrice || 0),
+          amount: amount,
+          expiryDate: expiryDate ? new Date(expiryDate) : null,
+          date: new Date(),
+          _id: new mongoose.Types.ObjectId(),
+          adjustmentType: "batch",
+        };
+
+        // Check if batch already exists to avoid duplicates
+        if (!batchExists(updatedBatches, newBatch)) {
+          updatedBatches.push(newBatch);
+        }
+      }
+
+      const { totalBoxesFromBatches, totalAmount, averagePrice } =
+        calculateTotalsFromBatches(updatedBatches);
+      const totalBoxes =
+        totalBoxesFromBatches +
+        (existingDoc.addStockAdjustment || 0) -
+        (existingDoc.removeStockAdjustment || 0);
+
+      await ReportInHand.updateOne(
+        { _id: existingDoc._id },
+        {
+          $set: {
+            batches: updatedBatches,
+            totalBoxesFromBatches,
+            totalBoxes,
+            totalAmount,
+            averagePrice,
+            status: calculateStockStatus(totalBoxes),
+            updatedAt: new Date(),
+          },
+        },
+      );
+    } else if (operation === "add") {
+      const lcValue = Number(lc || 0);
+      const amount = newQty * lcValue;
+
       const newBatch = {
-        boxes: qty,
+        boxes: newQty,
         lc: lcValue,
         fob: Number(fob || 0),
         cif: Number(cif || 0),
-        sellingPrice: Number(sellingPrice || 0), // ← correct: selling price
-        amount: amount, // ← correct: lc × qty
+        sellingPrice: Number(sellingPrice || 0),
+        amount: amount,
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         date: new Date(),
         _id: new mongoose.Types.ObjectId(),
@@ -165,22 +335,16 @@ const updateReportInHand = async (productData, operation = "add") => {
       }).lean();
 
       if (existingDoc) {
-        if (batchExists(existingDoc.batches || [], newBatch)) {
-          // Exact duplicate — skip silently
-          return;
-        }
+        if (batchExists(existingDoc.batches || [], newBatch)) return;
 
         const updatedBatches = [...(existingDoc.batches || []), newBatch];
         const { totalBoxesFromBatches, totalAmount, averagePrice } =
           calculateTotalsFromBatches(updatedBatches);
-
         const totalBoxes =
           totalBoxesFromBatches +
           (existingDoc.addStockAdjustment || 0) -
           (existingDoc.removeStockAdjustment || 0);
 
-        // Only update sellingPrice when the incoming value is non-zero
-        // (preserves existing value if purchase has sellingPrice = 0)
         const newSellingPrice =
           sellingPrice !== undefined &&
           sellingPrice !== null &&
@@ -207,11 +371,9 @@ const updateReportInHand = async (productData, operation = "add") => {
           },
         );
       } else {
-        // ── Create new ReportInHand document ─────────────────────────────
         const { totalBoxesFromBatches, totalAmount, averagePrice } =
           calculateTotalsFromBatches([newBatch]);
         const totalBoxes = totalBoxesFromBatches;
-
         await ReportInHand.create({
           productName: finalProductName,
           supplierName: validSupplier,
@@ -228,80 +390,6 @@ const updateReportInHand = async (productData, operation = "add") => {
           minStockLevel: 10,
         });
       }
-    } else if (operation === "subtract") {
-      // ── FIFO subtraction: remove from oldest batches first ─────────────
-      const existingDoc = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
-      }).lean();
-
-      if (!existingDoc) {
-        console.warn(`No stock found for ${finalProductName} to subtract`);
-        return;
-      }
-
-      let remainingToRemove = qty;
-      const batches = [...(existingDoc.batches || [])];
-
-      // Sort by date ascending (oldest first = FIFO)
-      batches.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-      const updatedBatches = [];
-      for (const batch of batches) {
-        if (remainingToRemove <= 0) {
-          updatedBatches.push(batch);
-          continue;
-        }
-
-        // Keep non-batch adjustments intact
-        if (batch.adjustmentType && batch.adjustmentType !== "batch") {
-          updatedBatches.push(batch);
-          continue;
-        }
-
-        const available = batch.boxes;
-        if (available <= remainingToRemove) {
-          // Remove entire batch
-          remainingToRemove -= available;
-        } else {
-          // Partially remove from this batch
-          updatedBatches.push({
-            ...batch,
-            boxes: available - remainingToRemove,
-            amount: (available - remainingToRemove) * (batch.lc || 0),
-          });
-          remainingToRemove = 0;
-        }
-      }
-
-      if (remainingToRemove > 0) {
-        console.warn(
-          `Not enough stock to subtract ${qty} from ${finalProductName}. ` +
-            `Only removed ${qty - remainingToRemove}.`,
-        );
-      }
-
-      const { totalBoxesFromBatches, totalAmount, averagePrice } =
-        calculateTotalsFromBatches(updatedBatches);
-
-      const totalBoxes =
-        totalBoxesFromBatches +
-        (existingDoc.addStockAdjustment || 0) -
-        (existingDoc.removeStockAdjustment || 0);
-
-      await ReportInHand.updateOne(
-        { _id: existingDoc._id },
-        {
-          $set: {
-            batches: updatedBatches,
-            totalBoxesFromBatches,
-            totalBoxes,
-            totalAmount,
-            averagePrice,
-            status: calculateStockStatus(totalBoxes),
-            updatedAt: new Date(),
-          },
-        },
-      );
     }
   } catch (err) {
     console.error("updateReportInHand ERROR:", err.message || err);
@@ -330,32 +418,114 @@ const filterReportsWithBatches = (reports) =>
     (report) => Array.isArray(report.batches) && report.batches.length > 0,
   );
 
-// ── Cleanup duplicates ────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: build product lookup maps from DB
+// ─────────────────────────────────────────────────────────────────────────────
+const buildProductMaps = async (products) => {
+  const productIds = products.map((p) => p.productId).filter(Boolean);
+  const productsInfo = await Product.find(
+    { _id: { $in: productIds } },
+    "productName type batches sellingPrice",
+  ).lean();
+
+  const productTypeMap = new Map();
+  const productBatchMap = new Map();
+  const productNameMap = new Map();
+  const productSellingPriceMap = new Map();
+
+  productsInfo.forEach((p) => {
+    if (!p._id) return;
+    const id = p._id.toString();
+    productTypeMap.set(id, p.type || "");
+    if (p.batches?.length > 0) productBatchMap.set(id, p.batches[0]);
+    productNameMap.set(id, p.productName);
+    productSellingPriceMap.set(id, p.sellingPrice || 0);
+  });
+
+  return {
+    productTypeMap,
+    productBatchMap,
+    productNameMap,
+    productSellingPriceMap,
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: process raw product lines → final product array + totalAmount
+// ─────────────────────────────────────────────────────────────────────────────
+const processProductLines = async (rawProducts) => {
+  const {
+    productTypeMap,
+    productBatchMap,
+    productNameMap,
+    productSellingPriceMap,
+  } = await buildProductMaps(rawProducts);
+
+  let totalAmount = 0;
+  const products = await Promise.all(
+    rawProducts.map(async (p) => {
+      const qty = Number(p.quantityPerBoxStrip || 0);
+      const productBatch = productBatchMap.get(p.productId);
+      const lc = Number(p.lc) || productBatch?.lc || 0;
+      const fob = Number(p.fob) || productBatch?.fob || 0;
+      const cif = Number(p.cif) || productBatch?.cif || 0;
+      const amount = qty * lc;
+      totalAmount += amount;
+
+      let productNameToUse = p.productName;
+      if (p.productId && productNameMap.has(p.productId.toString())) {
+        productNameToUse = productNameMap.get(p.productId.toString());
+      }
+      productNameToUse = await getStandardizedProductName(productNameToUse);
+
+      const sellingPrice =
+        p.sellingPrice ||
+        (p.productId && productSellingPriceMap.get(p.productId.toString())) ||
+        0;
+
+      return {
+        productName: productNameToUse,
+        type: p.type || productTypeMap.get(p.productId) || "",
+        expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
+        quantityPerBoxStrip: qty,
+        lc,
+        fob,
+        cif,
+        amount,
+        sellingPrice,
+      };
+    }),
+  );
+
+  return { products, totalAmount };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Debug & utility routes
+// ─────────────────────────────────────────────────────────────────────────────
+
 router.post("/reports-in-hand/cleanup-duplicates", async (req, res) => {
   try {
     const allReports = await ReportInHand.find({}).lean();
-    let cleanedCount = 0;
-    let updatedProducts = 0;
+    let cleanedCount = 0,
+      updatedProducts = 0;
     const errors = [];
 
     for (const report of allReports) {
       try {
         const batches = report.batches || [];
-        const uniqueBatches = [];
-        const seenBatches = new Set();
+        const uniqueBatches = [],
+          seenBatches = new Set();
 
         for (const batch of batches) {
           const batchExpiry = batch.expiryDate
             ? new Date(batch.expiryDate).getTime()
             : null;
           const batchKey = `${batch.boxes}|${batch.lc}|${batch.fob}|${batch.cif}|${batchExpiry}`;
-
           if (!seenBatches.has(batchKey)) {
             seenBatches.add(batchKey);
             uniqueBatches.push(batch);
-          } else {
-            cleanedCount++;
-          }
+          } else cleanedCount++;
         }
 
         if (uniqueBatches.length !== batches.length) {
@@ -368,12 +538,11 @@ router.post("/reports-in-hand/cleanup-duplicates", async (req, res) => {
             0,
           );
           const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
-
           await ReportInHand.updateOne(
             { _id: report._id },
             {
               $set: {
-                batches,
+                batches: uniqueBatches,
                 totalBoxes,
                 totalAmount,
                 averagePrice,
@@ -414,21 +583,17 @@ router.post("/reports-in-hand/cleanup-duplicates", async (req, res) => {
     });
   } catch (error) {
     console.error("Cleanup duplicates error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to cleanup duplicate batches",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to cleanup duplicate batches",
+      error: error.message,
+    });
   }
 });
 
-// ── Debug: all product totals ─────────────────────────────────────────────────
 router.get("/debug/all-product-totals", async (req, res) => {
   try {
     const allReports = await ReportInHand.find({}).lean();
-
     const productDetails = allReports.map((report) => {
       const batches = report.batches || [];
       const batchDetails = batches.map((batch, index) => ({
@@ -443,7 +608,6 @@ router.get("/debug/all-product-totals", async (req, res) => {
         date: batch.date,
         adjustmentType: batch.adjustmentType,
       }));
-
       const sumOfBatchBoxes = batches.reduce(
         (sum, b) => sum + (b.boxes || 0),
         0,
@@ -454,7 +618,6 @@ router.get("/debug/all-product-totals", async (req, res) => {
       );
       const calculatedAverage =
         sumOfBatchBoxes > 0 ? sumOfBatchAmount / sumOfBatchBoxes : 0;
-
       return {
         productName: report.productName,
         storedTotalBoxes: report.totalBoxes || 0,
@@ -473,7 +636,6 @@ router.get("/debug/all-product-totals", async (req, res) => {
         batches: batchDetails,
       };
     });
-
     const totalProducts = productDetails.length;
     const productsWithDiscrepancy = productDetails.filter(
       (p) => p.discrepancy.totalBoxes !== 0 || p.discrepancy.totalAmount !== 0,
@@ -486,7 +648,6 @@ router.get("/debug/all-product-totals", async (req, res) => {
       (sum, p) => sum + p.calculatedTotalBoxes,
       0,
     );
-
     res.json({
       success: true,
       summary: {
@@ -517,13 +678,11 @@ router.get("/debug/all-product-totals", async (req, res) => {
   }
 });
 
-// ── Fix all product totals ────────────────────────────────────────────────────
 router.post("/reports-in-hand/fix-all-totals", async (req, res) => {
   try {
     const allReports = await ReportInHand.find({}).lean();
     let fixedCount = 0;
     const errors = [];
-
     for (const report of allReports) {
       try {
         const batches = report.batches || [];
@@ -533,7 +692,6 @@ router.post("/reports-in-hand/fix-all-totals", async (req, res) => {
           0,
         );
         const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
-
         if (
           Math.abs(totalBoxes - (report.totalBoxes || 0)) > 0.01 ||
           Math.abs(totalAmount - (report.totalAmount || 0)) > 0.01
@@ -560,7 +718,6 @@ router.post("/reports-in-hand/fix-all-totals", async (req, res) => {
         });
       }
     }
-
     res.json({
       success: true,
       message: `Fixed totals for ${fixedCount} products`,
@@ -569,33 +726,25 @@ router.post("/reports-in-hand/fix-all-totals", async (req, res) => {
     });
   } catch (error) {
     console.error("Fix totals error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fix product totals",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fix product totals",
+      error: error.message,
+    });
   }
 });
 
-// ── Debug: single product ─────────────────────────────────────────────────────
 router.get("/debug/product/:productName", async (req, res) => {
   try {
     const { productName } = req.params;
     const reports = await ReportInHand.find({
       productName: { $regex: productName, $options: "i" },
     }).lean();
-
-    if (reports.length === 0) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: `No product found containing: ${productName}`,
-        });
-    }
-
+    if (reports.length === 0)
+      return res.status(404).json({
+        success: false,
+        message: `No product found containing: ${productName}`,
+      });
     const detailedReports = reports.map((report) => {
       const batches = report.batches || [];
       const { totalBoxesFromBatches, totalAmount, averagePrice } =
@@ -604,7 +753,6 @@ router.get("/debug/product/:productName", async (req, res) => {
         totalBoxesFromBatches +
         (report.addStockAdjustment || 0) -
         (report.removeStockAdjustment || 0);
-
       return {
         _id: report._id,
         productName: report.productName,
@@ -643,7 +791,6 @@ router.get("/debug/product/:productName", async (req, res) => {
         },
       };
     });
-
     res.json({
       success: true,
       count: detailedReports.length,
@@ -655,7 +802,6 @@ router.get("/debug/product/:productName", async (req, res) => {
   }
 });
 
-// ── GET /invoice ──────────────────────────────────────────────────────────────
 router.get("/invoice", async (req, res) => {
   try {
     const invoices = await purchaseInventory
@@ -669,7 +815,6 @@ router.get("/invoice", async (req, res) => {
   }
 });
 
-// ── GET / ─────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const purchases = await purchaseInventory
@@ -680,12 +825,10 @@ router.get("/", async (req, res) => {
       {},
       "productName type packing qtyPerBoxStrip sellingPrice batches",
     ).lean();
-
     const productMap = new Map();
     productList.forEach((prod) => {
-      if (prod.productName) {
+      if (prod.productName)
         productMap.set(normalizeProductName(prod.productName), prod);
-      }
     });
 
     const enhancedPurchases = purchases.map((invoice) => ({
@@ -728,7 +871,9 @@ router.get("/", async (req, res) => {
   }
 });
 
-// ── POST / ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /  –  Create purchase invoice                         ✅ LOGGED
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   try {
     const data = req.body;
@@ -744,71 +889,13 @@ router.post("/", async (req, res) => {
       invoiceNumber: data.invoiceNumber,
     });
     if (existing) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: `Invoice '${data.invoiceNumber}' already exists.`,
-        });
+      return res.status(400).json({
+        success: false,
+        message: `Invoice '${data.invoiceNumber}' already exists.`,
+      });
     }
 
-    let totalAmount = 0;
-    const productIds = data.products.map((p) => p.productId).filter((id) => id);
-    const productsInfo = await Product.find(
-      { _id: { $in: productIds } },
-      "productName type batches sellingPrice",
-    ).lean();
-
-    const productTypeMap = new Map();
-    const productBatchMap = new Map();
-    const productNameMap = new Map();
-    const productSellingPriceMap = new Map();
-
-    productsInfo.forEach((p) => {
-      if (p._id) {
-        productTypeMap.set(p._id.toString(), p.type || "");
-        if (p.batches && p.batches.length > 0) {
-          productBatchMap.set(p._id.toString(), p.batches[0]);
-        }
-        productNameMap.set(p._id.toString(), p.productName);
-        productSellingPriceMap.set(p._id.toString(), p.sellingPrice || 0);
-      }
-    });
-
-    const products = await Promise.all(
-      data.products.map(async (p) => {
-        const qty = Number(p.quantityPerBoxStrip || 0);
-        const productBatch = productBatchMap.get(p.productId);
-        const lc = Number(p.lc) || productBatch?.lc || 0;
-        const fob = Number(p.fob) || productBatch?.fob || 0;
-        const cif = Number(p.cif) || productBatch?.cif || 0;
-        const amount = qty * lc;
-        totalAmount += amount;
-
-        let productNameToUse = p.productName;
-        if (p.productId && productNameMap.has(p.productId.toString())) {
-          productNameToUse = productNameMap.get(p.productId.toString());
-        }
-        productNameToUse = await getStandardizedProductName(productNameToUse);
-
-        const sellingPrice =
-          p.sellingPrice ||
-          (p.productId && productSellingPriceMap.get(p.productId.toString())) ||
-          0;
-
-        return {
-          productName: productNameToUse,
-          type: p.type || productTypeMap.get(p.productId) || "",
-          expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
-          quantityPerBoxStrip: qty,
-          lc,
-          fob,
-          cif,
-          amount,
-          sellingPrice,
-        };
-      }),
-    );
+    const { products, totalAmount } = await processProductLines(data.products);
 
     const invoice = await purchaseInventory.create({
       ...data,
@@ -817,6 +904,7 @@ router.post("/", async (req, res) => {
       totalAmount,
     });
 
+    // Update stock - ADD operation
     for (const p of products) {
       await updateReportInHand(
         {
@@ -831,110 +919,136 @@ router.post("/", async (req, res) => {
           sellingPrice: p.sellingPrice,
         },
         "add",
+        0,
       );
     }
+
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Created Purchase Invoice: ${invoice.invoiceNumber}`,
+      tableName: "purchase",
+      tableLabel: "Purchase",
+      recordId: invoice._id,
+      referenceNumber: invoice.invoiceNumber,
+      newData: invoice.toObject ? invoice.toObject() : invoice,
+      description: `New purchase invoice ${invoice.invoiceNumber} from ${invoice.supplierName} — ${products.length} product(s), total $${totalAmount.toFixed(2)}`,
+      refField: "invoiceNumber",
+    });
 
     res
       .status(201)
       .json({ success: true, message: "Purchase added", purchase: invoice });
   } catch (err) {
     console.error("Add error:", err);
-    if (err.code === 11000) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "This invoice number already exists.",
-        });
-    }
+    if (err.code === 11000)
+      return res.status(400).json({
+        success: false,
+        message: "This invoice number already exists.",
+      });
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// ── PUT /:id ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /:id  –  Update purchase invoice - FIXED to only update changed products
+// ─────────────────────────────────────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const id = req.params.id;
     const oldInvoice = await purchaseInventory.findById(id).lean();
     if (!oldInvoice) return res.status(404).json({ message: "Not found" });
 
-    // Step 1: Subtract old product stock
-    for (const oldProduct of oldInvoice.products || []) {
-      await updateReportInHand(
-        {
-          productName: oldProduct.productName || "",
-          supplierName: oldInvoice.supplierName || "Unknown Supplier",
-          quantityPerBoxStrip: oldProduct.quantityPerBoxStrip || 0,
-          lc: oldProduct.lc || 0,
-          fob: oldProduct.fob || 0,
-          cif: oldProduct.cif || 0,
-          expiryDate: oldProduct.expiryDate,
-          type: oldProduct.type || "",
-          sellingPrice: oldProduct.sellingPrice || 0,
-        },
-        "subtract",
-      );
+    // Create maps for old and new products for comparison
+    const oldProductsMap = new Map();
+    for (const p of oldInvoice.products || []) {
+      oldProductsMap.set(p.productName, p);
     }
 
-    // Step 2: Process new products
-    const newProducts = req.body.products || [];
-    let totalAmount = 0;
-    const productIds = newProducts.map((p) => p.productId).filter((id) => id);
-    const productsInfo = await Product.find(
-      { _id: { $in: productIds } },
-      "productName type batches sellingPrice",
-    ).lean();
+    const newProductsMap = new Map();
+    for (const p of req.body.products || []) {
+      newProductsMap.set(p.productName, p);
+    }
 
-    const productTypeMap = new Map();
-    const productBatchMap = new Map();
-    const productNameMap = new Map();
-    const productSellingPriceMap = new Map();
+    // Get all unique product names
+    const allProductNames = new Set([
+      ...oldProductsMap.keys(),
+      ...newProductsMap.keys(),
+    ]);
 
-    productsInfo.forEach((p) => {
-      if (p._id) {
-        productTypeMap.set(p._id.toString(), p.type || "");
-        if (p.batches && p.batches.length > 0) {
-          productBatchMap.set(p._id.toString(), p.batches[0]);
-        }
-        productNameMap.set(p._id.toString(), p.productName);
-        productSellingPriceMap.set(p._id.toString(), p.sellingPrice || 0);
+    // Process each product - only update changed ones
+    for (const productName of allProductNames) {
+      const oldProduct = oldProductsMap.get(productName);
+      const newProduct = newProductsMap.get(productName);
+
+      const oldQty = oldProduct
+        ? Number(oldProduct.quantityPerBoxStrip || 0)
+        : 0;
+      const newQty = newProduct
+        ? Number(newProduct.quantityPerBoxStrip || 0)
+        : 0;
+
+      if (oldQty === newQty) {
+        // No change - skip
+        continue;
       }
-    });
 
-    const processedProducts = await Promise.all(
-      newProducts.map(async (p) => {
-        const qty = Number(p.quantityPerBoxStrip || 0);
-        const productBatch = productBatchMap.get(p.productId);
-        const lc = Number(p.lc) || productBatch?.lc || 0;
-        const fob = Number(p.fob) || productBatch?.fob || 0;
-        const cif = Number(p.cif) || productBatch?.cif || 0;
-        const amount = qty * lc;
-        totalAmount += amount;
+      if (oldQty > 0 && newQty === 0) {
+        // Product removed - subtract old quantity
+        await updateReportInHand(
+          {
+            productName: oldProduct.productName || "",
+            supplierName: oldInvoice.supplierName || "Unknown Supplier",
+            quantityPerBoxStrip: oldQty,
+            lc: oldProduct.lc || 0,
+            fob: oldProduct.fob || 0,
+            cif: oldProduct.cif || 0,
+            expiryDate: oldProduct.expiryDate,
+            type: oldProduct.type || "",
+            sellingPrice: oldProduct.sellingPrice || 0,
+          },
+          "subtract",
+          0,
+        );
+      } else if (oldQty === 0 && newQty > 0) {
+        // New product added - add new quantity
+        await updateReportInHand(
+          {
+            productName: newProduct.productName || "",
+            supplierName: req.body.supplierName || oldInvoice.supplierName,
+            quantityPerBoxStrip: newQty,
+            lc: newProduct.lc || 0,
+            fob: newProduct.fob || 0,
+            cif: newProduct.cif || 0,
+            expiryDate: newProduct.expiryDate,
+            type: newProduct.type || "",
+            sellingPrice: newProduct.sellingPrice || 0,
+          },
+          "add",
+          0,
+        );
+      } else if (oldQty > 0 && newQty > 0 && oldQty !== newQty) {
+        // Quantity changed - update using the update operation
+        await updateReportInHand(
+          {
+            productName: newProduct.productName || "",
+            supplierName: req.body.supplierName || oldInvoice.supplierName,
+            quantityPerBoxStrip: newQty,
+            lc: newProduct.lc || 0,
+            fob: newProduct.fob || 0,
+            cif: newProduct.cif || 0,
+            expiryDate: newProduct.expiryDate,
+            type: newProduct.type || "",
+            sellingPrice: newProduct.sellingPrice || 0,
+          },
+          "update",
+          oldQty,
+        );
+      }
+    }
 
-        let productNameToUse = p.productName;
-        if (p.productId && productNameMap.has(p.productId.toString())) {
-          productNameToUse = productNameMap.get(p.productId.toString());
-        }
-        productNameToUse = await getStandardizedProductName(productNameToUse);
-
-        const sellingPrice =
-          p.sellingPrice ||
-          (p.productId && productSellingPriceMap.get(p.productId.toString())) ||
-          0;
-
-        return {
-          productName: productNameToUse,
-          type: p.type || productTypeMap.get(p.productId) || "",
-          expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
-          quantityPerBoxStrip: qty,
-          lc,
-          fob,
-          cif,
-          amount,
-          sellingPrice,
-        };
-      }),
-    );
+    // Process new products
+    const { products: processedProducts, totalAmount } =
+      await processProductLines(req.body.products || []);
 
     const updated = await purchaseInventory.findByIdAndUpdate(
       id,
@@ -942,28 +1056,24 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       { new: true, runValidators: true, lean: true },
     );
 
-    if (!updated)
+    if (!updated) {
       return res
         .status(404)
         .json({ message: "Invoice not found after update" });
-
-    // Step 3: Add new product stock
-    for (const newProduct of processedProducts) {
-      await updateReportInHand(
-        {
-          productName: newProduct.productName || "",
-          supplierName: updated.supplierName || "Unknown Supplier",
-          quantityPerBoxStrip: newProduct.quantityPerBoxStrip || 0,
-          lc: newProduct.lc || 0,
-          fob: newProduct.fob || 0,
-          cif: newProduct.cif || 0,
-          expiryDate: newProduct.expiryDate,
-          type: newProduct.type || "",
-          sellingPrice: newProduct.sellingPrice || 0,
-        },
-        "add",
-      );
     }
+
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Purchase Invoice: ${updated.invoiceNumber}`,
+      tableName: "purchase",
+      tableLabel: "Purchase",
+      recordId: updated._id,
+      referenceNumber: updated.invoiceNumber,
+      previousData: oldInvoice,
+      newData: updated,
+      description: `Purchase invoice ${updated.invoiceNumber} from ${updated.supplierName} was updated — ${processedProducts.length} product(s), total $${totalAmount.toFixed(2)}`,
+      refField: "invoiceNumber",
+    });
 
     res.json(updated);
   } catch (err) {
@@ -972,12 +1082,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ── DELETE /:id ───────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /:id  –  Delete single invoice                      ✅ LOGGED
+// ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const invoice = await purchaseInventory.findById(req.params.id).lean();
     if (!invoice) return res.status(404).json({ error: "Not found" });
 
+    // Subtract stock for all products
     for (const p of invoice.products || []) {
       await updateReportInHand(
         {
@@ -992,10 +1105,24 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
           sellingPrice: p.sellingPrice || 0,
         },
         "subtract",
+        0,
       );
     }
 
     await purchaseInventory.findByIdAndDelete(req.params.id);
+
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Purchase Invoice: ${invoice.invoiceNumber}`,
+      tableName: "purchase",
+      tableLabel: "Purchase",
+      recordId: invoice._id,
+      referenceNumber: invoice.invoiceNumber,
+      previousData: invoice,
+      description: `Purchase invoice ${invoice.invoiceNumber} from ${invoice.supplierName} permanently deleted — ${(invoice.products || []).length} product(s)`,
+      refField: "invoiceNumber",
+    });
+
     res.json({ message: "Deleted successfully" });
   } catch (err) {
     console.error("Delete purchase error:", err);
@@ -1003,18 +1130,20 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ── DELETE / (bulk) ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE /  –  Bulk delete invoices                          ✅ LOGGED
+// ─────────────────────────────────────────────────────────────────────────────
 router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0) {
+    if (!Array.isArray(ids) || ids.length === 0)
       return res.status(400).json({ error: "No purchase IDs provided" });
-    }
 
     const invoices = await purchaseInventory.find({ _id: { $in: ids } }).lean();
     if (invoices.length === 0)
       return res.status(404).json({ error: "No purchases found" });
 
+    // Subtract stock for all invoices
     for (const inv of invoices) {
       for (const p of inv.products || []) {
         await updateReportInHand(
@@ -1030,11 +1159,23 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
             sellingPrice: p.sellingPrice || 0,
           },
           "subtract",
+          0,
         );
       }
     }
 
     const result = await purchaseInventory.deleteMany({ _id: { $in: ids } });
+
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Purchase Invoice(s)`,
+      tableName: "purchase",
+      tableLabel: "Purchase",
+      previousData: invoices,
+      description: `Bulk deleted ${result.deletedCount} purchase invoices`,
+      refField: "invoiceNumber",
+    });
+
     res.json({
       success: true,
       message: `Deleted ${result.deletedCount} invoices successfully`,
@@ -1046,118 +1187,21 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ── Merge decimal variations ──────────────────────────────────────────────────
-router.post("/reports-in-hand/merge-decimal-variations", async (req, res) => {
-  try {
-    const allReports = await ReportInHand.find({}).lean();
-    let mergedCount = 0;
-    const errors = [];
-
-    const productGroups = {};
-    for (const report of allReports) {
-      const normalizedName = normalizeProductName(report.productName);
-      if (!productGroups[normalizedName]) productGroups[normalizedName] = [];
-      productGroups[normalizedName].push(report);
-    }
-
-    for (const [normalizedName, reports] of Object.entries(productGroups)) {
-      if (reports.length > 1) {
-        try {
-          reports.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-          const mainReport = reports[0];
-          const otherReports = reports.slice(1);
-
-          let allBatches = [...(mainReport.batches || [])];
-          for (const other of otherReports) {
-            allBatches = [...allBatches, ...(other.batches || [])];
-          }
-
-          const uniqueBatches = [];
-          const seenBatches = new Set();
-          for (const batch of allBatches) {
-            const batchExpiry = batch.expiryDate
-              ? new Date(batch.expiryDate).getTime()
-              : null;
-            const batchKey = `${batch.boxes}|${batch.lc}|${batch.fob}|${batch.cif}|${batchExpiry}`;
-            if (!seenBatches.has(batchKey)) {
-              seenBatches.add(batchKey);
-              uniqueBatches.push(batch);
-            }
-          }
-
-          const { totalBoxesFromBatches, totalAmount, averagePrice } =
-            calculateTotalsFromBatches(uniqueBatches);
-          const addStockAdjustment = reports.reduce(
-            (sum, r) => sum + (r.addStockAdjustment || 0),
-            0,
-          );
-          const removeStockAdjustment = reports.reduce(
-            (sum, r) => sum + (r.removeStockAdjustment || 0),
-            0,
-          );
-          const totalBoxes =
-            totalBoxesFromBatches + addStockAdjustment - removeStockAdjustment;
-
-          await ReportInHand.updateOne(
-            { _id: mainReport._id },
-            {
-              $set: {
-                productName: normalizedName,
-                batches: uniqueBatches,
-                totalBoxesFromBatches,
-                totalBoxes,
-                totalAmount,
-                averagePrice,
-                addStockAdjustment,
-                removeStockAdjustment,
-                status: calculateStockStatus(totalBoxes),
-                updatedAt: new Date(),
-              },
-            },
-          );
-
-          const otherIds = otherReports.map((r) => r._id);
-          if (otherIds.length > 0)
-            await ReportInHand.deleteMany({ _id: { $in: otherIds } });
-          mergedCount += otherReports.length;
-        } catch (error) {
-          errors.push({ normalizedName, error: error.message });
-        }
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `Merged ${mergedCount} product variations`,
-      mergedCount,
-      errors: errors.length > 0 ? errors : undefined,
-    });
-  } catch (error) {
-    console.error("Merge decimal variations error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to merge decimal variations",
-        error: error.message,
-      });
-  }
-});
-
-// ── Import ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /import  –  Bulk import invoices                      ✅ LOGGED
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/import", async (req, res) => {
   try {
     const rows = req.body;
-    if (!Array.isArray(rows) || rows.length === 0) {
+    if (!Array.isArray(rows) || rows.length === 0)
       return res.status(400).json({ message: "Invalid or empty data" });
-    }
 
     const allProducts = await Product.find(
       {},
       "productName type batches sellingPrice",
     ).lean();
-    const skipped = [];
-    const importedInvoices = [];
+    const skipped = [],
+      importedInvoices = [];
 
     for (const invoiceData of rows) {
       try {
@@ -1176,7 +1220,6 @@ router.post("/import", async (req, res) => {
             );
             const normalizedSearch = normalizeProductName(standardizedName);
             let productInfo = null;
-
             for (const prod of allProducts) {
               if (
                 prod.productName &&
@@ -1203,7 +1246,6 @@ router.post("/import", async (req, res) => {
               ? new Date(product.expiryDate)
               : null;
             const amount = quantityPerBoxStrip * lc;
-
             return {
               productName: productNameToUse,
               type: product.type || productInfo?.type || "",
@@ -1252,10 +1294,11 @@ router.post("/import", async (req, res) => {
               sellingPrice: p.sellingPrice,
             },
             "add",
+            0,
           );
         }
 
-        importedInvoices.push(invoice);
+        importedInvoices.push(invoice.toObject ? invoice.toObject() : invoice);
       } catch (err) {
         console.error(
           `Error processing invoice ${invoiceData.invoiceNumber}:`,
@@ -1263,6 +1306,28 @@ router.post("/import", async (req, res) => {
         );
         skipped.push(invoiceData.invoiceNumber || "Unknown");
       }
+    }
+
+    if (importedInvoices.length > 0) {
+      await logActivity(req, {
+        action: "IMPORT",
+        actionLabel: `Bulk Imported ${importedInvoices.length} Purchase Invoice(s)`,
+        tableName: "purchase",
+        tableLabel: "Purchase",
+        newData: {
+          importedCount: importedInvoices.length,
+          skippedCount: skipped.length,
+          skippedInvoices: skipped,
+          invoices: importedInvoices.map((inv) => ({
+            invoiceNumber: inv.invoiceNumber,
+            supplierName: inv.supplierName,
+            productCount: (inv.products || []).length,
+            totalAmount: inv.totalAmount,
+          })),
+        },
+        description: `Imported ${importedInvoices.length} purchase invoices. Skipped: ${skipped.length}.`,
+        refField: "invoiceNumber",
+      });
     }
 
     res.json({
@@ -1276,13 +1341,101 @@ router.post("/import", async (req, res) => {
   }
 });
 
-// ── Cleanup names ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Remaining unchanged utility / report routes
+// ─────────────────────────────────────────────────────────────────────────────
+
+router.post("/reports-in-hand/merge-decimal-variations", async (req, res) => {
+  try {
+    const allReports = await ReportInHand.find({}).lean();
+    let mergedCount = 0;
+    const errors = [];
+    const productGroups = {};
+    for (const report of allReports) {
+      const normalizedName = normalizeProductName(report.productName);
+      if (!productGroups[normalizedName]) productGroups[normalizedName] = [];
+      productGroups[normalizedName].push(report);
+    }
+    for (const [normalizedName, reports] of Object.entries(productGroups)) {
+      if (reports.length > 1) {
+        try {
+          reports.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+          const mainReport = reports[0];
+          const otherReports = reports.slice(1);
+          let allBatches = [...(mainReport.batches || [])];
+          for (const other of otherReports)
+            allBatches = [...allBatches, ...(other.batches || [])];
+          const uniqueBatches = [],
+            seenBatches = new Set();
+          for (const batch of allBatches) {
+            const batchExpiry = batch.expiryDate
+              ? new Date(batch.expiryDate).getTime()
+              : null;
+            const batchKey = `${batch.boxes}|${batch.lc}|${batch.fob}|${batch.cif}|${batchExpiry}`;
+            if (!seenBatches.has(batchKey)) {
+              seenBatches.add(batchKey);
+              uniqueBatches.push(batch);
+            }
+          }
+          const { totalBoxesFromBatches, totalAmount, averagePrice } =
+            calculateTotalsFromBatches(uniqueBatches);
+          const addStockAdjustment = reports.reduce(
+            (sum, r) => sum + (r.addStockAdjustment || 0),
+            0,
+          );
+          const removeStockAdjustment = reports.reduce(
+            (sum, r) => sum + (r.removeStockAdjustment || 0),
+            0,
+          );
+          const totalBoxes =
+            totalBoxesFromBatches + addStockAdjustment - removeStockAdjustment;
+          await ReportInHand.updateOne(
+            { _id: mainReport._id },
+            {
+              $set: {
+                productName: normalizedName,
+                batches: uniqueBatches,
+                totalBoxesFromBatches,
+                totalBoxes,
+                totalAmount,
+                averagePrice,
+                addStockAdjustment,
+                removeStockAdjustment,
+                status: calculateStockStatus(totalBoxes),
+                updatedAt: new Date(),
+              },
+            },
+          );
+          const otherIds = otherReports.map((r) => r._id);
+          if (otherIds.length > 0)
+            await ReportInHand.deleteMany({ _id: { $in: otherIds } });
+          mergedCount += otherReports.length;
+        } catch (error) {
+          errors.push({ normalizedName, error: error.message });
+        }
+      }
+    }
+    res.json({
+      success: true,
+      message: `Merged ${mergedCount} product variations`,
+      mergedCount,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    console.error("Merge decimal variations error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to merge decimal variations",
+      error: error.message,
+    });
+  }
+});
+
 router.post("/reports-in-hand/cleanup-names", async (req, res) => {
   try {
     const allReports = await ReportInHand.find({}).lean();
     let updatedCount = 0;
     const errors = [];
-
     for (const report of allReports) {
       try {
         const standardizedName = await getStandardizedProductName(
@@ -1293,7 +1446,6 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
             productName: { $regex: new RegExp(`^${standardizedName}$`, "i") },
             _id: { $ne: report._id },
           }).lean();
-
           if (existingWithNewName) {
             const mergedBatches = [
               ...(existingWithNewName.batches || []),
@@ -1308,7 +1460,6 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
               0,
             );
             const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
-
             await ReportInHand.updateOne(
               { _id: existingWithNewName._id },
               {
@@ -1338,7 +1489,6 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
         });
       }
     }
-
     res.json({
       success: true,
       message: `Cleaned up ${updatedCount} product names`,
@@ -1347,17 +1497,14 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
     });
   } catch (error) {
     console.error("Cleanup error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to cleanup product names",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to cleanup product names",
+      error: error.message,
+    });
   }
 });
 
-// ── Debug: product name standardization ──────────────────────────────────────
 router.get("/debug/product-name-standardization", async (req, res) => {
   try {
     const testNames = [
@@ -1374,7 +1521,6 @@ router.get("/debug/product-name-standardization", async (req, res) => {
       "N-LYCOPENE + WHEATGERM OIL",
       "n lycopene + wheatgerm oil",
     ];
-
     const results = await Promise.all(
       testNames.map(async (name) => {
         const normalized = normalizeProductName(name);
@@ -1388,12 +1534,10 @@ router.get("/debug/product-name-standardization", async (req, res) => {
         };
       }),
     );
-
     const reportInHandEntries = await ReportInHand.find({})
       .select("productName totalBoxes sellingPrice")
       .limit(20)
       .lean();
-
     const standardizedReports = await Promise.all(
       reportInHandEntries.map(async (r) => ({
         productName: r.productName,
@@ -1402,7 +1546,6 @@ router.get("/debug/product-name-standardization", async (req, res) => {
         sellingPrice: r.sellingPrice,
       })),
     );
-
     res.json({
       testResults: results,
       sampleReportInHandEntries: standardizedReports,
@@ -1413,13 +1556,11 @@ router.get("/debug/product-name-standardization", async (req, res) => {
   }
 });
 
-// ── Search reports-in-hand ────────────────────────────────────────────────────
 router.get("/reports-in-hand/search", async (req, res) => {
   try {
     const { query } = req.query;
     if (!query)
       return res.status(400).json({ error: "Query parameter required" });
-
     const standardizedQuery = await getStandardizedProductName(query);
     const results = await ReportInHand.find({
       $or: [
@@ -1427,7 +1568,6 @@ router.get("/reports-in-hand/search", async (req, res) => {
         { productName: { $regex: standardizedQuery, $options: "i" } },
       ],
     }).lean();
-
     res.json({
       success: true,
       query,
@@ -1448,30 +1588,24 @@ router.get("/reports-in-hand/search", async (req, res) => {
   }
 });
 
-// ── Standardize name for one product ─────────────────────────────────────────
 router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
   try {
     const { id } = req.params;
     const report = await ReportInHand.findById(id).lean();
     if (!report) return res.status(404).json({ error: "Report not found" });
-
     const oldName = report.productName;
     const newName = await getStandardizedProductName(oldName);
-
-    if (oldName === newName) {
+    if (oldName === newName)
       return res.json({
         success: true,
         message: "Product name already standardized",
         oldName,
         newName,
       });
-    }
-
     const existingWithNewName = await ReportInHand.findOne({
       productName: { $regex: new RegExp(`^${newName}$`, "i") },
       _id: { $ne: id },
     }).lean();
-
     if (existingWithNewName) {
       const mergedBatches = [
         ...(existingWithNewName.batches || []),
@@ -1486,7 +1620,6 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
         0,
       );
       const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
-
       await ReportInHand.updateOne(
         { _id: existingWithNewName._id },
         {
@@ -1500,7 +1633,6 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
         },
       );
       await ReportInHand.findByIdAndDelete(id);
-
       return res.json({
         success: true,
         message: "Product merged with existing entry",
@@ -1527,7 +1659,6 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
   }
 });
 
-// ── GET /reports-in-hand ──────────────────────────────────────────────────────
 router.get("/reports-in-hand", async (req, res) => {
   try {
     const { search } = req.query;
@@ -1536,7 +1667,6 @@ router.get("/reports-in-hand", async (req, res) => {
       : {};
     const allReports = await ReportInHand.find(query).sort({ createdAt: -1 });
     const filteredReports = filterReportsWithBatches(allReports);
-
     const inStockCount = filteredReports.filter(
       (r) => r.status === "In Stock",
     ).length;
@@ -1553,7 +1683,6 @@ router.get("/reports-in-hand", async (req, res) => {
       (sum, r) => sum + (r.totalBoxes || 0),
       0,
     );
-
     res.status(200).json({
       success: true,
       count: filteredReports.length,
@@ -1567,25 +1696,20 @@ router.get("/reports-in-hand", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching stock in hands:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch reports",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch reports",
+      error: error.message,
+    });
   }
 });
 
-// ── Adjust stock ──────────────────────────────────────────────────────────────
 router.put("/reports-in-hand/:id/adjust-stock", async (req, res) => {
   try {
     const { id } = req.params;
     const { addStockAdjustment, removeStockAdjustment } = req.body;
-
     const report = await ReportInHand.findById(id).lean();
     if (!report) return res.status(404).json({ error: "Report not found" });
-
     const { totalBoxesFromBatches } = calculateTotalsFromBatches(
       report.batches || [],
     );
@@ -1593,7 +1717,6 @@ router.put("/reports-in-hand/:id/adjust-stock", async (req, res) => {
     const newRemoveAdjustment = Number(removeStockAdjustment) || 0;
     const totalBoxes =
       totalBoxesFromBatches + newAddAdjustment - newRemoveAdjustment;
-
     await ReportInHand.updateOne(
       { _id: id },
       {
@@ -1606,7 +1729,6 @@ router.put("/reports-in-hand/:id/adjust-stock", async (req, res) => {
         },
       },
     );
-
     const updatedReport = await ReportInHand.findById(id).lean();
     res.json({
       success: true,
@@ -1623,13 +1745,11 @@ router.put("/reports-in-hand/:id/adjust-stock", async (req, res) => {
   }
 });
 
-// ── Fix totals ────────────────────────────────────────────────────────────────
 router.post("/reports-in-hand/fix-totals", async (req, res) => {
   try {
     const allReports = await ReportInHand.find({}).lean();
     let fixedCount = 0;
     const errors = [];
-
     for (const report of allReports) {
       try {
         const batches = report.batches || [];
@@ -1639,14 +1759,12 @@ router.post("/reports-in-hand/fix-totals", async (req, res) => {
           totalBoxesFromBatches +
           (report.addStockAdjustment || 0) -
           (report.removeStockAdjustment || 0);
-
         const needsUpdate =
           Math.abs(
             totalBoxesFromBatches - (report.totalBoxesFromBatches || 0),
           ) > 0.01 ||
           Math.abs(totalBoxes - (report.totalBoxes || 0)) > 0.01 ||
           Math.abs(totalAmount - (report.totalAmount || 0)) > 0.01;
-
         if (needsUpdate) {
           await ReportInHand.updateOne(
             { _id: report._id },
@@ -1671,7 +1789,6 @@ router.post("/reports-in-hand/fix-totals", async (req, res) => {
         });
       }
     }
-
     res.json({
       success: true,
       message: `Fixed totals for ${fixedCount} products`,
@@ -1680,30 +1797,26 @@ router.post("/reports-in-hand/fix-totals", async (req, res) => {
     });
   } catch (error) {
     console.error("Fix totals error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fix product totals",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fix product totals",
+      error: error.message,
+    });
   }
 });
 
-// ── Download Excel (purchase) ─────────────────────────────────────────────────
 router.post("/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
     let query = {};
     if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+      const start = new Date(startDate),
+        end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
       query.invoiceDate = { $gte: start, $lte: end };
     }
-
     const purchases = await purchaseInventory.find(query).lean();
-    if (purchases.length === 0) {
+    if (purchases.length === 0)
       return res.status(200).json({
         success: false,
         message:
@@ -1711,7 +1824,6 @@ router.post("/download-excel", async (req, res) => {
             ? "No purchases found for selected date range"
             : "No purchases found in inventory",
       });
-    }
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Purchases");
@@ -1782,7 +1894,6 @@ router.post("/download-excel", async (req, res) => {
         ]);
       });
     });
-
     worksheet.eachRow((row) => {
       row.eachCell((cell) => {
         cell.border = {
@@ -1798,7 +1909,6 @@ router.post("/download-excel", async (req, res) => {
       startDate && endDate
         ? `purchase_summary_${dayjs(startDate).format("DD-MM-YYYY")}_to_${dayjs(endDate).format("DD-MM-YYYY")}.xlsx`
         : `purchase_summary_all_${dayjs().format("DD-MM-YYYY")}.xlsx`;
-
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1807,21 +1917,18 @@ router.post("/download-excel", async (req, res) => {
     await workbook.xlsx.write(res);
   } catch (error) {
     console.error("Error in purchase download-excel:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to generate purchase excel file",
-        error:
-          process.env.NODE_ENV === "development"
-            ? error.message
-            : "Internal server error",
-        timestamp: new Date().toISOString(),
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate purchase excel file",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : "Internal server error",
+      timestamp: new Date().toISOString(),
+    });
   }
 });
 
-// ── Download Excel (reports-in-hand) ─────────────────────────────────────────
 router.post("/reports-in-hand/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
@@ -1829,13 +1936,12 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
     const filteredReports = reports.filter(
       (r) => Array.isArray(r.batches) && r.batches.length > 0,
     );
-
     let finalData = [];
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
 
+    if (startDate && endDate) {
+      const start = new Date(startDate),
+        end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
       filteredReports.forEach((report) => {
         const filteredBatches = report.batches.filter((batch) => {
           const batchDate = new Date(batch.date);
@@ -1850,39 +1956,36 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
             (sum, b) => sum + b.amount,
             0,
           );
-          filteredBatches.forEach((batch) => {
+          filteredBatches.forEach((batch) =>
             finalData.push({
               ...report,
               batchData: batch,
               filteredTotalBoxes: totalBoxes,
               filteredTotalAmount: totalAmount,
               filteredStatus: calculateStockStatus(totalBoxes),
-            });
-          });
+            }),
+          );
         }
       });
     } else {
       filteredReports.forEach((report) => {
-        report.batches.forEach((batch) => {
+        report.batches.forEach((batch) =>
           finalData.push({
             ...report,
             batchData: batch,
             filteredTotalBoxes: report.totalBoxes,
             filteredTotalAmount: report.totalAmount,
             filteredStatus: report.status,
-          });
-        });
+          }),
+        );
       });
     }
 
-    if (finalData.length === 0) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "No reports found for selected criteria",
-        });
-    }
+    if (finalData.length === 0)
+      return res.status(404).json({
+        success: false,
+        message: "No reports found for selected criteria",
+      });
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("stock in hands");
@@ -1947,7 +2050,6 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
         item.filteredTotalAmount,
         item.filteredStatus,
       ]);
-
       const statusColors = {
         "Out of Stock": "FFCCCC",
         Critical: "FFE5CC",
@@ -1973,7 +2075,6 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
         cell.alignment = { vertical: "middle", horizontal: "center" };
       });
     });
-
     const numberCols = [6, 7, 8, 9, 10, 11, 12, 13];
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber > 1) {
@@ -2008,7 +2109,6 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
         ? `_${dayjs(startDate).format("DD-MM-YYYY")}_to_${dayjs(endDate).format("DD-MM-YYYY")}`
         : `_${dayjs().format("DD-MM-YYYY")}`) +
       ".xlsx";
-
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2018,37 +2118,31 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
     res.end();
   } catch (error) {
     console.error("Error generating stock in hands Excel:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to generate reports excel file",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate reports excel file",
+      error: error.message,
+    });
   }
 });
 
-// ── Debug: purchase product match ─────────────────────────────────────────────
 router.get("/debug/purchase-product-match/:productName", async (req, res) => {
   try {
     const { productName } = req.params;
     const normalized = normalizeProductName(productName);
     const standardized = await getStandardizedProductName(productName);
-
     const productMatches = await Product.find({
       $or: [
         { productName: { $regex: productName, $options: "i" } },
         { productName: { $regex: standardized, $options: "i" } },
       ],
     }).lean();
-
     const reportInHandMatches = await ReportInHand.find({
       $or: [
         { productName: { $regex: productName, $options: "i" } },
         { productName: { $regex: standardized, $options: "i" } },
       ],
     }).lean();
-
     res.json({
       searchTerm: productName,
       normalizedTerm: normalized,
@@ -2077,48 +2171,39 @@ router.get("/debug/purchase-product-match/:productName", async (req, res) => {
   }
 });
 
-// ── Check ─────────────────────────────────────────────────────────────────────
 router.get("/check", async (req, res) => {
   try {
     const count = await purchaseInventory.countDocuments();
-    res
-      .status(200)
-      .json({
-        success: true,
-        exists: count > 0,
-        count,
-        message:
-          count > 0
-            ? "Purchase inventories found"
-            : "No purchase inventories found",
-      });
+    res.status(200).json({
+      success: true,
+      exists: count > 0,
+      count,
+      message:
+        count > 0
+          ? "Purchase inventories found"
+          : "No purchase inventories found",
+    });
   } catch (error) {
     console.error("Error checking purchase inventories:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Error checking purchase inventories",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Error checking purchase inventories",
+      error: error.message,
+    });
   }
 });
 
-// ── Download ALL Excel ────────────────────────────────────────────────────────
 router.get("/download-all-excel", async (req, res) => {
   try {
     const purchases = await purchaseInventory
       .find()
       .sort({ invoiceDate: -1 })
       .lean();
-    if (!purchases || purchases.length === 0) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "No purchase records found to download",
-        });
-    }
+    if (!purchases || purchases.length === 0)
+      return res.status(404).json({
+        success: false,
+        message: "No purchase records found to download",
+      });
 
     const rows = [];
     purchases.forEach((invoice) => {
@@ -2164,7 +2249,6 @@ router.get("/download-all-excel", async (req, res) => {
     workbook.creator = "Healthcare South East Asia";
     workbook.created = new Date();
     const ws = workbook.addWorksheet("Purchase Inventory");
-
     ws.columns = [
       { key: "invoiceNumber", width: 25 },
       { key: "invoiceDate", width: 20 },
@@ -2187,7 +2271,6 @@ router.get("/download-all-excel", async (req, res) => {
     companyCell.font = { bold: true, size: 16, name: "Arial" };
     companyCell.alignment = { horizontal: "center", vertical: "middle" };
     ws.getRow(1).height = 21;
-
     ws.mergeCells("A2:M2");
     const titleCell = ws.getCell("A2");
     titleCell.value = "Purchase Inventory Summary";
@@ -2224,7 +2307,6 @@ router.get("/download-all-excel", async (req, res) => {
       left: { style: "thin", color: { argb: "FFD9D9D9" } },
       right: { style: "thin", color: { argb: "FFD9D9D9" } },
     };
-
     headers.forEach((header, idx) => {
       const cell = headerRow.getCell(idx + 1);
       cell.value = header;
@@ -2259,7 +2341,6 @@ router.get("/download-all-excel", async (req, res) => {
       pattern: "solid",
       fgColor: { argb: "FFFFFFFF" },
     };
-
     const invoiceColorMap = {};
     let invoiceColorIndex = 0;
     rows.forEach((r) => {
@@ -2281,7 +2362,6 @@ router.get("/download-all-excel", async (req, res) => {
       const dataRow = ws.getRow(excelRowNum);
       const rowFill =
         invoiceColorMap[rowData.invoiceNumber || "unknown"] || fillOdd;
-
       const values = [
         rowData.invoiceNumber,
         formatDate(rowData.invoiceDate),
@@ -2297,7 +2377,6 @@ router.get("/download-all-excel", async (req, res) => {
         rowData.sellingPrice,
         rowData.remarks,
       ];
-
       values.forEach((val, colIdx) => {
         const cell = dataRow.getCell(colIdx + 1);
         cell.value = val;
@@ -2361,7 +2440,6 @@ router.get("/download-all-excel", async (req, res) => {
       "",
       "",
     ];
-
     footerLabels.forEach((val, colIdx) => {
       const cell = footerRow.getCell(colIdx + 1);
       cell.value = val;
@@ -2373,19 +2451,15 @@ router.get("/download-all-excel", async (req, res) => {
       };
       cell.fill = footerFill;
       cell.border = footerBorder;
-      if (colIdx + 1 === 8) {
-        cell.numFmt = "#,##0";
-      }
+      if (colIdx + 1 === 8) cell.numFmt = "#,##0";
       cell.alignment = { horizontal: "center", vertical: "middle" };
     });
     footerRow.height = 20;
-
     ws.views = [{ state: "frozen", xSplit: 0, ySplit: 4 }];
     ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 13 } };
 
     const today = dayjs().format("DD-MM-YYYY");
     const fileName = `PurchaseInventory_${today}.xlsx`;
-
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2395,16 +2469,14 @@ router.get("/download-all-excel", async (req, res) => {
     res.end();
   } catch (error) {
     console.error("Error in download-all-excel:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to generate purchase inventory Excel",
-        error:
-          process.env.NODE_ENV === "development"
-            ? error.message
-            : "Internal server error",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate purchase inventory Excel",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : "Internal server error",
+    });
   }
 });
 

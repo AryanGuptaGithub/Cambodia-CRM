@@ -34,60 +34,49 @@ const ACTION_STYLE = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIXED: isSuperAdmin — case-insensitive, matches "SuperAdmin", "superadmin",
-//    "super", "Super Admin" etc. Mirrors the backend isSuperAdminRole() helper.
+// Helper function to get dynamic Jan to previous month range
 // ─────────────────────────────────────────────────────────────────────────────
-const checkIsSuperAdmin = (user) => {
-  const role = user?.role?.toLowerCase().replace(/\s+/g, "");
-  return role === "superadmin" || role === "super";
-};
+const getJanToPreviousMonthRange = () => {
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth(); // 0 = Jan, 3 = Apr, 4 = May, etc.
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIXED: Dynamic quarter label & date range
-//    - If current month is Jan–Mar  → shows "Jan – Mar (Q1)"  with those dates
-//    - If current month is Apr–Jun  → shows "Jan – Mar (Q1)"  (last complete Q)
-//    - If current month is Jul–Sep  → shows "Apr – Jun (Q2)"
-//    - If current month is Oct–Dec  → shows "Jul – Sep (Q3)"
-//    Always returns the LAST COMPLETED quarter so data is never empty.
-// ─────────────────────────────────────────────────────────────────────────────
-const getLastCompleteQuarter = () => {
-  const now = new Date();
-  const m = now.getMonth(); // 0-based
-  const y = now.getFullYear();
-
-  // Determine which quarter we are currently IN (0-indexed)
-  const currentQ = Math.floor(m / 3); // 0=Q1, 1=Q2, 2=Q3, 3=Q4
-
-  // Last complete quarter
-  let lastQ = currentQ - 1;
-  let qYear = y;
-  if (lastQ < 0) {
-    lastQ = 3;
-    qYear = y - 1;
+  if (currentMonth === 0) {
+    // January - show previous year's full year
+    const previousYear = currentYear - 1;
+    return {
+      startDate: `${previousYear}-01-01`,
+      endDate: `${previousYear}-12-31`,
+      label: `Jan - Dec ${previousYear}`,
+    };
   }
 
-  const QUARTERS = [
-    { label: "Jan – Mar", startMonth: 0, endMonth: 2 },
-    { label: "Apr – Jun", startMonth: 3, endMonth: 5 },
-    { label: "Jul – Sep", startMonth: 6, endMonth: 8 },
-    { label: "Oct – Dec", startMonth: 9, endMonth: 11 },
+  // For months Feb-Dec, show Jan to previous month
+  const endDate = new Date(currentYear, currentMonth, 0); // Last day of previous month
+  const monthNames = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
-
-  const q = QUARTERS[lastQ];
-  const startDate = new Date(qYear, q.startMonth, 1);
-  const endDate = new Date(qYear, q.endMonth + 1, 0, 23, 59, 59, 999); // last day of month
+  const endMonthName = monthNames[currentMonth - 1];
 
   return {
-    label: `${q.label} ${qYear} (Q${lastQ + 1})`,
-    startDate,
-    endDate,
+    startDate: `${currentYear}-01-01`,
+    endDate: endDate.toISOString().split("T")[0],
+    label: `Jan - ${endMonthName} ${currentYear}`,
   };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ FIXED: Date display helpers
-//    - formatDateTime → full "DD Month YYYY HH:MM:SS AM/PM"
-//    - formatDateOnly → "DD Month YYYY" (used when filter is date-range only)
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 const formatDateTime = (iso) => {
   if (!iso) return "—";
@@ -104,31 +93,10 @@ const formatDateTime = (iso) => {
   return `${day} ${month} ${year} ${time}`;
 };
 
-const formatDateOnly = (iso) => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = d.toLocaleString("en-US", { month: "long" });
-  const year = d.getFullYear();
-  return `${day} ${month} ${year}`;
-};
-
-// Decide whether to show date-only or full datetime depending on the active filter
-const formatLogDate = (iso, selectedTab, dateRange) => {
-  if (selectedTab === "custom" && dateRange.start && dateRange.end) {
-    // If start and end are the same calendar day, show full time
-    if (dateRange.start === dateRange.end) return formatDateTime(iso);
-    return formatDateOnly(iso);
-  }
-  if (selectedTab === "today") return formatDateTime(iso); // same day → show time
-  return formatDateTime(iso); // default: always show full datetime
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Skip _id and __v from snapshots
-// ─────────────────────────────────────────────────────────────────────────────
 const SKIP_FIELDS = ["__v", "_id"];
 
+// Flatten objects, skip _id and __v
 const flatten = (obj, prefix = "") => {
   if (!obj || typeof obj !== "object") return {};
   return Object.entries(obj).reduce((acc, [k, v]) => {
@@ -151,17 +119,22 @@ const flatten = (obj, prefix = "") => {
   }, {});
 };
 
+// Human readable key, with special handling for "date" when table is customers
 const humanKey = (key, tableName) => {
-  if (tableName === "customers" && key === "date") return "Joining Date";
+  if (tableName === "customers" && key === "date") {
+    return "Joining Date";
+  }
   return key
     .replace(/([A-Z])/g, " $1")
     .replace(/\./g, " › ")
     .replace(/^./, (c) => c.toUpperCase());
 };
+
+// Helper to get field label for snapshot tables
 const getFieldLabel = (field, tableName) => humanKey(field, tableName);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DeleteSnapshotTable
+// DeleteSnapshotTable – shows all deleted records with individual revert options
 // ─────────────────────────────────────────────────────────────────────────────
 const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
   const rows = log.previousSnapshots?.length
@@ -234,7 +207,7 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UpdateDiffTable
+// UpdateDiffTable – before / after diff (no _id, __v)
 // ─────────────────────────────────────────────────────────────────────────────
 const UpdateDiffTable = ({ log }) => {
   const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
@@ -252,6 +225,7 @@ const UpdateDiffTable = ({ log }) => {
   const allKeys = [
     ...new Set([...Object.keys(prevFlat), ...Object.keys(newFlat)]),
   ];
+
   const changed = allKeys.filter((k) => prevFlat[k] !== newFlat[k]);
   const unchanged = allKeys.filter((k) => prevFlat[k] === newFlat[k]);
 
@@ -283,7 +257,7 @@ const UpdateDiffTable = ({ log }) => {
                     <td className="px-4 py-2 font-medium text-gray-700">
                       {getFieldLabel(k, log.tableName)}
                     </td>
-                    <td className="px-4 py-2 bg-red-50   text-red-700   break-all">
+                    <td className="px-4 py-2 bg-red-50 text-red-700 break-all">
                       {prevFlat[k] || "—"}
                     </td>
                     <td className="px-4 py-2 bg-green-50 text-green-700 break-all">
@@ -331,7 +305,7 @@ const UpdateDiffTable = ({ log }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GenericSnapshotTable
+// GenericSnapshotTable – for CREATE / REVERT etc.
 // ─────────────────────────────────────────────────────────────────────────────
 const GenericSnapshotTable = ({ log }) => {
   const snapshots = log.newSnapshots?.length
@@ -344,7 +318,6 @@ const GenericSnapshotTable = ({ log }) => {
     snapshots?.[0]?.data || log.newData || log.previousData || {},
   );
   const entries = Object.entries(flat);
-
   if (!entries.length)
     return (
       <p className="text-gray-500 italic text-sm">
@@ -439,12 +412,13 @@ const DetailModal = ({
           </button>
         </div>
 
-        {/* Meta */}
+        {/* Meta info grid */}
         <div className="px-5 py-4 bg-gray-50 border-b text-sm">
           <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
             {[
               ["User", log.userName || "System"],
               ["Role", log.userRole || "—"],
+              ["Expires", log.expiresAt ? formatDateTime(log.expiresAt) : "—"],
             ].map(([label, value]) => (
               <div key={label} className="flex flex-col">
                 <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">
@@ -456,6 +430,7 @@ const DetailModal = ({
               </div>
             ))}
           </div>
+          {/* Description as full width row */}
           <div className="flex flex-col mt-2">
             <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">
               Description
@@ -475,7 +450,7 @@ const DetailModal = ({
           </div>
         )}
 
-        {/* Content */}
+        {/* Snapshot content (scrollable) */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {renderContent()}
         </div>
@@ -582,26 +557,71 @@ const Toast = ({ msg, type }) => (
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 const UserActivity = ({ currentUser: propCurrentUser }) => {
-  // ✅ Read user from prop first, fallback to localStorage
-  const [currentUser, setCurrentUser] = useState(() => {
-    if (propCurrentUser) return propCurrentUser;
-    try {
-      const raw = localStorage.getItem("user");
-      if (raw) return JSON.parse(raw);
-      // fallback from flat keys
-      const email = localStorage.getItem("email");
-      const role = localStorage.getItem("role");
-      if (email || role) return { name: email || "User", email, role };
-    } catch {}
-    return null;
-  });
+  // Try to get currentUser from multiple storage locations
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userLoading, setUserLoading] = useState(true);
+  const [activityTypeTab, setActivityTypeTab] = useState("all"); // "all", "normal", "revert"
 
   useEffect(() => {
-    if (propCurrentUser) setCurrentUser(propCurrentUser);
+    const getUserFromStorage = () => {
+      try {
+        if (propCurrentUser) {
+          setCurrentUser(propCurrentUser);
+          setUserLoading(false);
+          return;
+        }
+
+        const possibleKeys = [
+          "user",
+          "currentUser",
+          "userData",
+          "authUser",
+          "userInfo",
+        ];
+        let userData = null;
+
+        for (const key of possibleKeys) {
+          const storedUser = localStorage.getItem(key);
+          if (storedUser) {
+            try {
+              userData = JSON.parse(storedUser);
+              break;
+            } catch (e) {}
+          }
+        }
+
+        if (!userData) {
+          for (const key of possibleKeys) {
+            const sessionUser = sessionStorage.getItem(key);
+            if (sessionUser) {
+              try {
+                userData = JSON.parse(sessionUser);
+                break;
+              } catch (e) {}
+            }
+          }
+        }
+
+        if (userData) {
+          setCurrentUser(userData);
+        }
+      } catch (error) {
+        console.error("Error getting user from storage:", error);
+      } finally {
+        setUserLoading(false);
+      }
+    };
+
+    getUserFromStorage();
+
+    window.addEventListener("storage", getUserFromStorage);
+    return () => window.removeEventListener("storage", getUserFromStorage);
   }, [propCurrentUser]);
 
-  // ✅ isSuperAdmin is now case-insensitive
-  const isSuperAdmin = checkIsSuperAdmin(currentUser);
+  const isSuperAdmin = (() => {
+    const role = currentUser?.role?.toLowerCase();
+    return role === "superadmin" || role === "super" || role === "super admin";
+  })();
 
   const [users, setUsers] = useState([]);
   const [records, setRecords] = useState([]);
@@ -625,15 +645,14 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
 
   const inputRef = useRef(null);
 
-  // ✅ Compute quarter info once and reuse
-  const quarterInfo = getLastCompleteQuarter();
+  // Get dynamic Jan to previous month range
+  const janToPreviousMonthRange = getJanToPreviousMonthRange();
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
 
-  // ✅ FIXED: getDateFilter uses dynamic quarterInfo
   const getDateFilter = useCallback(() => {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, "0");
@@ -648,10 +667,10 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
           startDate: ymd(new Date(now.getFullYear(), now.getMonth(), 1)),
           endDate: now.toISOString(),
         };
-      case "quarter":
+      case "janToPreviousMonth":
         return {
-          startDate: quarterInfo.startDate.toISOString(),
-          endDate: quarterInfo.endDate.toISOString(),
+          startDate: janToPreviousMonthRange.startDate,
+          endDate: janToPreviousMonthRange.endDate,
         };
       case "custom":
         return {
@@ -665,7 +684,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
       default: // "all"
         return {};
     }
-  }, [selectedTab, dateRange, quarterInfo]);
+  }, [selectedTab, dateRange, janToPreviousMonthRange]);
 
   useEffect(() => {
     const check = () => setIsMobileView(window.innerWidth < 768);
@@ -700,7 +719,11 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
       setLoading(true);
       try {
         const dateFilter = getDateFilter();
-        const params = { page: goPage, limit: 50 };
+        const params = {
+          page: goPage,
+          limit: 50,
+          activityType: activityTypeTab, // "all", "normal", "revert"
+        };
         if (activeUser && activeUser !== "all") params.userId = activeUser;
         if (searchTerm.trim()) params.search = searchTerm.trim();
         if (dateFilter.startDate) params.startDate = dateFilter.startDate;
@@ -720,12 +743,12 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
         setLoading(false);
       }
     },
-    [activeUser, searchTerm, getDateFilter],
+    [activeUser, searchTerm, getDateFilter, activityTypeTab],
   );
 
   useEffect(() => {
     fetchActivity(1);
-  }, [activeUser, searchTerm, selectedTab, dateRange]);
+  }, [activeUser, searchTerm, selectedTab, dateRange, activityTypeTab]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -736,6 +759,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
       if (searchTerm.trim()) params.set("search", searchTerm.trim());
       if (dateFilter.startDate) params.set("startDate", dateFilter.startDate);
       if (dateFilter.endDate) params.set("endDate", dateFilter.endDate);
+      params.set("activityType", activityTypeTab);
 
       const res = await fetch(
         `${backendUrl}/api/activity-logs/export?${params}`,
@@ -759,11 +783,8 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     if (!revertLog) return;
     setReverting(true);
     try {
-      const token = localStorage.getItem("token");
       const res = await axios.post(
         `${backendUrl}/api/activity-logs/${revertLog._id}/revert`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } },
       );
       if (res.data.success) {
         showToast("Action reverted successfully!");
@@ -784,11 +805,9 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     const { log, recordId, recordIndex } = singleRecordRevert;
     setReverting(true);
     try {
-      const token = localStorage.getItem("token");
       const res = await axios.post(
         `${backendUrl}/api/activity-logs/${log._id}/revert-single`,
         { recordId, recordIndex },
-        { headers: { Authorization: `Bearer ${token}` } },
       );
       if (res.data.success) {
         showToast(`Record #${recordIndex + 1} reverted successfully!`);
@@ -804,7 +823,60 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     }
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // Render activity type tabs (All, Normal, Revert)
+  const renderActivityTypeTabs = () => {
+    const tabs = [
+      { key: "all", label: "All", color: "indigo" },
+      { key: "normal", label: "Normal", color: "indigo" },
+      { key: "revert", label: "Revert", color: "orange" },
+    ];
+
+    return (
+      <div
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}
+      >
+        <div className="flex flex-wrap gap-2">
+          {tabs.map(({ key, label, color }) => (
+            <button
+              key={key}
+              onClick={() => setActivityTypeTab(key)}
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors flex items-center gap-1 ${
+                activityTypeTab === key
+                  ? color === "orange"
+                    ? "bg-orange-600 text-white"
+                    : "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              {key === "revert" && <RotateCcw size={14} className="mr-1" />}
+              {label}
+            </button>
+          ))}
+        </div>
+        <div
+          className={`flex items-center gap-2 mt-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
+        >
+          <span>
+            {activityTypeTab === "all" &&
+              "📋 Showing all records (both normal and reverted)"}
+            {activityTypeTab === "normal" &&
+              "✅ Showing only normal records (DELETE & UPDATE actions that are NOT reverted)"}
+            {activityTypeTab === "revert" && "↩️ Showing only reverted records"}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  if (userLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <span className="ml-2 text-gray-500">Loading...</span>
+      </div>
+    );
+  }
+
   return (
     <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
       {toast && <Toast msg={toast.msg} type={toast.type} />}
@@ -938,17 +1010,19 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
         </div>
       )}
 
+      {/* Activity Type Tabs (All, Normal, Revert) */}
+      {renderActivityTypeTabs()}
+
       {/* Filter box */}
       <div
         className={`bg-white rounded-xl shadow-sm ${isMobileView ? "p-3" : "p-4"} space-y-3 mb-4 border border-gray-200`}
       >
         <div className="flex flex-wrap gap-2">
-          {/* ✅ FIXED: "quarter" tab now shows dynamic label e.g. "Jan – Mar 2025 (Q1)" */}
           {[
             { key: "today", label: "Today" },
             { key: "all", label: "All Records" },
             { key: "month", label: "Current Month" },
-            { key: "quarter", label: quarterInfo.label },
+            { key: "janToPreviousMonth", label: janToPreviousMonthRange.label },
             { key: "custom", label: "Custom" },
           ].map(({ key, label }) => (
             <button
@@ -1006,9 +1080,11 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
               ? `${dateRange.start || "any"} to ${dateRange.end || "any"}`
               : selectedTab === "all"
                 ? "All time"
-                : selectedTab === "quarter"
-                  ? quarterInfo.label
-                  : selectedTab}
+                : selectedTab === "janToPreviousMonth"
+                  ? janToPreviousMonthRange.label
+                  : selectedTab === "month"
+                    ? "Current Month"
+                    : "Today"}
           </span>
           {activeUser !== "all" && (
             <>
@@ -1022,10 +1098,17 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
               </span>
             </>
           )}
-          <span>•</span>
-          <span className="text-orange-600 font-medium">
-            Logs auto-delete after 30 days
-          </span>
+          {activityTypeTab !== "all" && (
+            <>
+              <span>•</span>
+              <span
+                className={`font-medium ${activityTypeTab === "revert" ? "text-orange-600" : ""}`}
+              >
+                {activityTypeTab === "revert" ? "Reverted Only" : "Normal Only"}
+              </span>
+            </>
+          )}
+ 
         </div>
 
         <div className="w-full sm:w-80">
@@ -1099,20 +1182,22 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
         >
           <thead className="bg-gradient-to-r from-gray-50 to-gray-100 text-gray-700 border-b">
             <tr>
-              {["Date & Time", "User", "Action", "Details", ""].map((col) => (
-                <th
-                  key={col}
-                  className={`${isMobileView ? "p-3" : "p-4"} font-semibold text-left`}
-                >
-                  {col}
-                </th>
-              ))}
+              {["Date & Time", "User", "Action", "Details", "Status", ""].map(
+                (col) => (
+                  <th
+                    key={col}
+                    className={`${isMobileView ? "p-3" : "p-4"} font-semibold text-left`}
+                  >
+                    {col}
+                  </th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="text-center p-8">
+                <td colSpan={6} className="text-center p-8">
                   <div className="flex justify-center items-center gap-3">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" />
                     <span className="text-gray-500">Loading activities…</span>
@@ -1121,7 +1206,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
               </tr>
             ) : records.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center py-12">
+                <td colSpan={6} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Activity size={48} className="text-gray-300" />
                     <p className="text-gray-400 font-medium">
@@ -1145,11 +1230,10 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                         : "bg-gray-50/50"
                   }`}
                 >
-                  {/* ✅ FIXED: date column uses formatLogDate which is date-only for multi-day ranges */}
                   <td
                     className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap text-gray-600 font-mono text-xs`}
                   >
-                    {formatLogDate(r.createdAt, selectedTab, dateRange)}
+                    {formatDateTime(r.createdAt)}
                   </td>
                   <td className={`${isMobileView ? "p-3" : "p-4"} text-left`}>
                     <span className="font-medium text-gray-800">
@@ -1167,17 +1251,23 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                     >
                       {r.action}
                     </span>
-                    {r.isReverted && (
-                      <span className="block text-xs text-orange-500 mt-0.5">
-                        ↩ reverted
-                      </span>
-                    )}
                   </td>
                   <td
                     className={`${isMobileView ? "p-3" : "p-4"} text-left text-gray-600 max-w-xs truncate`}
                     title={r.actionLabel || r.description}
                   >
                     {r.actionLabel || r.description || "—"}
+                  </td>
+                  <td className={`${isMobileView ? "p-3" : "p-4"} text-left`}>
+                    {r.isReverted ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
+                        <RotateCcw size={10} /> Reverted
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                        Normal
+                      </span>
+                    )}
                   </td>
                   <td
                     className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap`}
