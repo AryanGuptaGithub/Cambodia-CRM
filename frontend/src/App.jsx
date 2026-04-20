@@ -129,8 +129,52 @@ import StockTransferForm from "./pages/StockTransferForm";
 import AddStaffMember from "./pages/AddStaffMember";
 import LeaveAndAttendance from "./pages/HRM/LeaveAttendance";
 
-// ✅ FIXED IMPORT
+// Import UserActivity
 import UserActivity from "./pages/ActivityLog/UserActivity";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// readUserFromStorage
+// Login.jsx now stores a "user" key with { _id, name, email, role }.
+// As a fallback we also reconstruct from the individual flat keys
+// (token / role / email / username) that Login stored before this fix.
+// ─────────────────────────────────────────────────────────────────────────────
+const readUserFromStorage = () => {
+  // ── Priority 1: proper user object written by the updated Login.jsx ──────
+  try {
+    const raw = localStorage.getItem("user");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Must be an object with at least a name or id — not a plain JWT string
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        (parsed._id || parsed.id || parsed.name)
+      ) {
+        return parsed;
+      }
+    }
+  } catch {
+    /* ignore parse errors */
+  }
+
+  // ── Priority 2: fallback — reconstruct from flat keys (old login format) ─
+  const email = localStorage.getItem("email");
+  const role = localStorage.getItem("role");
+  const username = localStorage.getItem("username");
+
+  if (email || role || username) {
+    return {
+      _id: null,
+      id: null,
+      name: username || email || "User",
+      email: email || null,
+      role: role || null,
+      username: username || email || null,
+    };
+  }
+
+  return null;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook: detect if the current viewport is mobile (< 1024px)
@@ -156,6 +200,24 @@ function SmartDashboard() {
 }
 
 function App() {
+  // ✅ Synchronous read on first render — never null after login
+  const [currentUser, setCurrentUser] = useState(() => readUserFromStorage());
+
+  useEffect(() => {
+    // Cross-tab: another tab logged in or out
+    const handleStorageChange = () => setCurrentUser(readUserFromStorage());
+    // Same-tab: Login.jsx dispatches this event right after saving to localStorage
+    const handleUserLoggedIn = () => setCurrentUser(readUserFromStorage());
+
+    window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("userLoggedIn", handleUserLoggedIn);
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("userLoggedIn", handleUserLoggedIn);
+    };
+  }, []);
+
   return (
     <>
       <Toaster position="bottom-right" reverseOrder={false} />
@@ -175,8 +237,11 @@ function App() {
           <Route path="dashboard" element={<SmartDashboard />} />
           <Route path="mobile-dashboard" element={<MobileDashboard />} />
 
-          {/* ✅ FIXED: moved inside protected shell, path matches navigate("/user-activity") */}
-          <Route path="user-activity" element={<UserActivity />} />
+          {/* User Activity */}
+          <Route
+            path="user-activity"
+            element={<UserActivity currentUser={currentUser} />}
+          />
 
           <Route path="graph" element={<Graph />} />
           <Route path="onlineorder" element={<OnlineOrders />} />

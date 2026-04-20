@@ -1929,7 +1929,6 @@ router.post("/create", async (req, res) => {
         ? parseUTCDate(data.recordingDate)
         : new Date(),
       invoiceNumber: data.invoiceNumber.trim(),
-      // FIX: use parseInvoiceDate which no longer adds +1 day
       invoiceDate: data.invoiceDate
         ? parseInvoiceDate(data.invoiceDate)
         : new Date(),
@@ -2301,7 +2300,6 @@ const processSingleInvoiceWithMRDistribution = async (
         ? parseUTCDate(invoiceData.recordingDate)
         : new Date(),
       invoiceNumber: invoiceData.invoiceNumber.trim(),
-      // FIX: use parseInvoiceDate which no longer adds +2 days
       invoiceDate: invoiceData.invoiceDate
         ? parseInvoiceDate(invoiceData.invoiceDate)
         : new Date(),
@@ -2752,6 +2750,55 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
       success: false,
       message: "Failed to synchronize MR Cash",
       error: error.message,
+    });
+  }
+});
+
+// ✅ CORRECTED /all route – safe manual enrichment, no aggregation
+router.get("/all", async (req, res) => {
+  try {
+    const { search = "", tab = "All", saleType = "all" } = req.query;
+    const matchConditions = buildMatchConditions(search, tab, saleType);
+
+    let sales = await SaleSummary.find(matchConditions)
+      .sort({ recordingDate: -1 })
+      .lean();
+
+    const enrichedSales = [];
+    for (const sale of sales) {
+      let customerPhone = "",
+        customerZone = "",
+        customerProvince = "",
+        customerAddress = "";
+      if (sale.customerId && mongoose.Types.ObjectId.isValid(sale.customerId)) {
+        const customer = await Customer.findById(sale.customerId).lean();
+        if (customer) {
+          customerPhone = customer.customerNumber || "";
+          customerZone = customer.zone || "";
+          customerProvince = customer.province || "";
+          customerAddress = customer.address || "";
+        }
+      }
+      enrichedSales.push({
+        ...sale,
+        customerPhone,
+        customerZone,
+        customerProvince,
+        customerAddress,
+      });
+    }
+
+    res
+      .status(200)
+      .json({ summaries: enrichedSales, count: enrichedSales.length });
+  } catch (error) {
+    console.error("Fetch Sale Summary Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch sale summaries",
+      error: error.message,
+      summaries: [],
+      count: 0,
     });
   }
 });
@@ -3532,71 +3579,6 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Failed to fetch sales" });
   }
 });
-
-router.get("/all", async (req, res) => {
-  try {
-    const { search = "", tab = "All", saleType = "all" } = req.query;
-    const matchConditions = buildMatchConditions(search, tab, saleType);
-
-    const summaries = await SaleSummary.aggregate([
-      { $match: matchConditions },
-      { $sort: { recordingDate: -1 } },
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerId",
-          foreignField: "_id",
-          as: "customerInfo",
-        },
-      },
-      {
-        $addFields: {
-          customerPhone: { $arrayElemAt: ["$customerInfo.customerNumber", 0] },
-          customerZone: { $arrayElemAt: ["$customerInfo.zone", 0] },
-          customerProvince: { $arrayElemAt: ["$customerInfo.province", 0] },
-          customerAddress: { $arrayElemAt: ["$customerInfo.address", 0] }, // <-- Add this line
-        },
-      },
-      { $unset: "customerInfo" },
-    ]);
-    res.status(200).json({ summaries, count: summaries.length });
-  } catch (error) {
-    console.error("Fetch Sale Summary Error:", error);
-    res.status(500).json({ message: "Failed to fetch sale summaries." });
-  }
-});
-
-// router.get("/all", async (req, res) => {
-//   try {
-//     const { search = "", tab = "All", saleType = "all" } = req.query;
-//     const matchConditions = buildMatchConditions(search, tab, saleType);
-
-//     const summaries = await SaleSummary.aggregate([
-//       { $match: matchConditions },
-//       { $sort: { recordingDate: -1 } },
-//       {
-//         $lookup: {
-//           from: "customers",
-//           localField: "customerId",
-//           foreignField: "_id",
-//           as: "customerInfo",
-//         },
-//       },
-//       {
-//         $addFields: {
-//           customerPhone: { $arrayElemAt: ["$customerInfo.customerNumber", 0] },
-//           customerZone: { $arrayElemAt: ["$customerInfo.zone", 0] },
-//           customerProvince: { $arrayElemAt: ["$customerInfo.province", 0] },
-//         },
-//       },
-//       { $unset: "customerInfo" },
-//     ]);
-//     res.status(200).json({ summaries, count: summaries.length });
-//   } catch (error) {
-//     console.error("Fetch Sale Summary Error:", error);
-//     res.status(500).json({ message: "Failed to fetch sale summaries." });
-//   }
-// });
 
 router.get("/payment-status", async (req, res) => {
   try {
@@ -4548,11 +4530,9 @@ const getTableDateRanges = (period) => {
   const now = new Date();
   switch (period) {
     case "Today": {
-      // Start of today in UTC
       const start = new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
       );
-      // End of today in UTC (optional: if you want full day, set to end of day UTC)
       const end = new Date(
         Date.UTC(
           now.getUTCFullYear(),
@@ -4569,7 +4549,7 @@ const getTableDateRanges = (period) => {
     case "Month":
       return {
         start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-        end: now, // current moment (or end of month if preferred)
+        end: now,
       };
     case "Year":
       return {
@@ -4577,7 +4557,6 @@ const getTableDateRanges = (period) => {
         end: now,
       };
     default:
-      // fallback (should not happen)
       const start = new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
       );
@@ -4592,7 +4571,6 @@ router.get("/credit-sale-not-received", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
 
-    // Build date filter based on period or custom date range
     let dateFilter = {};
     const now = new Date();
 
@@ -4618,12 +4596,9 @@ router.get("/credit-sale-not-received", async (req, res) => {
       end.setHours(23, 59, 59, 999);
       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
     } else if (period === "All") {
-      // No date filter – fetch all records
       dateFilter = {};
     }
-    // If no period provided, dateFilter stays {} → returns all records
 
-    // Query: credit sales with outstanding amount + date filter
     const creditSales = await SaleSummary.find({
       ...dateFilter,
       $and: [

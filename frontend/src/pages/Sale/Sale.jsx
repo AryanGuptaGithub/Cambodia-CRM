@@ -48,6 +48,7 @@ import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale.jsx";
 import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
+console.log('values of backendUrl', backendUrl);
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const isSampleDownloadFile =
   import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
@@ -1685,12 +1686,10 @@ const ImportSalesModal = ({
           const mrName = invoice.mrName.trim();
           mrNames.add(mrName);
           if (!mrToInvoices.has(mrName)) mrToInvoices.set(mrName, []);
-          mrToInvoices
-            .get(mrName)
-            .push({
-              invoiceNumber: invoice.invoiceNumber,
-              customerName: invoice.customerName,
-            });
+          mrToInvoices.get(mrName).push({
+            invoiceNumber: invoice.invoiceNumber,
+            customerName: invoice.customerName,
+          });
         }
       }
       if (mrNames.size === 0) {
@@ -2794,23 +2793,62 @@ const Sales = () => {
     );
     setSales(sortedData);
   }, []);
+  // In Sales.jsx, replace the fetchSaleSummaries function with:
 
   const fetchSaleSummaries = useCallback(async () => {
     try {
       setLoadingData(true);
-      const res = await fetch(`${backendUrl}/api/sales/all`, {
-        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+      const response = await axios.get(`${backendUrl}/api/sales/all`, {
+        // headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+             headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+  
       });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      processSalesData(data.summaries);
+
+      if (
+        response.data &&
+        response.data.summaries &&
+        Array.isArray(response.data.summaries)
+      ) {
+        processSalesData(response.data.summaries);
+      } else {
+        throw new Error("Invalid response format: missing summaries array");
+      }
     } catch (error) {
-      showToast("error", error.message || "Error fetching sale summaries");
+      console.error("Fetch sale summaries error:", error);
+      let errorMessage = "Failed to load sales";
+      if (error.code === "ECONNABORTED") {
+        errorMessage = "Request timed out. Please check your network.";
+      } else if (error.response) {
+        errorMessage = `Server error: ${error.response.status} ${error.response.statusText}`;
+      } else if (error.request) {
+        errorMessage =
+          "Cannot reach server. Make sure backend is running on port 3001.";
+      }
+      showToast("error", errorMessage);
       setSales([]);
     } finally {
       setLoadingData(false);
     }
   }, [processSalesData]);
+  // const fetchSaleSummaries = useCallback(async () => {
+  //   try {
+  //     setLoadingData(true);
+  //     const res = await fetch(`${backendUrl}/api/sales/all`, {
+  //       headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+  //     });
+  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  //     const data = await res.json();
+  //     processSalesData(data.summaries);
+  //   } catch (error) {
+  //     showToast("error", error.message || "Error fetching sale summaries");
+  //     setSales([]);
+  //   } finally {
+  //     setLoadingData(false);
+  //   }
+  // }, [processSalesData]);
 
   const checkPurchaseInventories = useCallback(async () => {
     try {

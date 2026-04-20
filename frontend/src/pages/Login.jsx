@@ -131,13 +131,10 @@ const Login = () => {
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
-
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-
     setDeferredPrompt(null);
     setShowInstallPrompt(false);
-
     if (outcome === "dismissed") {
       localStorage.setItem("dismissedInstall", "true");
     }
@@ -232,7 +229,7 @@ const Login = () => {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Login Handler
+  // ─── Login Handler ────────────────────────────────────────────────────────
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
@@ -262,12 +259,29 @@ const Login = () => {
         return;
       }
 
+      // ✅ Store individual fields (keep existing behaviour)
       localStorage.setItem("token", data.token);
       localStorage.setItem("role", data.role);
       localStorage.setItem("email", data.email);
       localStorage.setItem("username", data.email || data.name || "User");
       localStorage.setItem("isAdmin", "true");
       localStorage.setItem("loginTime", new Date().toISOString());
+
+      // ✅ NEW — also store a proper user object so App.jsx / UserActivity
+      //          can read name, role, _id without having to decode the JWT.
+      const userObject = {
+        _id: data._id || data.id || null,
+        id: data._id || data.id || null,
+        name: data.name || data.username || data.email || "User",
+        email: data.email || null,
+        role: data.role || null,
+        username: data.username || data.email || null,
+      };
+      localStorage.setItem("user", JSON.stringify(userObject));
+
+      // ✅ Notify App.jsx (same-tab) that a login just happened
+      window.dispatchEvent(new Event("userLoggedIn"));
+
       navigate("/");
     } catch (err) {
       console.error("Login error:", err);
