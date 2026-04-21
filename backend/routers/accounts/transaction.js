@@ -7,6 +7,7 @@ import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import multer from "multer";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
 
@@ -48,11 +49,10 @@ const upload = multer({
 
 // =============================================================================
 // deriveTransactionType
-// NOTE: "remittance" must be checked BEFORE generic terms so it is never missed
 // =============================================================================
 function deriveTransactionType(label = "") {
   const s = label.toLowerCase().trim();
-  if (s.includes("remittance")) return "remittance"; // ← must come first
+  if (s.includes("remittance")) return "remittance";
   if (s.includes("payment inward")) return "payment inward";
   if (s.includes("payment outward")) return "payment outward";
   if (s.includes("credit collection")) return "credit collection";
@@ -539,11 +539,9 @@ router.get("/:id", async (req, res) => {
 
 // =============================================================================
 // POST / — create transaction
-// FIX: isConversionLoss is now correctly set to TRUE for any remittance
 // =============================================================================
 router.post("/", async (req, res) => {
   console.log("=== [TRANSACTION POST] Request received ===");
-  console.log("[REQ BODY]:", JSON.stringify(req.body, null, 2));
 
   const session = await mongoose.startSession();
   console.log("[SESSION] MongoDB session started");
@@ -570,26 +568,7 @@ router.post("/", async (req, res) => {
       transactionType,
     } = req.body;
 
-    console.log("[DESTRUCTURE] categoryType    :", categoryType);
-    console.log("[DESTRUCTURE] sourceAccount   :", sourceAccount);
-    console.log("[DESTRUCTURE] destination     :", destination);
-    console.log("[DESTRUCTURE] supplier        :", supplier);
-    console.log("[DESTRUCTURE] amount          :", amount);
-    console.log("[DESTRUCTURE] finalAmount     :", finalAmount);
-    console.log("[DESTRUCTURE] date            :", date);
-    console.log("[DESTRUCTURE] invoiceDate     :", invoiceDate);
-    console.log("[DESTRUCTURE] invoiceNo       :", invoiceNo);
-    console.log("[DESTRUCTURE] customerName    :", customerName);
-    console.log("[DESTRUCTURE] customerAddress :", customerAddress);
-    console.log("[DESTRUCTURE] accountType     :", accountType);
-    console.log("[DESTRUCTURE] description     :", description);
-    console.log("[DESTRUCTURE] remarks         :", remarks);
-    console.log("[DESTRUCTURE] transactionType :", transactionType);
-
-    // ── Required fields ──────────────────────────────────────────────────────
-    console.log("[VALIDATION] Checking required fields...");
     if (!categoryType || !amount || !date || !accountType) {
-      console.log("[VALIDATION] FAILED - missing required fields");
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -598,237 +577,126 @@ router.post("/", async (req, res) => {
           "Missing required fields: categoryType, amount, date, accountType",
       });
     }
-    console.log("[VALIDATION] Required fields OK");
 
-    // ── Derive normalized transaction type ───────────────────────────────────
-    // Uses categoryType first (what the user selected), falls back to transactionType
     const normalizedTxType = deriveTransactionType(
       categoryType || transactionType || "",
     );
-    console.log("[NORMALIZE] categoryType input :", categoryType);
-    console.log("[NORMALIZE] normalizedTxType   :", normalizedTxType);
 
     const isPaymentInward = normalizedTxType === "payment inward";
     const isPaymentOutward = normalizedTxType === "payment outward";
     const isRemittance = normalizedTxType === "remittance";
 
-    console.log("[FLAGS] isPaymentInward  :", isPaymentInward);
-    console.log("[FLAGS] isPaymentOutward :", isPaymentOutward);
-    console.log("[FLAGS] isRemittance     :", isRemittance);
-
-    // ── Payment Inward validation ────────────────────────────────────────────
     if (isPaymentInward) {
-      console.log("[PAYMENT INWARD] Validating supplier...");
       if (!supplier || supplier.trim() === "") {
-        console.log("[PAYMENT INWARD] FAILED - supplier missing");
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Supplier Name is required for Payment Inward",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Supplier Name is required for Payment Inward",
+        });
       }
-      console.log("[PAYMENT INWARD] supplier OK:", supplier);
-
-      console.log("[PAYMENT INWARD] Validating destination...");
       if (!destination || destination === "--" || destination.trim() === "") {
-        console.log("[PAYMENT INWARD] FAILED - destination missing");
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Destination Account is required for Payment Inward",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Destination Account is required for Payment Inward",
+        });
       }
-      console.log("[PAYMENT INWARD] destination OK:", destination);
     }
 
-    // ── Payment Outward validation ───────────────────────────────────────────
     if (isPaymentOutward) {
-      console.log("[PAYMENT OUTWARD] Validating sourceAccount...");
       if (
         !sourceAccount ||
         sourceAccount === "--" ||
         sourceAccount.trim() === ""
       ) {
-        console.log("[PAYMENT OUTWARD] FAILED - sourceAccount missing");
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Source Account is required for Payment Outward",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Source Account is required for Payment Outward",
+        });
       }
-      console.log("[PAYMENT OUTWARD] sourceAccount OK:", sourceAccount);
     }
 
     const invoiceNoClean =
       invoiceNo && invoiceNo.trim() && invoiceNo.trim() !== "NA"
         ? invoiceNo.trim()
         : "NA";
-    console.log(
-      "[INVOICE] raw invoiceNo:",
-      invoiceNo,
-      "→ invoiceNoClean:",
-      invoiceNoClean,
-    );
 
-    // ── Invoice duplicate check ──────────────────────────────────────────────
     if (invoiceNoClean !== "NA" && !isPaymentInward && !isPaymentOutward) {
-      console.log("[INVOICE CHECK] Running for invoice:", invoiceNoClean);
-
       const sale = await Sale.findOne({
         invoiceNumber: invoiceNoClean,
       }).session(session);
-      console.log(
-        "[INVOICE CHECK] Sale lookup result:",
-        sale ? `Found _id=${sale._id}` : "NOT FOUND",
-      );
-
       const isCreditCollection = normalizedTxType === "credit collection";
-      console.log("[INVOICE CHECK] isCreditCollection:", isCreditCollection);
 
       if (accountType === "MR Cash") {
-        console.log(
-          "[INVOICE CHECK] accountType = MR Cash → running MR Cash checks",
-        );
         if (!sale) {
-          console.log("[INVOICE CHECK] FAILED - no sale found");
           await session.abortTransaction();
           session.endSession();
-          return res
-            .status(404)
-            .json({
-              success: false,
-              message: `Sale with invoice "${invoiceNoClean}" not found.`,
-            });
+          return res.status(404).json({
+            success: false,
+            message: `Sale with invoice "${invoiceNoClean}" not found.`,
+          });
         }
         const dueAmount = sale.dueAmount || 0;
-        console.log("[INVOICE CHECK] sale.dueAmount:", dueAmount);
         if (dueAmount <= 0) {
-          console.log("[INVOICE CHECK] FAILED - already fully paid");
           await session.abortTransaction();
           session.endSession();
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: `Invoice "${invoiceNoClean}" is already fully paid.`,
-            });
+          return res.status(400).json({
+            success: false,
+            message: `Invoice "${invoiceNoClean}" is already fully paid.`,
+          });
         }
         const paymentAmount = parseFloat(amount);
-        console.log(
-          "[INVOICE CHECK] paymentAmount:",
-          paymentAmount,
-          "| dueAmount:",
-          dueAmount,
-        );
         if (paymentAmount > dueAmount) {
-          console.log("[INVOICE CHECK] FAILED - payment exceeds due");
           await session.abortTransaction();
           session.endSession();
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: `Payment amount (${paymentAmount}) exceeds remaining due amount (${dueAmount}) for invoice "${invoiceNoClean}".`,
-            });
+          return res.status(400).json({
+            success: false,
+            message: `Payment amount (${paymentAmount}) exceeds remaining due amount (${dueAmount}) for invoice "${invoiceNoClean}".`,
+          });
         }
-        console.log("[INVOICE CHECK] MR Cash checks passed ✓");
       } else {
-        console.log(
-          "[INVOICE CHECK] accountType =",
-          accountType,
-          "→ non-MR Cash path",
-        );
         if (!isCreditCollection) {
-          console.log("[INVOICE CHECK] Checking for duplicate transaction...");
           const dup = await Transaction.findOne({
             invoiceNo: invoiceNoClean,
           }).session(session);
-          console.log(
-            "[INVOICE CHECK] Duplicate:",
-            dup ? `Found _id=${dup._id}` : "NONE",
-          );
           if (dup) {
-            console.log("[INVOICE CHECK] FAILED - duplicate found");
             await session.abortTransaction();
             session.endSession();
-            return res
-              .status(400)
-              .json({
-                success: false,
-                message: `Invoice "${invoiceNoClean}" already has a transaction in "${dup.accountType || "another tab"}".`,
-              });
+            return res.status(400).json({
+              success: false,
+              message: `Invoice "${invoiceNoClean}" already has a transaction in "${dup.accountType || "another tab"}".`,
+            });
           }
-          console.log("[INVOICE CHECK] No duplicate ✓");
-        } else {
-          console.log(
-            "[INVOICE CHECK] Credit collection → skipping duplicate check",
-          );
         }
       }
-    } else {
-      console.log(
-        "[INVOICE CHECK] Skipped → invoiceNoClean=NA or isPaymentInward/Outward",
-      );
     }
 
-    // ── Amount calculations ──────────────────────────────────────────────────
     const amountNum = parseFloat(amount);
-    console.log("[AMOUNT] amountNum:", amountNum);
-    console.log("[AMOUNT] provided finalAmount (raw):", finalAmount);
-
     let calcFinal;
     if (isRemittance) {
-      calcFinal = amountNum; // remittance always uses full amount
-      console.log(
-        "[AMOUNT] isRemittance=true → calcFinal = amountNum:",
-        calcFinal,
-      );
+      calcFinal = amountNum;
     } else {
       calcFinal = parseFloat(finalAmount) || amountNum;
-      console.log("[AMOUNT] isRemittance=false → calcFinal:", calcFinal);
     }
 
-    // ── isConversionLoss ─────────────────────────────────────────────────────
-    // TRUE for ALL remittance transactions (not just when exchangeLoss > 0)
-    // This flags the record so the frontend can show the conversion loss indicator
     const isConversionLoss = isRemittance;
-    console.log("[CONVERSION LOSS] isRemittance     :", isRemittance);
-    console.log("[CONVERSION LOSS] isConversionLoss :", isConversionLoss);
 
-    // ── Source account balance check ─────────────────────────────────────────
     if (
       sourceAccount &&
       sourceAccount !== "--" &&
       sourceAccount.trim() !== ""
     ) {
-      console.log(
-        "[BALANCE CHECK] sourceAccount:",
-        sourceAccount,
-        "| amount:",
-        amountNum,
-        "| txType:",
-        normalizedTxType,
-      );
       await checkSourceAccountBalance(
         sourceAccount,
         amountNum,
         normalizedTxType,
       );
-      console.log("[BALANCE CHECK] Passed ✓");
-    } else {
-      console.log("[BALANCE CHECK] Skipped → no valid sourceAccount");
     }
 
-    // ── Build and save transaction ────────────────────────────────────────────
     const txData = {
       invoiceNo: invoiceNoClean,
       categoryType,
@@ -837,7 +705,7 @@ router.post("/", async (req, res) => {
       supplier: supplier || "",
       amount: amountNum,
       finalAmount: calcFinal,
-      isConversionLoss, // ← TRUE for all remittance transactions
+      isConversionLoss,
       date: new Date(date),
       invoiceDate: invoiceDate ? new Date(invoiceDate) : undefined,
       customerName: customerName || "",
@@ -847,44 +715,37 @@ router.post("/", async (req, res) => {
       remarks: remarks || "",
       transactionType: normalizedTxType,
     };
-    console.log("[TX DATA] Built txData:", JSON.stringify(txData, null, 2));
 
     const tx = new Transaction(txData);
-    console.log("[TX] Saving to DB...");
     await tx.save({ session });
-    console.log("[TX] Saved → _id:", tx._id);
 
-    // ── Side effects ─────────────────────────────────────────────────────────
-    console.log("[SIDE EFFECTS] adjustBalances...");
     await adjustBalances(tx, session, false);
-    console.log("[SIDE EFFECTS] adjustBalances done ✓");
-
-    console.log("[SIDE EFFECTS] updateSaleFromTransaction...");
     await updateSaleFromTransaction(tx, session, true);
-    console.log("[SIDE EFFECTS] updateSaleFromTransaction done ✓");
-
-    console.log("[SIDE EFFECTS] updateMRCashOnCreditCollection...");
     await updateMRCashOnCreditCollection(tx, session, true);
-    console.log("[SIDE EFFECTS] updateMRCashOnCreditCollection done ✓");
 
-    console.log("[SESSION] Committing...");
     await session.commitTransaction();
-    console.log("[SESSION] Committed ✓");
     session.endSession();
-    console.log("[SESSION] Ended");
 
-    console.log("=== [TRANSACTION POST] SUCCESS ===");
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: tx,
-        message: "Transaction created successfully",
-      });
+    // ── Log CREATE activity ──
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Created Transaction: ${categoryType} — $${amountNum}`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      recordId: tx._id,
+      referenceNumber:
+        invoiceNoClean !== "NA" ? invoiceNoClean : tx._id.toString(),
+      newData: tx.toObject(),
+      description: `New ${categoryType} transaction created. Amount: $${amountNum}, Account: ${accountType}${invoiceNoClean !== "NA" ? `, Invoice: ${invoiceNoClean}` : ""}`,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: tx,
+      message: "Transaction created successfully",
+    });
   } catch (error) {
-    console.log("=== [TRANSACTION POST] ERROR ===");
-    console.log("[ERROR] message:", error.message);
-    console.log("[ERROR] stack  :", error.stack);
+    console.log("=== [TRANSACTION POST] ERROR ===", error.message);
     await session.abortTransaction();
     session.endSession();
     res.status(400).json({ success: false, message: error.message });
@@ -915,13 +776,11 @@ router.post("/import", upload.single("file"), async (req, res) => {
           ignoreStyles: true,
         });
     } catch (e) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Error reading Excel file.",
-          error: e.message,
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Error reading Excel file.",
+        error: e.message,
+      });
     }
 
     const ws = workbook.worksheets[0];
@@ -1058,10 +917,9 @@ router.post("/import", upload.single("file"), async (req, res) => {
             continue;
           }
         } else if (isImportRemittance) {
-          final = amt; // remittance: always full amount
+          final = amt;
         }
 
-        // ── FIX: isConversionLoss = true for ALL remittance rows ──
         const isConversionLoss = isImportRemittance;
 
         const invNo = rowData["Invoice Number"]?.trim() || "";
@@ -1143,7 +1001,7 @@ router.post("/import", upload.single("file"), async (req, res) => {
           amount: amt,
           exchangeLoss: exLoss,
           finalAmount: final,
-          isConversionLoss, // ← TRUE for all remittance rows
+          isConversionLoss,
           remarks: rowData["Remarks"]?.trim() || "",
           transactionType: normTxType,
           accountType: req.body.accountType || "Cash Balance",
@@ -1192,6 +1050,23 @@ router.post("/import", upload.single("file"), async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Log IMPORT activity ──
+    await logActivity(req, {
+      action: "IMPORT",
+      actionLabel: `Bulk Imported ${imported.length} Transaction(s)`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      description: `Imported ${imported.length} transactions from Excel. Batch ID: ${batchId}. Skipped rows: ${skipped}.`,
+      newData: {
+        importedCount: imported.length,
+        skippedRows: skipped,
+        totalDataRows: dataRows,
+        batchId,
+        accountType: req.body.accountType || "Cash Balance",
+      },
+    });
+
     res.json({
       success: true,
       message: `Successfully imported ${imported.length} transaction(s)`,
@@ -1206,13 +1081,11 @@ router.post("/import", upload.single("file"), async (req, res) => {
   } catch (error) {
     if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Import failed due to server error",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Import failed due to server error",
+      error: error.message,
+    });
   }
 });
 
@@ -1241,7 +1114,6 @@ router.post("/import/test", upload.single("file"), async (req, res) => {
 
 // =============================================================================
 // PUT /:id — update transaction
-// FIX: isConversionLoss correctly set to TRUE for all remittance updates
 // =============================================================================
 router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
@@ -1265,6 +1137,9 @@ router.put("/:id", async (req, res) => {
         .json({ success: false, message: "Transaction not found" });
     }
 
+    // ── Snapshot before update ──
+    const previousData = existing.toObject();
+
     const newCategoryType =
       req.body.categoryType || existing.categoryType || "";
     const newNormTxType = deriveTransactionType(
@@ -1278,7 +1153,6 @@ router.put("/:id", async (req, res) => {
     const isPaymentOutward = newNormTxType === "payment outward";
     const isRemittance = newNormTxType === "remittance";
 
-    // Invoice duplicate check
     const newInvoiceNo = (
       req.body.invoiceNo ||
       existing.invoiceNo ||
@@ -1298,12 +1172,10 @@ router.put("/:id", async (req, res) => {
       if (dup) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: `Invoice "${newInvoiceNo}" already has a transaction in "${dup.accountType || "another tab"}".`,
-          });
+        return res.status(400).json({
+          success: false,
+          message: `Invoice "${newInvoiceNo}" already has a transaction in "${dup.accountType || "another tab"}".`,
+        });
       }
     }
 
@@ -1312,12 +1184,10 @@ router.put("/:id", async (req, res) => {
       if (!supplierVal.trim()) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Supplier Name is required for Payment Inward",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Supplier Name is required for Payment Inward",
+        });
       }
     }
 
@@ -1326,16 +1196,13 @@ router.put("/:id", async (req, res) => {
       if (!srcVal || srcVal === "--" || !srcVal.trim()) {
         await session.abortTransaction();
         session.endSession();
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Source Account is required for Payment Outward",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Source Account is required for Payment Outward",
+        });
       }
     }
 
-    // Reverse old effects
     await adjustBalances(existing, session, true);
     await updateSaleFromTransaction(existing, session, false);
     await updateMRCashOnCreditCollection(existing, session, false);
@@ -1351,10 +1218,9 @@ router.put("/:id", async (req, res) => {
     if (newNormTxType === "deposit") {
       newFinalAmount = newAmount - newExchangeLoss;
     } else if (isRemittance) {
-      newFinalAmount = newAmount; // remittance: always full amount
+      newFinalAmount = newAmount;
     }
 
-    // ── FIX: isConversionLoss = true for ALL remittance updates ──
     const isConversionLoss = isRemittance;
 
     const updateData = {
@@ -1363,7 +1229,7 @@ router.put("/:id", async (req, res) => {
       amount: newAmount,
       exchangeLoss: newExchangeLoss,
       finalAmount: newFinalAmount,
-      isConversionLoss, // ← TRUE for all remittance transactions
+      isConversionLoss,
       date: req.body.date ? new Date(req.body.date) : existing.date,
       invoiceDate: req.body.invoiceDate
         ? new Date(req.body.invoiceDate)
@@ -1400,6 +1266,21 @@ router.put("/:id", async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Log UPDATE activity ──
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Transaction: ${newCategoryType} — $${newAmount}`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      recordId: updated._id,
+      referenceNumber:
+        updated.invoiceNo !== "NA" ? updated.invoiceNo : updated._id.toString(),
+      previousData,
+      newData: updated.toObject(),
+      description: `Transaction updated. Category: ${newCategoryType}, Amount: $${newAmount}, Account: ${updated.accountType}${updated.invoiceNo !== "NA" ? `, Invoice: ${updated.invoiceNo}` : ""}`,
+    });
+
     res.json({
       success: true,
       data: updated,
@@ -1409,13 +1290,11 @@ router.put("/:id", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("PUT /:id error:", error);
-    res
-      .status(400)
-      .json({
-        success: false,
-        message: error.message || "Update failed",
-        details: error.errors || null,
-      });
+    res.status(400).json({
+      success: false,
+      message: error.message || "Update failed",
+      details: error.errors || null,
+    });
   }
 });
 
@@ -1442,12 +1321,33 @@ router.delete("/:id", async (req, res) => {
         .status(404)
         .json({ success: false, message: "Transaction not found" });
     }
+
+    // ── Snapshot before deletion ──
+    const previousData = tx.toObject();
+
     await adjustBalances(tx, session, true);
     await updateSaleFromTransaction(tx, session, false);
     await updateMRCashOnCreditCollection(tx, session, false);
     await Transaction.findByIdAndDelete(id, { session });
+
     await session.commitTransaction();
     session.endSession();
+
+    // ── Log DELETE activity ──
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Transaction: ${previousData.categoryType} — $${previousData.amount}`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      recordId: previousData._id,
+      referenceNumber:
+        previousData.invoiceNo !== "NA"
+          ? previousData.invoiceNo
+          : previousData._id.toString(),
+      previousData,
+      description: `Transaction deleted. Category: ${previousData.categoryType}, Amount: $${previousData.amount}, Account: ${previousData.accountType}${previousData.invoiceNo !== "NA" ? `, Invoice: ${previousData.invoiceNo}` : ""}`,
+    });
+
     res.json({
       success: true,
       message: "Transaction deleted and balances updated successfully",
@@ -1455,13 +1355,11 @@ router.delete("/:id", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete transaction",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete transaction",
+      error: error.message,
+    });
   }
 });
 
@@ -1480,12 +1378,10 @@ router.delete("/", async (req, res) => {
     if (invalid.length) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: `Invalid IDs: ${invalid.join(", ")}`,
-        });
+      return res.status(400).json({
+        success: false,
+        message: `Invalid IDs: ${invalid.join(", ")}`,
+      });
     }
     const txs = await Transaction.find({ _id: { $in: ids } }).session(session);
     if (!txs.length) {
@@ -1495,6 +1391,10 @@ router.delete("/", async (req, res) => {
         .status(404)
         .json({ success: false, message: "No transactions found" });
     }
+
+    // ── Snapshot all before deletion ──
+    const previousData = txs.map((t) => t.toObject());
+
     for (const tx of txs) {
       await adjustBalances(tx, session, true);
       await updateSaleFromTransaction(tx, session, false);
@@ -1503,8 +1403,20 @@ router.delete("/", async (req, res) => {
     const result = await Transaction.deleteMany({ _id: { $in: ids } }).session(
       session,
     );
+
     await session.commitTransaction();
     session.endSession();
+
+    // ── Log BULK DELETE activity ──
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Transaction(s)`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      previousData,
+      description: `Deleted ${result.deletedCount} transactions. Balances and sale records updated.`,
+    });
+
     res.json({
       success: true,
       message: `${result.deletedCount} transaction(s) deleted successfully`,
@@ -1512,19 +1424,16 @@ router.delete("/", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete transactions",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete transactions",
+      error: error.message,
+    });
   }
 });
 
 // =============================================================================
 // POST /bulk
-// FIX: isConversionLoss = true for ALL remittance bulk transactions
 // =============================================================================
 router.post("/bulk", async (req, res) => {
   const session = await mongoose.startSession();
@@ -1566,10 +1475,9 @@ router.post("/bulk", async (req, res) => {
       if (normalizedTxType === "deposit") {
         calcFinal = amountNum - exchangeLossNum;
       } else if (isBulkRemittance) {
-        calcFinal = amountNum; // remittance: always full amount
+        calcFinal = amountNum;
       }
 
-      // ── FIX: isConversionLoss = true for ALL remittance bulk items ──
       const isConversionLoss = isBulkRemittance;
 
       if (
@@ -1593,7 +1501,7 @@ router.post("/bulk", async (req, res) => {
         amount: amountNum,
         exchangeLoss: exchangeLossNum,
         finalAmount: calcFinal,
-        isConversionLoss, // ← TRUE for all remittance bulk transactions
+        isConversionLoss,
         date: new Date(date),
         customerName: txData.customerName || "",
         customerAddress: txData.customerAddress || "",
@@ -1611,13 +1519,31 @@ router.post("/bulk", async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
-    res
-      .status(201)
-      .json({
-        success: true,
-        data: created,
-        message: `${created.length} transaction(s) created successfully`,
-      });
+
+    // ── Log BULK CREATE activity ──
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Bulk Created ${created.length} Transaction(s)`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      newData: {
+        count: created.length,
+        transactions: created.map((t) => ({
+          id: t._id,
+          categoryType: t.categoryType,
+          amount: t.amount,
+          accountType: t.accountType,
+          invoiceNo: t.invoiceNo,
+        })),
+      },
+      description: `Bulk created ${created.length} transactions.`,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: created,
+      message: `${created.length} transaction(s) created successfully`,
+    });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();

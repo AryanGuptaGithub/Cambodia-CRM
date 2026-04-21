@@ -1,902 +1,877 @@
 import express from "express";
 import mongoose from "mongoose";
-import StockReturn from "../../models/stock/StockReturn.js";
-import StockInMrHand from "../../models/stock/stockInMRHand.js";
-import MRCash from "../../models/accounts/MRCash.js";
-import MR from "../../models/staffMember/staff.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
+import StockAdjustment from "../../models/stock/stockAdjustment.js";
+import ReportInHand from "../../models/reports/reportsInHand.js";
+import Product from "../../models/projectManger/product.js";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
 
-const generateReturnId = async () => {
-  const prefix = "SR";
-  const year = new Date().getFullYear().toString().slice(-2);
-  const month = (new Date().getMonth() + 1).toString().padStart(2, "0");
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-  const lastReturn = await StockReturn.findOne({
-    returnId: new RegExp(`^${prefix}${year}${month}`),
-  }).sort({ returnId: -1 });
-
-  let sequence = 1;
-  if (lastReturn && lastReturn.returnId) {
-    const lastSeq = parseInt(lastReturn.returnId.slice(-4));
-    sequence = lastSeq + 1;
-  }
-
-  return `${prefix}${year}${month}${sequence.toString().padStart(4, "0")}`;
+const fixPrecision = (num) => {
+  if (typeof num !== "number") return num;
+  return Math.round(num * 100) / 100;
 };
 
-const cleanString = (str) => {
+const toTitleCase = (str) => {
   if (!str) return "";
   return str
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/[^a-zA-Z0-9 ]/g, "")
-    .toLowerCase();
+    .split(" ")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
 };
 
-const findMR = async (returnItem) => {
-  const mrName = returnItem.mrName?.trim();
+// ==================== Helper: get best available LC from a ReportInHand ====================
+/**
+ * Priority order for cost-per-box fallback when no unitCost provided:
+ *   1. currentAvgPrice (computed from recalculateTotals)
+ *   2. lc from the most recent "batch" type entry with lc > 0
+ *   3. lc from the most recent "add" type entry with lc > 0
+ *   4. lc from ANY batch entry with lc > 0 (latest first)
+ *   5. 0 if nothing found (caller decides whether to throw)
+ */
+const getBestLcFallback = (reportItem) => {
+  const batches = reportItem.batches || [];
 
-  if (!mrName) {
-    return null;
+  // Sort descending by date so we get most recent first
+  const sorted = [...batches].sort(
+    (a, b) => new Date(b.date || 0) - new Date(a.date || 0),
+  );
+
+  // 1. Use currentAvgPrice if it's valid
+  if ((reportItem.averagePrice || 0) > 0) {
+    return reportItem.averagePrice;
   }
 
-  let mrCashData = null;
+  // 2. Last real purchase batch with lc > 0
+  const lastRealBatch = sorted.find(
+    (b) =>
+      (b.adjustmentType === "batch" || !b.adjustmentType) && (b.lc || 0) > 0,
+  );
+  if (lastRealBatch) return lastRealBatch.lc;
 
-  try {
-    mrCashData = await MRCash.findOne({
-      mrName: mrName,
-      isActive: true,
-    })
-      .select("currentCash mrCode mrName")
-      .lean();
-  } catch (err) {
-    console.error("Error finding MR cash data:", err);
-  }
+  // 3. Last "add" adjustment with lc > 0
+  const lastAddBatch = sorted.find(
+    (b) => b.adjustmentType === "add" && (b.lc || 0) > 0,
+  );
+  if (lastAddBatch) return lastAddBatch.lc;
 
-  return mrCashData;
+  // 4. Any batch with lc > 0
+  const anyBatch = sorted.find((b) => (b.lc || 0) > 0);
+  if (anyBatch) return anyBatch.lc;
+
+  return 0;
 };
 
-// ==================== GET ALL STOCK RETURNS (Protected) ====================
-router.get("/", protect, async (req, res) => {
+// ==================== Helper: warehouse summary ====================
+const getWarehouseInventorySummary = async (overrideMap = null) => {
+  const allReports = await ReportInHand.find({}).lean();
+  let totalAmount = 0;
+  let totalProducts = 0;
+
+  for (const report of allReports) {
+    let boxes = report.totalBoxes || 0;
+    let amount = report.totalAmount || 0;
+
+    if (overrideMap) {
+      const key = (report.productName || "").toLowerCase();
+      if (overrideMap.has(key)) {
+        const fresh = overrideMap.get(key);
+        boxes = fresh.totalBoxes;
+        amount = fresh.totalAmount;
+      }
+    }
+    if (boxes > 0) {
+      totalAmount += amount;
+      totalProducts++;
+    }
+  }
+  return { totalAmount: fixPrecision(totalAmount), totalProducts };
+};
+
+// ==================== Core: recalculate totals ====================
+const recalculateTotals = (reportItem) => {
+  const batches = reportItem.batches || [];
+
+  let totalBoxesFromBatches = 0;
+  let addStockAdjustment = 0;
+  let removeStockAdjustment = 0;
+  let totalAmount = 0;
+
+  for (const b of batches) {
+    const type = b.adjustmentType;
+    const boxes = Number(b.boxes) || 0;
+    const amount = Number(b.amount) || 0;
+
+    if (type === "batch" || !type) {
+      totalBoxesFromBatches += boxes;
+      totalAmount += amount;
+    } else if (type === "add") {
+      addStockAdjustment += boxes;
+      totalAmount += amount;
+    } else if (type === "remove") {
+      removeStockAdjustment += boxes;
+      totalAmount -= amount;
+    }
+  }
+
+  const totalBoxes = fixPrecision(
+    totalBoxesFromBatches + addStockAdjustment - removeStockAdjustment,
+  );
+  const fixedAmount = fixPrecision(totalAmount);
+  const averagePrice =
+    totalBoxes > 0 ? fixPrecision(fixedAmount / totalBoxes) : 0;
+
+  reportItem.totalBoxesFromBatches = fixPrecision(totalBoxesFromBatches);
+  reportItem.addStockAdjustment = fixPrecision(addStockAdjustment);
+  reportItem.removeStockAdjustment = fixPrecision(removeStockAdjustment);
+  reportItem.totalBoxes = totalBoxes;
+  reportItem.totalAmount = fixedAmount;
+  reportItem.averagePrice = averagePrice;
+  reportItem.status =
+    totalBoxes <= 0
+      ? "Out of Stock"
+      : totalBoxes < (reportItem.minStockLevel || 10)
+        ? "Low Stock"
+        : "In Stock";
+  reportItem.updatedAt = new Date();
+};
+
+// ==================== GET /in-stock ====================
+router.get("/in-stock", async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 10,
-      search,
-      mrCode,
-      status,
-      startDate,
-      endDate,
-      sortBy = "createdAt",
-      sortOrder = "desc",
-    } = req.query;
+    const { name } = req.query;
+    const stockList = await ReportInHand.find(
+      {},
+      "productName totalBoxes totalAmount averagePrice",
+    ).lean();
 
-    const query = { isDeleted: false };
-
-    if (search) {
-      query.$or = [
-        { returnId: { $regex: search, $options: "i" } },
-        { mrName: { $regex: search, $options: "i" } },
-        { mrCode: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    if (mrCode) {
-      query.mrCode = mrCode;
-    }
-
-    if (status) {
-      query.status = status;
-    }
-
-    if (startDate || endDate) {
-      query.returnDate = {};
-      if (startDate) query.returnDate.$gte = new Date(startDate);
-      if (endDate) query.returnDate.$lte = new Date(endDate);
-    }
-
-    const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === "desc" ? -1 : 1;
-
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    const stockReturns = await StockReturn.find(query)
-      .sort(sortOptions)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate("createdBy", "name email")
-      .populate("approvedBy", "name email")
-      .lean();
-
-    const enhancedReturns = await Promise.all(
-      stockReturns.map(async (item) => {
-        try {
-          const mrCashData = await findMR(item);
-          return {
-            ...item,
-            currentCash: mrCashData?.currentCash || 0,
-            mrCashDetails: mrCashData || null,
-          };
-        } catch (err) {
-          console.error("Error enhancing MR data:", err);
-          return {
-            ...item,
-            currentCash: 0,
-            mrCashDetails: null,
-          };
-        }
-      })
+    const stockMap = new Map(
+      stockList.map((item) => [
+        item.productName.toLowerCase(),
+        {
+          boxes: item.totalBoxes || 0,
+          amount: item.totalAmount || 0,
+          averagePrice: item.averagePrice || 0,
+        },
+      ]),
     );
 
-    const total = await StockReturn.countDocuments(query);
+    let productQuery = {};
+    if (name) productQuery.productName = { $regex: name, $options: "i" };
+    const products = await Product.find(productQuery).lean();
 
-    return res.status(200).json({
-      success: true,
-      data: enhancedReturns,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit)),
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching stock returns:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch stock returns",
-      error: error.message,
-    });
-  }
-});
+    const capitalize = (str) =>
+      str
+        ?.split(" ")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ") ?? "";
 
-// ==================== GET STATISTICS (Protected) ====================
-router.get("/statistics", protect, async (req, res) => {
-  try {
-    const { mrCode, startDate, endDate } = req.query;
-
-    const matchStage = { isDeleted: false };
-
-    if (mrCode) {
-      matchStage.mrCode = mrCode;
-    }
-
-    if (startDate || endDate) {
-      matchStage.returnDate = {};
-      if (startDate) matchStage.returnDate.$gte = new Date(startDate);
-      if (endDate) matchStage.returnDate.$lte = new Date(endDate);
-    }
-
-    const stats = await StockReturn.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: null,
-          totalReturns: { $sum: 1 },
-          totalQuantity: { $sum: "$totalQuantity" },
-          totalValue: { $sum: "$totalValue" },
-          pendingReturns: {
-            $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] },
-          },
-          approvedReturns: {
-            $sum: { $cond: [{ $eq: ["$status", "Approved"] }, 1, 0] },
-          },
-          rejectedReturns: {
-            $sum: { $cond: [{ $eq: ["$status", "Rejected"] }, 1, 0] },
-          },
-        },
-      },
-    ]);
-
-    const monthlyStats = await StockReturn.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: {
-            year: { $year: "$returnDate" },
-            month: { $month: "$returnDate" },
-          },
-          count: { $sum: 1 },
-          totalQuantity: { $sum: "$totalQuantity" },
-          totalValue: { $sum: "$totalValue" },
-        },
-      },
-      { $sort: { "_id.year": -1, "_id.month": -1 } },
-      { $limit: 6 },
-    ]);
-
-    const mrStats = await StockReturn.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: "$mrCode",
-          mrName: { $first: "$mrName" },
-          count: { $sum: 1 },
-          totalQuantity: { $sum: "$totalQuantity" },
-        },
-      },
-      { $sort: { count: -1 } },
-      { $limit: 5 },
-    ]);
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        summary: stats[0] || {
-          totalReturns: 0,
-          totalQuantity: 0,
-          totalValue: 0,
-          pendingReturns: 0,
-          approvedReturns: 0,
-          rejectedReturns: 0,
-        },
-        monthlyStats,
-        topMRs: mrStats,
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching statistics:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch statistics",
-      error: error.message,
-    });
-  }
-});
-
-// ==================== GET SINGLE STOCK RETURN (Protected) ====================
-router.get("/:id", protect, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock return ID format",
-      });
-    }
-
-    const stockReturn = await StockReturn.findOne({
-      _id: id,
-      isDeleted: false,
-    })
-      .populate("createdBy", "name email")
-      .populate("approvedBy", "name email")
-      .lean();
-
-    if (!stockReturn) {
-      return res.status(404).json({
-        success: false,
-        message: "Stock return not found",
-      });
-    }
-
-    const mrCashData = await findMR(stockReturn);
-
-    const enhancedReturn = {
-      ...stockReturn,
-      currentCash: mrCashData?.currentCash || 0,
-      mrDetails: mrCashData,
-    };
-
-    return res.status(200).json({
-      success: true,
-      data: enhancedReturn,
-    });
-  } catch (error) {
-    console.error("Error fetching stock return:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch stock return",
-      error: error.message,
-    });
-  }
-});
-
-// ==================== CREATE STOCK RETURN (Protected) ====================
-router.post("/", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const { mrId, mrName, items, remarks, returnDate } = req.body;
-
-    if (!mrId || !items || !Array.isArray(items) || items.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Medical Representative ID and items are required",
-      });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(mrId)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Medical Representative ID format",
-      });
-    }
-
-    let mrInfo = null;
-    let mrNameToUse = mrName;
-
-    if (mrId) {
-      mrInfo = await MR.findOne({ _id: mrId }).session(session);
-      if (mrInfo) {
-        mrNameToUse = mrInfo.mrName || mrName;
-      }
-    }
-
-    if (!mrNameToUse) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Medical Representative name is required",
-      });
-    }
-
-    let mrStock = await StockInMrHand.findOne({ mrId: mrId }).session(session);
-
-    if (!mrStock) {
-      mrStock = await StockInMrHand.findOne({ mrName: mrNameToUse }).session(
-        session
-      );
-    }
-
-    if (!mrStock) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: `No stock found for Medical Representative: ${mrNameToUse}`,
-      });
-    }
-
-    const returnItems = [];
-    const stockInMrUpdates = [];
-    let totalQuantity = 0;
-    let totalValue = 0;
-
-    for (const [index, item] of items.entries()) {
-      if (!item.productId || !item.returnQty || item.returnQty <= 0) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Invalid item data at position ${
-            index + 1
-          }. Product ID and positive return quantity are required`,
-        });
-      }
-
-      const productInMr = mrStock.productsInHand?.find((p) => {
-        const productIdStr = p.productId?.toString();
-        const itemProductIdStr = item.productId?.toString();
-        return productIdStr === itemProductIdStr;
-      });
-
-      if (!productInMr) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({
-          success: false,
-          message: `Product "${
-            item.productName || item.productId
-          }" not found in stock for MR: ${mrNameToUse}`,
-        });
-      }
-
-      const availableQuantity = productInMr.quantity || 0;
-
-      if (availableQuantity < item.returnQty) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient stock for "${
-            item.productName || productInMr.productName
-          }". Available: ${availableQuantity}, Requested: ${item.returnQty}`,
-        });
-      }
-
-      const returnItem = {
-        productId: productInMr.productId,
-        stockRecordId: productInMr._id,
-        productCode:
-          item.productCode ||
-          productInMr.productCode ||
-          `PROD-${productInMr.productId.toString().slice(-6)}`,
-        productName: item.productName || productInMr.productName,
-        batch: item.batch || productInMr.batch || "N/A",
-        expiry: item.expiry || productInMr.expiry || null,
-        returnQty: Number(item.returnQty),
-        returnDate: item.returnDate || new Date(),
-        remarks: item.remarks || "",
-        costPrice: item.costPrice || productInMr.costPrice || 0,
-        unit: productInMr.unit || item.unit || "box",
+    const productsWithStock = products.map((product) => {
+      const stock = stockMap.get(product.productName.toLowerCase()) || {
+        boxes: 0,
+        amount: 0,
+        averagePrice: 0,
       };
-
-      returnItems.push(returnItem);
-      totalQuantity += returnItem.returnQty;
-      totalValue += returnItem.returnQty * returnItem.costPrice;
-
-      stockInMrUpdates.push({
-        updateOne: {
-          filter: {
-            _id: mrStock._id,
-            "productsInHand._id": productInMr._id,
-          },
-          update: {
-            $inc: { "productsInHand.$.quantity": -item.returnQty },
-            $set: {
-              "productsInHand.$.lastUpdated": new Date(),
-              updatedAt: new Date(),
-            },
-          },
+      return {
+        ...product,
+        productName: capitalize(product.productName),
+        type: capitalize(product.type),
+        supplierName: capitalize(product.supplierName),
+        inStock: {
+          boxes: stock.boxes,
+          amount: stock.amount,
+          averagePrice: stock.averagePrice,
+          status: stock.boxes > 0 ? "In Stock" : "Out of Stock",
         },
-      });
-    }
-
-    const returnId = await generateReturnId();
-
-    let createdById;
-    if (req.user?._id) {
-      createdById = req.user._id;
-    } else if (
-      req.body.createdBy &&
-      mongoose.Types.ObjectId.isValid(req.body.createdBy)
-    ) {
-      createdById = new mongoose.Types.ObjectId(req.body.createdBy);
-    } else {
-      createdById = new mongoose.Types.ObjectId("000000000000000000000001");
-    }
-
-    let mrCodeValue = "";
-    if (mrInfo) {
-      mrCodeValue =
-        mrInfo.mrCode || `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
-    } else {
-      mrCodeValue = `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
-    }
-
-    const stockReturn = new StockReturn({
-      returnId: returnId,
-      mrId: new mongoose.Types.ObjectId(mrId),
-      mrCode: mrCodeValue,
-      mrName: mrNameToUse,
-      returnDate: returnDate || new Date(),
-      items: returnItems,
-      totalItems: returnItems.length,
-      totalQuantity: totalQuantity,
-      totalValue: totalValue,
-      remarks: remarks || "",
-      status: "Pending",
-      createdBy: createdById,
+      };
     });
 
-    if (stockInMrUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
-    }
-
-    await stockReturn.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    const populatedReturn = await StockReturn.findById(stockReturn._id)
-      .populate("createdBy", "name email")
-      .lean();
-
-    return res.status(201).json({
-      success: true,
-      message: "Stock return created successfully",
-      data: populatedReturn,
-    });
+    const warehouseSummary = await getWarehouseInventorySummary();
+    res
+      .status(200)
+      .json({ success: true, data: productsWithStock, warehouseSummary });
   } catch (error) {
-    if (session.inTransaction()) {
-      await session.abortTransaction();
-    }
-    session.endSession();
-
-    console.error("Error creating stock return:", error);
-
-    if (error.name === "ValidationError") {
-      const validationErrors = {};
-      if (error.errors) {
-        for (const field in error.errors) {
-          validationErrors[field] = error.errors[field].message;
-        }
-      }
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed",
-        errors: validationErrors,
-      });
-    }
-
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: "Duplicate return ID. Please try again.",
-      });
-    }
-
-    return res.status(500).json({
+    console.error("Error fetching products with stock:", error);
+    res.status(500).json({
       success: false,
-      message: "Failed to create stock return",
-      error: error.message,
+      message: "Failed to fetch products with stock information.",
     });
   }
 });
 
-// ==================== UPDATE STATUS (Protected & Admin Only) ====================
-router.put("/:id/status", protect, allowAdminOnly, async (req, res) => {
+// ==================== GET all adjustments ====================
+router.get("/", async (req, res) => {
+  try {
+    const adjustments = await StockAdjustment.find()
+      .populate("productId", "productName qtyPerCarton")
+      .sort({ createdAt: -1 })
+      .lean();
+    const warehouseSummary = await getWarehouseInventorySummary();
+    res.json({
+      success: true,
+      data: adjustments,
+      count: adjustments.length,
+      warehouseSummary,
+    });
+  } catch (error) {
+    console.error("Error fetching adjustments:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch adjustments" });
+  }
+});
+
+// ==================== GET single adjustment ====================
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ success: false, message: "Invalid ID" });
+
+    const adjustment = await StockAdjustment.findById(id)
+      .populate("productId", "productName qtyPerCarton")
+      .lean();
+    if (!adjustment)
+      return res
+        .status(404)
+        .json({ success: false, message: "Adjustment not found" });
+
+    res.json({ success: true, data: adjustment });
+  } catch (error) {
+    console.error("Error fetching adjustment:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch adjustment" });
+  }
+});
+
+// ==================== CREATE adjustment ====================
+router.post("/", protect, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { id } = req.params;
-    const { status, rejectedReason } = req.body;
+    const { productId, boxQuantity, adjustmentType, remarks, unitCost } =
+      req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock return ID format",
-      });
-    }
+    if (!productId || !boxQuantity || !adjustmentType)
+      throw new Error("Missing required fields");
+    if (Number(boxQuantity) <= 0)
+      throw new Error("Box quantity must be positive");
+    if (!mongoose.Types.ObjectId.isValid(productId))
+      throw new Error("Invalid product ID");
 
-    if (!["Pending", "Approved", "Rejected"].includes(status)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid status. Must be 'Pending', 'Approved', or 'Rejected'",
-      });
-    }
+    const product = await Product.findById(productId).session(session);
+    if (!product) throw new Error("Product not found");
 
-    const stockReturn = await StockReturn.findOne({
-      _id: id,
-      isDeleted: false,
+    let reportItem = await ReportInHand.findOne({
+      productName: {
+        $regex: new RegExp(`^${escapeRegex(product.productName)}$`, "i"),
+      },
     }).session(session);
 
-    if (!stockReturn) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Stock return not found",
+    if (!reportItem) {
+      if (adjustmentType === "remove")
+        throw new Error(
+          `Cannot remove stock: Product "${product.productName}" not found in warehouse.`,
+        );
+      reportItem = new ReportInHand({
+        productName: product.productName,
+        supplierName: "System",
+        type: "System",
+        batches: [],
+        status: "Out of Stock",
+        minStockLevel: 10,
       });
     }
 
-    const previousStatus = stockReturn.status;
-    const stockInMrUpdates = [];
+    // Compute current state BEFORE adding new batch
+    recalculateTotals(reportItem);
 
-    if (status === "Rejected" && previousStatus !== "Rejected") {
-      for (const item of stockReturn.items) {
-        stockInMrUpdates.push({
-          updateOne: {
-            filter: {
-              mrId: stockReturn.mrId,
-              "productsInHand.productId": item.productId,
-            },
-            update: {
-              $inc: { "productsInHand.$.quantity": item.returnQty },
-              $set: {
-                "productsInHand.$.lastUpdated": new Date(),
-                updatedAt: new Date(),
-              },
-            },
-          },
-        });
+    const adjustmentQty = fixPrecision(Number(boxQuantity));
+    const wasOutOfStock = reportItem.totalBoxes <= 0;
+
+    if (adjustmentType === "remove" && reportItem.totalBoxes < adjustmentQty)
+      throw new Error(
+        `Insufficient stock. Available: ${reportItem.totalBoxes}, Requested: ${adjustmentQty}`,
+      );
+
+    let costPerBox = 0;
+    let adjustmentAmount = 0;
+
+    if (adjustmentType === "add") {
+      if (unitCost && Number(unitCost) > 0) {
+        // ✅ User explicitly provided a cost — use it
+        costPerBox = Number(unitCost);
+      } else {
+        // ✅ Fallback: averagePrice → last real batch lc → last add lc → any lc
+        costPerBox = getBestLcFallback(reportItem);
+        if (costPerBox === 0)
+          throw new Error(
+            "Cannot add stock: No cost found. Please provide a unit cost.",
+          );
       }
+      adjustmentAmount = fixPrecision(adjustmentQty * costPerBox);
+    } else if (adjustmentType === "remove") {
+      // For remove, always use current averagePrice (or best LC fallback)
+      costPerBox =
+        (reportItem.averagePrice || 0) > 0
+          ? reportItem.averagePrice
+          : getBestLcFallback(reportItem);
+      adjustmentAmount = fixPrecision(adjustmentQty * costPerBox);
     }
 
-    if (status === "Approved" && previousStatus === "Pending") {
-      for (const item of stockReturn.items) {
-        stockInMrUpdates.push({
-          updateOne: {
-            filter: {
-              mrId: stockReturn.mrId,
-              "productsInHand.productId": item.productId,
-            },
-            update: {
-              $inc: { "productsInHand.$.quantity": -item.returnQty },
-              $set: {
-                "productsInHand.$.lastUpdated": new Date(),
-                updatedAt: new Date(),
-              },
-            },
-          },
-        });
-      }
-    }
+    // Push new batch — amount always stored as positive
+    const newBatch = {
+      _id: new mongoose.Types.ObjectId(),
+      boxes: adjustmentQty,
+      lc: costPerBox,
+      fob: 0,
+      cif: 0,
+      amount: adjustmentAmount,
+      date: new Date(),
+      adjustmentType: adjustmentType,
+      batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
+    };
 
-    if (status === "Approved" && previousStatus === "Rejected") {
-      for (const item of stockReturn.items) {
-        stockInMrUpdates.push({
-          updateOne: {
-            filter: {
-              mrId: stockReturn.mrId,
-              "productsInHand.productId": item.productId,
-            },
-            update: {
-              $inc: { "productsInHand.$.quantity": -item.returnQty },
-              $set: {
-                "productsInHand.$.lastUpdated": new Date(),
-                updatedAt: new Date(),
-              },
-            },
-          },
-        });
-      }
-    }
+    reportItem.batches.push(newBatch);
 
-    if (stockInMrUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
-    }
+    recalculateTotals(reportItem);
+    await reportItem.save({ session });
 
-    stockReturn.status = status;
-
-    if (status === "Approved") {
-      stockReturn.approvedBy = req.user?._id;
-      stockReturn.approvedAt = new Date();
-      stockReturn.rejectedReason = undefined;
-    }
-
-    if (status === "Rejected") {
-      stockReturn.rejectedReason = rejectedReason || "No reason provided";
-      stockReturn.approvedBy = undefined;
-      stockReturn.approvedAt = undefined;
-    }
-
-    await stockReturn.save({ session });
-
+    const adjustment = new StockAdjustment({
+      productId,
+      boxQuantity: adjustmentQty,
+      totalQuantity:
+        adjustmentType === "add"
+          ? adjustmentQty * (product.qtyPerCarton || 1)
+          : -adjustmentQty * (product.qtyPerCarton || 1),
+      adjustmentType,
+      remarks,
+      createdBy: req.user._id,
+      costPerBox: costPerBox,
+      amount: adjustmentAmount,
+    });
+    await adjustment.save({ session });
     await session.commitTransaction();
     session.endSession();
 
-    const updatedReturn = await StockReturn.findById(id)
-      .populate("createdBy", "name email")
-      .populate("approvedBy", "name email")
-      .lean();
-
-    const mrCashData = await findMR(updatedReturn);
-
-    return res.status(200).json({
-      success: true,
-      message: `Stock return ${status.toLowerCase()} successfully`,
-      data: {
-        ...updatedReturn,
-        currentCash: mrCashData?.currentCash || 0,
-        mrDetails: mrCashData,
+    // Log activity
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `${adjustmentType === "add" ? "Added" : "Removed"} Stock: ${toTitleCase(product.productName)}`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      recordId: adjustment._id,
+      referenceNumber: adjustment._id.toString(),
+      newData: {
+        productName: toTitleCase(product.productName),
+        adjustmentType: adjustmentType,
+        boxQuantity: adjustmentQty,
+        costPerBox: costPerBox,
+        amount: adjustmentAmount,
+        remarks: remarks || "",
       },
+      description: `${adjustmentType === "add" ? "Added" : "Removed"} ${adjustmentQty} boxes of ${toTitleCase(product.productName)} ${adjustmentType === "add" ? "to" : "from"} warehouse. Cost per box: ${costPerBox}, Total amount: ${adjustmentAmount}`,
+      refField: "productId",
+    });
+
+    const overrideMap = new Map([
+      [
+        reportItem.productName.toLowerCase(),
+        {
+          totalBoxes: reportItem.totalBoxes,
+          totalAmount: reportItem.totalAmount,
+        },
+      ],
+    ]);
+    const warehouseSummary = await getWarehouseInventorySummary(overrideMap);
+
+    res.status(201).json({
+      success: true,
+      message: `Stock ${adjustmentType === "add" ? "added to" : "removed from"} warehouse successfully`,
+      data: await StockAdjustment.findById(adjustment._id).populate(
+        "productId",
+        "productName qtyPerCarton",
+      ),
+      updatedWarehouseStock: {
+        productName: reportItem.productName,
+        totalBoxes: reportItem.totalBoxes,
+        totalAmount: reportItem.totalAmount,
+        averagePrice: reportItem.averagePrice,
+        status: reportItem.status,
+        adjustment: {
+          type: adjustmentType,
+          boxes: adjustmentQty,
+          costPerBox,
+          amount:
+            adjustmentType === "add" ? adjustmentAmount : -adjustmentAmount,
+          absAmount: adjustmentAmount,
+        },
+      },
+      warehouseSummary,
+      stockStatusChanged: wasOutOfStock !== reportItem.totalBoxes > 0,
     });
   } catch (error) {
-    if (session.inTransaction()) {
-      await session.abortTransaction();
-    }
+    await session.abortTransaction();
     session.endSession();
-
-    console.error("Error updating stock return status:", error);
-
-    return res.status(500).json({
+    console.error("Error creating adjustment:", error);
+    res.status(500).json({
       success: false,
-      message: "Failed to update stock return status",
-      error: error.message,
+      message: error.message || "Failed to create adjustment",
     });
   }
 });
 
-// ==================== DELETE SINGLE STOCK RETURN (Protected & Admin Only) ====================
+// ==================== UPDATE adjustment ====================
+router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      throw new Error("Invalid adjustment ID");
+
+    const existing = await StockAdjustment.findById(id).session(session);
+    if (!existing) throw new Error("Adjustment not found");
+
+    // Get previous record for logging
+    const previousRecord = existing.toObject();
+
+    const { productId, boxQuantity, adjustmentType, remarks, unitCost } =
+      req.body;
+    if (!productId || !boxQuantity || !adjustmentType)
+      throw new Error("Missing required fields");
+    if (Number(boxQuantity) <= 0)
+      throw new Error("Box quantity must be positive");
+    if (!mongoose.Types.ObjectId.isValid(productId))
+      throw new Error("Invalid product ID");
+
+    const product = await Product.findById(productId).session(session);
+    if (!product) throw new Error("Product not found");
+
+    let reportItem = await ReportInHand.findOne({
+      productName: {
+        $regex: new RegExp(`^${escapeRegex(product.productName)}$`, "i"),
+      },
+    }).session(session);
+    if (!reportItem)
+      throw new Error(
+        `Product "${product.productName}" not found in warehouse.`,
+      );
+
+    // Remove old batch
+    const oldBatchIndex = reportItem.batches.findIndex(
+      (b) =>
+        b.adjustmentType === existing.adjustmentType &&
+        Number(b.boxes) === existing.boxQuantity &&
+        b.batchNumber?.startsWith(
+          `ADJ-${existing.adjustmentType.toUpperCase()}`,
+        ),
+    );
+    if (oldBatchIndex !== -1) reportItem.batches.splice(oldBatchIndex, 1);
+
+    recalculateTotals(reportItem);
+
+    const newQty = fixPrecision(Number(boxQuantity));
+
+    let costPerBox = 0;
+    let adjustmentAmount = 0;
+
+    if (adjustmentType === "add") {
+      if (unitCost && Number(unitCost) > 0) {
+        costPerBox = Number(unitCost);
+      } else {
+        // ✅ Fallback to best available LC
+        costPerBox = getBestLcFallback(reportItem);
+        if (costPerBox === 0)
+          throw new Error(
+            "Cannot add stock: No cost found. Please provide a unit cost.",
+          );
+      }
+      adjustmentAmount = fixPrecision(newQty * costPerBox);
+    } else if (adjustmentType === "remove") {
+      costPerBox =
+        (reportItem.averagePrice || 0) > 0
+          ? reportItem.averagePrice
+          : getBestLcFallback(reportItem);
+      adjustmentAmount = fixPrecision(newQty * costPerBox);
+    }
+
+    const newBatch = {
+      _id: new mongoose.Types.ObjectId(),
+      boxes: newQty,
+      lc: costPerBox,
+      fob: 0,
+      cif: 0,
+      amount: adjustmentAmount,
+      date: new Date(),
+      adjustmentType: adjustmentType,
+      batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
+    };
+
+    reportItem.batches.push(newBatch);
+
+    recalculateTotals(reportItem);
+
+    if (reportItem.totalBoxes < 0)
+      throw new Error(
+        `Insufficient stock after update. Stock would be ${reportItem.totalBoxes}`,
+      );
+
+    await reportItem.save({ session });
+
+    existing.productId = productId;
+    existing.boxQuantity = newQty;
+    existing.totalQuantity =
+      adjustmentType === "add"
+        ? newQty * (product.qtyPerCarton || 1)
+        : -newQty * (product.qtyPerCarton || 1);
+    existing.adjustmentType = adjustmentType;
+    existing.remarks = remarks || "";
+    existing.costPerBox = costPerBox;
+    existing.amount = adjustmentAmount;
+    existing.updatedAt = new Date();
+    await existing.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Log activity
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Stock Adjustment: ${toTitleCase(product.productName)}`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      recordId: existing._id,
+      referenceNumber: existing._id.toString(),
+      previousData: previousRecord,
+      newData: {
+        productName: toTitleCase(product.productName),
+        adjustmentType: adjustmentType,
+        boxQuantity: newQty,
+        costPerBox: costPerBox,
+        amount: adjustmentAmount,
+        remarks: remarks || "",
+      },
+      description: `Updated stock adjustment for ${toTitleCase(product.productName)}: Changed from ${previousRecord.boxQuantity} ${previousRecord.adjustmentType} to ${newQty} ${adjustmentType}`,
+      refField: "productId",
+    });
+
+    const overrideMap = new Map([
+      [
+        reportItem.productName.toLowerCase(),
+        {
+          totalBoxes: reportItem.totalBoxes,
+          totalAmount: reportItem.totalAmount,
+        },
+      ],
+    ]);
+    const warehouseSummary = await getWarehouseInventorySummary(overrideMap);
+
+    res.json({
+      success: true,
+      message: "Adjustment updated successfully",
+      data: await StockAdjustment.findById(existing._id).populate(
+        "productId",
+        "productName qtyPerCarton",
+      ),
+      updatedWarehouseStock: {
+        productName: reportItem.productName,
+        totalBoxes: reportItem.totalBoxes,
+        totalAmount: reportItem.totalAmount,
+        averagePrice: reportItem.averagePrice,
+        status: reportItem.status,
+        adjustment: {
+          type: adjustmentType,
+          boxes: newQty,
+          costPerBox,
+          amount:
+            adjustmentType === "add" ? adjustmentAmount : -adjustmentAmount,
+          absAmount: adjustmentAmount,
+        },
+      },
+      warehouseSummary,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error updating adjustment:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ==================== DELETE single adjustment ====================
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      throw new Error("Invalid adjustment ID");
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock return ID format",
-      });
-    }
+    const adjustment = await StockAdjustment.findById(id)
+      .populate("productId", "productName qtyPerCarton")
+      .session(session);
+    if (!adjustment) throw new Error("Adjustment not found");
 
-    const stockReturn = await StockReturn.findOne({
-      _id: id,
-      isDeleted: false,
+    // Get product info for logging
+    const product = adjustment.productId;
+    const previousRecord = adjustment.toObject();
+
+    const reportItem = await ReportInHand.findOne({
+      productName: {
+        $regex: new RegExp(`^${escapeRegex(product.productName)}$`, "i"),
+      },
     }).session(session);
 
-    if (!stockReturn) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Stock return not found",
-      });
+    if (reportItem) {
+      const batchIndex = reportItem.batches.findIndex(
+        (b) =>
+          b.adjustmentType === adjustment.adjustmentType &&
+          Number(b.boxes) === adjustment.boxQuantity &&
+          b.batchNumber?.startsWith(
+            `ADJ-${adjustment.adjustmentType.toUpperCase()}`,
+          ),
+      );
+      if (batchIndex !== -1) reportItem.batches.splice(batchIndex, 1);
+
+      recalculateTotals(reportItem);
+
+      if (reportItem.totalBoxes < 0)
+        throw new Error(
+          `Cannot delete: warehouse stock would go negative (${reportItem.totalBoxes})`,
+        );
+
+      await reportItem.save({ session });
     }
 
-    if (stockReturn.status !== "Pending") {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Only pending stock returns can be deleted",
-      });
-    }
-
-    const stockInMrUpdates = [];
-    for (const item of stockReturn.items) {
-      stockInMrUpdates.push({
-        updateOne: {
-          filter: {
-            mrId: stockReturn.mrId,
-            "productsInHand.productId": item.productId,
-          },
-          update: {
-            $inc: { "productsInHand.$.quantity": item.returnQty },
-            $set: {
-              "productsInHand.$.lastUpdated": new Date(),
-              updatedAt: new Date(),
-            },
-          },
-        },
-      });
-    }
-
-    if (stockInMrUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
-    }
-
-    stockReturn.isDeleted = true;
-    await stockReturn.save({ session });
-
+    await StockAdjustment.findByIdAndDelete(id).session(session);
     await session.commitTransaction();
     session.endSession();
 
-    return res.status(200).json({
+    // Log activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Stock Adjustment: ${toTitleCase(product.productName)}`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      recordId: adjustment._id,
+      referenceNumber: adjustment._id.toString(),
+      previousData: previousRecord,
+      description: `Deleted stock adjustment for ${toTitleCase(product.productName)}: ${adjustment.adjustmentType} of ${adjustment.boxQuantity} boxes`,
+      refField: "productId",
+    });
+
+    const overrideMap = reportItem
+      ? new Map([
+          [
+            reportItem.productName.toLowerCase(),
+            {
+              totalBoxes: reportItem.totalBoxes,
+              totalAmount: reportItem.totalAmount,
+            },
+          ],
+        ])
+      : null;
+    const warehouseSummary = await getWarehouseInventorySummary(overrideMap);
+
+    res.json({
       success: true,
-      message: "Stock return deleted successfully",
+      message: "Adjustment deleted and warehouse stock reverted",
+      warehouseSummary,
     });
   } catch (error) {
-    if (session.inTransaction()) {
-      await session.abortTransaction();
-    }
+    await session.abortTransaction();
     session.endSession();
-
-    console.error("Error deleting stock return:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete stock return",
-      error: error.message,
-    });
+    console.error("Error deleting adjustment:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// ==================== BULK DELETE STOCK RETURNS (Protected & Admin Only) ====================
+// ==================== BULK DELETE ====================
 router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0)
+      throw new Error("No adjustment IDs provided");
+    const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) throw new Error("No valid adjustment IDs");
 
-    if (!Array.isArray(ids) || ids.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Please provide stock return IDs to delete",
-      });
-    }
-
-    const validIds = [];
-    const invalidIds = [];
-
-    ids.forEach((id) => {
-      if (mongoose.Types.ObjectId.isValid(id)) {
-        validIds.push(new mongoose.Types.ObjectId(id));
-      } else {
-        invalidIds.push(id);
-      }
-    });
-
-    if (invalidIds.length > 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ID(s) provided",
-        invalidIds,
-      });
-    }
-
-    const stockReturns = await StockReturn.find({
+    const adjustments = await StockAdjustment.find({
       _id: { $in: validIds },
-      isDeleted: false,
-      status: "Pending",
-    }).session(session);
+    })
+      .populate("productId", "productName qtyPerCarton")
+      .session(session);
 
-    if (stockReturns.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "No pending stock returns found to delete",
+    // Store for logging
+    const deletedRecords = adjustments.map((adj) => adj.toObject());
+
+    const byProduct = new Map();
+    for (const adj of adjustments) {
+      const key = adj.productId._id.toString();
+      if (!byProduct.has(key)) byProduct.set(key, []);
+      byProduct.get(key).push(adj);
+    }
+
+    const overrideMap = new Map();
+    for (const [productId, adjs] of byProduct) {
+      const product = await Product.findById(productId).session(session);
+      if (!product) continue;
+
+      const reportItem = await ReportInHand.findOne({
+        productName: {
+          $regex: new RegExp(`^${escapeRegex(product.productName)}$`, "i"),
+        },
+      }).session(session);
+      if (!reportItem) continue;
+
+      for (const adj of adjs) {
+        const batchIndex = reportItem.batches.findIndex(
+          (b) =>
+            b.adjustmentType === adj.adjustmentType &&
+            Number(b.boxes) === adj.boxQuantity &&
+            b.batchNumber?.startsWith(
+              `ADJ-${adj.adjustmentType.toUpperCase()}`,
+            ),
+        );
+        if (batchIndex !== -1) reportItem.batches.splice(batchIndex, 1);
+      }
+
+      recalculateTotals(reportItem);
+      await reportItem.save({ session });
+      overrideMap.set(reportItem.productName.toLowerCase(), {
+        totalBoxes: reportItem.totalBoxes,
+        totalAmount: reportItem.totalAmount,
       });
     }
 
-    const updatesByMR = {};
-    for (const returnDoc of stockReturns) {
-      for (const item of returnDoc.items) {
-        const key = `${returnDoc.mrId}-${item.productId}`;
-        if (!updatesByMR[key]) {
-          updatesByMR[key] = {
-            mrId: returnDoc.mrId,
-            productId: item.productId,
-            totalQty: 0,
-          };
-        }
-        updatesByMR[key].totalQty += item.returnQty;
-      }
-    }
-
-    const stockInMrUpdates = Object.values(updatesByMR).map((update) => ({
-      updateOne: {
-        filter: {
-          mrId: update.mrId,
-          "productsInHand.productId": update.productId,
-        },
-        update: {
-          $inc: { "productsInHand.$.quantity": update.totalQty },
-          $set: {
-            "productsInHand.$.lastUpdated": new Date(),
-            updatedAt: new Date(),
-          },
-        },
-      },
-    }));
-
-    if (stockInMrUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
-    }
-
-    await StockReturn.updateMany(
-      { _id: { $in: validIds } },
-      { $set: { isDeleted: true } },
-      { session }
-    );
-
+    const result = await StockAdjustment.deleteMany({
+      _id: { $in: validIds },
+    }).session(session);
     await session.commitTransaction();
     session.endSession();
 
-    return res.status(200).json({
+    // Log bulk delete activity
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Stock Adjustment(s)`,
+      tableName: "stockadjustments",
+      tableLabel: "Stock Adjustment",
+      previousData: deletedRecords,
+      description: `Deleted ${result.deletedCount} stock adjustments. Affected products: ${Array.from(byProduct.keys()).length}`,
+      refField: "productId",
+    });
+
+    const warehouseSummary = await getWarehouseInventorySummary(
+      overrideMap.size > 0 ? overrideMap : null,
+    );
+    res.json({
       success: true,
-      message: `${stockReturns.length} stock return(s) deleted successfully`,
-      deletedCount: stockReturns.length,
+      message: `${result.deletedCount} adjustment(s) deleted and warehouse stock reverted`,
+      warehouseSummary,
     });
   } catch (error) {
-    if (session.inTransaction()) {
-      await session.abortTransaction();
-    }
+    await session.abortTransaction();
     session.endSession();
+    console.error("Bulk delete error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
-    console.error("Error bulk deleting stock returns:", error);
-    return res.status(500).json({
+// ==================== GET WAREHOUSE SUMMARY ====================
+router.get("/summary/warehouse", async (req, res) => {
+  try {
+    const warehouseSummary = await getWarehouseInventorySummary();
+    res.json({ success: true, warehouseSummary });
+  } catch (error) {
+    console.error("Error fetching warehouse summary:", error);
+    res.status(500).json({
       success: false,
-      message: "Failed to delete stock returns",
+      message: "Failed to fetch warehouse summary",
       error: error.message,
     });
   }
 });
+
+// ==================== REPAIR: recalc all products ====================
+router.post(
+  "/repair/recalc-only",
+  protect,
+  allowAdminOnly,
+  async (req, res) => {
+    try {
+      const allReports = await ReportInHand.find({});
+      let updatedCount = 0;
+      const details = [];
+
+      for (const report of allReports) {
+        const before = {
+          totalBoxes: report.totalBoxes,
+          totalAmount: report.totalAmount,
+          averagePrice: report.averagePrice,
+        };
+
+        recalculateTotals(report);
+        await report.save();
+
+        const changed =
+          report.totalBoxes !== before.totalBoxes ||
+          report.totalAmount !== before.totalAmount ||
+          report.averagePrice !== before.averagePrice;
+
+        if (changed) {
+          updatedCount++;
+          details.push({
+            productName: report.productName,
+            before,
+            after: {
+              totalBoxes: report.totalBoxes,
+              totalAmount: report.totalAmount,
+              averagePrice: report.averagePrice,
+            },
+          });
+        }
+      }
+
+      // Log repair activity
+      await logActivity(req, {
+        action: "REPAIR",
+        actionLabel: `Recalculated Stock Totals (${updatedCount} products changed)`,
+        tableName: "stockadjustments",
+        tableLabel: "Stock Adjustment",
+        description: `Recalculated totals for ${allReports.length} products. ${updatedCount} products had changes.`,
+        newData: {
+          totalProducts: allReports.length,
+          changedProducts: updatedCount,
+          details: details.slice(0, 10),
+        },
+      });
+
+      const warehouseSummary = await getWarehouseInventorySummary();
+      res.json({
+        success: true,
+        message: `Recalculated ${allReports.length} products. ${updatedCount} had changes.`,
+        updatedCount,
+        details,
+        warehouseSummary,
+      });
+    } catch (error) {
+      console.error("Repair error:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+);
 
 export default router;

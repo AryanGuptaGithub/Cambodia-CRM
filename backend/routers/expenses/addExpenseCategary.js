@@ -2,8 +2,29 @@ import express from "express";
 import mongoose from "mongoose";
 import addExpenseCategary from "../../models/expenses/addExpenseCategary.js";
 import Expense from "../../models/expenses/addExpense.js";
+import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
+
+// ─── Utility helpers ──────────────────────────────────────────────────────────
+
+const handleServerError = (res, err, message = "Server error", code = 500) => {
+  console.error("ERROR:", err);
+  res.status(code).json({
+    success: false,
+    message,
+    error: err.message || err,
+  });
+};
+
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
 
 /**
  * GET /
@@ -71,12 +92,11 @@ router.get("/", async (req, res) => {
       monthlyMap.set(exp._id.toString(), exp.monthlyAmount);
     });
 
-    // ✅ Build response with consistent field names
     const responseData = categories.map((category, index) => ({
       Sr: skip + index + 1,
-      _id: category._id, // use _id (not id)
-      category: category.category, // lowercase
-      description: category.description || "", // lowercase
+      _id: category._id,
+      category: category.category,
+      description: category.description || "",
       amountUntilYear: ytdMap.get(category._id.toString()) || 0,
       monthlyAmount: monthlyMap.get(category._id.toString()) || 0,
       createdAt: category.createdAt,
@@ -307,6 +327,19 @@ router.post("/", async (req, res) => {
 
     const savedCategory = await newCategory.save();
 
+    // Log activity for CREATE
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Created Expense Category: ${toTitleCase(savedCategory.category)}`,
+      tableName: "addexpensecategaries",
+      tableLabel: "Expense Category",
+      recordId: savedCategory._id,
+      referenceNumber: savedCategory.category,
+      newData: savedCategory.toObject(),
+      description: `New expense category "${toTitleCase(savedCategory.category)}" created`,
+      refField: "category",
+    });
+
     res.status(201).json({
       success: true,
       message: "Category created successfully",
@@ -346,8 +379,9 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    const existingCategory = await addExpenseCategary.findById(id);
-    if (!existingCategory) {
+    // Get previous record for logging
+    const previousRecord = await addExpenseCategary.findById(id).lean();
+    if (!previousRecord) {
       return res.status(404).json({
         success: false,
         message: "Category not found",
@@ -374,15 +408,33 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    existingCategory.category = category.trim();
-    existingCategory.description = description?.trim() || "";
+    const updatedCategory = await addExpenseCategary.findByIdAndUpdate(
+      id,
+      {
+        category: category.trim(),
+        description: description?.trim() || "",
+      },
+      { new: true, runValidators: true },
+    );
 
-    const updatedCategory = await existingCategory.save();
+    // Log activity for UPDATE
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Expense Category: ${toTitleCase(previousRecord.category)} → ${toTitleCase(updatedCategory.category)}`,
+      tableName: "addexpensecategaries",
+      tableLabel: "Expense Category",
+      recordId: updatedCategory._id,
+      referenceNumber: updatedCategory.category,
+      previousData: previousRecord,
+      newData: updatedCategory.toObject(),
+      description: `Expense category "${toTitleCase(previousRecord.category)}" was updated to "${toTitleCase(updatedCategory.category)}"`,
+      refField: "category",
+    });
 
     res.status(200).json({
       success: true,
       message: "Category updated successfully",
-      data: updatedCategory, // contains _id
+      data: updatedCategory,
     });
   } catch (error) {
     console.error("Error updating category:", error);
@@ -409,6 +461,15 @@ router.delete("/:id", async (req, res) => {
       });
     }
 
+    // Get category details before deletion for logging
+    const categoryToDelete = await addExpenseCategary.findById(id).lean();
+    if (!categoryToDelete) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+      });
+    }
+
     const expenseCount = await Expense.countDocuments({
       category: new mongoose.Types.ObjectId(id),
     });
@@ -423,12 +484,18 @@ router.delete("/:id", async (req, res) => {
 
     const deletedCategory = await addExpenseCategary.findByIdAndDelete(id);
 
-    if (!deletedCategory) {
-      return res.status(404).json({
-        success: false,
-        message: "Category not found",
-      });
-    }
+    // Log activity for DELETE
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Expense Category: ${toTitleCase(categoryToDelete.category)}`,
+      tableName: "addexpensecategaries",
+      tableLabel: "Expense Category",
+      recordId: deletedCategory._id,
+      referenceNumber: categoryToDelete.category,
+      previousData: categoryToDelete,
+      description: `Expense category "${toTitleCase(categoryToDelete.category)}" was permanently deleted`,
+      refField: "category",
+    });
 
     res.status(200).json({
       success: true,
@@ -479,6 +546,13 @@ router.delete("/bulk", async (req, res) => {
       });
     }
 
+    // Get categories to delete for logging
+    const categoriesToDelete = await addExpenseCategary
+      .find({
+        _id: { $in: validIds },
+      })
+      .lean();
+
     const categoriesWithExpenses = await Expense.aggregate([
       {
         $match: {
@@ -507,6 +581,17 @@ router.delete("/bulk", async (req, res) => {
 
     const result = await addExpenseCategary.deleteMany({
       _id: { $in: validIds },
+    });
+
+    // Log activity for BULK DELETE
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Bulk Deleted ${result.deletedCount} Expense Category(ies)`,
+      tableName: "addexpensecategaries",
+      tableLabel: "Expense Category",
+      previousData: categoriesToDelete,
+      description: `Deleted ${result.deletedCount} expense categories: ${categoriesToDelete.map((c) => toTitleCase(c.category)).join(", ")}`,
+      refField: "category",
     });
 
     res.status(200).json({

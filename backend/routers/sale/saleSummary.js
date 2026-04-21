@@ -2848,40 +2848,56 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
     });
   }
 });
-
-// ✅ CORRECTED /all route – safe manual enrichment, no aggregation
 router.get("/all", async (req, res) => {
   try {
     const { search = "", tab = "All", saleType = "all" } = req.query;
     const matchConditions = buildMatchConditions(search, tab, saleType);
 
-    let sales = await SaleSummary.find(matchConditions)
-      .sort({ recordingDate: -1 })
-      .lean();
+    // ── Single aggregation replaces the old find() + per-document findById() loop ──
+    const enrichedSales = await SaleSummary.aggregate([
+      { $match: matchConditions },
+      { $sort: { recordingDate: -1 } },
 
-    const enrichedSales = [];
-    for (const sale of sales) {
-      let customerPhone = "",
-        customerZone = "",
-        customerProvince = "",
-        customerAddress = "";
-      if (sale.customerId && mongoose.Types.ObjectId.isValid(sale.customerId)) {
-        const customer = await Customer.findById(sale.customerId).lean();
-        if (customer) {
-          customerPhone = customer.customerNumber || "";
-          customerZone = customer.zone || "";
-          customerProvince = customer.province || "";
-          customerAddress = customer.address || "";
-        }
-      }
-      enrichedSales.push({
-        ...sale,
-        customerPhone,
-        customerZone,
-        customerProvince,
-        customerAddress,
-      });
-    }
+      // $lookup joins Customer in one DB round-trip instead of N findById calls
+      {
+        $lookup: {
+          from: "customers", // MongoDB collection name (check yours: db.getCollectionNames())
+          localField: "customerId",
+          foreignField: "_id",
+          as: "_customerDoc",
+          // Only pull the 4 fields we actually use — keeps the payload small
+          pipeline: [
+            {
+              $project: {
+                customerNumber: 1,
+                zone: 1,
+                province: 1,
+                address: 1,
+              },
+            },
+          ],
+        },
+      },
+
+      // Flatten the joined array and map to the same field names the frontend expects
+      {
+        $addFields: {
+          customerPhone: {
+            $ifNull: [{ $first: "$_customerDoc.customerNumber" }, ""],
+          },
+          customerZone: { $ifNull: [{ $first: "$_customerDoc.zone" }, ""] },
+          customerProvince: {
+            $ifNull: [{ $first: "$_customerDoc.province" }, ""],
+          },
+          customerAddress: {
+            $ifNull: [{ $first: "$_customerDoc.address" }, ""],
+          },
+        },
+      },
+
+      // Drop the raw joined array — frontend never sees it
+      { $unset: "_customerDoc" },
+    ]);
 
     res
       .status(200)
@@ -4877,6 +4893,87 @@ router.post("/download-excel", async (req, res) => {
       success: false,
       message: "Failed to generate Excel file",
       error: error.message,
+    });
+  }
+});
+
+router.get("/all-paginated", async (req, res) => {
+  try {
+    const {
+      search = "",
+      tab = "All",
+      saleType = "all",
+      page = 1,
+      limit = 9,
+    } = req.query;
+
+    const matchConditions = buildMatchConditions(search, tab, saleType);
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [result] = await SaleSummary.aggregate([
+      { $match: matchConditions },
+      {
+        $facet: {
+          // Count total matching docs (for pagination controls)
+          total: [{ $count: "n" }],
+
+          // Fetch only the current page
+          data: [
+            { $sort: { recordingDate: -1 } },
+            { $skip: skip },
+            { $limit: parseInt(limit) },
+            {
+              $lookup: {
+                from: "customers",
+                localField: "customerId",
+                foreignField: "_id",
+                as: "_customerDoc",
+                pipeline: [
+                  {
+                    $project: {
+                      customerNumber: 1,
+                      zone: 1,
+                      province: 1,
+                      address: 1,
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              $addFields: {
+                customerPhone: {
+                  $ifNull: [{ $first: "$_customerDoc.customerNumber" }, ""],
+                },
+                customerZone: {
+                  $ifNull: [{ $first: "$_customerDoc.zone" }, ""],
+                },
+                customerProvince: {
+                  $ifNull: [{ $first: "$_customerDoc.province" }, ""],
+                },
+                customerAddress: {
+                  $ifNull: [{ $first: "$_customerDoc.address" }, ""],
+                },
+              },
+            },
+            { $unset: "_customerDoc" },
+          ],
+        },
+      },
+    ]);
+
+    const count = result.total[0]?.n ?? 0;
+    const summaries = result.data ?? [];
+
+    res.status(200).json({ summaries, count });
+  } catch (error) {
+    console.error("Fetch Sale Summary Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch sale summaries",
+      error: error.message,
+      summaries: [],
+      count: 0,
     });
   }
 });

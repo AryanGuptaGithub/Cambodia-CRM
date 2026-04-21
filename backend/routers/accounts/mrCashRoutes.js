@@ -12,6 +12,7 @@ import stockInMRHand from "../../models/stock/stockInMRHand.js";
 import Product from "../../models/projectManger/product.js";
 import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import Sale from "../../models/sale/saleSummary.js";
+import { logActivity } from "../activity/activityLog.js"; // Add this import
 
 const router = express.Router();
 
@@ -20,6 +21,11 @@ const formatCurrency = (value) => {
     style: "currency",
     currency: "USD",
   }).format(value);
+};
+
+// Helper to get user ID from request
+const getUserIdFromRequest = (req) => {
+  return req.user?.id || req.user?._id || null;
 };
 
 // ─── helper: recalculate and save sale payment fields ─────────────────────────
@@ -202,6 +208,19 @@ router.post("/", async (req, res) => {
     await mrCash.save();
     await mrCash.populate("categoryType", "name code");
 
+    // Log activity for CREATE
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Created MR Cash Record for ${staff.medicalRepName || staff.employeeName}`,
+      tableName: "mrcashes",
+      tableLabel: "MR Cash",
+      recordId: mrCash._id,
+      referenceNumber: staff.MRId || mrCash.mrName,
+      newData: mrCash.toObject(),
+      description: `MR Cash record created for ${mrCash.mrName} with initial cash ${formatCurrency(currentCash)}`,
+      refField: "mrName",
+    });
+
     res.status(201).json({
       success: true,
       message: "MR Cash record created successfully",
@@ -355,17 +374,14 @@ router.get("/mr-list", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /mr-list-with-cash
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /mr-list-with-cash
 router.get("/mr-list-with-cash", async (req, res) => {
   try {
     const { minCash = 0 } = req.query;
 
-    // 1. Get all MR IDs that have stock transfers
     const stockTransfers = await stockTransferToMR.find({}, { mrId: 1 }).lean();
     const mrIdsWithStock = stockTransfers.map((t) => t.mrId).filter(Boolean);
 
     if (mrIdsWithStock.length === 0) {
-      // No MRs have stock transfers → return empty list
       return res.status(200).json({
         success: true,
         data: [],
@@ -374,7 +390,6 @@ router.get("/mr-list-with-cash", async (req, res) => {
       });
     }
 
-    // 2. Query MRCash for active records with positive cash AND mrId in the list
     const mrsWithCash = await MRCash.find({
       isActive: true,
       mrId: { $in: mrIdsWithStock },
@@ -424,6 +439,7 @@ router.get("/mr-list-with-cash", async (req, res) => {
       .json({ success: false, message: "Server error", error: error.message });
   }
 });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /mr/:mrId
 // ─────────────────────────────────────────────────────────────────────────────
@@ -488,8 +504,9 @@ router.put("/:id", async (req, res) => {
     const { id } = req.params;
     const updateData = req.body;
 
-    const mrCash = await MRCash.findById(id);
-    if (!mrCash)
+    // Get previous record for logging
+    const previousRecord = await MRCash.findById(id).lean();
+    if (!previousRecord)
       return res
         .status(404)
         .json({ success: false, message: "MR Cash record not found" });
@@ -502,7 +519,7 @@ router.put("/:id", async (req, res) => {
           .json({ success: false, message: "Category type not found" });
     }
 
-    if (updateData.mrId && updateData.mrId !== mrCash.mrId.toString()) {
+    if (updateData.mrId && updateData.mrId !== previousRecord.mrId.toString()) {
       const staff = await Staff.findById(updateData.mrId);
       if (!staff)
         return res
@@ -511,12 +528,27 @@ router.put("/:id", async (req, res) => {
       updateData.mrName = staff.medicalRepName || staff.employeeName;
     }
 
+    const mrCash = await MRCash.findById(id);
     Object.assign(mrCash, updateData);
     mrCash.updatedBy = req.user?.id || mrCash.updatedBy;
     mrCash.updatedAt = new Date();
 
     await mrCash.save();
     await mrCash.populate("categoryType", "name code");
+
+    // Log activity for UPDATE
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated MR Cash Record for ${mrCash.mrName}`,
+      tableName: "mrcashes",
+      tableLabel: "MR Cash",
+      recordId: mrCash._id,
+      referenceNumber: mrCash.mrName,
+      previousData: previousRecord,
+      newData: mrCash.toObject(),
+      description: `MR Cash record for ${mrCash.mrName} was updated`,
+      refField: "mrName",
+    });
 
     res.status(200).json({
       success: true,
@@ -531,9 +563,6 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /:mrCashId/transfer
-// ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /:mrCashId/transfer
 // ─────────────────────────────────────────────────────────────────────────────
@@ -599,8 +628,12 @@ router.post("/:mrCashId/transfer", async (req, res) => {
     }
 
     const transferAmount = parseFloat(amount);
-    // Use the provided date or default to now
     const effectiveDate = transferDate ? new Date(transferDate) : new Date();
+
+    // Store previous values for logging
+    const previousCurrentCash = mrCash.currentCash;
+    const previousTransferredToAdmin = mrCash.cashTransferredToAdmin;
+    const previousDestTotal = destinationAcc.totalAmount;
 
     mrCash.currentCash -= transferAmount;
     mrCash.cashTransferredToAdmin += transferAmount;
@@ -648,9 +681,33 @@ router.post("/:mrCashId/transfer", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // Log activity for TRANSFER
+    await logActivity(req, {
+      action: "TRANSFER",
+      actionLabel: `Cash Transfer: ${mrCash.mrName} → ${destinationAcc.name}`,
+      tableName: "mrcashes",
+      tableLabel: "MR Cash",
+      recordId: mrCash._id,
+      referenceNumber: mrCash.mrName,
+      previousData: {
+        currentCash: previousCurrentCash,
+        cashTransferredToAdmin: previousTransferredToAdmin,
+        destinationTotal: previousDestTotal,
+      },
+      newData: {
+        currentCash: mrCash.currentCash,
+        cashTransferredToAdmin: mrCash.cashTransferredToAdmin,
+        destinationTotal: destinationAcc.totalAmount,
+        transferAmount,
+        destinationAccount: destinationAcc.name,
+      },
+      description: `Transferred ${formatCurrency(transferAmount)} from ${mrCash.mrName} to ${destinationAcc.name}`,
+      refField: "mrName",
+    });
+
     res.status(200).json({
       success: true,
-      message: `$${amount} transferred from ${mrCash.mrName} to ${destinationAcc.name} successfully`,
+      message: `${formatCurrency(amount)} transferred from ${mrCash.mrName} to ${destinationAcc.name} successfully`,
       data: {
         mrCash,
         destinationAccount: destinationAcc,
@@ -728,6 +785,12 @@ router.post("/:mrCashId/transfer-to/:destinationCode", async (req, res) => {
     }
 
     const transferAmount = parseFloat(amount);
+
+    // Store previous values for logging
+    const previousCurrentCash = mrCash.currentCash;
+    const previousTransferredToAdmin = mrCash.cashTransferredToAdmin;
+    const previousDestTotal = destinationAcc.totalAmount;
+
     mrCash.currentCash -= transferAmount;
     mrCash.cashTransferredToAdmin += transferAmount;
     mrCash.lastTransferDate = new Date();
@@ -774,9 +837,33 @@ router.post("/:mrCashId/transfer-to/:destinationCode", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // Log activity for TRANSFER
+    await logActivity(req, {
+      action: "TRANSFER",
+      actionLabel: `Cash Transfer: ${mrCash.mrName} → ${destinationAcc.name}`,
+      tableName: "mrcashes",
+      tableLabel: "MR Cash",
+      recordId: mrCash._id,
+      referenceNumber: mrCash.mrName,
+      previousData: {
+        currentCash: previousCurrentCash,
+        cashTransferredToAdmin: previousTransferredToAdmin,
+        destinationTotal: previousDestTotal,
+      },
+      newData: {
+        currentCash: mrCash.currentCash,
+        cashTransferredToAdmin: mrCash.cashTransferredToAdmin,
+        destinationTotal: destinationAcc.totalAmount,
+        transferAmount,
+        destinationAccount: destinationAcc.name,
+      },
+      description: `Transferred ${formatCurrency(transferAmount)} from ${mrCash.mrName} to ${destinationAcc.name}`,
+      refField: "mrName",
+    });
+
     res.status(200).json({
       success: true,
-      message: `$${amount} transferred from ${mrCash.mrName} to ${destinationAcc.name} successfully`,
+      message: `${formatCurrency(amount)} transferred from ${mrCash.mrName} to ${destinationAcc.name} successfully`,
       data: {
         mrCash,
         destinationAccount: destinationAcc,
@@ -901,6 +988,11 @@ router.put("/transfers/:transferId", async (req, res) => {
         .json({ success: false, message: "Destination account not found" });
     }
 
+    // Store previous values for logging
+    const previousMrCashCurrent = mrCash.currentCash;
+    const previousMrCashTransferred = mrCash.cashTransferredToAdmin;
+    const previousDestTotal = destAcc.totalAmount;
+
     if (difference > 0) {
       if (mrCash.currentCash < difference) {
         await session.abortTransaction();
@@ -960,6 +1052,30 @@ router.put("/transfers/:transferId", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // Log activity for TRANSFER UPDATE
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Cash Transfer: ${mrCash.mrName} → ${destAcc.name}`,
+      tableName: "transfers",
+      tableLabel: "Transfer",
+      recordId: transfer._id,
+      referenceNumber: transfer._id,
+      previousData: {
+        amount: oldAmount,
+        mrCashCurrent: previousMrCashCurrent,
+        mrCashTransferred: previousMrCashTransferred,
+        destTotal: previousDestTotal,
+      },
+      newData: {
+        amount: newAmount,
+        mrCashCurrent: mrCash.currentCash,
+        mrCashTransferred: mrCash.cashTransferredToAdmin,
+        destTotal: destAcc.totalAmount,
+      },
+      description: `Transfer amount updated from ${formatCurrency(oldAmount)} to ${formatCurrency(newAmount)}`,
+      refField: "fromAccountName",
+    });
+
     res.json({
       success: true,
       message: "Transfer updated successfully",
@@ -1014,6 +1130,10 @@ router.delete("/:mrCashId/transfers/:transferId", async (req, res) => {
         .json({ success: false, message: "MR Cash record not found" });
     }
 
+    // Store previous values for logging
+    const previousCurrentCash = mrCash.currentCash;
+    const previousTransferredToAdmin = mrCash.cashTransferredToAdmin;
+
     mrCash.currentCash = parseFloat(
       (mrCash.currentCash + refundAmount).toFixed(2),
     );
@@ -1025,7 +1145,9 @@ router.delete("/:mrCashId/transfers/:transferId", async (req, res) => {
     const destinationAcc = await Account.findById(
       transferRecord.toAccount,
     ).session(session);
+    let previousDestTotal = 0;
     if (destinationAcc) {
+      previousDestTotal = destinationAcc.totalAmount;
       destinationAcc.totalAmount = parseFloat(
         Math.max(0, destinationAcc.totalAmount - refundAmount).toFixed(2),
       );
@@ -1052,6 +1174,24 @@ router.delete("/:mrCashId/transfers/:transferId", async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // Log activity for TRANSFER DELETE
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Cash Transfer: ${mrCash.mrName} → ${destinationAcc?.name || "Unknown"}`,
+      tableName: "transfers",
+      tableLabel: "Transfer",
+      recordId: transferId,
+      referenceNumber: transferId,
+      previousData: {
+        amount: refundAmount,
+        mrCashCurrent: previousCurrentCash,
+        mrCashTransferred: previousTransferredToAdmin,
+        destTotal: previousDestTotal,
+      },
+      description: `Deleted transfer of ${formatCurrency(refundAmount)} from ${mrCash.mrName}. Amount returned to MR cash.`,
+      refField: "fromAccountName",
+    });
 
     res.status(200).json({
       success: true,
@@ -1086,9 +1226,25 @@ router.delete("/:id", async (req, res) => {
         .status(404)
         .json({ success: false, message: "MR Cash record not found" });
 
+    // Store previous state for logging
+    const previousRecord = mrCash.toObject();
+
     mrCash.isActive = false;
     mrCash.updatedBy = req.user?.id || mrCash.updatedBy;
     await mrCash.save();
+
+    // Log activity for DELETE (deactivate)
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deactivated MR Cash Record for ${mrCash.mrName}`,
+      tableName: "mrcashes",
+      tableLabel: "MR Cash",
+      recordId: mrCash._id,
+      referenceNumber: mrCash.mrName,
+      previousData: previousRecord,
+      description: `MR Cash record for ${mrCash.mrName} was deactivated (soft delete)`,
+      refField: "mrName",
+    });
 
     res.status(200).json({
       success: true,
@@ -1267,6 +1423,25 @@ router.post("/stock-transfer-to-mr", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // Log activity for STOCK TRANSFER
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Stock Transfer to MR: ${productName} x${transferQty}`,
+      tableName: "stockinmrhands",
+      tableLabel: "Stock in MR Hand",
+      recordId: mrStock._id,
+      referenceNumber: mrName,
+      newData: {
+        mrName,
+        productName,
+        quantity: transferQty,
+        lc,
+        totalAmount: transferQty * lc,
+      },
+      description: `Transferred ${transferQty} units of "${productName}" to ${mrName}`,
+      refField: "mrName",
+    });
+
     res.status(200).json({
       success: true,
       message: `Successfully transferred ${transferQty} units of "${productName}" to ${mrName}`,
@@ -1343,7 +1518,6 @@ router.get("/sales-by-mr/:mrName", async (req, res) => {
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     endOfMonth.setHours(23, 59, 59, 999);
 
-    // Get invoice numbers already collected via credit collection for this MR
     const mrSaleInvoiceNos = await Sale.distinct("invoiceNumber", {
       mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
     });
@@ -1357,7 +1531,6 @@ router.get("/sales-by-mr/:mrName", async (req, res) => {
       mrName: new RegExp(`^\\s*${mrName.trim()}\\s*$`, "i"),
       paymentStatus: { $in: ["Partial Paid", "Cash", "Paid"] },
       invoiceDate: { $gte: startOfMonth, $lte: endOfMonth },
-      // Exclude invoices already in credit collection tab
       invoiceNumber: { $nin: creditCollectedInvoiceNos },
     })
       .select(
@@ -1374,6 +1547,7 @@ router.get("/sales-by-mr/:mrName", async (req, res) => {
       .json({ success: false, message: "Server error", error: error.message });
   }
 });
+
 // =============================================================================
 // PUT /credit-collection-invoices/:transactionId
 // Edit a credit collection Transaction.
@@ -1429,6 +1603,10 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
         .json({ success: false, message: "MR Cash record not found" });
     }
 
+    // Store previous values for logging
+    const previousCurrentCash = mrCash.currentCash;
+    const previousTxnAmount = txn.amount;
+
     const newCurrentCash = parseFloat(
       (mrCash.currentCash + difference).toFixed(4),
     );
@@ -1448,7 +1626,9 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
       invoiceNumber: String(txn.invoiceNo),
     }).session(session);
 
+    let previousSalePaidAmount = null;
     if (sale) {
+      previousSalePaidAmount = sale.paidAmount;
       sale.paidAmount = parseFloat(
         ((sale.paidAmount || 0) + difference).toFixed(4),
       );
@@ -1466,6 +1646,28 @@ router.put("/credit-collection-invoices/:transactionId", async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // Log activity for CREDIT COLLECTION UPDATE
+    await logActivity(req, {
+      action: "UPDATE",
+      actionLabel: `Updated Credit Collection: Invoice ${txn.invoiceNo}`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      recordId: txn._id,
+      referenceNumber: txn.invoiceNo,
+      previousData: {
+        amount: previousTxnAmount,
+        mrCashCurrent: previousCurrentCash,
+        salePaidAmount: previousSalePaidAmount,
+      },
+      newData: {
+        amount: newAmount,
+        mrCashCurrent: mrCash.currentCash,
+        salePaidAmount: sale?.paidAmount,
+      },
+      description: `Credit collection for invoice ${txn.invoiceNo} updated from ${formatCurrency(previousTxnAmount)} to ${formatCurrency(newAmount)}`,
+      refField: "invoiceNo",
+    });
 
     res.status(200).json({
       success: true,
@@ -1542,6 +1744,9 @@ router.delete(
           .json({ success: false, message: "MR Cash record not found" });
       }
 
+      // Store previous values for logging
+      const previousCurrentCash = mrCash.currentCash;
+
       mrCash.currentCash = parseFloat(
         Math.max(0, mrCash.currentCash - collectedAmount).toFixed(4),
       );
@@ -1551,7 +1756,9 @@ router.delete(
         invoiceNumber: String(txn.invoiceNo),
       }).session(session);
 
+      let previousSalePaidAmount = null;
       if (sale) {
+        previousSalePaidAmount = sale.paidAmount;
         sale.paidAmount = parseFloat(
           Math.max(0, (sale.paidAmount || 0) - collectedAmount).toFixed(4),
         );
@@ -1561,7 +1768,9 @@ router.delete(
       const dest = await Account.findOne({ name: mrCash.mrName }).session(
         session,
       );
+      let previousDestTotal = null;
       if (dest) {
+        previousDestTotal = dest.totalAmount;
         dest.totalAmount = parseFloat(
           Math.max(0, dest.totalAmount - collectedAmount).toFixed(4),
         );
@@ -1573,6 +1782,24 @@ router.delete(
 
       await session.commitTransaction();
       session.endSession();
+
+      // Log activity for CREDIT COLLECTION DELETE
+      await logActivity(req, {
+        action: "DELETE",
+        actionLabel: `Deleted Credit Collection: Invoice ${txn.invoiceNo}`,
+        tableName: "transactions",
+        tableLabel: "Transaction",
+        recordId: transactionId,
+        referenceNumber: txn.invoiceNo,
+        previousData: {
+          amount: collectedAmount,
+          mrCashCurrent: previousCurrentCash,
+          salePaidAmount: previousSalePaidAmount,
+          destTotal: previousDestTotal,
+        },
+        description: `Credit collection for invoice ${txn.invoiceNo} of ${formatCurrency(collectedAmount)} deleted. Amount reversed from ${mrCash.mrName}'s cash.`,
+        refField: "invoiceNo",
+      });
 
       res.status(200).json({
         success: true,
@@ -1614,7 +1841,6 @@ router.get("/combined-cash-summary", async (req, res) => {
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     endOfMonth.setHours(23, 59, 59, 999);
 
-    // 1. Credit collection totals per MR (all time)
     const creditTotals = await Transaction.aggregate([
       { $match: { transactionType: "credit collection" } },
       {
@@ -1625,13 +1851,10 @@ router.get("/combined-cash-summary", async (req, res) => {
       },
     ]);
 
-    // 2. Get all invoice numbers already counted in credit collection
     const creditCollectedInvoiceNos = await Transaction.distinct("invoiceNo", {
       transactionType: "credit collection",
     });
 
-    // 3. Cash / Paid / Partial Paid sales paidAmount for current month
-    //    EXCLUDE invoices already counted in credit collection
     const saleTotals = await Sale.aggregate([
       {
         $match: {
@@ -1649,7 +1872,6 @@ router.get("/combined-cash-summary", async (req, res) => {
       },
     ]);
 
-    // 4. Merge
     const creditMap = new Map(
       creditTotals.map((c) => [c._id, c.creditCollectionTotal]),
     );
@@ -1672,6 +1894,7 @@ router.get("/combined-cash-summary", async (req, res) => {
       .json({ success: false, message: "Server error", error: error.message });
   }
 });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /collect-payment
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1718,6 +1941,11 @@ router.post("/collect-payment", async (req, res) => {
       });
     }
 
+    // Store previous values for logging
+    const previousSalePaidAmount = sale.paidAmount;
+    const previousSaleDueAmount = sale.dueAmount;
+    const previousSaleStatus = sale.paymentStatus;
+
     sale.paidAmount = parseFloat(
       ((sale.paidAmount || 0) + collectedAmount).toFixed(4),
     );
@@ -1727,6 +1955,9 @@ router.post("/collect-payment", async (req, res) => {
       mrName: nameRegex,
       isActive: true,
     }).session(session);
+    let isNewMRCash = false;
+    let previousMrCashCurrent = 0;
+
     if (!mrCash) {
       const staff = await Staff.findOne({
         $or: [{ medicalRepName: nameRegex }, { employeeName: nameRegex }],
@@ -1745,6 +1976,9 @@ router.post("/collect-payment", async (req, res) => {
         cashTransferredToAdmin: 0,
         isActive: true,
       });
+      isNewMRCash = true;
+    } else {
+      previousMrCashCurrent = mrCash.currentCash;
     }
 
     mrCash.currentCash = parseFloat(
@@ -1772,7 +2006,9 @@ router.post("/collect-payment", async (req, res) => {
     const dest = await Account.findOne({ name: mrCash.mrName }).session(
       session,
     );
+    let previousDestTotal = null;
     if (dest) {
+      previousDestTotal = dest.totalAmount;
       dest.totalAmount = parseFloat(
         (dest.totalAmount + collectedAmount).toFixed(4),
       );
@@ -1784,6 +2020,27 @@ router.post("/collect-payment", async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // Log activity for COLLECT PAYMENT
+    await logActivity(req, {
+      action: "CREATE",
+      actionLabel: `Credit Collection: Invoice ${invoiceNumber}`,
+      tableName: "transactions",
+      tableLabel: "Transaction",
+      recordId: transaction._id,
+      referenceNumber: invoiceNumber,
+      newData: {
+        invoiceNumber,
+        collectedAmount,
+        mrName: mrCash.mrName,
+        previousSalePaid: previousSalePaidAmount,
+        newSalePaid: sale.paidAmount,
+        previousMrCash: previousMrCashCurrent,
+        newMrCash: mrCash.currentCash,
+      },
+      description: `Collected ${formatCurrency(collectedAmount)} from invoice ${invoiceNumber} for ${mrName}. Added to MR cash.`,
+      refField: "invoiceNo",
+    });
 
     res.status(200).json({
       success: true,

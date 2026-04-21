@@ -16,9 +16,14 @@ const TABLE_MODEL_MAP = {
   staff: () => import("../../models/staffMember/staff.js"),
   StockAdjustment: () => import("../../models/stock/stockAdjustment.js"),
   stockTransfer: () => import("../../models/stock/stockTransfer.js"),
-   purchaseReturn: () => import("../../models/purcharsing/purchaseReturns.js"),
+  purchaseReturn: () => import("../../models/purcharsing/purchaseReturns.js"),
   paymentsOut: () => import("../../models/purcharsing/purchaseOut.js"),
   salesReturn: () => import("../../models/sale/saleReturn.js"),
+  transactions: () => import("../../models/accounts/Transaction.js"),
+  mrcashes: () => import("../../models/accounts/MRCash.js"),
+  addexpensecategaries: () =>
+    import("../../models/expenses/addExpenseCategary.js"),
+  mrbasicpayrolls: () => import("../../models/Hrm/MRBasicPayroll.js"),
 };
 
 const router = express.Router();
@@ -99,7 +104,437 @@ export const logActivity = async (req, options = {}) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: Recursively flatten nested objects for Excel export
+// Helper: Recalculate and update ReportInHand stock totals after revert
+// This is the KEY fix — after restoring purchase/sale records, we need to
+// recalculate the actual stock values from all existing batches.
+// ─────────────────────────────────────────────────────────────────────────────
+const recalculateReportInHandStock = async () => {
+  try {
+    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
+      .default;
+    const allReports = await ReportInHand.find({}).lean();
+
+    for (const report of allReports) {
+      try {
+        const batches = report.batches || [];
+
+        // Only consider real batches (not adjustments)
+        const realBatches = batches.filter(
+          (b) => !b.adjustmentType || b.adjustmentType === "batch",
+        );
+
+        const totalBoxesFromBatches = realBatches.reduce(
+          (sum, b) => sum + (Number(b.boxes) || 0),
+          0,
+        );
+        const totalAmount = realBatches.reduce(
+          (sum, b) => sum + (Number(b.amount) || 0),
+          0,
+        );
+
+        const addAdj = Number(report.addStockAdjustment || 0);
+        const removeAdj = Number(report.removeStockAdjustment || 0);
+        const totalBoxes = Math.max(
+          0,
+          totalBoxesFromBatches + addAdj - removeAdj,
+        );
+        const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+
+        let status = "In Stock";
+        if (totalBoxes <= 0) status = "Out of Stock";
+        else if (totalBoxes < (report.minStockLevel || 10))
+          status = "Low Stock";
+
+        await ReportInHand.updateOne(
+          { _id: report._id },
+          {
+            $set: {
+              totalBoxesFromBatches,
+              totalBoxes,
+              totalAmount,
+              averagePrice,
+              status,
+              updatedAt: new Date(),
+            },
+          },
+        );
+      } catch (err) {
+        console.error(
+          `Failed to recalculate stock for ${report.productName}:`,
+          err.message,
+        );
+      }
+    }
+    console.log("✅ ReportInHand stock recalculated after revert");
+  } catch (err) {
+    console.error("❌ recalculateReportInHandStock failed:", err.message);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: After restoring a purchase invoice, add its batches back to
+// ReportInHand so the stock totals reflect the reverted state.
+// ─────────────────────────────────────────────────────────────────────────────
+const restorePurchaseBatchesToStock = async (invoiceData) => {
+  try {
+    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
+      .default;
+    const products = invoiceData.products || [];
+
+    for (const product of products) {
+      const productName = (product.productName || "").toLowerCase().trim();
+      if (!productName) continue;
+
+      const qty = Number(product.quantityPerBoxStrip || 0);
+      const lc = Number(product.lc || 0);
+      const fob = Number(product.fob || 0);
+      const cif = Number(product.cif || 0);
+      const amount = qty * lc;
+      const expiryDate = product.expiryDate
+        ? new Date(product.expiryDate)
+        : null;
+
+      if (qty <= 0) continue;
+
+      const newBatch = {
+        boxes: qty,
+        lc,
+        fob,
+        cif,
+        amount,
+        expiryDate,
+        date: product.date ? new Date(product.date) : new Date(),
+        _id: new mongoose.Types.ObjectId(),
+        adjustmentType: "batch",
+        sellingPrice: Number(product.sellingPrice || 0),
+      };
+
+      const existingReport = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      });
+
+      if (existingReport) {
+        const updatedBatches = [...(existingReport.batches || []), newBatch];
+        const realBatches = updatedBatches.filter(
+          (b) => !b.adjustmentType || b.adjustmentType === "batch",
+        );
+        const totalBoxesFromBatches = realBatches.reduce(
+          (s, b) => s + (Number(b.boxes) || 0),
+          0,
+        );
+        const totalAmount = realBatches.reduce(
+          (s, b) => s + (Number(b.amount) || 0),
+          0,
+        );
+        const addAdj = Number(existingReport.addStockAdjustment || 0);
+        const removeAdj = Number(existingReport.removeStockAdjustment || 0);
+        const totalBoxes = Math.max(
+          0,
+          totalBoxesFromBatches + addAdj - removeAdj,
+        );
+        const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+
+        let status = "In Stock";
+        if (totalBoxes <= 0) status = "Out of Stock";
+        else if (totalBoxes < (existingReport.minStockLevel || 10))
+          status = "Low Stock";
+
+        await ReportInHand.updateOne(
+          { _id: existingReport._id },
+          {
+            $set: {
+              batches: updatedBatches,
+              totalBoxesFromBatches,
+              totalBoxes,
+              totalAmount,
+              averagePrice,
+              status,
+              updatedAt: new Date(),
+            },
+          },
+        );
+      } else {
+        const totalBoxesFromBatches = qty;
+        const totalBoxes = qty;
+        const averagePrice = lc;
+
+        await ReportInHand.create({
+          productName,
+          supplierName: invoiceData.supplierName || "Unknown",
+          type: product.type || "",
+          sellingPrice: Number(product.sellingPrice || 0),
+          batches: [newBatch],
+          totalBoxesFromBatches,
+          totalBoxes,
+          totalAmount: amount,
+          averagePrice,
+          addStockAdjustment: 0,
+          removeStockAdjustment: 0,
+          status: "In Stock",
+          minStockLevel: 10,
+        });
+      }
+    }
+    console.log(
+      `✅ Purchase batches restored to stock for invoice: ${invoiceData.invoiceNumber}`,
+    );
+  } catch (err) {
+    console.error("❌ restorePurchaseBatchesToStock failed:", err.message);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: After removing a purchase invoice (revert CREATE), subtract its
+// batches from ReportInHand
+// ─────────────────────────────────────────────────────────────────────────────
+const removePurchaseBatchesFromStock = async (invoiceData) => {
+  try {
+    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
+      .default;
+    const products = invoiceData.products || [];
+
+    for (const product of products) {
+      const productName = (product.productName || "").toLowerCase().trim();
+      if (!productName) continue;
+
+      const qty = Number(product.quantityPerBoxStrip || 0);
+      if (qty <= 0) continue;
+
+      const existingReport = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      });
+
+      if (!existingReport) continue;
+
+      let remainingToRemove = qty;
+      const batches = [...(existingReport.batches || [])];
+      batches.sort((a, b) => new Date(b.date) - new Date(a.date)); // newest first for revert
+
+      const updatedBatches = [];
+      for (const batch of batches) {
+        if (remainingToRemove <= 0) {
+          updatedBatches.push(batch);
+          continue;
+        }
+        if (batch.adjustmentType && batch.adjustmentType !== "batch") {
+          updatedBatches.push(batch);
+          continue;
+        }
+        const available = Number(batch.boxes || 0);
+        if (available <= remainingToRemove) {
+          remainingToRemove -= available;
+          // Don't push — effectively remove this batch
+        } else {
+          const lc = Number(batch.lc || 0);
+          updatedBatches.push({
+            ...batch,
+            boxes: available - remainingToRemove,
+            amount: (available - remainingToRemove) * lc,
+          });
+          remainingToRemove = 0;
+        }
+      }
+
+      const realBatches = updatedBatches.filter(
+        (b) => !b.adjustmentType || b.adjustmentType === "batch",
+      );
+      const totalBoxesFromBatches = realBatches.reduce(
+        (s, b) => s + (Number(b.boxes) || 0),
+        0,
+      );
+      const totalAmount = realBatches.reduce(
+        (s, b) => s + (Number(b.amount) || 0),
+        0,
+      );
+      const addAdj = Number(existingReport.addStockAdjustment || 0);
+      const removeAdj = Number(existingReport.removeStockAdjustment || 0);
+      const totalBoxes = Math.max(
+        0,
+        totalBoxesFromBatches + addAdj - removeAdj,
+      );
+      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+
+      let status = "In Stock";
+      if (totalBoxes <= 0) status = "Out of Stock";
+      else if (totalBoxes < (existingReport.minStockLevel || 10))
+        status = "Low Stock";
+
+      await ReportInHand.updateOne(
+        { _id: existingReport._id },
+        {
+          $set: {
+            batches: updatedBatches,
+            totalBoxesFromBatches,
+            totalBoxes,
+            totalAmount,
+            averagePrice,
+            status,
+            updatedAt: new Date(),
+          },
+        },
+      );
+    }
+    console.log(
+      `✅ Purchase batches removed from stock for invoice: ${invoiceData.invoiceNumber}`,
+    );
+  } catch (err) {
+    console.error("❌ removePurchaseBatchesFromStock failed:", err.message);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: After restoring a sale invoice (revert DELETE), deduct stock again
+// ─────────────────────────────────────────────────────────────────────────────
+const restoreSaleDeductionsToStock = async (saleData) => {
+  try {
+    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
+      .default;
+    const products = saleData.products || [];
+
+    for (const product of products) {
+      const productName = (product.productName || "").toLowerCase().trim();
+      if (!productName) continue;
+
+      const salesQty = Number(product.salesQty || 0);
+      const bonusQty = Number(product.bonusQty || 0);
+      const totalQty = salesQty + bonusQty;
+      if (totalQty <= 0) continue;
+
+      // For MR Sales, stock was in MR hand — skip warehouse deduction
+      if (saleData.saleType === "MR Sale") continue;
+
+      const existingReport = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      });
+
+      if (!existingReport) continue;
+
+      // Re-deduct from stock (since we're restoring the sale record,
+      // the sale deduction needs to be reapplied)
+      const newRemoveAdj =
+        Number(existingReport.removeStockAdjustment || 0) + totalQty;
+
+      const realBatches = (existingReport.batches || []).filter(
+        (b) => !b.adjustmentType || b.adjustmentType === "batch",
+      );
+      const totalBoxesFromBatches = realBatches.reduce(
+        (s, b) => s + (Number(b.boxes) || 0),
+        0,
+      );
+      const totalAmount = realBatches.reduce(
+        (s, b) => s + (Number(b.amount) || 0),
+        0,
+      );
+      const addAdj = Number(existingReport.addStockAdjustment || 0);
+      const totalBoxes = Math.max(
+        0,
+        totalBoxesFromBatches + addAdj - newRemoveAdj,
+      );
+      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+
+      let status = "In Stock";
+      if (totalBoxes <= 0) status = "Out of Stock";
+      else if (totalBoxes < (existingReport.minStockLevel || 10))
+        status = "Low Stock";
+
+      await ReportInHand.updateOne(
+        { _id: existingReport._id },
+        {
+          $set: {
+            removeStockAdjustment: newRemoveAdj,
+            totalBoxes,
+            averagePrice,
+            status,
+            updatedAt: new Date(),
+          },
+        },
+      );
+    }
+    console.log(
+      `✅ Sale deductions re-applied after revert for invoice: ${saleData.invoiceNumber}`,
+    );
+  } catch (err) {
+    console.error("❌ restoreSaleDeductionsToStock failed:", err.message);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: After removing a sale invoice (revert CREATE), restore stock
+// ─────────────────────────────────────────────────────────────────────────────
+const removeSaleDeductionsFromStock = async (saleData) => {
+  try {
+    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
+      .default;
+    const products = saleData.products || [];
+
+    for (const product of products) {
+      const productName = (product.productName || "").toLowerCase().trim();
+      if (!productName) continue;
+
+      const salesQty = Number(product.salesQty || 0);
+      const bonusQty = Number(product.bonusQty || 0);
+      const totalQty = salesQty + bonusQty;
+      if (totalQty <= 0) continue;
+
+      if (saleData.saleType === "MR Sale") continue;
+
+      const existingReport = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      });
+
+      if (!existingReport) continue;
+
+      const newRemoveAdj = Math.max(
+        0,
+        Number(existingReport.removeStockAdjustment || 0) - totalQty,
+      );
+
+      const realBatches = (existingReport.batches || []).filter(
+        (b) => !b.adjustmentType || b.adjustmentType === "batch",
+      );
+      const totalBoxesFromBatches = realBatches.reduce(
+        (s, b) => s + (Number(b.boxes) || 0),
+        0,
+      );
+      const totalAmount = realBatches.reduce(
+        (s, b) => s + (Number(b.amount) || 0),
+        0,
+      );
+      const addAdj = Number(existingReport.addStockAdjustment || 0);
+      const totalBoxes = Math.max(
+        0,
+        totalBoxesFromBatches + addAdj - newRemoveAdj,
+      );
+      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+
+      let status = "In Stock";
+      if (totalBoxes <= 0) status = "Out of Stock";
+      else if (totalBoxes < (existingReport.minStockLevel || 10))
+        status = "Low Stock";
+
+      await ReportInHand.updateOne(
+        { _id: existingReport._id },
+        {
+          $set: {
+            removeStockAdjustment: newRemoveAdj,
+            totalBoxes,
+            averagePrice,
+            status,
+            updatedAt: new Date(),
+          },
+        },
+      );
+    }
+    console.log(
+      `✅ Sale deductions removed after revert for invoice: ${saleData.invoiceNumber}`,
+    );
+  } catch (err) {
+    console.error("❌ removeSaleDeductionsFromStock failed:", err.message);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: Flatten nested objects for Excel export
 // ─────────────────────────────────────────────────────────────────────────────
 const flattenObject = (obj, parentKey = "", result = {}) => {
   if (!obj || typeof obj !== "object") return result;
@@ -166,7 +601,7 @@ router.get("/", async (req, res) => {
       endDate,
       search,
       referenceNumber,
-      activityType = "all", // "all", "normal", "revert"
+      activityType = "all",
     } = req.query;
 
     const filter = {};
@@ -197,16 +632,12 @@ router.get("/", async (req, res) => {
       }
     }
 
-    // ✅ Activity Type Filtering
     if (activityType === "normal") {
-      // Show only DELETE and UPDATE actions that are NOT reverted
-      filter.action = { $in: ["DELETE", "UPDATE"] };
+      filter.action = { $in: ["DELETE", "UPDATE", "CREATE"] };
       filter.isReverted = { $ne: true };
     } else if (activityType === "revert") {
-      // Show ONLY REVERT actions (not the original actions that were reverted)
       filter.action = "REVERT";
     }
-    // "all" - no additional filter, show everything
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
@@ -310,6 +741,7 @@ router.get("/stats/summary", async (req, res) => {
 });
 
 // ─── POST /:id/revert ────────────────────────────────────────────────────────
+// ✅ FIXED: Now recalculates stock totals after reverting purchase/sale records
 router.post("/:id/revert", protect, async (req, res) => {
   try {
     const role = req.user?.role;
@@ -327,7 +759,7 @@ router.post("/:id/revert", protect, async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Already reverted." });
-    if (!["DELETE", "UPDATE"].includes(log.action)) {
+    if (!["DELETE", "UPDATE", "CREATE"].includes(log.action)) {
       return res.status(400).json({
         success: false,
         message: `Cannot revert action: ${log.action}`,
@@ -346,6 +778,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 
     let revertSummary = {};
 
+    // ─── DELETE revert: restore deleted records + fix stock ──────────────
     if (log.action === "DELETE") {
       const rows = log.previousSnapshots?.length
         ? log.previousSnapshots
@@ -365,22 +798,50 @@ router.post("/:id/revert", protect, async (req, res) => {
 
       let restored = 0,
         failed = 0;
+      const restoredDocs = [];
+
       for (const row of rows) {
         const docData = row.data || row;
         const { _id, __v, createdAt, updatedAt, ...rest } = docData;
         try {
+          const existing = await Model.findById(_id);
+          if (existing) {
+            failed++;
+            continue;
+          }
           const doc = new Model({
             _id: new mongoose.Types.ObjectId(String(_id)),
             ...rest,
           });
           await doc.save();
+          restoredDocs.push(docData);
           restored++;
         } catch (e) {
           console.error("Restore failed for", _id, e.message);
           failed++;
         }
       }
+
+      // ✅ KEY FIX: After restoring records, update stock calculations
+      if (restoredDocs.length > 0) {
+        if (log.tableName === "purchase") {
+          // Restore each invoice's batches back into ReportInHand
+          for (const doc of restoredDocs) {
+            await restorePurchaseBatchesToStock(doc);
+          }
+        } else if (log.tableName === "sales") {
+          // Re-apply sale deductions to stock
+          for (const doc of restoredDocs) {
+            await restoreSaleDeductionsToStock(doc);
+          }
+        }
+        // Final recalculation pass to ensure all totals are accurate
+        await recalculateReportInHandStock();
+      }
+
       revertSummary = { restored, failed };
+
+      // ─── UPDATE revert: roll back to previous state ───────────────────────
     } else if (log.action === "UPDATE") {
       const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
       if (!prevDoc) {
@@ -403,9 +864,60 @@ router.post("/:id/revert", protect, async (req, res) => {
         { $set: prevFields },
         { new: true, runValidators: false },
       );
+
+      // ✅ KEY FIX: Recalculate stock after update revert
+      if (
+        updated &&
+        (log.tableName === "purchase" || log.tableName === "sales")
+      ) {
+        await recalculateReportInHandStock();
+      }
+
       revertSummary = { rolledBack: updated ? 1 : 0 };
+
+      // ─── CREATE revert: delete the created record + fix stock ─────────────
+    } else if (log.action === "CREATE") {
+      const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+      if (!newDoc) {
+        return res.status(400).json({
+          success: false,
+          message: "No snapshot data available for the created record.",
+        });
+      }
+      const targetId = log.recordId || (newDoc._id ? String(newDoc._id) : null);
+      if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot revert: invalid recordId.",
+        });
+      }
+
+      const existingRecord = await Model.findById(targetId);
+      if (!existingRecord) {
+        return res.status(400).json({
+          success: false,
+          message: "Record no longer exists in the database.",
+        });
+      }
+
+      // ✅ KEY FIX: Before deleting, undo the stock effect of this record
+      if (log.tableName === "purchase") {
+        await removePurchaseBatchesFromStock(newDoc);
+      } else if (log.tableName === "sales") {
+        await removeSaleDeductionsFromStock(newDoc);
+      }
+
+      await Model.findByIdAndDelete(targetId);
+
+      // Final recalculation pass
+      if (log.tableName === "purchase" || log.tableName === "sales") {
+        await recalculateReportInHandStock();
+      }
+
+      revertSummary = { deleted: 1 };
     }
 
+    // Create the revert log entry
     const revertLog = await ActivityLog.create({
       userId: req.user._id || req.user.id,
       userName: req.user.name || req.user.userName || "Super Admin",
@@ -424,7 +936,7 @@ router.post("/:id/revert", protect, async (req, res) => {
       ipAddress:
         req.ip || req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || null,
       userAgent: req.headers["user-agent"] || null,
-      description: `Reverted ${log.action} action. Original log ID: ${log._id}`,
+      description: `Reverted ${log.action} action. Original log ID: ${log._id}. Stock recalculated.`,
     });
 
     await ActivityLog.findByIdAndUpdate(log._id, {
@@ -436,7 +948,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 
     res.json({
       success: true,
-      message: "Reverted successfully.",
+      message: "Reverted successfully. Stock totals have been recalculated.",
       revertSummary,
       revertLogId: revertLog._id,
     });
@@ -447,6 +959,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 });
 
 // ─── POST /:id/revert-single ────────────────────────────────────────────────
+// ✅ FIXED: Now recalculates stock totals after reverting a single record
 router.post("/:id/revert-single", protect, async (req, res) => {
   try {
     const role = req.user?.role;
@@ -505,7 +1018,6 @@ router.post("/:id/revert-single", protect, async (req, res) => {
     const { _id, __v, createdAt, updatedAt, ...rest } = docData;
 
     try {
-      // Check if record already exists
       const existing = await Model.findById(_id);
       if (existing) {
         return res.status(400).json({
@@ -520,7 +1032,18 @@ router.post("/:id/revert-single", protect, async (req, res) => {
       });
       await doc.save();
 
-      // Create revert log entry for this single record
+      // ✅ KEY FIX: Restore stock for this single record
+      if (log.tableName === "purchase") {
+        await restorePurchaseBatchesToStock(docData);
+      } else if (log.tableName === "sales") {
+        await restoreSaleDeductionsToStock(docData);
+      }
+
+      // Final recalculation to make sure all totals are right
+      if (log.tableName === "purchase" || log.tableName === "sales") {
+        await recalculateReportInHandStock();
+      }
+
       await ActivityLog.create({
         userId: req.user._id || req.user.id,
         userName: req.user.name || req.user.userName || "Super Admin",
@@ -538,12 +1061,13 @@ router.post("/:id/revert-single", protect, async (req, res) => {
           req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
           null,
         userAgent: req.headers["user-agent"] || null,
-        description: `Reverted single record from DELETE action. Original log ID: ${log._id}, Record Index: ${recordIndex}`,
+        description: `Reverted single record from DELETE action. Original log ID: ${log._id}, Record Index: ${recordIndex}. Stock recalculated.`,
       });
 
       res.json({
         success: true,
-        message: "Record restored successfully.",
+        message:
+          "Record restored successfully. Stock totals have been recalculated.",
       });
     } catch (e) {
       console.error("Single record restore failed:", e.message);
@@ -555,10 +1079,6 @@ router.post("/:id/revert-single", protect, async (req, res) => {
   }
 });
 
-// ─── GET /export ─────────────────────────────────────────────────────────────
-// ─── GET /export ─────────────────────────────────────────────────────────────
-// ─── GET /export ─────────────────────────────────────────────────────────────
-// ─── GET /export ─────────────────────────────────────────────────────────────
 // ─── GET /export ─────────────────────────────────────────────────────────────
 router.get("/export", async (req, res) => {
   try {
@@ -596,18 +1116,15 @@ router.get("/export", async (req, res) => {
       }
     }
 
-    // ✅ Activity Type Filtering for export
     if (activityType === "normal") {
-      filter.action = { $in: ["DELETE", "UPDATE"] };
+      filter.action = { $in: ["DELETE", "UPDATE", "CREATE"] };
       filter.isReverted = { $ne: true };
     } else if (activityType === "revert") {
       filter.action = "REVERT";
     }
-    // "all" - no additional filter, show everything
 
     const logs = await ActivityLog.find(filter).sort({ createdAt: -1 }).lean();
 
-    // Get current date for report header
     const currentDate = new Date();
     const formattedDate = currentDate.toLocaleDateString("en-US", {
       year: "numeric",
@@ -615,19 +1132,13 @@ router.get("/export", async (req, res) => {
       day: "numeric",
     });
 
-    // Prepare data for Excel
     const sheetData = [];
-
-    // Add empty row for spacing
     sheetData.push([]);
-
-    // Add title rows with proper spacing
     sheetData.push(["HEALTHCARE SOUTH EAST ASIA"]);
     sheetData.push(["User Activity Logs"]);
     sheetData.push([`Generated On: ${formattedDate}`]);
-    sheetData.push([]); // Empty row for spacing
+    sheetData.push([]);
 
-    // Add date range filter if applied
     if (startDate || endDate) {
       let dateRange = "";
       if (startDate && endDate) {
@@ -643,7 +1154,6 @@ router.get("/export", async (req, res) => {
       }
     }
 
-    // Add headers
     sheetData.push([
       "Date & Time",
       "User",
@@ -656,7 +1166,6 @@ router.get("/export", async (req, res) => {
       "Expires At",
     ]);
 
-    // Add data rows
     logs.forEach((l) => {
       sheetData.push([
         formatDateTime(l.createdAt),
@@ -671,37 +1180,30 @@ router.get("/export", async (req, res) => {
       ]);
     });
 
-    // Create worksheet
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
 
-    // Set column widths
     ws["!cols"] = [
-      { wch: 22 }, // Date & Time
-      { wch: 18 }, // User
-      { wch: 12 }, // Role
-      { wch: 10 }, // Action
-      { wch: 50 }, // Details
-      { wch: 10 }, // Status
-      { wch: 18 }, // Reverted By
-      { wch: 22 }, // Reverted At
-      { wch: 22 }, // Expires At
+      { wch: 22 },
+      { wch: 18 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 50 },
+      { wch: 10 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 22 },
     ];
 
-    // Find header row index
     const headerRowIndex = sheetData.findIndex(
       (row) => row[0] === "Date & Time" && row[1] === "User",
     );
-
-    const lastColumnIndex = 8; // 9 columns (0-8)
-
-    // Company name row index (after empty row)
+    const lastColumnIndex = 8;
     const companyRowIndex = 1;
     const titleRowIndex = 2;
     const dateRowIndex = 3;
 
-    // Apply styling to company name - Bold, centered, blue color, larger font
     for (let c = 0; c <= lastColumnIndex; c++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: companyRowIndex, c: c });
+      const cellAddress = XLSX.utils.encode_cell({ r: companyRowIndex, c });
       if (!ws[cellAddress])
         ws[cellAddress] = { t: "s", v: "HEALTHCARE SOUTH EAST ASIA" };
       ws[cellAddress].s = {
@@ -710,9 +1212,8 @@ router.get("/export", async (req, res) => {
       };
     }
 
-    // Apply styling to report title - Bold, centered, dark blue, medium font
     for (let c = 0; c <= lastColumnIndex; c++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: titleRowIndex, c: c });
+      const cellAddress = XLSX.utils.encode_cell({ r: titleRowIndex, c });
       if (!ws[cellAddress])
         ws[cellAddress] = { t: "s", v: "User Activity Logs" };
       ws[cellAddress].s = {
@@ -721,9 +1222,8 @@ router.get("/export", async (req, res) => {
       };
     }
 
-    // Apply styling to generated date row - Italic, centered, gray
     for (let c = 0; c <= lastColumnIndex; c++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: dateRowIndex, c: c });
+      const cellAddress = XLSX.utils.encode_cell({ r: dateRowIndex, c });
       if (ws[cellAddress]) {
         ws[cellAddress].s = {
           font: { italic: true, color: { rgb: "6B7280" } },
@@ -732,28 +1232,25 @@ router.get("/export", async (req, res) => {
       }
     }
 
-    // Merge cells for title rows
     if (!ws["!merges"]) ws["!merges"] = [];
     ws["!merges"].push(
       {
         s: { r: companyRowIndex, c: 0 },
         e: { r: companyRowIndex, c: lastColumnIndex },
-      }, // Company name
+      },
       {
         s: { r: titleRowIndex, c: 0 },
         e: { r: titleRowIndex, c: lastColumnIndex },
-      }, // Report title
+      },
       {
         s: { r: dateRowIndex, c: 0 },
         e: { r: dateRowIndex, c: lastColumnIndex },
-      }, // Date row
+      },
     );
 
-    // Apply styling to date range filter row if it exists
     const filterRowIndex = sheetData.findIndex(
       (row) => row && row[0] && row[0].startsWith("Date Range:"),
     );
-
     if (filterRowIndex >= 0) {
       for (let i = 0; i <= lastColumnIndex; i++) {
         const cellAddress = XLSX.utils.encode_cell({ r: filterRowIndex, c: i });
@@ -770,7 +1267,6 @@ router.get("/export", async (req, res) => {
       });
     }
 
-    // Apply styling to headers (bold, background color, centered)
     if (headerRowIndex >= 0) {
       for (let i = 0; i <= lastColumnIndex; i++) {
         const cellAddress = XLSX.utils.encode_cell({ r: headerRowIndex, c: i });
@@ -783,12 +1279,11 @@ router.get("/export", async (req, res) => {
       }
     }
 
-    // Apply alternating row colors for data rows
     const dataStartRow = headerRowIndex + 1;
     for (let i = dataStartRow; i < sheetData.length; i++) {
       const rowColor = (i - dataStartRow) % 2 === 0 ? "F9FAFB" : "FFFFFF";
       for (let c = 0; c <= lastColumnIndex; c++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: i, c: c });
+        const cellAddress = XLSX.utils.encode_cell({ r: i, c });
         if (ws[cellAddress]) {
           if (!ws[cellAddress].s) ws[cellAddress].s = {};
           ws[cellAddress].s.fill = {
@@ -800,10 +1295,9 @@ router.get("/export", async (req, res) => {
       }
     }
 
-    // Apply border to all cells
     for (let r = 0; r < sheetData.length; r++) {
       for (let c = 0; c <= lastColumnIndex; c++) {
-        const cellAddress = XLSX.utils.encode_cell({ r: r, c: c });
+        const cellAddress = XLSX.utils.encode_cell({ r, c });
         if (ws[cellAddress]) {
           if (!ws[cellAddress].s) ws[cellAddress].s = {};
           ws[cellAddress].s.border = {
@@ -834,6 +1328,7 @@ router.get("/export", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to export logs" });
   }
 });
+
 // ─── DELETE /cleanup/:days ───────────────────────────────────────────────────
 router.delete("/cleanup/:days", protect, async (req, res) => {
   try {

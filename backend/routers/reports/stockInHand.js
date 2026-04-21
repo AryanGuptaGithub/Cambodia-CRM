@@ -241,6 +241,15 @@ router.get("/product/:productName", async (req, res) => {
       });
     }
     const { boxes, processedBatches } = processBatches(report.batches || []);
+
+    // Filter: only return if totalBoxes >= 0
+    if (boxes < 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Product has negative stock and is excluded",
+      });
+    }
+
     res.json({
       success: true,
       data: {
@@ -264,9 +273,10 @@ router.get("/combined-stock", async (req, res) => {
   try {
     const { search } = req.query;
     const productMap = await buildCombinedProductMap(search || null);
-    const combinedProducts = Array.from(productMap.values()).sort((a, b) =>
-      a.productName.localeCompare(b.productName),
-    );
+    const combinedProducts = Array.from(productMap.values())
+      .filter((p) => p.totalBoxes >= 0)
+      .sort((a, b) => a.productName.localeCompare(b.productName));
+
     const summary = computeSummary(combinedProducts);
     res.status(200).json({
       success: true,
@@ -340,9 +350,10 @@ router.get("/mr-stock-summary", async (req, res) => {
       }
     }
 
-    const products = Array.from(productMap.values()).sort((a, b) =>
-      a.productName.localeCompare(b.productName),
-    );
+    const products = Array.from(productMap.values())
+      .filter((p) => p.totalMrBoxes >= 0)
+      .sort((a, b) => a.productName.localeCompare(b.productName));
+
     const totalMrBoxes = products.reduce((s, p) => s + p.totalMrBoxes, 0);
     const totalMrAmount = products.reduce((s, p) => s + p.totalMrAmount, 0);
 
@@ -368,9 +379,9 @@ router.get("/", async (req, res) => {
   try {
     const { search } = req.query;
     const productMap = await buildCombinedProductMap(search || null);
-    const allProducts = Array.from(productMap.values()).sort((a, b) =>
-      a.productName.localeCompare(b.productName),
-    );
+    const allProducts = Array.from(productMap.values())
+      .filter((p) => p.totalBoxes >= 0)
+      .sort((a, b) => a.productName.localeCompare(b.productName));
 
     const inStockCount = allProducts.filter(
       (p) => p.status === "In Stock",
@@ -423,9 +434,10 @@ router.get("/average-price/export", async (req, res) => {
   try {
     const { search } = req.query;
     const productMap = await buildCombinedProductMap(search || null);
-    const allProducts = Array.from(productMap.values()).sort((a, b) =>
-      a.productName.localeCompare(b.productName),
-    );
+    const allProducts = Array.from(productMap.values())
+      .filter((p) => p.totalBoxes >= 0)
+      .sort((a, b) => a.productName.localeCompare(b.productName));
+
     const summary = computeSummary(allProducts);
 
     const workbook = new ExcelJS.Workbook();
@@ -566,9 +578,10 @@ router.get("/efficient", async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const productMap = await buildCombinedProductMap(search || null);
-    const allProducts = Array.from(productMap.values()).sort((a, b) =>
-      a.productName.localeCompare(b.productName),
-    );
+    const allProducts = Array.from(productMap.values())
+      .filter((p) => p.totalBoxes >= 0)
+      .sort((a, b) => a.productName.localeCompare(b.productName));
+
     const summary = computeSummary(allProducts);
     const paginatedProducts = allProducts.slice(skip, skip + limitNum);
 
@@ -606,9 +619,10 @@ router.get("/all", async (req, res) => {
   try {
     const { search } = req.query;
     const productMap = await buildCombinedProductMap(search || null);
-    const allProducts = Array.from(productMap.values()).sort((a, b) =>
-      a.productName.localeCompare(b.productName),
-    );
+    const allProducts = Array.from(productMap.values())
+      .filter((p) => p.totalBoxes >= 0)
+      .sort((a, b) => a.productName.localeCompare(b.productName));
+
     const summary = computeSummary(allProducts);
 
     res.status(200).json({
@@ -641,7 +655,9 @@ router.get("/all", async (req, res) => {
 router.get("/summary/total-boxes", async (req, res) => {
   try {
     const productMap = await buildCombinedProductMap(null);
-    const allProducts = Array.from(productMap.values());
+    const allProducts = Array.from(productMap.values()).filter(
+      (p) => p.totalBoxes >= 0,
+    );
     const summary = computeSummary(allProducts);
 
     const avgBoxesPerProduct =
@@ -730,6 +746,15 @@ router.get("/:id", async (req, res) => {
     const { boxes, amount, avgLC, processedBatches } = processBatches(
       report.batches,
     );
+
+    // Filter: only return if totalBoxes >= 0
+    if (boxes < 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Product has negative stock and is excluded",
+      });
+    }
+
     const productName = report.productName?.trim();
     const warehouseDeductions = report.totalMrSaleDeductions || 0;
     const warehouseNetAmount = amount - warehouseDeductions;
@@ -763,6 +788,16 @@ router.get("/:id", async (req, res) => {
       }
     }
 
+    const totalBoxes = boxes + mrBoxes;
+
+    // Final combined check
+    if (totalBoxes < 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Product total stock is negative and is excluded",
+      });
+    }
+
     res.status(200).json({
       success: true,
       report: {
@@ -777,7 +812,7 @@ router.get("/:id", async (req, res) => {
         mrBoxes,
         mrAmount,
         mrBreakdown,
-        totalBoxes: boxes + mrBoxes,
+        totalBoxes,
         totalAmount: amount + mrAmount,
         totalNetAmount: warehouseNetAmount + mrAmount,
       },
@@ -803,9 +838,10 @@ router.get("/search/:productName", async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const productMap = await buildCombinedProductMap(productName);
-    const allProducts = Array.from(productMap.values()).sort((a, b) =>
-      a.productName.localeCompare(b.productName),
-    );
+    const allProducts = Array.from(productMap.values())
+      .filter((p) => p.totalBoxes >= 0)
+      .sort((a, b) => a.productName.localeCompare(b.productName));
+
     const summary = computeSummary(allProducts);
     const paginatedProducts = allProducts.slice(skip, skip + limitNum);
 
@@ -901,17 +937,20 @@ router.get("/supplier/:supplierName", async (req, res) => {
       }),
     );
 
-    const paginatedReports = enrichedReports.slice(skip, skip + limitNum);
-    const totalBoxesSum = enrichedReports.reduce((s, r) => s + r.totalBoxes, 0);
-    const totalAmountSum = enrichedReports.reduce(
+    // Filter: only include products where totalBoxes >= 0
+    const filteredReports = enrichedReports.filter((r) => r.totalBoxes >= 0);
+    const paginatedReports = filteredReports.slice(skip, skip + limitNum);
+
+    const totalBoxesSum = filteredReports.reduce((s, r) => s + r.totalBoxes, 0);
+    const totalAmountSum = filteredReports.reduce(
       (s, r) => s + r.totalAmount,
       0,
     );
-    const totalNetAmountSum = enrichedReports.reduce(
+    const totalNetAmountSum = filteredReports.reduce(
       (s, r) => s + r.totalNetAmount,
       0,
     );
-    const totalDeductionsSum = enrichedReports.reduce(
+    const totalDeductionsSum = filteredReports.reduce(
       (s, r) => s + (r.warehouseDeductions || 0),
       0,
     );
@@ -919,12 +958,12 @@ router.get("/supplier/:supplierName", async (req, res) => {
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
-      total: warehouseReports.length,
+      total: filteredReports.length,
       totalBoxes: totalBoxesSum,
       totalAmount: totalAmountSum,
       totalDeductions: totalDeductionsSum,
       totalNetAmount: totalNetAmountSum,
-      totalPages: Math.ceil(warehouseReports.length / limitNum),
+      totalPages: Math.ceil(filteredReports.length / limitNum),
       currentPage: pageNum,
       reports: paginatedReports,
     });
