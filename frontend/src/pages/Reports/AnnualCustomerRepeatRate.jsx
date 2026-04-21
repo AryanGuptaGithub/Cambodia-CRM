@@ -689,7 +689,7 @@ const AnnualCustomerRepeatRate = () => {
               </div>
               {!isMobileView && (
                 <div className="text-xs text-gray-400 mt-1">
-                  New / Existing × 100
+                  Existing / Total × 100
                 </div>
               )}
             </div>

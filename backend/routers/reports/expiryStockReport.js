@@ -64,6 +64,62 @@ const searchItems = (items, searchTerm) => {
   );
 };
 
+// Helper: Filter out ALL remove adjustments and cancelled add adjustments
+const filterValidBatchesForExpiry = (batches) => {
+  // First, separate batches by type
+  const regularBatches = []; // Batches with no adjustmentType or adjustmentType === "batch"
+  const addBatches = []; // Batches with adjustmentType === "add"
+  const removeBatches = []; // Batches with adjustmentType === "remove"
+
+  for (const batch of batches) {
+    const adjType = batch.adjustmentType;
+
+    if (adjType === "add") {
+      addBatches.push(batch);
+    } else if (adjType === "remove") {
+      removeBatches.push(batch);
+    } else {
+      // Regular batches (no adjustmentType, "batch", or undefined)
+      regularBatches.push(batch);
+    }
+  }
+
+  // IMPORTANT: We EXCLUDE ALL remove batches completely
+  // They represent stock that has been removed and should not appear in expiry report
+
+  // For add batches, only keep them if they are NOT cancelled by a remove batch
+  // Create a map of remove quantities for quick lookup
+  const removeQuantities = new Map();
+  for (const removeBatch of removeBatches) {
+    const qty = Number(removeBatch.boxes) || 0;
+    const key = qty.toString();
+    if (!removeQuantities.has(key)) {
+      removeQuantities.set(key, 0);
+    }
+    removeQuantities.set(key, removeQuantities.get(key) + 1);
+  }
+
+  // Keep add batches that don't have a matching remove batch
+  const validAddBatches = [];
+  for (const addBatch of addBatches) {
+    const addQty = Number(addBatch.boxes) || 0;
+    const key = addQty.toString();
+
+    if (removeQuantities.has(key) && removeQuantities.get(key) > 0) {
+      // This add batch is cancelled, decrement the counter
+      removeQuantities.set(key, removeQuantities.get(key) - 1);
+      // Skip this add batch (don't add to validAddBatches)
+    } else {
+      // No matching remove, keep this add batch
+      validAddBatches.push(addBatch);
+    }
+  }
+
+  // Return regular batches + valid (non-cancelled) add batches
+  // Remove batches are completely excluded
+  return [...regularBatches, ...validAddBatches];
+};
+
 // --------------------------------------------------------------
 // MAIN REPORT ENDPOINT (grouped by product)
 // --------------------------------------------------------------
@@ -74,8 +130,6 @@ router.get("/", async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
     const searchTerm = search || "";
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
     // 1. Fetch all products that have batches
     let query = { batches: { $exists: true, $not: { $size: 0 } } };
@@ -85,12 +139,18 @@ router.get("/", async (req, res) => {
     }
     const allItems = await reportsInHand.find(query).lean();
 
-    // 2. Collect every batch as a plain object
+    // 2. Collect every batch as a plain object, filtering out remove adjustments
     const rawBatches = [];
     allItems.forEach((item) => {
       if (!item.batches?.length) return;
-      item.batches.forEach((batch) => {
+
+      // Filter out remove adjustments and cancelled add adjustments
+      const validBatches = filterValidBatchesForExpiry(item.batches);
+
+      validBatches.forEach((batch) => {
+        // Skip if no expiry date
         if (!batch.expiryDate) return;
+
         const expiryDate = new Date(batch.expiryDate);
         expiryDate.setHours(0, 0, 0, 0);
         const daysRemaining = calculateDaysRemaining(batch.expiryDate);
@@ -113,6 +173,8 @@ router.get("/", async (req, res) => {
           amount: batch.amount || 0,
           date: batch.date || null,
           status: item.status || "Unknown",
+          adjustmentType: batch.adjustmentType || "batch",
+          batchNumber: batch.batchNumber,
         });
       });
     });
@@ -130,14 +192,16 @@ router.get("/", async (req, res) => {
           totalAmount: 0,
           earliestExpiryDate: null,
           hasExpired: false,
-          hasNearExpiry: false, // any batch not expired & ≤15 days
-          hasCritical: false, // any batch not expired & ≤3 days
+          hasNearExpiry: false,
+          hasCritical: false,
           status: batch.status,
+          batches: [],
         });
       }
       const group = groupMap.get(key);
       group.totalQuantity += batch.quantity;
       group.totalAmount += batch.totalValue;
+      group.batches.push(batch);
       if (
         !group.earliestExpiryDate ||
         batch.expiryDate < group.earliestExpiryDate
@@ -187,8 +251,8 @@ router.get("/", async (req, res) => {
           quantity: totalQuantity,
           unitPrice: unitPrice,
           totalValue: totalAmount,
-          lc: unitPrice, // keep for compatibility
-          fob: 0, // not used after grouping
+          lc: unitPrice,
+          fob: 0,
           amount: totalAmount,
           date: null,
           status: group.status,
@@ -196,7 +260,7 @@ router.get("/", async (req, res) => {
       }
     }
 
-    // 5. Apply search again (already filtered by DB, but group keys may have changed)
+    // 5. Apply search again
     if (searchTerm) {
       groupedItems = searchItems(groupedItems, searchTerm);
     }
@@ -208,7 +272,7 @@ router.get("/", async (req, res) => {
       return a.daysRemaining - b.daysRemaining;
     });
 
-    // 7. Compute summary totals from the filtered (and searched) grouped items
+    // 7. Compute summary totals from the filtered grouped items
     let totalExpiringSoon = 0;
     let totalNearExpiryValue = 0;
     let criticalItems = 0;
@@ -235,15 +299,13 @@ router.get("/", async (req, res) => {
     const totalItemsCount = groupedItems.length;
     const paginatedItems = groupedItems.slice(skip, skip + limitNum);
 
-    // 9. Compute filtered summary from ALL groupedItems (NOT paginatedItems)
-    //    This ensures summary cards show totals across ALL pages, not just current page
+    // 9. Compute filtered summary from ALL groupedItems
     let filteredExpiringSoon = 0;
     let filteredNearExpiryValue = 0;
     let filteredCriticalItems = 0;
     let filteredExpiredItems = 0;
     let filteredExpiredValue = 0;
     for (const item of groupedItems) {
-      // ✅ FIXED: was paginatedItems, now groupedItems
       if (!item.isExpired && item.daysRemaining <= 15) {
         filteredExpiringSoon += item.quantity;
         filteredNearExpiryValue += item.totalValue;
@@ -251,7 +313,7 @@ router.get("/", async (req, res) => {
       }
       if (item.isExpired) {
         filteredExpiredItems += item.quantity;
-        filteredExpiredValue += item.totalValue; // ✅ FIXED: now sums all pages
+        filteredExpiredValue += item.totalValue;
       }
     }
 
@@ -269,7 +331,7 @@ router.get("/", async (req, res) => {
         filteredNearExpiryValue: parseFloat(filteredNearExpiryValue.toFixed(2)),
         filteredCriticalItems,
         filteredExpiredItems,
-        filteredExpiredValue: parseFloat(filteredExpiredValue.toFixed(2)), // ✅ FIXED: whole records sum
+        filteredExpiredValue: parseFloat(filteredExpiredValue.toFixed(2)),
       },
       items: paginatedItems,
       pagination: {
@@ -304,8 +366,6 @@ router.get("/export", async (req, res) => {
   try {
     const { filter = "all", search = "" } = req.query;
     const searchTerm = search || "";
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
     let query = { batches: { $exists: true, $not: { $size: 0 } } };
     if (searchTerm) {
@@ -314,11 +374,15 @@ router.get("/export", async (req, res) => {
     }
     const allItems = await reportsInHand.find(query).lean();
 
-    // Collect all batches (same as main endpoint)
+    // Collect all batches with remove adjustment filtering
     const rawBatches = [];
     allItems.forEach((item) => {
       if (!item.batches?.length) return;
-      item.batches.forEach((batch) => {
+
+      // Filter out remove adjustments and cancelled add adjustments
+      const validBatches = filterValidBatchesForExpiry(item.batches);
+
+      validBatches.forEach((batch) => {
         if (!batch.expiryDate) return;
         const expiryDate = new Date(batch.expiryDate);
         expiryDate.setHours(0, 0, 0, 0);
@@ -342,6 +406,8 @@ router.get("/export", async (req, res) => {
           amount: batch.amount || 0,
           date: batch.date || null,
           status: item.status || "Unknown",
+          adjustmentType: batch.adjustmentType || "batch",
+          batchNumber: batch.batchNumber,
         });
       });
     });

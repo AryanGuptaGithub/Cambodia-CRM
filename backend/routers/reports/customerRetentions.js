@@ -42,21 +42,18 @@ function buildDateRange(period, startDate, endDate) {
 
     case "month":
     case "currentMonth": {
-      // First day of current month → today
       return { start: utcStart(yr, mo, 1), end: utcEnd(yr, mo, day) };
     }
 
     case "jan_feb":
     case "janToPreviousMonth": {
-      // Jan 1 of current year → last day of previous month
       if (mo === 0) {
-        // Jan: go to prev year full
         return {
           start: utcStart(yr - 1, 0, 1),
           end: utcEnd(yr - 1, 11, 31),
         };
       }
-      const lastDayPrevMonth = new Date(Date.UTC(yr, mo, 0)); // day 0 = last of prev month
+      const lastDayPrevMonth = new Date(Date.UTC(yr, mo, 0));
       return {
         start: utcStart(yr, 0, 1),
         end: utcEnd(
@@ -103,7 +100,7 @@ function buildDateRange(period, startDate, endDate) {
 
     case "all":
     default:
-      return null; // no date restriction
+      return null;
   }
 }
 
@@ -119,20 +116,18 @@ function buildDateFilter(period, startDate, endDate) {
 // Definitions:
 //   period = the selected date window
 //
-//   "New Customers" (called "Retained" in UI per your spec) =
+//   "New Customers" =
 //       customers whose FIRST EVER purchase falls within the selected period.
 //       i.e. first purchase date >= period start
 //
 //   "Existing Customers" =
 //       customers who had at least one purchase BEFORE the period start.
-//       (they appear in the period too, but their first purchase is before it)
 //
 //   Total Customers (in period) = all unique customers who bought in period
 //       = New + Existing
 //
-//   Retention Rate = New in Period / Existing (before period)
-//       e.g. 15 new / 33 existing = 45.45%
-//
+//   Retention Rate = Existing Customers / Total Customers × 100
+//       e.g. 33 existing / 50 total = 66%
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -140,7 +135,7 @@ function buildDateFilter(period, startDate, endDate) {
  *   - all customers who purchased in the period (totalCustomers)
  *   - of those, which ones had their FIRST EVER purchase in this period (newInPeriod)
  *   - of those, which ones had purchases BEFORE this period (existingCustomers)
- *   - retentionRate = newInPeriod / existingCustomers * 100
+ *   - retentionRate = existingCustomers / totalCustomers * 100
  *
  * @param {Date|null} periodStart
  * @param {Date|null} periodEnd
@@ -191,6 +186,7 @@ async function computeRetentionData(
             totalAmount: "$totalAmount",
             paymentStatus: "$paymentStatus",
             saleType: "$saleType",
+            createdAt: "$createdAt",
           },
         },
       },
@@ -251,6 +247,17 @@ async function computeRetentionData(
       isNewInPeriod = new Date(absFirst) >= periodStart;
     }
 
+    // Sort invoices by createdAt date (descending - newest first)
+    const sortedInvoices = (c.invoices || []).sort((a, b) => {
+      const dateA = a.createdAt
+        ? new Date(a.createdAt)
+        : new Date(a.invoiceDate);
+      const dateB = b.createdAt
+        ? new Date(b.createdAt)
+        : new Date(b.invoiceDate);
+      return dateB - dateA; // Newest first
+    });
+
     return {
       ...c,
       absoluteFirstPurchase: absFirst,
@@ -258,6 +265,7 @@ async function computeRetentionData(
       totalOrdersAllTime: allTime.totalOrdersAllTime || c.ordersInPeriod,
       isNewInPeriod, // true = new customer (first purchase is in this period)
       isExisting: !isNewInPeriod, // true = was already a customer before period
+      invoices: sortedInvoices,
     };
   });
 
@@ -265,14 +273,11 @@ async function computeRetentionData(
   const newInPeriod = enrichedCustomers.filter((c) => c.isNewInPeriod).length;
   const existingCustomers = totalCustomers - newInPeriod;
 
-  // Retention Rate = New customers acquired in period / Existing customers before period
-  // Per your spec: 15 new / 33 existing = 45.45%
+  // Retention Rate = Existing customers / Total customers in period * 100
   const retentionRate =
-    existingCustomers > 0
-      ? parseFloat(((newInPeriod / existingCustomers) * 100).toFixed(2))
-      : newInPeriod > 0
-        ? 100 // all new, no existing → 100% acquisition
-        : 0;
+    totalCustomers > 0
+      ? parseFloat(((existingCustomers / totalCustomers) * 100).toFixed(2))
+      : 0;
 
   return {
     customers: enrichedCustomers,
@@ -395,14 +400,15 @@ async function buildMRData(period, startDate, endDate, search = "") {
     });
   });
 
-  // Step 4: Compute retention rate per MR and convert to array
+  // Step 4: Compute retention rate per MR using new formula
+  // Retention Rate = Existing Customers / Total Customers * 100
   const result = Array.from(mrMap.values()).map((mr) => {
     const retentionRate =
-      mr.existingCustomers > 0
-        ? parseFloat(((mr.newInPeriod / mr.existingCustomers) * 100).toFixed(2))
-        : mr.newInPeriod > 0
-          ? 100
-          : 0;
+      mr.totalCustomers > 0
+        ? parseFloat(
+            ((mr.existingCustomers / mr.totalCustomers) * 100).toFixed(2),
+          )
+        : 0;
     return { ...mr, retentionRate };
   });
 
@@ -464,10 +470,9 @@ router.get("/customer-details", async (req, res) => {
     }
     // "all" → every customer who bought in period
 
-    // Sort: new-in-period first, then by ordersInPeriod desc
+    // Sort: by total amount (highest to lowest)
     filtered.sort((a, b) => {
-      if (b.isNewInPeriod !== a.isNewInPeriod) return b.isNewInPeriod ? 1 : -1;
-      return b.ordersInPeriod - a.ordersInPeriod;
+      return (b.totalAmountInPeriod || 0) - (a.totalAmountInPeriod || 0);
     });
 
     // Enrich with Customer collection
@@ -642,7 +647,7 @@ async function handleExportRequest(req, res, defaultPeriod, sheetTitle) {
       summary.existingCustomers,
     ]);
     summarySheet.addRow([
-      "Retention Rate (New / Existing × 100)",
+      "Retention Rate (Existing / Total × 100)",
       `${summary.retentionRate?.toFixed(2) || 0}%`,
     ]);
     summarySheet.addRow(["Period", period]);
