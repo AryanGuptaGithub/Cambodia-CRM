@@ -20,9 +20,6 @@ async function generateIcons() {
     // Check if input icon exists
     if (!fs.existsSync(inputIcon)) {
       console.error("❌ mainlogo.png not found in public folder!");
-      console.log(
-        "Please add mainlogo.png to the public folder and try again.",
-      );
       return;
     }
 
@@ -35,11 +32,7 @@ async function generateIcons() {
         })
         .png()
         .toFile(outputPath);
-      console.log(`✅ Generated ${size}x${size} icon`);
     }
-
-    console.log("\n🎉 All icons generated successfully!");
-    console.log(`📁 Icons saved in: ${outputDir}`);
   } catch (error) {
     console.error("❌ Error generating icons:", error);
   }

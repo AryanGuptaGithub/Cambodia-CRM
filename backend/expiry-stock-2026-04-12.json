@@ -1,0 +1,418 @@
+{
+  "generatedOn": "2026-04-22T06:57:27.206Z",
+  "targetExpiryDate": "2026-04-12T00:00:00.000Z",
+  "summary": {
+    "totalInvoices": 6,
+    "totalProducts": 41,
+    "totalQuantity": 0,
+    "totalValue": 0
+  },
+  "details": [
+    {
+      "_id": "69b288107befd7ed086bfdf2",
+      "invoiceNumber": "KPPL/23-24/376",
+      "invoiceDate": "2023-04-12T00:00:00.000Z",
+      "deliveryNumber": "HSCL/DN/06",
+      "receivedDate": "2023-04-12T00:00:00.000Z",
+      "supplierName": "Impulse Pharma Pvt. Ltd.",
+      "totalAmount": 58162.50749999999,
+      "remarks": "",
+      "createdAt": "2026-03-12T09:32:00.149Z",
+      "expiringProducts": [
+        {
+          "productName": "suprafen 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 1.1804000000000001,
+          "fob": 1.04,
+          "sellingPrice": 2.1
+        },
+        {
+          "productName": "ecovastin 10",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.28261499999999995,
+          "fob": 0.249,
+          "sellingPrice": 2.5
+        },
+        {
+          "productName": "ecovastin 20",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.34049999999999997,
+          "fob": 0.3,
+          "sellingPrice": 3.5
+        },
+        {
+          "productName": "kamzole 200",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 2.0884,
+          "fob": 1.84,
+          "sellingPrice": 4.5
+        },
+        {
+          "productName": "ecothrocin 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 8.6941,
+          "fob": 7.66,
+          "sellingPrice": 18
+        },
+        {
+          "productName": "ecofloxcin 200",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 1.7479,
+          "fob": 1.54,
+          "sellingPrice": 2.5
+        },
+        {
+          "productName": "ecomol 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.7831499999999999,
+          "fob": 0.69,
+          "sellingPrice": 1.2
+        },
+        {
+          "productName": "ecozin 5",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.7263999999999999,
+          "fob": 0.64,
+          "sellingPrice": 2
+        },
+        {
+          "productName": "ecoflam 400",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.9306999999999999,
+          "fob": 0.82,
+          "sellingPrice": 2.4
+        },
+        {
+          "productName": "ecoflaz 6",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 3.1439500000000002,
+          "fob": 2.77,
+          "sellingPrice": 7
+        },
+        {
+          "productName": "ecopred 5",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.60155,
+          "fob": 0.53,
+          "sellingPrice": 1.2
+        },
+        {
+          "productName": "ecolevo 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 4.16545,
+          "fob": 3.67,
+          "sellingPrice": 7
+        },
+        {
+          "productName": "alu alu ecocid 20",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 1.12365,
+          "fob": 0.99,
+          "sellingPrice": 1.8
+        }
+      ]
+    },
+    {
+      "_id": "69b288117befd7ed086bfee6",
+      "invoiceNumber": "KPPL/23-24/94",
+      "invoiceDate": "2023-08-11T00:00:00.000Z",
+      "deliveryNumber": "HSCL/DN/07",
+      "receivedDate": "2023-08-11T00:00:00.000Z",
+      "supplierName": "Impulse Pharma Pvt. Ltd.",
+      "totalAmount": 46047.96065000001,
+      "remarks": "",
+      "createdAt": "2026-03-12T09:32:01.159Z",
+      "expiringProducts": [
+        {
+          "productName": "ecoflam 400",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.96883,
+          "fob": 0.82,
+          "sellingPrice": 2.4
+        },
+        {
+          "productName": "ecozin m",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 1.6541,
+          "fob": 1.4,
+          "sellingPrice": 6
+        },
+        {
+          "productName": "esoprazole 20",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 1.06335,
+          "fob": 0.9,
+          "sellingPrice": 5
+        },
+        {
+          "productName": "ecocid 20",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.7679750000000001,
+          "fob": 0.65,
+          "sellingPrice": 1
+        },
+        {
+          "productName": "ecocid 20",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.696,
+          "fob": 0.6,
+          "sellingPrice": 1
+        },
+        {
+          "productName": "ecolevo 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 4.1528,
+          "fob": 3.58,
+          "sellingPrice": 7
+        },
+        {
+          "productName": "ecomol 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.6148,
+          "fob": 0.53,
+          "sellingPrice": 1.2
+        },
+        {
+          "productName": "ecopred 5",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.6148,
+          "fob": 0.53,
+          "sellingPrice": 1.2
+        },
+        {
+          "productName": "ecothrocin 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 10.962,
+          "fob": 9.45,
+          "sellingPrice": 18
+        },
+        {
+          "productName": "ecozole 400",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 3.306,
+          "fob": 2.85,
+          "sellingPrice": 5
+        }
+      ]
+    },
+    {
+      "_id": "69b288107befd7ed086bfe5c",
+      "invoiceNumber": "IPE/085/23-24",
+      "invoiceDate": "2023-04-12T00:00:00.000Z",
+      "deliveryNumber": "HSCL/DN/06",
+      "receivedDate": "2023-04-12T00:00:00.000Z",
+      "supplierName": "Impulse Pharma Pvt. Ltd.",
+      "totalAmount": 5537.665,
+      "remarks": "",
+      "createdAt": "2026-03-12T09:32:00.479Z",
+      "expiringProducts": [
+        {
+          "productName": "ecocid 20",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.7718,
+          "fob": 0.68,
+          "sellingPrice": 1
+        }
+      ]
+    },
+    {
+      "_id": "69b288107befd7ed086bfe74",
+      "invoiceNumber": "INC00003",
+      "invoiceDate": "2023-04-12T00:00:00.000Z",
+      "deliveryNumber": "HSCL/DN/06",
+      "receivedDate": "2023-04-12T00:00:00.000Z",
+      "supplierName": "Krux Pharma Private Limited",
+      "totalAmount": 42479.08885,
+      "remarks": "",
+      "createdAt": "2026-03-12T09:32:00.891Z",
+      "expiringProducts": [
+        {
+          "productName": "sirmox 250 syp",
+          "type": "bottle",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.48805,
+          "fob": 0.43,
+          "sellingPrice": 1.2
+        },
+        {
+          "productName": "sirmox cl 228.5",
+          "type": "bottle",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.6809999999999999,
+          "fob": 0.6,
+          "sellingPrice": 1.8
+        },
+        {
+          "productName": "sirmox cl 625",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 8.50115,
+          "fob": 7.49,
+          "sellingPrice": 18
+        },
+        {
+          "productName": "sirmox cl 1000",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 11.06625,
+          "fob": 9.75,
+          "sellingPrice": 22
+        },
+        {
+          "productName": "sirmox 250 cap",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 1.6798,
+          "fob": 1.48,
+          "sellingPrice": 2.5
+        },
+        {
+          "productName": "sirmox 500",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 3.07585,
+          "fob": 2.71,
+          "sellingPrice": 3.5
+        }
+      ]
+    },
+    {
+      "_id": "69b288117befd7ed086bff54",
+      "invoiceNumber": "INC00005",
+      "invoiceDate": "2023-08-11T00:00:00.000Z",
+      "deliveryNumber": "HSCL/DN/07",
+      "receivedDate": "2023-08-11T00:00:00.000Z",
+      "supplierName": "Krux Pharma Private Limited",
+      "totalAmount": 56332.374745,
+      "remarks": "",
+      "createdAt": "2026-03-12T09:32:01.894Z",
+      "expiringProducts": [
+        {
+          "productName": "sirmox 500",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 3.1900500000000003,
+          "fob": 2.7,
+          "sellingPrice": 3.5
+        },
+        {
+          "productName": "sirmox cl 625",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 8.849435,
+          "fob": 7.49,
+          "sellingPrice": 18
+        },
+        {
+          "productName": "sirmox cl 228.5",
+          "type": "bottle",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.7089,
+          "fob": 0.6,
+          "sellingPrice": 1.8
+        },
+        {
+          "productName": "sirmox cl 1000",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 11.43876,
+          "fob": 9.861,
+          "sellingPrice": 22
+        },
+        {
+          "productName": "sirmox cl 228.5",
+          "type": "bottle",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.70992,
+          "fob": 0.612,
+          "sellingPrice": 1.8
+        },
+        {
+          "productName": "sirmox cl 625",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 8.828759999999999,
+          "fob": 7.611,
+          "sellingPrice": 18
+        },
+        {
+          "productName": "sirmox 500",
+          "type": "cap",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 3.3118,
+          "fob": 2.855,
+          "sellingPrice": 3.5
+        }
+      ]
+    },
+    {
+      "_id": "69b288117befd7ed086bfeb2",
+      "invoiceNumber": "INC00004",
+      "invoiceDate": "2023-04-12T00:00:00.000Z",
+      "deliveryNumber": "HSCL/DN/06",
+      "receivedDate": "2023-04-12T00:00:00.000Z",
+      "supplierName": "Merit Organics Limited",
+      "totalAmount": 9957.128,
+      "remarks": "",
+      "createdAt": "2026-03-12T09:32:01.021Z",
+      "expiringProducts": [
+        {
+          "productName": "paracare plus",
+          "type": "",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 1.2031,
+          "fob": 1.06,
+          "sellingPrice": 0
+        },
+        {
+          "productName": "metcare 500",
+          "type": "tab",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.2497,
+          "fob": 0.22,
+          "sellingPrice": 1.25
+        },
+        {
+          "productName": "amlocare 5",
+          "type": "",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 0.2497,
+          "fob": 0.22,
+          "sellingPrice": 0
+        },
+        {
+          "productName": "liasix",
+          "type": "inj",
+          "expiryDate": "2026-04-12T00:00:00.000Z",
+          "lc": 2.9510000000000005,
+          "fob": 2.6,
+          "sellingPrice": 5
+        }
+      ]
+    }
+  ]
+}

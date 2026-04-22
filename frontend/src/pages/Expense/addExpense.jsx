@@ -6,7 +6,6 @@ import axios from "axios";
 import { showToast } from "../../utils/toast";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { fetchMRList } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -152,11 +151,11 @@ const AddExpense = ({
 
   const [form, setForm] = useState({
     date: formatDateToYYYYMMDD(new Date()),
-    category: "", // ObjectId string
-    categoryName: "", // human-readable name (for requiresMR check)
+    category: "",
+    categoryName: "",
     remarks: "",
     amount: "",
-    sourceAccount: "", // ObjectId string
+    sourceAccount: "",
     paymentMethod: "cash",
     notes: "",
     mrId: "",
@@ -165,7 +164,6 @@ const AddExpense = ({
 
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [loading, setLoading] = useState(false);
 
   // ── Drop-down data ──
   const [categories, setCategories] = useState([]);
@@ -191,7 +189,7 @@ const AddExpense = ({
     load();
   }, []);
 
-  // ── Fetch source accounts (Destinations) ──
+  // ── Fetch source accounts ──
   useEffect(() => {
     const load = async () => {
       setAccountsLoading(true);
@@ -207,22 +205,43 @@ const AddExpense = ({
     load();
   }, []);
 
-  // ── Fetch MR list whenever a tour-related category is selected ──
+  // ── Whether current category needs an MR ──
   const needsMR = useMemo(
     () => categoryRequiresMR(form.categoryName),
     [form.categoryName],
   );
 
   useEffect(() => {
-    if (!needsMR) return;
+    if (!needsMR) {
+      setMrList([]);
+      return;
+    }
     const load = async () => {
       setMrListLoading(true);
       try {
-        const result = await fetchMRList();
-        if (result.success) setMrList(result.data || []);
-        else showToast("error", result.error || "Failed to load MR list");
+        const res = await axios.get(`${backendUrl}/api/staff`, {
+          params: { isActive: true },
+        });
+
+        let staffData = [];
+
+        // Handle different response shapes from the staff endpoint
+        if (Array.isArray(res.data)) {
+          staffData = res.data;
+        } else if (res.data.success && Array.isArray(res.data.data)) {
+          staffData = res.data.data;
+        } else if (res.data.success && Array.isArray(res.data.staff)) {
+          staffData = res.data.staff;
+        }
+
+        const activeMRs = staffData.filter(
+          (mr) => mr.isActive === true && mr.medicalRepName,
+        );
+
+        setMrList(activeMRs);
       } catch (err) {
-        showToast("error", "Failed to load Medical Representatives");
+        showToast("error", "Failed to load active Medical Representatives");
+        setMrList([]);
       } finally {
         setMrListLoading(false);
       }
@@ -230,7 +249,7 @@ const AddExpense = ({
     load();
   }, [needsMR]);
 
-  // Load initial data for editing
+  // ── Load initial data when editing ──
   useEffect(() => {
     if (initialData && isEditing) {
       setForm({
@@ -269,21 +288,20 @@ const AddExpense = ({
   }, [accounts, accountsLoading]);
 
   const mrOptions = useMemo(() => {
-    if (mrListLoading) return [];
+    if (mrListLoading || mrList.length === 0) return [];
     return mrList.map((mr) => ({
       value: mr._id,
       label: mr.medicalRepName,
     }));
   }, [mrList, mrListLoading]);
 
-  // Get selected account balance
+  // ── Account balance helpers ──
   const getSelectedAccountBalance = useCallback(() => {
     if (!form.sourceAccount) return 0;
     const acc = accountOptions.find((a) => a.value === form.sourceAccount);
     return acc ? acc.totalAmount : 0;
   }, [form.sourceAccount, accountOptions]);
 
-  // Validate amount against balance
   const validateAmountAgainstBalance = useCallback(
     (amount) => {
       if (!form.sourceAccount) return true;
@@ -294,7 +312,7 @@ const AddExpense = ({
     [form.sourceAccount, getSelectedAccountBalance],
   );
 
-  // ── Handlers ──
+  // ── Change handlers ──
   const handleCategoryChange = useCallback(
     (e) => {
       const categoryId = e.target.value;
@@ -304,6 +322,7 @@ const AddExpense = ({
         ...prev,
         category: categoryId,
         categoryName: catName,
+        // Reset MR whenever category changes
         mrId: "",
         mrName: "",
       }));
@@ -313,8 +332,7 @@ const AddExpense = ({
   );
 
   const handleAccountChange = useCallback((e) => {
-    const accountId = e.target.value;
-    setForm((prev) => ({ ...prev, sourceAccount: accountId }));
+    setForm((prev) => ({ ...prev, sourceAccount: e.target.value }));
     setErrors((prev) => ({ ...prev, sourceAccount: "", amount: "" }));
   }, []);
 
@@ -339,12 +357,9 @@ const AddExpense = ({
 
   const handleAmountChange = (value) => {
     const sanitized = value.replace(/[^0-9.]/g, "");
-    const decimalCount = (sanitized.match(/\./g) || []).length;
-    let final = sanitized;
-    if (decimalCount > 1) {
-      const parts = sanitized.split(".");
-      final = parts[0] + "." + parts.slice(1).join("");
-    }
+    const parts = sanitized.split(".");
+    const final =
+      parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : sanitized;
     setForm((prev) => ({ ...prev, amount: final }));
     setErrors((prev) => ({ ...prev, amount: "" }));
   };
@@ -374,6 +389,14 @@ const AddExpense = ({
     }
   }, []);
 
+  // ── Clear amount error when account changes ──
+  useEffect(() => {
+    if (errors.amount) {
+      setErrors((prev) => ({ ...prev, amount: "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.sourceAccount]);
+
   // ── Validation ──
   const validate = useCallback(() => {
     const newErrors = {};
@@ -381,9 +404,8 @@ const AddExpense = ({
     if (!form.date) newErrors.date = "Date is required";
     if (!form.category) newErrors.category = "Category is required";
     if (!form.remarks?.trim()) newErrors.remarks = "Remarks are required";
-    if (form.remarks?.trim() && form.remarks.trim().length < 3) {
+    if (form.remarks?.trim() && form.remarks.trim().length < 3)
       newErrors.remarks = "Remarks must be at least 3 characters long";
-    }
 
     if (
       !form.amount ||
@@ -398,6 +420,7 @@ const AddExpense = ({
 
     if (!form.sourceAccount)
       newErrors.sourceAccount = "Source account is required";
+
     if (needsMR && !form.mrId) {
       newErrors.mrId = `Medical Representative is required for "${form.categoryName}"`;
     }
@@ -405,13 +428,6 @@ const AddExpense = ({
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }, [form, needsMR, validateAmountAgainstBalance, getSelectedAccountBalance]);
-
-  // Clear amount error when source account changes
-  useEffect(() => {
-    if (errors.amount) {
-      setErrors((prev) => ({ ...prev, amount: "" }));
-    }
-  }, [form.sourceAccount]);
 
   // ── Submit ──
   const handleSubmit = async (e) => {
@@ -449,9 +465,7 @@ const AddExpense = ({
           "success",
           res.data.message || `${isEditing ? "Updated" : "Added"} successfully`,
         );
-        if (typeof onSuccess === "function") {
-          onSuccess(res.data.data);
-        }
+        if (typeof onSuccess === "function") onSuccess(res.data.data);
         if (!isEditing) {
           setForm({
             date: formatDateToYYYYMMDD(new Date()),
@@ -479,23 +493,21 @@ const AddExpense = ({
     }
   };
 
+  const handleCancel = () => {
+    if (onCancel) onCancel();
+    else navigate("/expenselayout/expenses");
+  };
+
   const selectedBal = getSelectedAccountBalance();
   const remaining = form.amount
     ? selectedBal - parseFloat(form.amount)
     : selectedBal;
 
-  const handleCancel = () => {
-    if (onCancel) {
-      onCancel();
-    } else {
-      navigate("/expenselayout/expenses");
-    }
-  };
-
   // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4">
+        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <h3 className="text-xl font-semibold text-gray-800">
             {isEditing ? "Edit Expense" : "Add New Expense"}
@@ -509,6 +521,7 @@ const AddExpense = ({
           </button>
         </div>
 
+        {/* Body */}
         <div className="p-6">
           {errors.submit && (
             <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
@@ -560,26 +573,47 @@ const AddExpense = ({
                   placeholder="Select Category"
                 />
 
-                {/* Medical Representative - shown only for tour-related categories */}
                 {needsMR && (
                   <div className="md:col-span-2">
-                    <SelectField
-                      label="Medical Representative"
-                      name="mrId"
-                      value={form.mrId}
-                      onChange={handleMRChange}
-                      error={errors.mrId}
-                      options={mrOptions}
-                      required
-                      disabled={mrListLoading}
-                      placeholder="Select Medical Representative"
-                    />
-                    {form.categoryName && (
-                      <p className="text-xs text-blue-600 mt-1">
-                        MR is required for <strong>{form.categoryName}</strong>{" "}
-                        expenses
-                      </p>
-                    )}
+                    <div className="flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1">
+                        Medical Representative{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+
+                      {mrListLoading ? (
+                        <div className="px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 text-sm">
+                          Loading active MRs...
+                        </div>
+                      ) : (
+                        <select
+                          id="mrId"
+                          name="mrId"
+                          value={form.mrId || ""}
+                          onChange={handleMRChange}
+                          className={`px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            errors.mrId ? "border-red-500" : "border-gray-300"
+                          }`}
+                        >
+                          <option value="">
+                            {mrOptions.length === 0
+                              ? "No active MRs found"
+                              : "Select Medical Representative"}
+                          </option>
+                          {mrOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+
+                      {errors.mrId && (
+                        <span className="text-red-500 text-xs mt-1">
+                          {errors.mrId}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -648,6 +682,7 @@ const AddExpense = ({
               </div>
             </div>
 
+            {/* Footer */}
             <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-gray-200">
               <button
                 type="submit"

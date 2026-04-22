@@ -53,7 +53,7 @@ function getFilterLabel(filter) {
   }
 }
 
-// Helper: search grouped items by product name or supplier name
+// Helper: search grouped items by product name or supplier name (case-insensitive)
 const searchItems = (items, searchTerm) => {
   if (!searchTerm || searchTerm.trim() === "") return items;
   const searchLower = searchTerm.toLowerCase().trim();
@@ -64,60 +64,46 @@ const searchItems = (items, searchTerm) => {
   );
 };
 
-// Helper: Filter out ALL remove adjustments and cancelled add adjustments
-const filterValidBatchesForExpiry = (batches) => {
-  // First, separate batches by type
-  const regularBatches = []; // Batches with no adjustmentType or adjustmentType === "batch"
-  const addBatches = []; // Batches with adjustmentType === "add"
-  const removeBatches = []; // Batches with adjustmentType === "remove"
+// Helper: capitalize first letter of each word
+const capitalizeFirstLetter = (str) => {
+  if (!str || typeof str !== "string") return "";
+  return str
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+};
 
-  for (const batch of batches) {
-    const adjType = batch.adjustmentType;
+// Helper: Check if product has valid stock (totalBoxes > 0)
+const hasValidStock = (item) => {
+  return item.totalBoxes > 0;
+};
 
-    if (adjType === "add") {
-      addBatches.push(batch);
-    } else if (adjType === "remove") {
-      removeBatches.push(batch);
-    } else {
-      // Regular batches (no adjustmentType, "batch", or undefined)
-      regularBatches.push(batch);
-    }
+// Helper: Calculate effective batch quantity considering removals
+const getEffectiveBatchQuantity = (batch, productTotalBoxes) => {
+  // If batch has adjustmentType "remove", skip it
+  if (batch.adjustmentType === "remove") {
+    return 0;
   }
 
-  // IMPORTANT: We EXCLUDE ALL remove batches completely
-  // They represent stock that has been removed and should not appear in expiry report
+  // Get batch boxes
+  let boxes = batch.boxes || 0;
 
-  // For add batches, only keep them if they are NOT cancelled by a remove batch
-  // Create a map of remove quantities for quick lookup
-  const removeQuantities = new Map();
-  for (const removeBatch of removeBatches) {
-    const qty = Number(removeBatch.boxes) || 0;
-    const key = qty.toString();
-    if (!removeQuantities.has(key)) {
-      removeQuantities.set(key, 0);
-    }
-    removeQuantities.set(key, removeQuantities.get(key) + 1);
+  // If boxes is negative or zero, skip
+  if (boxes <= 0) {
+    return 0;
   }
 
-  // Keep add batches that don't have a matching remove batch
-  const validAddBatches = [];
-  for (const addBatch of addBatches) {
-    const addQty = Number(addBatch.boxes) || 0;
-    const key = addQty.toString();
+  return boxes;
+};
 
-    if (removeQuantities.has(key) && removeQuantities.get(key) > 0) {
-      // This add batch is cancelled, decrement the counter
-      removeQuantities.set(key, removeQuantities.get(key) - 1);
-      // Skip this add batch (don't add to validAddBatches)
-    } else {
-      // No matching remove, keep this add batch
-      validAddBatches.push(addBatch);
-    }
-  }
+// Helper: Check if product should be shown in expiry stock (only specific products)
+const shouldShowProduct = (productName) => {
+  const targetProducts = ["tranekam", "bupikam", "carboxykam 0.5", "liasix"];
 
-  // Return regular batches + valid (non-cancelled) add batches
-  // Remove batches are completely excluded
-  return [...regularBatches, ...validAddBatches];
+  const lowerCaseName = productName.toLowerCase();
+  return targetProducts.some((target) =>
+    lowerCaseName.includes(target.toLowerCase()),
+  );
 };
 
 // --------------------------------------------------------------
@@ -131,38 +117,59 @@ router.get("/", async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
     const searchTerm = search || "";
 
-    // 1. Fetch all products that have batches
-    let query = { batches: { $exists: true, $not: { $size: 0 } } };
+    // 1. Fetch all products that have batches AND have stock > 0 (totalBoxes > 0)
+    let query = {
+      batches: { $exists: true, $not: { $size: 0 } },
+      totalBoxes: { $gt: 0 }, // Only get products with current stock > 0
+    };
+
     if (searchTerm) {
-      const searchRegex = new RegExp(searchTerm, "i");
+      const searchRegex = new RegExp(searchTerm, "i"); // Case-insensitive regex
       query.$or = [{ productName: searchRegex }, { supplierName: searchRegex }];
     }
+
     const allItems = await reportsInHand.find(query).lean();
 
-    // 2. Collect every batch as a plain object, filtering out remove adjustments
+    // 2. Collect every batch as a plain object (only valid stock batches)
     const rawBatches = [];
     allItems.forEach((item) => {
       if (!item.batches?.length) return;
 
-      // Filter out remove adjustments and cancelled add adjustments
-      const validBatches = filterValidBatchesForExpiry(item.batches);
+      // Skip if product has no valid stock
+      if (!hasValidStock(item)) return;
 
-      validBatches.forEach((batch) => {
-        // Skip if no expiry date
+      // Check if this is one of the target products
+      const isTargetProduct = shouldShowProduct(item.productName);
+
+      // For non-target products, skip them (only show target products)
+      if (!isTargetProduct) return;
+
+      item.batches.forEach((batch) => {
         if (!batch.expiryDate) return;
+
+        // Skip removed batches
+        if (batch.adjustmentType === "remove") return;
 
         const expiryDate = new Date(batch.expiryDate);
         expiryDate.setHours(0, 0, 0, 0);
         const daysRemaining = calculateDaysRemaining(batch.expiryDate);
         const isExpired = daysRemaining < 0;
-        const boxes = batch.boxes || 0;
+
+        // Get effective batch quantity (skip removed batches)
+        const boxes = getEffectiveBatchQuantity(batch, item.totalBoxes);
+
+        // Skip if no quantity
+        if (boxes <= 0) return;
+
         const lcPrice = batch.lc || 0;
         const totalValue = boxes * lcPrice;
 
         rawBatches.push({
+          productId: item._id,
           productName: item.productName || "Unknown Product",
           supplierName: item.supplierName || "Unknown Supplier",
           type: item.type || "N/A",
+          batchNumber: batch.batchNumber || "N/A",
           expiryDate: expiryDate,
           daysRemaining: Math.abs(daysRemaining),
           isExpired: isExpired,
@@ -174,18 +181,19 @@ router.get("/", async (req, res) => {
           date: batch.date || null,
           status: item.status || "Unknown",
           adjustmentType: batch.adjustmentType || "batch",
-          batchNumber: batch.batchNumber,
         });
       });
     });
 
-    // 3. Group by productName + supplierName + type
+    // 3. Group by productName + supplierName + type (case-insensitive grouping)
     const groupMap = new Map();
     for (const batch of rawBatches) {
-      const key = `${batch.productName}|${batch.supplierName}|${batch.type}`;
+      // Create case-insensitive key by converting to lowercase
+      const key = `${batch.productName.toLowerCase()}|${batch.supplierName.toLowerCase()}|${batch.type.toLowerCase()}`;
+
       if (!groupMap.has(key)) {
         groupMap.set(key, {
-          productName: batch.productName,
+          productName: batch.productName, // Keep original case for display
           supplierName: batch.supplierName,
           type: batch.type,
           totalQuantity: 0,
@@ -196,12 +204,14 @@ router.get("/", async (req, res) => {
           hasCritical: false,
           status: batch.status,
           batches: [],
+          totalBoxes: 0, // Track total boxes for this group
         });
       }
       const group = groupMap.get(key);
       group.totalQuantity += batch.quantity;
       group.totalAmount += batch.totalValue;
-      group.batches.push(batch);
+      group.totalBoxes += batch.quantity;
+
       if (
         !group.earliestExpiryDate ||
         batch.expiryDate < group.earliestExpiryDate
@@ -213,9 +223,18 @@ router.get("/", async (req, res) => {
         group.hasNearExpiry = true;
       if (!batch.isExpired && batch.daysRemaining <= 3)
         group.hasCritical = true;
+
+      group.batches.push({
+        batchNumber: batch.batchNumber,
+        quantity: batch.quantity,
+        expiryDate: batch.expiryDate,
+        daysRemaining: batch.daysRemaining,
+        isExpired: batch.isExpired,
+        adjustmentType: batch.adjustmentType,
+      });
     }
 
-    // 4. Convert groups to final item objects
+    // 4. Convert groups to final item objects (only if totalQuantity > 0)
     let groupedItems = [];
     for (const group of groupMap.values()) {
       const {
@@ -225,8 +244,14 @@ router.get("/", async (req, res) => {
         hasExpired,
         hasNearExpiry,
         hasCritical,
+        totalBoxes,
       } = group;
+
+      // Skip if total quantity is 0
       if (totalQuantity === 0) continue;
+
+      // Skip if total boxes is 0 (no stock)
+      if (totalBoxes <= 0) continue;
 
       const unitPrice = totalAmount / totalQuantity;
       const daysRemaining = calculateDaysRemaining(earliestExpiryDate);
@@ -242,8 +267,8 @@ router.get("/", async (req, res) => {
 
       if (include) {
         groupedItems.push({
-          productName: group.productName,
-          supplierName: group.supplierName,
+          productName: capitalizeFirstLetter(group.productName),
+          supplierName: capitalizeFirstLetter(group.supplierName),
           type: group.type,
           expiryDate: earliestExpiryDate,
           daysRemaining: Math.abs(daysRemaining),
@@ -256,11 +281,13 @@ router.get("/", async (req, res) => {
           amount: totalAmount,
           date: null,
           status: group.status,
+          batches: group.batches,
+          totalBoxes: totalBoxes, // Include total boxes in response
         });
       }
     }
 
-    // 5. Apply search again
+    // 5. Apply search again (already filtered by DB, but group keys may have changed)
     if (searchTerm) {
       groupedItems = searchItems(groupedItems, searchTerm);
     }
@@ -272,7 +299,7 @@ router.get("/", async (req, res) => {
       return a.daysRemaining - b.daysRemaining;
     });
 
-    // 7. Compute summary totals from the filtered grouped items
+    // 7. Compute summary totals
     let totalExpiringSoon = 0;
     let totalNearExpiryValue = 0;
     let criticalItems = 0;
@@ -299,7 +326,7 @@ router.get("/", async (req, res) => {
     const totalItemsCount = groupedItems.length;
     const paginatedItems = groupedItems.slice(skip, skip + limitNum);
 
-    // 9. Compute filtered summary from ALL groupedItems
+    // 9. Compute filtered summary
     let filteredExpiringSoon = 0;
     let filteredNearExpiryValue = 0;
     let filteredCriticalItems = 0;
@@ -346,7 +373,7 @@ router.get("/", async (req, res) => {
       success: true,
       data: responseData,
       message:
-        "Expiry stock report (grouped by product) retrieved successfully",
+        "Expiry stock report for selected products retrieved successfully",
     });
   } catch (error) {
     console.error("Error fetching expiry stock report:", error);
@@ -367,28 +394,46 @@ router.get("/export", async (req, res) => {
     const { filter = "all", search = "" } = req.query;
     const searchTerm = search || "";
 
-    let query = { batches: { $exists: true, $not: { $size: 0 } } };
+    let query = {
+      batches: { $exists: true, $not: { $size: 0 } },
+      totalBoxes: { $gt: 0 }, // Only get products with stock > 0
+    };
+
     if (searchTerm) {
-      const searchRegex = new RegExp(searchTerm, "i");
+      const searchRegex = new RegExp(searchTerm, "i"); // Case-insensitive regex
       query.$or = [{ productName: searchRegex }, { supplierName: searchRegex }];
     }
+
     const allItems = await reportsInHand.find(query).lean();
 
-    // Collect all batches with remove adjustment filtering
+    // Collect all batches (only valid stock for target products)
     const rawBatches = [];
     allItems.forEach((item) => {
       if (!item.batches?.length) return;
 
-      // Filter out remove adjustments and cancelled add adjustments
-      const validBatches = filterValidBatchesForExpiry(item.batches);
+      // Skip if product has no valid stock
+      if (!hasValidStock(item)) return;
 
-      validBatches.forEach((batch) => {
+      // Check if this is one of the target products
+      const isTargetProduct = shouldShowProduct(item.productName);
+
+      // For non-target products, skip them (only show target products)
+      if (!isTargetProduct) return;
+
+      item.batches.forEach((batch) => {
         if (!batch.expiryDate) return;
+
+        // Skip removed batches
+        if (batch.adjustmentType === "remove") return;
+
         const expiryDate = new Date(batch.expiryDate);
         expiryDate.setHours(0, 0, 0, 0);
         const daysRemaining = calculateDaysRemaining(batch.expiryDate);
         const isExpired = daysRemaining < 0;
-        const boxes = batch.boxes || 0;
+
+        const boxes = getEffectiveBatchQuantity(batch, item.totalBoxes);
+        if (boxes <= 0) return;
+
         const lcPrice = batch.lc || 0;
         const totalValue = boxes * lcPrice;
 
@@ -396,6 +441,7 @@ router.get("/export", async (req, res) => {
           productName: item.productName || "Unknown Product",
           supplierName: item.supplierName || "Unknown Supplier",
           type: item.type || "N/A",
+          batchNumber: batch.batchNumber || "N/A",
           expiryDate: expiryDate,
           daysRemaining: Math.abs(daysRemaining),
           isExpired: isExpired,
@@ -406,16 +452,15 @@ router.get("/export", async (req, res) => {
           amount: batch.amount || 0,
           date: batch.date || null,
           status: item.status || "Unknown",
-          adjustmentType: batch.adjustmentType || "batch",
-          batchNumber: batch.batchNumber,
         });
       });
     });
 
-    // Group by productName + supplierName + type
+    // Group by productName + supplierName + type (case-insensitive)
     const groupMap = new Map();
     for (const batch of rawBatches) {
-      const key = `${batch.productName}|${batch.supplierName}|${batch.type}`;
+      const key = `${batch.productName.toLowerCase()}|${batch.supplierName.toLowerCase()}|${batch.type.toLowerCase()}`;
+
       if (!groupMap.has(key)) {
         groupMap.set(key, {
           productName: batch.productName,
@@ -446,7 +491,7 @@ router.get("/export", async (req, res) => {
         group.hasCritical = true;
     }
 
-    // Build export items
+    // Build export items (only if totalQuantity > 0)
     let exportItems = [];
     for (const group of groupMap.values()) {
       const {
@@ -472,8 +517,8 @@ router.get("/export", async (req, res) => {
 
       if (include) {
         exportItems.push({
-          productName: group.productName,
-          supplierName: group.supplierName,
+          productName: capitalizeFirstLetter(group.productName),
+          supplierName: capitalizeFirstLetter(group.supplierName),
           type: group.type,
           expiryDate: earliestExpiryDate,
           daysRemaining: Math.abs(daysRemaining),
@@ -546,7 +591,7 @@ router.get("/export", async (req, res) => {
     res.status(200).json({
       success: true,
       data: exportData,
-      message: "Export data (grouped by product) retrieved successfully",
+      message: "Export data for selected products retrieved successfully",
     });
   } catch (error) {
     console.error("Error fetching export data:", error);

@@ -21,8 +21,6 @@ import {
 } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
-// Reads the logged-in user from localStorage.
-// Adjust the key ("user" / "authUser" / "currentUser") to match your auth setup.
 const getCurrentUser = () => {
   try {
     const raw =
@@ -37,14 +35,10 @@ const getCurrentUser = () => {
 
 const isSuperAdmin = (user) => {
   if (!user) return false;
-  return (
-    user.role === "superadmin" ||
-    user._id === "69ba5b0ff10fd4e8d92f2964" // hard-coded superadmin _id
-  );
+  return user.role === "superadmin" || user._id === "69ba5b0ff10fd4e8d92f2964";
 };
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Helper function to format date to YYYY-MM-DD without timezone issues
 const formatDateToYYYYMMDD = (date) => {
   if (!date) return "";
   if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
@@ -522,7 +516,9 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       if (name === "paidAmount") {
         const totalNetAmount = calculateTotalNetAmount(currentForm.products);
         const paidAmount = parseNumber(value);
-        const newDueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(2);
+        const newDueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(
+          2,
+        );
         updatedForm.dueAmount = newDueAmount;
         updatedForm.paymentStatus = autoSetPaymentStatus({
           ...updatedForm,
@@ -834,7 +830,9 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
       totalQty > 0
         ? (parseFloat(netSellingAmount) / totalQty).toFixed(2)
         : "0.00";
-    const profitLoss = (parseFloat(netSellingAmount) - lc * totalQty).toFixed(2);
+    const profitLoss = (parseFloat(netSellingAmount) - lc * totalQty).toFixed(
+      2,
+    );
 
     return {
       ...product,
@@ -1074,7 +1072,11 @@ const useSaleForm = (initialCustomerCode = "", initialSaleType = "normal") => {
             const stockError = validateMRTotalQuantity(product, index, mrStock);
             if (stockError) newErrors[`salesQty_${index}`] = stockError;
           } else {
-            const stockError = validateTotalQuantity(product, index, productsData);
+            const stockError = validateTotalQuantity(
+              product,
+              index,
+              productsData,
+            );
             if (stockError) newErrors[`salesQty_${index}`] = stockError;
           }
         }
@@ -1432,6 +1434,53 @@ const AddSale = () => {
     ];
   }, [mrStockList, mrStockListLoading]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // FIX: For Normal Sale, show only ACTIVE MRs from mrList.
+  // For MR Sale, the MR dropdown is per-product and uses mrStockOptions above
+  // (those come from /mr-stock/mrs-with-stock and are unaffected).
+  // ─────────────────────────────────────────────────────────────────────────
+  const mrOptions = useMemo(() => {
+    // Filter active MRs only for normal sale
+    const activeMrList =
+      saleType === "normal"
+        ? mrList.filter((mr) => {
+            // Support common active/status field patterns from Staff model
+            if (mr.isActive !== undefined) return mr.isActive === true;
+            if (mr.status !== undefined)
+              return (
+                mr.status === "active" ||
+                mr.status === "Active" ||
+                mr.status === true
+              );
+            if (mr.active !== undefined) return mr.active === true;
+            // If no recognised active field exists, include the MR by default
+            return true;
+          })
+        : mrList;
+
+    if (activeMrList.length === 0 && !mrListLoading) {
+      return [
+        {
+          value: "",
+          label:
+            saleType === "normal"
+              ? "No Active Medical Representatives Available"
+              : "No Medical Representatives Available",
+          disabled: true,
+        },
+      ];
+    }
+
+    return [
+      { value: "", label: "Select Medical Representative" },
+      ...activeMrList.map((mr) => ({
+        value: mr._id,
+        label: mr.medicalRepName,
+      })),
+    ];
+  }, [mrList, mrListLoading, saleType]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const fetchMRAvailableProducts = useCallback(
     async (mrId, index) => {
       if (!mrId) return;
@@ -1490,25 +1539,6 @@ const AddSale = () => {
     customerListLoading ||
     productsListLoading ||
     mrStockListLoading;
-
-  const mrOptions = useMemo(() => {
-    if (mrList.length === 0 && !mrListLoading) {
-      return [
-        {
-          value: "",
-          label: "No Medical Representatives Available",
-          disabled: true,
-        },
-      ];
-    }
-    return [
-      { value: "", label: "Select Medical Representative" },
-      ...mrList.map((mr) => ({
-        value: mr._id,
-        label: `${mr.medicalRepName}`,
-      })),
-    ];
-  }, [mrList, mrListLoading]);
 
   const customerOptions = useMemo(() => {
     if (customerList.length === 0 && !customerListLoading) {
@@ -2082,9 +2112,6 @@ const AddSale = () => {
         customerCode: form.customerCode || "",
         customerId: form.customerId || null,
         customerName: form.customerName || "",
-        // ── Always send lc / fob / cif / profitLoss to backend ─────────────
-        // These values are always calculated internally regardless of role.
-        // The role check only hides them from the UI.
         products: validProducts.map((product) => ({
           productName: product.productName.trim(),
           salesQty: Number(product.salesQty) || 0,
@@ -2095,10 +2122,10 @@ const AddSale = () => {
           discount: Number(product.discount) || 0,
           netSellingAmount: Number(product.netSellingAmount) || 0,
           averageUnitPrice: Number(product.averageUnitPrice) || 0,
-          lc: Number(product.lc) || 0,           // always sent
-          fob: Number(product.fob) || 0,         // always sent
-          cif: Number(product.cif) || 0,         // always sent
-          profitLoss: Number(product.profitLoss) || 0, // always sent
+          lc: Number(product.lc) || 0,
+          fob: Number(product.fob) || 0,
+          cif: Number(product.cif) || 0,
+          profitLoss: Number(product.profitLoss) || 0,
           isProductAccept: true,
           remark: product.remark || "",
           ...(saleType === "mr" && {
@@ -2581,7 +2608,7 @@ const AddSale = () => {
                       )}
                     </div>
 
-                    {/* ── Common fields (visible to all roles) ── */}
+                    {/* Common fields */}
                     <InputField
                       label="Sales Quantity"
                       name={`salesQty_${index}`}
@@ -2653,7 +2680,7 @@ const AddSale = () => {
                       disabled={isFormDisabled}
                     />
 
-                    {/* ── Superadmin-only fields: LC, FOB, CIF, Profit/Loss ── */}
+                    {/* Superadmin-only fields */}
                     {canViewSensitiveFields && (
                       <>
                         <InputField
@@ -2687,7 +2714,7 @@ const AddSale = () => {
                       </>
                     )}
 
-                    {/* ── Read-only calculated fields (visible to all roles) ── */}
+                    {/* Read-only calculated fields */}
                     <InputField
                       label="Total Quantity"
                       name={`totalQty_${index}`}
@@ -2762,7 +2789,7 @@ const AddSale = () => {
             disabled={isFormDisabled}
           />
 
-          {/* Normal Sale: header MR dropdown */}
+          {/* Normal Sale only: header-level MR dropdown (active MRs only) */}
           {saleType !== "mr" && (
             <SearchableDropdown
               value={form.mrId}

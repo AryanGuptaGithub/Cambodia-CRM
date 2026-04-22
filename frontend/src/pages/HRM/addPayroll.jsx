@@ -223,6 +223,10 @@ const AllowanceBreakdownModal = ({
   );
 };
 
+// ─────────────────────────────────────────────
+// Salary Details Modal
+// FIXED: Show totalSalary as "Basic Salary ($)" — the key value users need
+// ─────────────────────────────────────────────
 const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
   if (!isOpen || !calculation) return null;
   const fmt = (v) => {
@@ -255,7 +259,7 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
         <div className="px-6 py-4 space-y-1">
           {[
             [
-              "Basic Salary (Full Month)",
+              "Full Monthly Basic Salary",
               `$${fmt(calculation.basicSalary)}`,
               "gray",
             ],
@@ -323,9 +327,10 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
             </div>
           )}
 
+          {/* ── FIXED: Show totalSalary as "Basic Salary ($)" ── */}
           <div className="flex justify-between items-center pt-3 border-t-2 border-gray-200 mt-2">
             <span className="text-base font-bold text-gray-800">
-              Net Salary (before allowances)
+              Basic Salary ($)
             </span>
             <span className="text-base font-bold text-green-700">
               ${fmt(calculation.totalSalary)}
@@ -572,6 +577,8 @@ const useAllMRList = () => {
 
 // ─────────────────────────────────────────────
 // Hook: payroll form
+// FIXED: net salary = totalSalary (from calculation) + totalAllowance
+//        totalSalary already has leave/advance deductions applied by backend
 // ─────────────────────────────────────────────
 const usePayrollForm = () => {
   const navigate = useNavigate();
@@ -672,8 +679,7 @@ const usePayrollForm = () => {
       if (res.data.success && res.data.data) {
         const sc = res.data.data.salaryCalculation;
         setSalaryCalculation(sc);
-        // Only store deductions (leave deduction) — do NOT store basicSalary
-        // Net salary is computed from adjustedBasicSalary + extraTime + allowances - deductions - advance
+        // Store leave deduction for display only — net is computed from totalSalary
         setForm((p) => ({
           ...p,
           deductions: sc?.leaveDeduction?.toFixed(2) || "0.00",
@@ -828,16 +834,13 @@ const usePayrollForm = () => {
     [form.allowances],
   );
 
-  // ── Net salary = adjustedBasicSalary + extraTimeAmount + totalAllowance - deductions - advance ──
-  // NOT full basicSalary
+  // ── FIXED: Net salary = totalSalary (basic after leave/advance deductions) + totalAllowance ──
+  // totalSalary from backend already = basicSalary - leaveDeduction - advanceDeduction
   const netSalary = useMemo(() => {
-    const adjusted = salaryCalculation?.adjustedBasicSalary ?? 0;
-    const extra = salaryCalculation?.extraTimeAmount ?? 0;
-    const advance = salaryCalculation?.advanceDeduction ?? 0;
-    const deductions = parseFloat(form.deductions) || 0;
-    const result = adjusted + extra + totalAllowance - deductions - advance;
+    const basicAfterDeductions = salaryCalculation?.totalSalary ?? 0;
+    const result = basicAfterDeductions + totalAllowance;
     return Math.max(0, result).toFixed(2);
-  }, [salaryCalculation, totalAllowance, form.deductions]);
+  }, [salaryCalculation, totalAllowance]);
 
   useEffect(() => setForm((p) => ({ ...p, netSalary })), [netSalary]);
 
@@ -947,6 +950,9 @@ const usePayrollForm = () => {
 
 // ─────────────────────────────────────────────
 // Current Month Tab Component
+// FIXED: Removed "Adjusted Basic" input
+//        Basic Salary ($) shown using totalSalary from calculation
+//        Net Salary = Basic Salary ($) + Allowances
 // ─────────────────────────────────────────────
 const CurrentMonthTab = () => {
   const {
@@ -1030,9 +1036,10 @@ const CurrentMonthTab = () => {
   const net = parseFloat(form.netSalary) || 0;
   const sourceDiff = totalFromSources - net;
 
-  // adjustedBasicSalary from calculation (shown in summary, not full basic)
-  const displayAdjustedBasic = salaryCalculation
-    ? (salaryCalculation.adjustedBasicSalary || 0).toFixed(2)
+  // ── FIXED: Basic Salary ($) = totalSalary from calculation
+  // (already has leave deduction and advance deduction applied by backend)
+  const displayBasicSalary = salaryCalculation
+    ? (salaryCalculation.totalSalary || 0).toFixed(2)
     : "0.00";
 
   const isFormValid =
@@ -1073,7 +1080,6 @@ const CurrentMonthTab = () => {
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* Row 1: MR, Period, Full Basic Salary (read-only reference) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           <SearchableDropdown
             label="MR Name"
@@ -1110,8 +1116,7 @@ const CurrentMonthTab = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Full Basic Salary ($){" "}
-              <span className="text-gray-400 text-xs">(reference only)</span>
+              Full Monthly Basic Salary ($){" "}
             </label>
             <input
               type="text"
@@ -1121,7 +1126,7 @@ const CurrentMonthTab = () => {
               className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-100 font-semibold text-gray-500 cursor-not-allowed"
             />
             <p className="text-xs text-gray-400 mt-1">
-              MR's fixed monthly basic (not used in net)
+              MR's fixed monthly basic (before any deductions)
             </p>
           </div>
         </div>
@@ -1152,25 +1157,29 @@ const CurrentMonthTab = () => {
           </div>
         )}
 
-        {/* Row 2: Adjusted Basic, Deductions, Net Salary, Advance - REPLACEMENT */}
+        {/* ── FIXED Row 2: Basic Salary ($), Deductions, Advance, Net Salary ── */}
+        {/* Removed "Adjusted Basic" input entirely */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          {/* Basic Salary ($) = totalSalary from calculation */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Adjusted Basic ($)
+              Basic Salary ($)
             </label>
             <input
               type="text"
-              value={displayAdjustedBasic}
+              value={displayBasicSalary}
               readOnly
               className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-100 font-semibold text-gray-700 cursor-not-allowed"
             />
-            <p className="text-xs text-gray-400 mt-1">Based on days worked</p>
+            <p className="text-xs text-gray-400 mt-1">
+              After leave &amp; advance deductions
+            </p>
           </div>
 
-          {/* Deductions (read-only, from unpaid leaves) */}
+          {/* Deductions (unpaid leave only, read-only) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Deductions ($)
+              Leave Deduction ($)
             </label>
             <input
               type="text"
@@ -1181,25 +1190,6 @@ const CurrentMonthTab = () => {
             <p className="text-xs text-gray-400 mt-1">
               Based on unpaid leaves only
             </p>
-          </div>
-
-          {/* Net Salary */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Net Salary ($)
-            </label>
-            <input
-              type="text"
-              value={form.netSalary}
-              readOnly
-              className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-blue-50 font-bold text-blue-700 cursor-not-allowed text-lg"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Adjusted + Extra + Allowances − Deductions − Advance
-            </p>
-            {errors.netSalary && (
-              <p className="text-red-500 text-xs mt-1">{errors.netSalary}</p>
-            )}
           </div>
 
           {/* Advance Deduction */}
@@ -1219,6 +1209,25 @@ const CurrentMonthTab = () => {
                   : "border-gray-300 bg-gray-100 text-gray-500"
               }`}
             />
+          </div>
+
+          {/* Net Salary = Basic Salary ($) + Allowances */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Net Salary ($)
+            </label>
+            <input
+              type="text"
+              value={form.netSalary}
+              readOnly
+              className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-blue-50 font-bold text-blue-700 cursor-not-allowed text-lg"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Basic Salary ($) + Allowances
+            </p>
+            {errors.netSalary && (
+              <p className="text-red-500 text-xs mt-1">{errors.netSalary}</p>
+            )}
           </div>
         </div>
 
@@ -1315,7 +1324,8 @@ const CurrentMonthTab = () => {
           </div>
         </div>
 
-        {/* Salary Summary Table - REPLACEMENT */}
+        {/* ── FIXED Salary Summary Table ── */}
+        {/* Shows: Basic Salary ($) | + Allowances | = Net Salary */}
         <div className="mt-8 p-5 bg-white rounded-2xl shadow">
           <h3 className="text-lg font-semibold mb-4 text-center">
             Salary Summary
@@ -1325,27 +1335,16 @@ const CurrentMonthTab = () => {
               <tr>
                 <th className="p-3 font-medium">Basic Salary ($)</th>
                 <th className="p-3 font-medium">Allowance ($)</th>
-                <th className="p-3 font-medium">Leave Deduction ($)</th>
-                {hasAdvance && (
-                  <th className="p-3 font-medium text-red-600">Advance ($)</th>
-                )}
                 <th className="p-3 font-medium">Net Salary ($)</th>
               </tr>
             </thead>
             <tbody>
               <tr className="bg-white hover:bg-gray-50">
-                <td className="p-4 font-semibold">{displayAdjustedBasic}</td>
-                <td className="p-4 font-semibold">
+                {/* Basic Salary ($) = totalSalary (already deducted leave+advance) */}
+                <td className="p-4 font-semibold">{displayBasicSalary}</td>
+                <td className="p-4 font-semibold text-blue-600">
                   +{totalAllowance.toFixed(2)}
                 </td>
-                <td className="p-4 font-semibold text-red-600">
-                  -{form.deductions || "0.00"}
-                </td>
-                {hasAdvance && (
-                  <td className="p-4 font-semibold text-red-600">
-                    -{salaryCalculation?.advanceDeduction?.toFixed(2) || "0.00"}
-                  </td>
-                )}
                 <td className="p-4 font-bold text-green-600 text-lg">
                   {form.netSalary}
                 </td>
@@ -1371,6 +1370,12 @@ const CurrentMonthTab = () => {
                 <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full font-medium">
                   ⚠️ Unpaid leave deducted: {salaryCalculation.unpaidLeaves}{" "}
                   day(s)
+                </span>
+              )}
+              {hasAdvance && (
+                <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full font-medium">
+                  Advance deducted: $
+                  {salaryCalculation.advanceDeduction?.toFixed(2)}
                 </span>
               )}
             </div>
@@ -1793,7 +1798,6 @@ const PreviousMonthTab = () => {
       const payload = rows.map((row) => {
         const basicSalaryAmount = parseFloat(row.salary) || 0;
         const allowanceTotal = parseFloat(buildTotalAllowance(row)) || 0;
-        // netSalary for previous month = basicSalary + totalAllowance
         const netSalaryValue = basicSalaryAmount + allowanceTotal;
         return {
           employeeId: row.employeeId,
@@ -1812,9 +1816,7 @@ const PreviousMonthTab = () => {
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } },
       );
       if (res.status === 201 || res.status === 200) {
         showToast("success", res.data.message || "Payroll saved");
@@ -1940,7 +1942,6 @@ const PreviousMonthTab = () => {
         );
         const basicSalaryAmount = parseFloat(row.salary) || 0;
         const allowanceTotal = parseFloat(buildTotalAllowance(row)) || 0;
-        // netSalary for previous month = basicSalary + totalAllowance
         const netSalaryValue = basicSalaryAmount + allowanceTotal;
         return {
           employeeId: mr?._id || null,
@@ -1969,9 +1970,7 @@ const PreviousMonthTab = () => {
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
-        {
-          headers: { "Content-Type": "application/json" },
-        },
+        { headers: { "Content-Type": "application/json" } },
       );
       if (res.status === 201 || res.status === 200) {
         showToast("success", res.data.message || "Payroll uploaded");

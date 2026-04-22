@@ -4,13 +4,232 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
+// ── Placeholder strings that mean "no value provided" ────────────────────────
+const INVALID_VALUES = [
+  "not provided",
+  "n/a",
+  "na",
+  "none",
+  "null",
+  "undefined",
+  "-",
+  "--",
+  "unknown",
+  "",
+];
+
+// ── JS helper: returns true if a string is a real/meaningful value ────────────
+const isValid = (val) => {
+  if (!val) return false;
+  return !INVALID_VALUES.includes(val.trim().toLowerCase());
+};
+
+// ── JS helper: derive the group label for a customer (used in exports) ────────
+// Priority: zone → province → address → "Not Provided"
+const getGroupLabel = (customer) => {
+  if (isValid(customer.zone)) return customer.zone.trim();
+  if (isValid(customer.province)) return customer.province.trim();
+  if (isValid(customer.address)) return customer.address.trim();
+  return "Not Provided";
+};
+
+// ── MongoDB expression: true if the field is a real value ────────────────────
+const validFieldExpr = (field) => ({
+  $and: [
+    { $gt: [{ $type: field }, "missing"] },
+    { $ne: [field, null] },
+    {
+      $not: {
+        $in: [
+          { $toLower: { $trim: { input: { $ifNull: [field, ""] } } } },
+          INVALID_VALUES,
+        ],
+      },
+    },
+  ],
+});
+
+// ── Group key expression (lowercase, for dedup/grouping) ─────────────────────
+// Priority: zone → province → address → "not provided"
+const groupKeyExpr = {
+  $cond: {
+    if: validFieldExpr("$zone"),
+    then: { $toLower: { $trim: { input: "$zone" } } },
+    else: {
+      $cond: {
+        if: validFieldExpr("$province"),
+        then: { $toLower: { $trim: { input: "$province" } } },
+        else: {
+          $cond: {
+            if: validFieldExpr("$address"),
+            then: { $toLower: { $trim: { input: "$address" } } },
+            else: "not provided",
+          },
+        },
+      },
+    },
+  },
+};
+
+// ── Display label expression (preserves original casing for UI) ──────────────
+// Priority: zone → province → address → "Not Provided"
+const groupDisplayExpr = {
+  $cond: {
+    if: validFieldExpr("$zone"),
+    then: { $trim: { input: "$zone" } },
+    else: {
+      $cond: {
+        if: validFieldExpr("$province"),
+        then: { $trim: { input: "$province" } },
+        else: {
+          $cond: {
+            if: validFieldExpr("$address"),
+            then: { $trim: { input: "$address" } },
+            else: "Not Provided",
+          },
+        },
+      },
+    },
+  },
+};
+
+// ── Reusable Mongoose filter: checks if a field is invalid/missing ────────────
+const invalidFieldFilter = (fieldName) => ({
+  $or: [
+    { [fieldName]: { $exists: false } },
+    { [fieldName]: null },
+    {
+      $expr: {
+        $in: [
+          {
+            $toLower: { $trim: { input: { $ifNull: [`$${fieldName}`, ""] } } },
+          },
+          INVALID_VALUES,
+        ],
+      },
+    },
+  ],
+});
+
+// ── Build Mongoose filter to fetch customers belonging to a group ──────────────
+// groupKey is always lowercase (as stored in _id from aggregation)
+const buildGroupFilter = (groupKey) => {
+  // ── "Not Provided": zone, province AND address are all invalid ────────────
+  if (groupKey === "not provided") {
+    return {
+      $and: [
+        invalidFieldFilter("zone"),
+        invalidFieldFilter("province"),
+        invalidFieldFilter("address"),
+      ],
+    };
+  }
+
+  // ── Normal key: could be a zone, province, or address value ──────────────
+  // Try to match in priority order using $or:
+  //   1. zone is valid and matches this key
+  //   2. zone is invalid, province is valid and matches
+  //   3. zone AND province are invalid, address is valid and matches
+  return {
+    $or: [
+      // 1. Valid zone matches
+      {
+        $and: [
+          {
+            $expr: {
+              $eq: [
+                { $toLower: { $trim: { input: { $ifNull: ["$zone", ""] } } } },
+                groupKey,
+              ],
+            },
+          },
+          {
+            $expr: {
+              $not: {
+                $in: [
+                  {
+                    $toLower: { $trim: { input: { $ifNull: ["$zone", ""] } } },
+                  },
+                  INVALID_VALUES,
+                ],
+              },
+            },
+          },
+        ],
+      },
+      // 2. Zone invalid → valid province matches
+      {
+        $and: [
+          invalidFieldFilter("zone"),
+          {
+            $expr: {
+              $eq: [
+                {
+                  $toLower: {
+                    $trim: { input: { $ifNull: ["$province", ""] } },
+                  },
+                },
+                groupKey,
+              ],
+            },
+          },
+          {
+            $expr: {
+              $not: {
+                $in: [
+                  {
+                    $toLower: {
+                      $trim: { input: { $ifNull: ["$province", ""] } },
+                    },
+                  },
+                  INVALID_VALUES,
+                ],
+              },
+            },
+          },
+        ],
+      },
+      // 3. Zone AND province invalid → valid address matches
+      {
+        $and: [
+          invalidFieldFilter("zone"),
+          invalidFieldFilter("province"),
+          {
+            $expr: {
+              $eq: [
+                {
+                  $toLower: { $trim: { input: { $ifNull: ["$address", ""] } } },
+                },
+                groupKey,
+              ],
+            },
+          },
+          {
+            $expr: {
+              $not: {
+                $in: [
+                  {
+                    $toLower: {
+                      $trim: { input: { $ifNull: ["$address", ""] } },
+                    },
+                  },
+                  INVALID_VALUES,
+                ],
+              },
+            },
+          },
+        ],
+      },
+    ],
+  };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /  (paginated list)
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 7,
-      search = "",
-    } = req.query;
+    const { page = 1, limit = 7, search = "" } = req.query;
 
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
@@ -18,27 +237,27 @@ router.get("/", async (req, res) => {
 
     let matchStage = { enabled: true };
 
-    // Add search filter
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       matchStage.$or = [
         { zone: searchRegex },
+        { province: searchRegex },
+        { address: searchRegex },
         { name: searchRegex },
         { customerCode: searchRegex },
-        { medicalRepName: searchRegex }
+        { medicalRepName: searchRegex },
       ];
     }
 
-    // First, get zones with basic info (without pushing all customer data)
     const zonesAggregation = [
       { $match: matchStage },
       {
         $group: {
-          _id: "$zone",
-          zoneName: { $first: "$zone" },
+          _id: groupKeyExpr, // lowercase key for dedup
+          zoneName: { $first: groupDisplayExpr }, // pretty display name
           totalCustomers: { $sum: 1 },
           totalMRs: { $addToSet: "$medicalRepName" },
-        }
+        },
       },
       {
         $project: {
@@ -51,73 +270,73 @@ router.get("/", async (req, res) => {
               { $divide: ["$totalCustomers", { $size: "$totalMRs" }] },
               0,
             ],
-          }
-        }
+          },
+        },
       },
       { $sort: { totalCustomers: -1 } },
       {
         $facet: {
-          paginatedResults: [
-            { $skip: skip },
-            { $limit: limitNum }
-          ],
-          totalCount: [
-            { $count: "total" }
-          ]
-        }
-      }
+          paginatedResults: [{ $skip: skip }, { $limit: limitNum }],
+          totalCount: [{ $count: "total" }],
+        },
+      },
     ];
 
-    // Execute with allowDiskUse to prevent memory issues
-    const [zonesResult] = await Customer.aggregate(zonesAggregation).allowDiskUse(true);
-    
+    const [zonesResult] =
+      await Customer.aggregate(zonesAggregation).allowDiskUse(true);
     const totalRecords = zonesResult.totalCount[0]?.total || 0;
 
-    // Now get customers for each zone separately to avoid memory issues
     const records = [];
-    
+
     for (const zoneData of zonesResult.paginatedResults) {
-      const zoneName = zoneData._id;
-      
-      // Get customers for this specific zone
+      const groupKey = zoneData._id; // lowercase
+      const groupFilter = buildGroupFilter(groupKey);
+
       const zoneCustomers = await Customer.find({
-        ...matchStage,
-        zone: zoneName
+        enabled: true,
+        ...groupFilter,
       })
-      .select('_id customerCode name typeOfBusiness customerNumber address medicalRepName province isNew createdAt remark')
-      .sort({ name: 1 })
-      .lean();
+        .select(
+          "_id customerCode name typeOfBusiness customerNumber address medicalRepName province zone isNew createdAt remark",
+        )
+        .sort({ name: 1 })
+        .lean();
 
       records.push({
-        zoneId: zoneName ? zoneName.replace(/\s+/g, '_').toUpperCase() : "UNKNOWN_ZONE",
-        zoneName: zoneData.zoneName || "Unknown Zone",
+        zoneId: groupKey
+          ? groupKey
+              .replace(/[\s()]/g, "_")
+              .replace(/_+/g, "_")
+              .toUpperCase()
+          : "NOT_PROVIDED",
+        zoneName: zoneData.zoneName || "Not Provided",
         totalMRs: zoneData.totalMRs || 0,
         totalCustomers: zoneData.totalCustomers || 0,
         averagePerMR: parseFloat((zoneData.averagePerMR || 0).toFixed(1)),
-        customers: zoneCustomers.map(customer => ({
-          customerId: customer._id,
-          customerCode: customer.customerCode,
-          customerName: customer.name,
-          typeOfBusiness: customer.typeOfBusiness,
-          contactNumber: customer.customerNumber,
-          address: customer.address,
-          medicalRepName: customer.medicalRepName,
-          province: customer.province,
-          isNew: customer.isNew,
-          createdAt: customer.createdAt,
-          remark: customer.remark
-        }))
+        customers: zoneCustomers.map((c) => ({
+          customerId: c._id,
+          customerCode: c.customerCode,
+          customerName: c.name,
+          typeOfBusiness: c.typeOfBusiness,
+          contactNumber: c.customerNumber,
+          address: c.address,
+          medicalRepName: c.medicalRepName,
+          province: c.province,
+          isNew: c.isNew,
+          createdAt: c.createdAt,
+          remark: c.remark,
+        })),
       });
     }
 
-    // Get summary statistics (optimized)
+    // ── Summary ───────────────────────────────────────────────────────────────
     const summaryResult = await Customer.aggregate([
       { $match: matchStage },
       {
         $group: {
           _id: null,
           totalCustomers: { $sum: 1 },
-          totalZones: { $addToSet: "$zone" },
+          totalZones: { $addToSet: groupKeyExpr },
           totalMRs: { $addToSet: "$medicalRepName" },
         },
       },
@@ -144,71 +363,68 @@ router.get("/", async (req, res) => {
       averageCustomersPerZone: 0,
     };
 
-    // Format summary numbers
-    const formattedSummary = {
-      totalCustomers: summary.totalCustomers || 0,
-      totalZones: summary.totalZones || 0,
-      totalMRs: summary.totalMRs || 0,
-      averageCustomersPerZone: parseFloat((summary.averageCustomersPerZone || 0).toFixed(1))
-    };
-
-    // Pagination info
     const totalPages = Math.ceil(totalRecords / limitNum);
-    const pagination = {
-      currentPage: pageNum,
-      totalPages,
-      totalRecords,
-      hasNext: pageNum < totalPages,
-      hasPrev: pageNum > 1,
-    };
 
-    // Final Response
     res.json({
       success: true,
       data: {
-        summary: formattedSummary,
-        records: records,
+        summary: {
+          totalCustomers: summary.totalCustomers || 0,
+          totalZones: summary.totalZones || 0,
+          totalMRs: summary.totalMRs || 0,
+          averageCustomersPerZone: parseFloat(
+            (summary.averageCustomersPerZone || 0).toFixed(1),
+          ),
+        },
+        records,
       },
-      pagination: pagination,
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalRecords,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
     });
-
   } catch (error) {
     console.error("❌ Error fetching zone wise customers:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch zone wise customer data",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /export  (full Excel: Summary + Zones + Customers sheets)
+// ─────────────────────────────────────────────────────────────────────────────
 router.get("/export", async (req, res) => {
   try {
     const search = req.query.search?.trim() || "";
-    
-    let matchStage = { enabled: true };
 
-    // Add search filter
-    if (search && search.trim() !== "") {
-      const searchRegex = new RegExp(search.trim(), "i");
+    let matchStage = { enabled: true };
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
       matchStage.$or = [
         { zone: searchRegex },
+        { province: searchRegex },
+        { address: searchRegex },
         { name: searchRegex },
         { customerCode: searchRegex },
-        { medicalRepName: searchRegex }
+        { medicalRepName: searchRegex },
       ];
     }
 
-    // Get all zones with customers (optimized for export)
     const zonesAggregation = [
       { $match: matchStage },
       {
         $group: {
-          _id: "$zone",
-          zoneName: { $first: "$zone" },
+          _id: groupKeyExpr,
+          zoneName: { $first: groupDisplayExpr },
           totalCustomers: { $sum: 1 },
           totalMRs: { $addToSet: "$medicalRepName" },
-        }
+        },
       },
       {
         $project: {
@@ -221,22 +437,21 @@ router.get("/export", async (req, res) => {
               { $divide: ["$totalCustomers", { $size: "$totalMRs" }] },
               0,
             ],
-          }
-        }
+          },
+        },
       },
-      { $sort: { totalCustomers: -1 } }
+      { $sort: { totalCustomers: -1 } },
     ];
 
     const zones = await Customer.aggregate(zonesAggregation).allowDiskUse(true);
 
-    // Get summary statistics
     const summaryResult = await Customer.aggregate([
       { $match: matchStage },
       {
         $group: {
           _id: null,
           totalCustomers: { $sum: 1 },
-          totalZones: { $addToSet: "$zone" },
+          totalZones: { $addToSet: groupKeyExpr },
           totalMRs: { $addToSet: "$medicalRepName" },
         },
       },
@@ -263,430 +478,211 @@ router.get("/export", async (req, res) => {
       averageCustomersPerZone: 0,
     };
 
-    // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
-    
-    // 1. SUMMARY SHEET
-    const summarySheet = workbook.addWorksheet('Summary');
-    
-    // Title
-    summarySheet.mergeCells('A1:D1');
-    summarySheet.getCell('A1').value = 'ZONE WISE CUSTOMERS REPORT';
-    summarySheet.getCell('A1').font = { bold: true, size: 16 };
-    summarySheet.getCell('A1').alignment = { horizontal: 'center' };
-    
-    summarySheet.addRow([]); // Empty row
-    
-    // Report Info
-    summarySheet.addRow(['Report Date:', new Date().toLocaleDateString()]);
-    summarySheet.addRow(['Generated At:', new Date().toLocaleTimeString()]);
-    if (search) {
-      summarySheet.addRow(['Search Filter:', search]);
-    }
-    
-    summarySheet.addRow([]); // Empty row
-    
-    // Summary Header
-    summarySheet.addRow(['SUMMARY']);
-    summarySheet.mergeCells('A6:D6');
-    summarySheet.getRow(6).font = { bold: true, size: 14, color: { argb: 'FF0000FF' } };
-    summarySheet.getRow(6).alignment = { horizontal: 'center' };
-    
-    // Summary Data
-    const summaryHeaders = summarySheet.addRow(['Metric', 'Value', '', '']);
+
+    // ── SUMMARY SHEET ─────────────────────────────────────────────────────────
+    const summarySheet = workbook.addWorksheet("Summary");
+    summarySheet.mergeCells("A1:D1");
+    summarySheet.getCell("A1").value = "ZONE WISE CUSTOMERS REPORT";
+    summarySheet.getCell("A1").font = { bold: true, size: 16 };
+    summarySheet.getCell("A1").alignment = { horizontal: "center" };
+    summarySheet.addRow([]);
+    summarySheet.addRow(["Report Date:", new Date().toLocaleDateString()]);
+    summarySheet.addRow(["Generated At:", new Date().toLocaleTimeString()]);
+    if (search) summarySheet.addRow(["Search Filter:", search]);
+    summarySheet.addRow([]);
+    summarySheet.mergeCells("A6:D6");
+    summarySheet.getCell("A6").value = "SUMMARY";
+    summarySheet.getRow(6).font = {
+      bold: true,
+      size: 14,
+      color: { argb: "FF0000FF" },
+    };
+    summarySheet.getRow(6).alignment = { horizontal: "center" };
+    const summaryHeaders = summarySheet.addRow(["Metric", "Value", "", ""]);
     summaryHeaders.font = { bold: true };
-    summaryHeaders.eachCell(cell => {
+    summaryHeaders.eachCell((cell) => {
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
       };
     });
-    
-    const summaryData = [
-      ['Total Customers', summary.totalCustomers],
-      ['Total Zones', summary.totalZones],
-      ['Total Medical Representatives', summary.totalMRs],
-      ['Average Customers per Zone', parseFloat(summary.averageCustomersPerZone.toFixed(1))],
-      ['', ''],
-      ['Search Applied', search || 'None']
-    ];
-    
-    summaryData.forEach(row => {
-      summarySheet.addRow(row);
-    });
-    
-    // Format summary sheet
+    [
+      ["Total Customers", summary.totalCustomers],
+      ["Total Zones", summary.totalZones],
+      ["Total Medical Representatives", summary.totalMRs],
+      [
+        "Average Customers per Zone",
+        parseFloat((summary.averageCustomersPerZone || 0).toFixed(1)),
+      ],
+      ["", ""],
+      ["Search Applied", search || "None"],
+    ].forEach((row) => summarySheet.addRow(row));
     summarySheet.columns = [
-      { width: 30 },
+      { width: 35 },
       { width: 20 },
       { width: 10 },
-      { width: 10 }
+      { width: 10 },
     ];
-    
-    // 2. ZONES SHEET
-    const zonesSheet = workbook.addWorksheet('Zones');
-    
-    // Title
-    zonesSheet.mergeCells('A1:E1');
-    zonesSheet.getCell('A1').value = 'ZONE WISE SUMMARY';
-    zonesSheet.getCell('A1').font = { bold: true, size: 16 };
-    zonesSheet.getCell('A1').alignment = { horizontal: 'center' };
+
+    // ── ZONES SHEET ───────────────────────────────────────────────────────────
+    const zonesSheet = workbook.addWorksheet("Zones");
+    zonesSheet.mergeCells("A1:E1");
+    zonesSheet.getCell("A1").value = "ZONE WISE SUMMARY";
+    zonesSheet.getCell("A1").font = { bold: true, size: 16 };
+    zonesSheet.getCell("A1").alignment = { horizontal: "center" };
     zonesSheet.addRow([]);
-    
-    // Zone Headers
-    const zoneHeaders = [
-      'Sr. No.',
-      'Zone Name',
-      'Total Customers',
-      'Medical Representatives',
-      'Average per MR'
-    ];
-    
-    const zoneHeaderRow = zonesSheet.addRow(zoneHeaders);
+    const zoneHeaderRow = zonesSheet.addRow([
+      "Sr. No.",
+      "Zone Name",
+      "Total Customers",
+      "Medical Representatives",
+      "Average per MR",
+    ]);
     zoneHeaderRow.font = { bold: true };
-    zoneHeaderRow.eachCell(cell => {
+    zoneHeaderRow.eachCell((cell) => {
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
       };
       cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
       };
-      cell.alignment = { horizontal: 'center' };
+      cell.alignment = { horizontal: "center" };
     });
-    
-    // Zone Data
     zones.forEach((zone, index) => {
       const row = zonesSheet.addRow([
         index + 1,
-        zone.zoneName || 'Unknown Zone',
+        zone.zoneName || "Not Provided",
         zone.totalCustomers,
         zone.totalMRs,
-        parseFloat(zone.averagePerMR.toFixed(1))
+        parseFloat((zone.averagePerMR || 0).toFixed(1)),
       ]);
-      
-      // Add borders
-      row.eachCell(cell => {
+      row.eachCell((cell) => {
         cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
         };
-      });
-      
-      // Alternate row colors
-      if (index % 2 === 0) {
-        row.eachCell(cell => {
+        if (index % 2 === 0) {
           cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFF9F9F9' }
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF9F9F9" },
           };
-        });
-      }
+        }
+      });
     });
-    
-    // Format zones sheet
     zonesSheet.columns = [
       { width: 10 },
-      { width: 35 },
+      { width: 40 },
       { width: 18 },
       { width: 25 },
-      { width: 18 }
+      { width: 18 },
     ];
-    
-    // 3. CUSTOMERS SHEET (Get customers in batches to avoid memory issues)
-    const customersSheet = workbook.addWorksheet('Customers');
-    
-    // Title
-    customersSheet.mergeCells('A1:L1');
-    customersSheet.getCell('A1').value = 'CUSTOMER DETAILS';
-    customersSheet.getCell('A1').font = { bold: true, size: 16 };
-    customersSheet.getCell('A1').alignment = { horizontal: 'center' };
+
+    // ── CUSTOMERS SHEET ───────────────────────────────────────────────────────
+    const customersSheet = workbook.addWorksheet("Customers");
+    customersSheet.mergeCells("A1:L1");
+    customersSheet.getCell("A1").value = "CUSTOMER DETAILS";
+    customersSheet.getCell("A1").font = { bold: true, size: 16 };
+    customersSheet.getCell("A1").alignment = { horizontal: "center" };
     customersSheet.addRow([]);
-    
-    // Customer Headers
-    const customerHeaders = [
-      'Sr. No.',
-      'Zone',
-      'Customer Code',
-      'Customer Name',
-      'Type of Business',
-      'Contact Number',
-      'Medical Representative',
-      'Province',
-      'Address',
-      'Status',
-      'Created Date',
-      'Remarks'
-    ];
-    
-    const customerHeaderRow = customersSheet.addRow(customerHeaders);
+    const customerHeaderRow = customersSheet.addRow([
+      "Sr. No.",
+      "Zone / Group",
+      "Customer Code",
+      "Customer Name",
+      "Type of Business",
+      "Contact Number",
+      "Medical Representative",
+      "Province",
+      "Address",
+      "Status",
+      "Created Date",
+      "Remarks",
+    ]);
     customerHeaderRow.font = { bold: true };
-    customerHeaderRow.eachCell(cell => {
+    customerHeaderRow.eachCell((cell) => {
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
       };
       cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
       };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
     });
-    
-    // Get all customers (paginated to avoid memory issues)
+
     let customerCounter = 1;
+    let batchSkip = 0;
     const batchSize = 1000;
-    let skip = 0;
-    let hasMoreCustomers = true;
-    
-    while (hasMoreCustomers) {
+    let hasMore = true;
+
+    while (hasMore) {
       const customers = await Customer.find(matchStage)
-        .select('zone customerCode name typeOfBusiness customerNumber address medicalRepName province isNew createdAt remark')
-        .sort({ zone: 1, name: 1 })
-        .skip(skip)
+        .select(
+          "zone customerCode name typeOfBusiness customerNumber address medicalRepName province isNew createdAt remark",
+        )
+        .sort({ zone: 1, province: 1, address: 1, name: 1 })
+        .skip(batchSkip)
         .limit(batchSize)
         .lean();
-      
+
       if (customers.length === 0) {
-        hasMoreCustomers = false;
+        hasMore = false;
         break;
       }
-      
-      // Add customers to sheet
-      customers.forEach(customer => {
+
+      customers.forEach((customer) => {
         const row = customersSheet.addRow([
           customerCounter++,
-          customer.zone || 'N/A',
-          customer.customerCode || 'N/A',
-          customer.name || 'N/A',
-          customer.typeOfBusiness || 'N/A',
-          customer.customerNumber || 'N/A',
-          customer.medicalRepName || 'N/A',
-          customer.province || 'N/A',
-          customer.address || 'N/A',
-          customer.isNew ? 'New' : 'Existing',
-          customer.createdAt ? new Date(customer.createdAt).toLocaleDateString() : 'N/A',
-          customer.remark || ''
+          getGroupLabel(customer),
+          customer.customerCode || "N/A",
+          customer.name || "N/A",
+          customer.typeOfBusiness || "N/A",
+          customer.customerNumber || "N/A",
+          customer.medicalRepName || "N/A",
+          customer.province || "N/A",
+          customer.address || "N/A",
+          customer.isNew ? "New" : "Existing",
+          customer.createdAt
+            ? new Date(customer.createdAt).toLocaleDateString()
+            : "N/A",
+          customer.remark || "",
         ]);
-        
-        // Add borders
-        row.eachCell(cell => {
+        row.eachCell((cell) => {
           cell.border = {
-            top: { style: 'thin' },
-            left: { style: 'thin' },
-            bottom: { style: 'thin' },
-            right: { style: 'thin' }
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
           };
-        });
-        
-        // Alternate row colors
-        if (customerCounter % 2 === 0) {
-          row.eachCell(cell => {
+          if (customerCounter % 2 === 0) {
             cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFF9F9F9' }
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF9F9F9" },
             };
-          });
-        }
+          }
+        });
       });
-      
-      skip += batchSize;
+      batchSkip += batchSize;
     }
-    
-    // Format customers sheet
+
     customersSheet.columns = [
-      { width: 10 },  // Sr. No.
-      { width: 25 },  // Zone
-      { width: 20 },  // Customer Code
-      { width: 30 },  // Customer Name
-      { width: 20 },  // Type of Business
-      { width: 20 },  // Contact Number
-      { width: 25 },  // Medical Representative
-      { width: 15 },  // Province
-      { width: 40 },  // Address
-      { width: 12 },  // Status
-      { width: 15 },  // Created Date
-      { width: 30 }   // Remarks
-    ];
-    
-    // Auto-filter
-    customersSheet.autoFilter = 'A1:L1';
-    
-    // Set response headers
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="zone_wise_customers_${Date.now()}.xlsx"`
-    );
-    
-    // Write workbook to response
-    await workbook.xlsx.write(res);
-    res.end();
-    
-  } catch (error) {
-    console.error('❌ Excel export error:', error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to export data to Excel",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-    });
-  }
-});
-
-router.get("/export-customers", async (req, res) => {
-  try {
-    const search = req.query.search?.trim() || "";
-    
-    let matchStage = { enabled: true };
-
-    // Add search filter
-    if (search && search.trim() !== "") {
-      const searchRegex = new RegExp(search.trim(), "i");
-      matchStage.$or = [
-        { zone: searchRegex },
-        { name: searchRegex },
-        { customerCode: searchRegex },
-        { medicalRepName: searchRegex }
-      ];
-    }
-
-    // Create Excel workbook
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Customer List');
-    
-    // Title
-    worksheet.mergeCells('A1:L1');
-    worksheet.getCell('A1').value = 'CUSTOMER LIST';
-    worksheet.getCell('A1').font = { bold: true, size: 16 };
-    worksheet.getCell('A1').alignment = { horizontal: 'center' };
-    worksheet.addRow([]);
-    
-    // Report Info
-    worksheet.addRow(['Report Date:', new Date().toLocaleDateString()]);
-    worksheet.addRow(['Generated At:', new Date().toLocaleTimeString()]);
-    if (search) {
-      worksheet.addRow(['Search Filter:', search]);
-    }
-    worksheet.addRow([]);
-    
-    // Get total count for summary
-    const totalCustomers = await Customer.countDocuments(matchStage);
-    worksheet.addRow(['Total Customers:', totalCustomers]);
-    worksheet.addRow([]);
-    
-    // Headers
-    const headers = [
-      'Sr. No.',
-      'Zone',
-      'Customer Code',
-      'Customer Name',
-      'Type of Business',
-      'Contact Number',
-      'Medical Representative',
-      'Province',
-      'Address',
-      'Status',
-      'Created Date',
-      'Remarks'
-    ];
-    
-    const headerRow = worksheet.addRow(headers);
-    headerRow.font = { bold: true };
-    headerRow.eachCell(cell => {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
-      };
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
-      };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    });
-    
-    // Get customers in batches
-    let customerCounter = 1;
-    const batchSize = 2000;
-    let skip = 0;
-    let hasMoreCustomers = true;
-    
-    while (hasMoreCustomers) {
-      const customers = await Customer.find(matchStage)
-        .select('zone customerCode name typeOfBusiness customerNumber address medicalRepName province isNew createdAt remark')
-        .sort({ zone: 1, name: 1 })
-        .skip(skip)
-        .limit(batchSize)
-        .lean();
-      
-      if (customers.length === 0) {
-        hasMoreCustomers = false;
-        break;
-      }
-      
-      // Add customers to sheet
-      customers.forEach(customer => {
-        const row = worksheet.addRow([
-          customerCounter++,
-          customer.zone || 'N/A',
-          customer.customerCode || 'N/A',
-          customer.name || 'N/A',
-          customer.typeOfBusiness || 'N/A',
-          customer.customerNumber || 'N/A',
-          customer.medicalRepName || 'N/A',
-          customer.province || 'N/A',
-          customer.address || 'N/A',
-          customer.isNew ? 'New' : 'Existing',
-          customer.createdAt ? new Date(customer.createdAt).toLocaleDateString() : 'N/A',
-          customer.remark || ''
-        ]);
-        
-        // Add borders
-        row.eachCell(cell => {
-          cell.border = {
-            top: { style: 'thin' },
-            left: { style: 'thin' },
-            bottom: { style: 'thin' },
-            right: { style: 'thin' }
-          };
-        });
-        
-        // Alternate row colors
-        if (customerCounter % 2 === 0) {
-          row.eachCell(cell => {
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFF9F9F9' }
-            };
-          });
-        }
-      });
-      
-      skip += batchSize;
-    }
-    
-    // Format columns
-    worksheet.columns = [
       { width: 10 },
-      { width: 25 },
+      { width: 40 },
       { width: 20 },
       { width: 30 },
       { width: 20 },
@@ -696,37 +692,185 @@ router.get("/export-customers", async (req, res) => {
       { width: 40 },
       { width: 12 },
       { width: 15 },
-      { width: 30 }
+      { width: 30 },
     ];
-    
-    // Auto-filter
-    worksheet.autoFilter = 'A1:L1';
-    
-    // Freeze header row
-    worksheet.views = [
-      { state: 'frozen', xSplit: 0, ySplit: 1 }
-    ];
-    
-    // Set response headers
+    customersSheet.autoFilter = "A1:L1";
+
     res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="customer_list_${Date.now()}.xlsx"`
+      "Content-Disposition",
+      `attachment; filename="zone_wise_customers_${Date.now()}.xlsx"`,
     );
-    
-    // Write workbook to response
     await workbook.xlsx.write(res);
     res.end();
-    
   } catch (error) {
-    console.error('❌ Customer list export error:', error);
+    console.error("❌ Excel export error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export data to Excel",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /export-customers  (customer-only Excel)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/export-customers", async (req, res) => {
+  try {
+    const search = req.query.search?.trim() || "";
+
+    let matchStage = { enabled: true };
+    if (search) {
+      const searchRegex = new RegExp(search, "i");
+      matchStage.$or = [
+        { zone: searchRegex },
+        { province: searchRegex },
+        { address: searchRegex },
+        { name: searchRegex },
+        { customerCode: searchRegex },
+        { medicalRepName: searchRegex },
+      ];
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Customer List");
+
+    worksheet.mergeCells("A1:L1");
+    worksheet.getCell("A1").value = "CUSTOMER LIST";
+    worksheet.getCell("A1").font = { bold: true, size: 16 };
+    worksheet.getCell("A1").alignment = { horizontal: "center" };
+    worksheet.addRow([]);
+    worksheet.addRow(["Report Date:", new Date().toLocaleDateString()]);
+    worksheet.addRow(["Generated At:", new Date().toLocaleTimeString()]);
+    if (search) worksheet.addRow(["Search Filter:", search]);
+    worksheet.addRow([]);
+    const totalCustomers = await Customer.countDocuments(matchStage);
+    worksheet.addRow(["Total Customers:", totalCustomers]);
+    worksheet.addRow([]);
+
+    const headerRow = worksheet.addRow([
+      "Sr. No.",
+      "Zone / Group",
+      "Customer Code",
+      "Customer Name",
+      "Type of Business",
+      "Contact Number",
+      "Medical Representative",
+      "Province",
+      "Address",
+      "Status",
+      "Created Date",
+      "Remarks",
+    ]);
+    headerRow.font = { bold: true };
+    headerRow.eachCell((cell) => {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
+      };
+      cell.border = {
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
+      };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+    });
+
+    let customerCounter = 1;
+    let batchSkip = 0;
+    const batchSize = 2000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const customers = await Customer.find(matchStage)
+        .select(
+          "zone customerCode name typeOfBusiness customerNumber address medicalRepName province isNew createdAt remark",
+        )
+        .sort({ zone: 1, province: 1, address: 1, name: 1 })
+        .skip(batchSkip)
+        .limit(batchSize)
+        .lean();
+
+      if (customers.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      customers.forEach((customer) => {
+        const row = worksheet.addRow([
+          customerCounter++,
+          getGroupLabel(customer),
+          customer.customerCode || "N/A",
+          customer.name || "N/A",
+          customer.typeOfBusiness || "N/A",
+          customer.customerNumber || "N/A",
+          customer.medicalRepName || "N/A",
+          customer.province || "N/A",
+          customer.address || "N/A",
+          customer.isNew ? "New" : "Existing",
+          customer.createdAt
+            ? new Date(customer.createdAt).toLocaleDateString()
+            : "N/A",
+          customer.remark || "",
+        ]);
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          };
+          if (customerCounter % 2 === 0) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF9F9F9" },
+            };
+          }
+        });
+      });
+      batchSkip += batchSize;
+    }
+
+    worksheet.columns = [
+      { width: 10 },
+      { width: 40 },
+      { width: 20 },
+      { width: 30 },
+      { width: 20 },
+      { width: 20 },
+      { width: 25 },
+      { width: 15 },
+      { width: 40 },
+      { width: 12 },
+      { width: 15 },
+      { width: 30 },
+    ];
+    worksheet.autoFilter = "A1:L1";
+    worksheet.views = [{ state: "frozen", xSplit: 0, ySplit: 1 }];
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="customer_list_${Date.now()}.xlsx"`,
+    );
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("❌ Customer list export error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to export customer list",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });

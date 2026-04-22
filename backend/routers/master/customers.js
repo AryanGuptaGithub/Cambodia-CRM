@@ -41,49 +41,56 @@ const toTitleCase = (str) => {
     .join(" ");
 };
 
+// ─── FIXED: parseCustomerDate never defaults to current date ─────────────────
 const parseCustomerDate = (dateInput) => {
+  // Return null if no date provided — never default to current date
+  if (dateInput === null || dateInput === undefined) return null;
+  if (typeof dateInput === "string" && dateInput.trim() === "") return null;
+
   let year, month, day;
-  if (!dateInput) {
-    const now = new Date();
-    year = now.getUTCFullYear();
-    month = now.getUTCMonth();
-    day = now.getUTCDate();
-  } else if (dateInput instanceof Date) {
+
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return null;
     year = dateInput.getUTCFullYear();
     month = dateInput.getUTCMonth();
     day = dateInput.getUTCDate();
   } else if (typeof dateInput === "number") {
     const excelEpoch = new Date(Date.UTC(1899, 11, 30));
     const date = new Date(excelEpoch.getTime() + (dateInput - 1) * 86400000);
+    if (isNaN(date.getTime())) return null;
     year = date.getUTCFullYear();
     month = date.getUTCMonth();
     day = date.getUTCDate();
   } else if (typeof dateInput === "string") {
-    const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const trimmed = dateInput.trim();
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (match) {
       year = parseInt(match[1], 10);
       month = parseInt(match[2], 10) - 1;
       day = parseInt(match[3], 10);
     } else {
-      const parsed = new Date(dateInput);
-      if (!isNaN(parsed.getTime())) {
-        year = parsed.getUTCFullYear();
-        month = parsed.getUTCMonth();
-        day = parsed.getUTCDate();
-      } else {
-        const now = new Date();
-        year = now.getUTCFullYear();
-        month = now.getUTCMonth();
-        day = now.getUTCDate();
-      }
+      const parsed = new Date(trimmed);
+      if (isNaN(parsed.getTime())) return null;
+      year = parsed.getUTCFullYear();
+      month = parsed.getUTCMonth();
+      day = parsed.getUTCDate();
     }
   } else {
-    const now = new Date();
-    year = now.getUTCFullYear();
-    month = now.getUTCMonth();
-    day = now.getUTCDate();
+    return null;
   }
-  return new Date(Date.UTC(year, month, day, 12, 0, 0));
+
+  // Validate ranges
+  if (!year || month < 0 || month > 11 || day < 1 || day > 31) return null;
+
+  const result = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  if (isNaN(result.getTime())) return null;
+
+  // Reject future dates — return sentinel string
+  const today = new Date();
+  today.setUTCHours(23, 59, 59, 999);
+  if (result > today) return "FUTURE_DATE";
+
+  return result;
 };
 
 const formatDateForResponse = (date) => {
@@ -196,6 +203,16 @@ router.get("/provinces", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const { customerNumber, date, ...data } = req.body;
+
+    // ─── FIXED: validate date before proceeding ───────────────────────────
+    const parsedDate = parseCustomerDate(date);
+    if (parsedDate === "FUTURE_DATE") {
+      return res.status(400).json({
+        message: "Joining date cannot be a future date.",
+        ok: false,
+      });
+    }
+
     const customerCode = await generateNextCustomerCode();
 
     const cleanData = {
@@ -223,7 +240,7 @@ router.post("/", async (req, res) => {
       zone: cleanData.zone,
       province: cleanData.province,
       remark: cleanData.remark,
-      date: parseCustomerDate(date),
+      date: parsedDate,
     };
     if (cleanNumber) duplicateQuery.customerNumber = cleanNumber;
 
@@ -238,7 +255,7 @@ router.post("/", async (req, res) => {
     const customer = new Customer({
       ...cleanData,
       customerNumber: cleanNumber,
-      date: parseCustomerDate(date),
+      date: parsedDate,
     });
     const saved = await customer.save();
 
@@ -263,20 +280,16 @@ router.post("/", async (req, res) => {
   } catch (err) {
     if (err.code === 11000) {
       if (err.keyPattern?.customerCode)
-        return res
-          .status(400)
-          .json({
-            message: "Customer with code already exists. Please try again.",
-            duplicateCode: true,
-            ok: false,
-          });
+        return res.status(400).json({
+          message: "Customer with code already exists. Please try again.",
+          duplicateCode: true,
+          ok: false,
+        });
       if (err.keyPattern?.customerNumber)
-        return res
-          .status(400)
-          .json({
-            message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
-            ok: false,
-          });
+        return res.status(400).json({
+          message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
+          ok: false,
+        });
       return handleDuplicateError(res, err);
     }
     res
@@ -409,6 +422,29 @@ router.post("/import", async (req, res) => {
         const remark = safeStr(item.remark || "");
         const dateValue = item.date || item["Joining Date"] || item.Date;
 
+        // ─── FIXED: parse date and check for future/invalid ───────────────
+        const parsedDate = parseCustomerDate(dateValue);
+
+        if (parsedDate === "FUTURE_DATE") {
+          errors.push(
+            `Row ${rowNumber} (${name}): Joining date "${dateValue}" is a future date — not allowed`,
+          );
+          continue;
+        }
+
+        // If a date value was provided but couldn't be parsed, reject the row
+        if (
+          dateValue !== undefined &&
+          dateValue !== null &&
+          dateValue !== "" &&
+          parsedDate === null
+        ) {
+          errors.push(
+            `Row ${rowNumber} (${name}): Invalid date format "${dateValue}" — please use YYYY-MM-DD or a valid Excel date`,
+          );
+          continue;
+        }
+
         const rowKey = generateCustomerKey({
           name,
           date: dateValue,
@@ -480,7 +516,7 @@ router.post("/import", async (req, res) => {
 
         docsToInsert.push({
           customerCode,
-          date: parseCustomerDate(dateValue),
+          date: parsedDate, // ─── FIXED: use already-parsed date (never today's date)
           medicalRepName: mrName,
           medicalRepId,
           name: name.toLowerCase(),
@@ -498,14 +534,12 @@ router.post("/import", async (req, res) => {
     }
 
     if (docsToInsert.length === 0) {
-      return res
-        .status(400)
-        .json({
-          message: "No valid customers to import.",
-          errors: errors.slice(0, 20),
-          duplicates: duplicates.slice(0, 20),
-          ok: false,
-        });
+      return res.status(400).json({
+        message: "No valid customers to import.",
+        errors: errors.slice(0, 20),
+        duplicates: duplicates.slice(0, 20),
+        ok: false,
+      });
     }
 
     let insertedCount = 0,
@@ -549,38 +583,32 @@ router.post("/import", async (req, res) => {
       message += ` ${duplicates.length} duplicate(s) skipped.`;
     if (dbErrors.length) message += ` ${dbErrors.length} database error(s).`;
 
-    res
-      .status(200)
-      .json({
-        message,
-        importedCount: insertedCount,
-        errorCount: errors.length,
-        duplicateCount: duplicates.length,
-        dbErrorCount: dbErrors.length,
-        errors: errors.slice(0, 10),
-        duplicates: duplicates.slice(0, 20),
-        dbErrors: dbErrors.slice(0, 10),
-        ok: true,
-      });
+    res.status(200).json({
+      message,
+      importedCount: insertedCount,
+      errorCount: errors.length,
+      duplicateCount: duplicates.length,
+      dbErrorCount: dbErrors.length,
+      errors: errors.slice(0, 10),
+      duplicates: duplicates.slice(0, 20),
+      dbErrors: dbErrors.slice(0, 10),
+      ok: true,
+    });
   } catch (err) {
     if (err.code === 11000) {
       if (err.keyPattern?.customerNumber)
-        return res
-          .status(400)
-          .json({
-            message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
-            ok: false,
-          });
+        return res.status(400).json({
+          message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
+          ok: false,
+        });
       return handleDuplicateError(res, err);
     }
     if (err.name === "ValidationError") {
       const field = Object.keys(err.errors)[0];
-      return res
-        .status(400)
-        .json({
-          message: `Validation failed: ${err.errors[field].message}`,
-          ok: false,
-        });
+      return res.status(400).json({
+        message: `Validation failed: ${err.errors[field].message}`,
+        ok: false,
+      });
     }
     handleServerError(res, err, "Failed to import customers");
   }
@@ -676,7 +704,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .status(400)
         .json({ message: "Invalid customer ID format", ok: false });
 
-    const previousRecord = await Customer.findById(id).lean(); // ✅ full snapshot before update
+    const previousRecord = await Customer.findById(id).lean();
     const { customerNumber, date, customerCode, ...updateData } = req.body;
     if (customerCode)
       return res
@@ -690,7 +718,24 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           ? updateData[key].toLowerCase()
           : updateData[key];
     });
-    if (date) cleanUpdateData.date = parseCustomerDate(date);
+
+    // ─── FIXED: validate date before updating ────────────────────────────
+    if (date) {
+      const parsedDate = parseCustomerDate(date);
+      if (parsedDate === "FUTURE_DATE") {
+        return res.status(400).json({
+          message: "Joining date cannot be a future date.",
+          ok: false,
+        });
+      }
+      if (parsedDate === null) {
+        return res.status(400).json({
+          message: "Invalid date format provided.",
+          ok: false,
+        });
+      }
+      cleanUpdateData.date = parsedDate;
+    }
 
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
     if (cleanNumber) {
@@ -699,14 +744,12 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         _id: { $ne: id },
       });
       if (exists) {
-        return res
-          .status(400)
-          .json({
-            message: `Customer with mobile number <b>${cleanNumber}</b> already exists.`,
-            duplicateNumber: cleanNumber,
-            existingCustomer: exists.name,
-            ok: false,
-          });
+        return res.status(400).json({
+          message: `Customer with mobile number <b>${cleanNumber}</b> already exists.`,
+          duplicateNumber: cleanNumber,
+          existingCustomer: exists.name,
+          ok: false,
+        });
       }
       cleanUpdateData.customerNumber = cleanNumber;
     }
@@ -735,12 +778,10 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   } catch (err) {
     if (err.code === 11000) {
       if (err.keyPattern?.customerNumber)
-        return res
-          .status(400)
-          .json({
-            message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
-            ok: false,
-          });
+        return res.status(400).json({
+          message: `Customer with mobile number <b>${err.keyValue.customerNumber}</b> already exists.`,
+          ok: false,
+        });
       return handleDuplicateError(res, err);
     }
     if (err.name === "CastError")
@@ -792,7 +833,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ─── DELETE /  –  Bulk delete (fetch full docs before deletion) ───────────────
+// ─── DELETE /  –  Bulk delete ─────────────────────────────────────────────────
 router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
@@ -811,7 +852,7 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
         .status(400)
         .json({ message: "No valid customer IDs provided", ok: false });
 
-    const toDelete = await Customer.find({ _id: { $in: validIds } }).lean(); // ✅ full documents
+    const toDelete = await Customer.find({ _id: { $in: validIds } }).lean();
     const result = await Customer.deleteMany({ _id: { $in: validIds } });
 
     await logActivity(req, {

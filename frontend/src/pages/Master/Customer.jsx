@@ -115,6 +115,20 @@ const formatDateForDisplay = (dateString) => {
   return "--";
 };
 
+const isFutureDate = (dateStr) => {
+  if (!dateStr) return false;
+  const match = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const parsed = new Date(
+    parseInt(match[1]),
+    parseInt(match[2]) - 1,
+    parseInt(match[3]),
+  );
+  return parsed > today;
+};
+
 // ===================== CUSTOM FORM HOOK =====================
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
@@ -162,6 +176,9 @@ const useCustomerForm = (initialCustomerCode = "") => {
     if (!form.zone) newErrors.zone = "Zone is required";
     if (!form.province) newErrors.province = "Province is required";
     if (!form.date) newErrors.date = "Date is required";
+    if (form.date && isFutureDate(form.date)) {
+      newErrors.date = "Joining date cannot be a future date";
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }, [form]);
@@ -204,30 +221,139 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   const [fileName, setFileName] = useState("");
   const [existingCustomers, setExistingCustomers] = useState([]);
   const [duplicateRows, setDuplicateRows] = useState([]);
+  const [futureDateRows, setFutureDateRows] = useState([]);
+  const [invalidDateRows, setInvalidDateRows] = useState([]);
   const [loadingExisting, setLoadingExisting] = useState(false);
   const [importWithCode, setImportWithCode] = useState(false);
 
+  // Excel serial-date conversion
   const excelSerialToDateStr = (serial) => {
-    const excelEpoch = new Date(1899, 11, 30);
-    const date = new Date(excelEpoch.getTime() + (serial - 1) * 86400000);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
+    console.log(`📅 Converting Excel serial: ${serial}`);
+    if (serial === null || serial === undefined) {
+      console.log(`❌ Serial is null or undefined`);
+      return null;
+    }
+    if (typeof serial !== "number") {
+      console.log(`❌ Serial is not a number: ${typeof serial}`);
+      return null;
+    }
+    if (serial <= 0) {
+      console.log(`❌ Serial <= 0: ${serial}`);
+      return null;
+    }
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const date = new Date(excelEpoch.getTime() + serial * 86400000);
+    if (isNaN(date.getTime())) {
+      console.log(`❌ Invalid date from serial: ${serial}`);
+      return null;
+    }
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    const result = `${year}-${month}-${day}`;
+    console.log(`✅ Converted serial ${serial} to date: ${result}`);
+    return result;
   };
 
+  // Parse date value - supports multiple formats
   const parseDateValue = (val) => {
-    if (!val) return "";
-    if (typeof val === "number") return excelSerialToDateStr(val);
+    console.log(`📅 Parsing date value:`, val, typeof val);
+    if (val === null || val === undefined || val === "") {
+      console.log(`❌ Date value is empty/null/undefined`);
+      return null;
+    }
+
+    // Excel serial number
+    if (typeof val === "number") {
+      console.log(`📅 Value is Excel serial number: ${val}`);
+      return excelSerialToDateStr(val);
+    }
+
     if (typeof val === "string") {
       const trimmed = val.trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      console.log(`📅 Parsing string date: "${trimmed}"`);
+      if (!trimmed) {
+        console.log(`❌ Empty string after trim`);
+        return null;
+      }
+
+      // Already YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        console.log(`✅ Valid YYYY-MM-DD format: ${trimmed}`);
+        return trimmed;
+      }
+
+      // Split on / . or -
+      const parts = trimmed.split(/[\/.\-]/);
+      if (parts.length === 3) {
+        const p0 = parseInt(parts[0], 10);
+        const p1 = parseInt(parts[1], 10);
+        const p2 = parseInt(parts[2], 10);
+
+        let year, month, day;
+
+        if (parts[0].length === 4) {
+          year = p0;
+          month = p1;
+          day = p2;
+          console.log(
+            `📅 Format: YYYY/MM/DD → year=${year}, month=${month}, day=${day}`,
+          );
+        } else if (parts[2].length === 4) {
+          year = p2;
+
+          if (p0 > 12) {
+            day = p0;
+            month = p1;
+            console.log(
+              `📅 Format: DD/MM/YYYY (p0>12) → year=${year}, month=${month}, day=${day}`,
+            );
+          } else if (p1 > 12) {
+            month = p0;
+            day = p1;
+            console.log(
+              `📅 Format: MM/DD/YYYY (p1>12) → year=${year}, month=${month}, day=${day}`,
+            );
+          } else {
+            day = p0;
+            month = p1;
+            console.log(
+              `📅 Format: DD/MM/YYYY (ambiguous, defaulting) → year=${year}, month=${month}, day=${day}`,
+            );
+          }
+        } else {
+          console.log(
+            `❌ Cannot determine date format (no 4-digit year): ${trimmed}`,
+          );
+          year = month = day = null;
+        }
+
+        if (
+          year &&
+          month &&
+          day &&
+          month >= 1 &&
+          month <= 12 &&
+          day >= 1 &&
+          day <= 31
+        ) {
+          const result = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          console.log(`✅ Parsed split date: ${result}`);
+          return result;
+        }
+      }
+
+      // Last resort: native Date parsing
       const d = new Date(trimmed);
       if (!isNaN(d.getTime())) {
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const result = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        console.log(`✅ Parsed via Date object: ${trimmed} -> ${result}`);
+        return result;
       }
     }
-    return "";
+
+    console.log(`❌ Cannot parse date value: ${val}`);
+    return null;
   };
 
   const getRowKey = (row) => {
@@ -248,12 +374,15 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   useEffect(() => {
     if (isOpen) fetchExistingCustomers();
   }, [isOpen]);
+
   useEffect(() => {
     if (!isOpen) {
       setParsedData([]);
       setParseErrors([]);
       setFileName("");
       setDuplicateRows([]);
+      setFutureDateRows([]);
+      setInvalidDateRows([]);
       setImportWithCode(false);
     }
   }, [isOpen]);
@@ -263,15 +392,15 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
     try {
       const res = await axios.get(`${backendUrl}/api/customers?limit=10000`);
       if (res.data.ok) {
-        setExistingCustomers(
-          (res.data.customers || []).map((c) => ({
-            customerNumber: c.customerNumber,
-            name: c.name,
-            customerCode: c.customerCode,
-          })),
-        );
+        const customers = (res.data.customers || []).map((c) => ({
+          customerNumber: c.customerNumber,
+          name: c.name,
+          customerCode: c.customerCode,
+        }));
+        setExistingCustomers(customers);
       }
     } catch (error) {
+      console.error("❌ Failed to load existing customers:", error);
       showToast(
         "error",
         "Could not load existing customers for duplicate check",
@@ -283,19 +412,58 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
 
   useEffect(() => {
     if (!parsedData.length) {
+      setFutureDateRows([]);
+      setInvalidDateRows([]);
+      return;
+    }
+
+    const future = parsedData.filter((row) => {
+      const isFuture = isFutureDate(row.date);
+      if (isFuture)
+        console.log(`⚠️ Future date found: ${row.name} - ${row.date}`);
+      return isFuture;
+    });
+    const invalid = parsedData.filter((row) => {
+      const isInvalid = !row.date || row.date.trim() === "";
+      if (isInvalid) console.log(`⚠️ Invalid/missing date found: ${row.name}`);
+      return isInvalid;
+    });
+
+    console.log(
+      `📊 Results: ${future.length} future dates, ${invalid.length} invalid/missing dates`,
+    );
+    setFutureDateRows(future);
+    setInvalidDateRows(invalid);
+  }, [parsedData]);
+
+  useEffect(() => {
+    if (!parsedData.length) {
       setDuplicateRows([]);
       return;
     }
+
+    console.log(
+      `📊 Checking for duplicates among ${parsedData.length} rows...`,
+    );
     const duplicateIndices = new Set();
     const keyCount = new Map();
+
     parsedData.forEach((row) => {
       const key = getRowKey(row);
       keyCount.set(key, (keyCount.get(key) || 0) + 1);
     });
+
     parsedData.forEach((row, idx) => {
-      if (keyCount.get(getRowKey(row)) > 1) duplicateIndices.add(idx);
+      if (keyCount.get(getRowKey(row)) > 1) {
+        console.log(`⚠️ Duplicate found at index ${idx}: ${row.name}`);
+        duplicateIndices.add(idx);
+      }
     });
+
     if (existingCustomers.length > 0) {
+      console.log(
+        `📊 Checking against ${existingCustomers.length} existing customers...`,
+      );
       const existingNumbers = new Set(
         existingCustomers
           .map((c) => c.customerNumber?.trim().toLowerCase())
@@ -306,35 +474,54 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           .map((c) => c.customerCode?.trim().toLowerCase())
           .filter(Boolean),
       );
+
       parsedData.forEach((row, idx) => {
         const num = row.customerNumber?.trim().toLowerCase();
-        if (num && existingNumbers.has(num)) duplicateIndices.add(idx);
+        if (num && existingNumbers.has(num)) {
+          console.log(
+            `⚠️ Duplicate number found: ${row.customerNumber} for ${row.name}`,
+          );
+          duplicateIndices.add(idx);
+        }
         if (importWithCode && row.customerCode) {
           const code = row.customerCode?.trim().toLowerCase();
-          if (code && existingCodes.has(code)) duplicateIndices.add(idx);
+          if (code && existingCodes.has(code)) {
+            console.log(
+              `⚠️ Duplicate code found: ${row.customerCode} for ${row.name}`,
+            );
+            duplicateIndices.add(idx);
+          }
         }
       });
     }
-    setDuplicateRows(parsedData.filter((_, idx) => duplicateIndices.has(idx)));
+
+    const duplicates = parsedData.filter((_, idx) => duplicateIndices.has(idx));
+    console.log(`📊 Found ${duplicates.length} duplicate rows`);
+    setDuplicateRows(duplicates);
   }, [parsedData, existingCustomers, importWithCode]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     setFileName(file.name);
     setParseErrors([]);
     setParsedData([]);
     setDuplicateRows([]);
+    setFutureDateRows([]);
+    setInvalidDateRows([]);
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, {
           type: "array",
-          cellDates: true,
+          cellDates: false,
           cellNF: false,
           cellText: false,
         });
+
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, {
           header: 1,
@@ -342,10 +529,12 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           blankrows: true,
           raw: true,
         });
+
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
+
         let headerIdx = -1;
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
           for (let j = 0; j < (rows[i]?.length || 0); j++) {
@@ -357,10 +546,15 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           }
           if (headerIdx !== -1) break;
         }
+
         if (headerIdx === -1) {
-          showToast("error", "Header row not found.");
+          showToast(
+            "error",
+            "Header row not found. Please ensure 'Date' or 'Joining Date' column exists.",
+          );
           return;
         }
+
         const headers = rows[headerIdx].map((h) => h.toString().trim());
         const dataRows = rows.slice(headerIdx + 1);
         const getValue = (obj, keys) => {
@@ -377,15 +571,21 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           }
           return "";
         };
+
         const rowErrors = [];
         const validRows = [];
+
         dataRows.forEach((row, idx) => {
+          const rowNumber = headerIdx + idx + 2;
           const obj = {};
           headers.forEach((h, i) => {
             obj[h] = row[i] !== undefined ? row[i] : "";
           });
-          if (!Object.values(obj).some((v) => v.toString().trim() !== ""))
+
+          if (!Object.values(obj).some((v) => v.toString().trim() !== "")) {
             return;
+          }
+
           const name = capitalizeFirstLetter(
             String(
               getValue(obj, [
@@ -403,16 +603,35 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
               "Contact",
             ]) || "",
           ).trim();
+
           if (!name && !customerNumber) {
-            rowErrors.push(
-              `Row ${headerIdx + idx + 2}: Missing name and number — skipped`,
-            );
+            const error = `Row ${rowNumber}: Missing name and number — skipped`;
+            console.log(`❌ ${error}`);
+            rowErrors.push(error);
             return;
           }
+
           const rawDate = getValue(obj, ["Date", "Joining Date"]);
+          console.log(`📅 Raw date value: "${rawDate}"`);
+
           const dateStr = parseDateValue(rawDate);
+
+          // If a value was present but couldn't be parsed → error, skip row
+          if (
+            rawDate !== "" &&
+            rawDate !== null &&
+            rawDate !== undefined &&
+            dateStr === null
+          ) {
+            const error = `Row ${rowNumber} (${name || "Unknown"}): Invalid date format "${rawDate}" — please use YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, or Excel date format`;
+            console.log(`❌ ${error}`);
+            rowErrors.push(error);
+            return;
+          }
+
+          // Create row data object
           const rowData = {
-            date: dateStr,
+            date: dateStr || "",
             medicalRepName: String(
               getValue(obj, [
                 "Medical Representative Name",
@@ -435,26 +654,69 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
               getValue(obj, ["Remark", "Notes", "Comments"]) || "",
             ).trim(),
           };
+
           if (isWithCustomerCode && importWithCode) {
             const code = String(
               getValue(obj, ["Customer Code", "Code"]) || "",
             ).trim();
-            if (code) rowData.customerCode = code;
+            if (code) {
+              rowData.customerCode = code;
+              console.log(`📝 Added customer code: ${code}`);
+            }
           }
+
+          // Check for future date and add error but still include the row (marked as invalid for import)
+          if (dateStr && isFutureDate(dateStr)) {
+            const error = `Row ${rowNumber} (${name || "Unknown"}): Joining date "${dateStr}" is a future date — not allowed. Please correct the date in your Excel file.`;
+            console.log(`❌ ${error}`);
+            rowErrors.push(error);
+            // Still add to validRows but it will be filtered out during import
+            // This allows the user to see the row in the preview with the future date warning
+          }
+
+          console.log(`✅ Row ${rowNumber} processed:`, rowData);
           validRows.push(rowData);
         });
+
+        console.log(
+          `\n📊 Validation complete: ${validRows.length} rows processed, ${rowErrors.length} errors`,
+        );
+
         if (validRows.length === 0) {
-          showToast("warning", "No valid customer records found.");
+          showToast("warning", "No customer records found in the file.");
           return;
         }
+
         setParsedData(validRows);
         setParseErrors(rowErrors);
-        if (rowErrors.length)
+
+        const futureDateErrorCount = rowErrors.filter((e) =>
+          e.toLowerCase().includes("future date"),
+        ).length;
+        const invalidDateErrorCount = rowErrors.filter((e) =>
+          e.toLowerCase().includes("invalid date"),
+        ).length;
+
+        if (futureDateErrorCount > 0) {
+          showToast(
+            "error",
+            `${futureDateErrorCount} row(s) have future joining dates. Please correct them before importing.`,
+          );
+        } else if (invalidDateErrorCount > 0) {
+          showToast(
+            "error",
+            `${invalidDateErrorCount} row(s) have invalid date formats. Please fix them.`,
+          );
+        } else if (rowErrors.length) {
           showToast(
             "warning",
-            `${validRows.length} valid rows, ${rowErrors.length} skipped`,
+            `${validRows.length} rows loaded, ${rowErrors.length} warnings.`,
           );
+        } else {
+          showToast("success", `${validRows.length} rows loaded successfully`);
+        }
       } catch (err) {
+        console.error("❌ Parse error:", err);
         showToast("error", "Failed to parse file: " + err.message);
       }
     };
@@ -462,46 +724,107 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
   };
 
   const handleImport = async () => {
+    console.log("\n🚀 Starting import process...");
+    console.log(`📊 Total rows loaded: ${parsedData.length}`);
+    console.log(`📊 Future date rows: ${futureDateRows.length}`);
+    console.log(`📊 Invalid date rows: ${invalidDateRows.length}`);
+    console.log(`📊 Duplicate rows: ${duplicateRows.length}`);
+
     if (!parsedData.length) {
-      showToast("warning", "Upload a valid file first");
+      showToast("warning", "No data to import. Please upload a file first.");
       return;
     }
+
+    // Check for future dates - these cannot be imported
+    if (futureDateRows.length > 0) {
+      const futureDatesList = futureDateRows
+        .map((row) => `${row.name} (${row.date})`)
+        .join(", ");
+      showToast(
+        "error",
+        `Cannot import: ${futureDateRows.length} row(s) have future joining dates.\n\nPlease correct these dates in your Excel file:\n${futureDatesList.substring(0, 200)}`,
+        8000,
+      );
+      return;
+    }
+
+    // Check for invalid/missing dates
+    if (invalidDateRows.length > 0) {
+      showToast(
+        "error",
+        `Cannot import: ${invalidDateRows.length} row(s) have missing or invalid dates. Please fix your file.`,
+      );
+      return;
+    }
+
+    // Filter out duplicate rows
     const uniqueData = parsedData.filter((row) => !duplicateRows.includes(row));
+    console.log(`📊 Unique data count: ${uniqueData.length}`);
+
     if (uniqueData.length === 0) {
-      showToast("warning", "No unique records to import");
+      showToast(
+        "warning",
+        "No unique records to import. All rows are duplicates.",
+      );
       return;
     }
+
     setIsUploading(true);
     try {
+      const payload = {
+        customers: uniqueData,
+        importWithCode: isWithCustomerCode && importWithCode,
+      };
+      console.log(
+        "📤 Sending import request with",
+        uniqueData.length,
+        "records",
+      );
+
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
-        {
-          customers: uniqueData,
-          importWithCode: isWithCustomerCode && importWithCode,
-        },
+        payload,
         { headers: { "Content-Type": "application/json" }, timeout: 60000 },
       );
+
+      console.log("✅ Import response:", res.data);
+
       if (res.status === 200) {
-        showToast(
-          "success",
+        let successMessage =
           res.data.message ||
-            `Imported ${uniqueData.length} records successfully`,
-        );
+          `Imported ${uniqueData.length} records successfully`;
+        if (res.data.importedCount !== uniqueData.length) {
+          successMessage = `Imported ${res.data.importedCount} out of ${uniqueData.length} records. ${res.data.duplicateCount || 0} duplicates skipped.`;
+        }
+        showToast("success", successMessage);
         onClose(true);
       }
     } catch (err) {
+      console.error("❌ Import failed:", err);
       let msg = "Import failed";
-      if (err.response?.data?.message) msg = err.response.data.message;
-      else if (err.request) msg = "No response from server. Check network.";
-      else msg = err.message || "Unknown error";
+      if (err.response?.data?.message) {
+        msg = err.response.data.message;
+        console.error("❌ Server error:", msg);
+      } else if (err.request) {
+        msg = "No response from server. Please check your network connection.";
+        console.error("❌ No response from server");
+      } else {
+        msg = err.message || "Unknown error occurred";
+        console.error("❌ Error:", err.message);
+      }
       showToast("error", msg);
     } finally {
       setIsUploading(false);
+      console.log("🏁 Import process completed");
     }
   };
 
   if (!isOpen) return null;
   const isDuplicateRow = (row) => duplicateRows.includes(row);
+  const isFutureDateRow = (row) => futureDateRows.includes(row);
+  const isInvalidDateRow = (row) => invalidDateRows.includes(row);
+  const hasBlockingIssues =
+    futureDateRows.length > 0 || invalidDateRows.length > 0;
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
@@ -515,6 +838,7 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
         </button>
         <h2 className="text-lg font-semibold mb-1">Import Customers</h2>
         {isSampleFile && <SampleExcelDownloadCustomer />}
+
         {isWithCustomerCode && (
           <div className="mb-3 flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <input
@@ -527,6 +851,8 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                 setParseErrors([]);
                 setFileName("");
                 setDuplicateRows([]);
+                setFutureDateRows([]);
+                setInvalidDateRows([]);
               }}
               className="w-4 h-4 text-blue-600 cursor-pointer"
             />
@@ -542,6 +868,52 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             </label>
           </div>
         )}
+
+        {futureDateRows.length > 0 && (
+          <div className="mb-4 bg-red-50 border border-red-300 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle size={16} className="text-red-600 flex-shrink-0" />
+              <span className="text-sm font-semibold text-red-800">
+                ⚠️ {futureDateRows.length} row(s) have a future joining date
+              </span>
+            </div>
+            <p className="text-xs text-red-700 mb-2">
+              Joining dates cannot be in the future. Please correct your Excel
+              file and re-upload.
+            </p>
+            <div className="max-h-20 overflow-y-auto text-xs text-red-700 space-y-0.5">
+              {futureDateRows.slice(0, 5).map((row, i) => (
+                <div key={i}>
+                  • <strong>{row.name || "Unknown"}</strong> — date:{" "}
+                  <span className="font-mono">{row.date}</span>
+                </div>
+              ))}
+              {futureDateRows.length > 5 && (
+                <div>...and {futureDateRows.length - 5} more</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {invalidDateRows.length > 0 && (
+          <div className="mb-4 bg-orange-50 border border-orange-300 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle
+                size={16}
+                className="text-orange-600 flex-shrink-0"
+              />
+              <span className="text-sm font-semibold text-orange-800">
+                ⚠️ {invalidDateRows.length} row(s) have missing or invalid date
+              </span>
+            </div>
+            <p className="text-xs text-orange-700 mb-2">
+              Please ensure all rows have a valid date (YYYY-MM-DD, DD/MM/YYYY,
+              MM/DD/YYYY, or Excel date format). Rows without a date cannot be
+              imported.
+            </p>
+          </div>
+        )}
+
         <div className="mb-4">
           <label className="block text-gray-700 mb-2 font-medium">
             Select File
@@ -555,13 +927,19 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           {fileName && (
             <p className="text-xs text-gray-500 mt-1">📄 {fileName}</p>
           )}
+          <p className="text-xs text-gray-400 mt-1">
+            ℹ️ Supported date formats: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, or
+            Excel date. Joining dates cannot be in the future.
+          </p>
         </div>
+
         {loadingExisting && (
           <div className="mb-4 text-sm text-blue-600 flex items-center gap-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
             Loading existing customers for duplicate check...
           </div>
         )}
+
         {duplicateRows.length > 0 && (
           <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
@@ -582,20 +960,30 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
               )}
             </div>
             <p className="text-xs text-red-600 mt-2">
-              Duplicate rows are highlighted in red below. They will be skipped
-              during import.
+              Duplicate rows will be skipped during import.
             </p>
           </div>
         )}
+
         {parsedData.length > 0 && (
           <div className="mb-4 bg-green-50 border border-green-200 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
               <CheckCircle size={16} className="text-green-600" />
               <span className="text-sm font-medium text-green-800">
-                {parsedData.length} Total Records
+                {parsedData.length} Records Loaded
                 {duplicateRows.length > 0 && (
                   <span className="ml-2 text-red-600">
                     ({parsedData.length - duplicateRows.length} unique)
+                  </span>
+                )}
+                {futureDateRows.length > 0 && (
+                  <span className="ml-2 text-red-600">
+                    ⚠️ {futureDateRows.length} future date(s)
+                  </span>
+                )}
+                {invalidDateRows.length > 0 && (
+                  <span className="ml-2 text-orange-600">
+                    ⚠️ {invalidDateRows.length} missing date(s)
                   </span>
                 )}
               </span>
@@ -611,16 +999,27 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                     <th className="p-1 text-left">Name</th>
                     <th className="p-1 text-left">MR</th>
                     <th className="p-1 text-left">Number</th>
+                    <th className="p-1 text-left">Date</th>
                     <th className="p-1 text-left">Zone</th>
                   </tr>
                 </thead>
                 <tbody>
                   {parsedData.slice(0, 5).map((row, i) => {
                     const duplicate = isDuplicateRow(row);
+                    const futureDate = isFutureDateRow(row);
+                    const invalidDate = isInvalidDateRow(row);
                     return (
                       <tr
                         key={i}
-                        className={`border-t ${duplicate ? "bg-red-100 text-red-800 font-medium" : ""}`}
+                        className={`border-t ${
+                          futureDate
+                            ? "bg-red-100 text-red-800 font-medium"
+                            : invalidDate
+                              ? "bg-orange-100 text-orange-800 font-medium"
+                              : duplicate
+                                ? "bg-red-100 text-red-800 font-medium"
+                                : ""
+                        }`}
                       >
                         <td className="p-1 text-gray-500">{i + 1}</td>
                         {isWithCustomerCode && importWithCode && (
@@ -631,6 +1030,18 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
                         <td className="p-1">{row.name || "—"}</td>
                         <td className="p-1">{row.medicalRepName || "—"}</td>
                         <td className="p-1">{row.customerNumber || "—"}</td>
+                        <td className="p-1">
+                          {row.date || (
+                            <span className="text-orange-600 font-bold">
+                              ⚠️ Missing
+                            </span>
+                          )}
+                          {futureDate && (
+                            <span className="ml-1 text-red-600 font-bold">
+                              ⚠️ Future
+                            </span>
+                          )}
+                        </td>
                         <td className="p-1">{row.zone || "—"}</td>
                       </tr>
                     );
@@ -645,21 +1056,40 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
             </div>
           </div>
         )}
+
         {parseErrors.length > 0 && (
-          <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-h-28 overflow-y-auto">
+          <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 max-h-36 overflow-y-auto">
             <div className="flex items-center gap-2 mb-1">
               <AlertCircle size={14} className="text-yellow-600" />
               <span className="text-xs font-medium text-yellow-800">
-                {parseErrors.length} rows skipped
+                {parseErrors.length} issue(s) found
               </span>
             </div>
-            {parseErrors.slice(0, 5).map((err, i) => (
-              <p key={i} className="text-xs text-yellow-700">
+            {parseErrors.slice(0, 10).map((err, i) => (
+              <p
+                key={i}
+                className={`text-xs ${
+                  err.toLowerCase().includes("future date") ||
+                  err.toLowerCase().includes("invalid date")
+                    ? "text-red-700 font-medium"
+                    : "text-yellow-700"
+                }`}
+              >
+                {err.toLowerCase().includes("future date") ||
+                err.toLowerCase().includes("invalid date")
+                  ? "❌ "
+                  : "⚠️ "}
                 {err}
               </p>
             ))}
+            {parseErrors.length > 10 && (
+              <p className="text-xs text-gray-500 mt-1">
+                ...and {parseErrors.length - 10} more
+              </p>
+            )}
           </div>
         )}
+
         <div className="flex justify-end mt-4 gap-3">
           <button
             onClick={() => onClose(false)}
@@ -670,16 +1100,32 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
           </button>
           <button
             onClick={handleImport}
-            disabled={isUploading || parsedData.length === 0 || loadingExisting}
-            className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            disabled={
+              isUploading ||
+              parsedData.length === 0 ||
+              loadingExisting ||
+              hasBlockingIssues
+            }
+            title={
+              hasBlockingIssues
+                ? "Please fix future date or invalid date issues before importing"
+                : "Import customers"
+            }
+            className={`px-5 py-2 rounded-lg text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
+              hasBlockingIssues
+                ? "bg-gray-400"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
           >
             {isUploading ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                 Importing…
               </>
+            ) : hasBlockingIssues ? (
+              "Fix Issues to Import"
             ) : (
-              "Import"
+              `Import ${parsedData.length - duplicateRows.length} Records`
             )}
           </button>
         </div>
@@ -703,7 +1149,6 @@ const Customer = () => {
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
   const inputRef = useRef(null);
 
-  // Business type tab state
   const [selectedBusinessTab, setSelectedBusinessTab] = useState("All");
   const [businessTypeTabs, setBusinessTypeTabs] = useState([]);
 
@@ -1077,6 +1522,7 @@ const Customer = () => {
     setShowImportModal(false);
     if (shouldRefresh) fetchCustomers();
   };
+
   const handleDownloadAll = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/customers/export`, {
@@ -1150,7 +1596,6 @@ const Customer = () => {
       />
 
       <div className="container mx-auto">
-        {/* Mobile Header */}
         {isMobileView && (
           <div className="flex justify-between items-center mb-3 bg-gray-200 rounded-2xl p-2">
             <button
@@ -1165,7 +1610,6 @@ const Customer = () => {
           </div>
         )}
 
-        {/* Desktop Action Bar */}
         <div className="flex flex-wrap justify-between items-center mb-4 gap-3">
           <div className="flex flex-wrap gap-3">
             {!isMobileView && (
@@ -1232,7 +1676,6 @@ const Customer = () => {
           )}
         </div>
 
-        {/* Mobile Search */}
         {isMobileView && (
           <div className="relative mb-3">
             <Search
@@ -1250,13 +1693,11 @@ const Customer = () => {
           </div>
         )}
 
-        {/* ── Business Type Tab Filters (fixed font for mobile) ── */}
         {businessTypeTabs.length > 0 && (
           <div
             className={`mb-4 ${isMobileView ? "overflow-x-auto whitespace-nowrap scrollbar-hide" : ""}`}
           >
             <div className="flex items-center gap-2 flex-wrap pb-1">
-              {/* "All" tab */}
               <button
                 onClick={() => handleTabChange("All")}
                 className={`${
@@ -1271,7 +1712,6 @@ const Customer = () => {
               >
                 All
               </button>
-              {/* One tab per business type */}
               {businessTypeTabs.map((tab) => (
                 <button
                   key={tab}
@@ -1293,7 +1733,6 @@ const Customer = () => {
           </div>
         )}
 
-        {/* Active filter info */}
         {selectedBusinessTab !== "All" && (
           <div className="mb-3 flex items-center gap-2">
             <span className="text-sm text-gray-500">Filtering by:</span>
@@ -1312,7 +1751,6 @@ const Customer = () => {
           </div>
         )}
 
-        {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="min-w-[800px] md:min-w-full w-full border-collapse bg-white rounded-2xl text-center">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1493,7 +1931,6 @@ const Customer = () => {
           </table>
         </div>
 
-        {/* Pagination - Fixed for mobile view like Product component */}
         {customers.length > 0 && totalPages > 1 && (
           <div
             className={`mt-4 p-5 flex gap-2 ${isMobileView ? "justify-center items-center" : "justify-start"}`}
@@ -1764,6 +2201,7 @@ const Customer = () => {
                         }
                         dateFormat="yyyy-MM-dd"
                         placeholderText="Select date"
+                        maxDate={new Date()}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200"
                         isClearable
                       />

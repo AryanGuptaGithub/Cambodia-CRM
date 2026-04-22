@@ -48,7 +48,6 @@ import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale.jsx";
 import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-console.log('values of backendUrl', backendUrl);
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const isSampleDownloadFile =
   import.meta.env.VITE_IS_SAMPLE_DOWNLOAD_FILE === "true";
