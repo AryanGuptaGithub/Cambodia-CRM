@@ -104,51 +104,167 @@ export const logActivity = async (req, options = {}) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: Recalculate and update ReportInHand stock totals after revert
-// This is the KEY fix — after restoring purchase/sale records, we need to
-// recalculate the actual stock values from all existing batches.
+// CORE HELPER: Remove specific batches from ReportInHand for a purchase invoice
+// This is the CORRECT way to revert a purchase — remove the exact batches that
+// were added, identified by matching product name + quantity + lc + expiry.
 // ─────────────────────────────────────────────────────────────────────────────
-const recalculateReportInHandStock = async () => {
+const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
   try {
     const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
       .default;
-    const allReports = await ReportInHand.find({}).lean();
 
-    for (const report of allReports) {
-      try {
-        const batches = report.batches || [];
+    const products = invoiceData.products || [];
+    const invoiceNumber = invoiceData.invoiceNumber || "unknown";
 
-        // Only consider real batches (not adjustments)
-        const realBatches = batches.filter(
-          (b) => !b.adjustmentType || b.adjustmentType === "batch",
+    for (const product of products) {
+      const productName = (product.productName || "").toLowerCase().trim();
+      if (!productName) continue;
+
+      const qty = Number(product.quantityPerBoxStrip || 0);
+      if (qty <= 0) continue;
+
+      const lcValue = Number(product.lc || 0);
+      const fobValue = Number(product.fob || 0);
+      const cifValue = Number(product.cif || 0);
+      const expiryTime = product.expiryDate
+        ? new Date(product.expiryDate).getTime()
+        : null;
+
+      const existingReport = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      });
+
+      if (!existingReport) {
+        console.warn(
+          `⚠️ No ReportInHand found for product "${productName}" — skipping`,
+        );
+        continue;
+      }
+
+      const batches = [...(existingReport.batches || [])];
+
+      // ── Step 1: Try to remove the exact matching batch first ──────────────
+      // A batch matches if boxes, lc, fob, cif and expiryDate all match.
+      let removed = false;
+      const updatedBatches = [];
+
+      for (const batch of batches) {
+        if (removed) {
+          updatedBatches.push(batch);
+          continue;
+        }
+
+        // Only target real purchase batches (not adjustment entries)
+        if (batch.adjustmentType && batch.adjustmentType !== "batch") {
+          updatedBatches.push(batch);
+          continue;
+        }
+
+        const batchExpiry = batch.expiryDate
+          ? new Date(batch.expiryDate).getTime()
+          : null;
+        const lcMatch = Math.abs(Number(batch.lc || 0) - lcValue) < 0.0001;
+        const fobMatch = Math.abs(Number(batch.fob || 0) - fobValue) < 0.0001;
+        const cifMatch = Math.abs(Number(batch.cif || 0) - cifValue) < 0.0001;
+        const expiryMatch = batchExpiry === expiryTime;
+        const qtyMatch = Number(batch.boxes || 0) === qty;
+
+        if (lcMatch && fobMatch && cifMatch && expiryMatch && qtyMatch) {
+          // Exact match — drop this batch entirely
+          removed = true;
+          continue;
+        }
+
+        // Partial qty match: same lc/fob/cif/expiry but batch has more boxes
+        if (
+          lcMatch &&
+          fobMatch &&
+          cifMatch &&
+          expiryMatch &&
+          Number(batch.boxes || 0) > qty
+        ) {
+          const newBoxes = Number(batch.boxes) - qty;
+          updatedBatches.push({
+            ...(batch.toObject ? batch.toObject() : batch),
+            boxes: newBoxes,
+            amount: newBoxes * lcValue,
+          });
+          removed = true;
+          continue;
+        }
+
+        updatedBatches.push(batch);
+      }
+
+      // ── Step 2: If no exact match found, fall back to FIFO removal ────────
+      if (!removed) {
+        console.warn(
+          `⚠️ No exact batch match for "${productName}" qty=${qty} lc=${lcValue} — falling back to FIFO removal`,
         );
 
+        let remaining = qty;
+        const fifoResult = [];
+
+        // Sort oldest first for FIFO
+        const sortable = updatedBatches
+          .slice()
+          .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
+
+        for (const batch of sortable) {
+          if (remaining <= 0) {
+            fifoResult.push(batch);
+            continue;
+          }
+          if (batch.adjustmentType && batch.adjustmentType !== "batch") {
+            fifoResult.push(batch);
+            continue;
+          }
+          const available = Number(batch.boxes || 0);
+          if (available <= remaining) {
+            remaining -= available;
+            // drop this batch
+          } else {
+            const newBoxes = available - remaining;
+            fifoResult.push({
+              ...(batch.toObject ? batch.toObject() : batch),
+              boxes: newBoxes,
+              amount: newBoxes * Number(batch.lc || 0),
+            });
+            remaining = 0;
+          }
+        }
+
+        // Recalculate with FIFO result
+        const realBatches = fifoResult.filter(
+          (b) => !b.adjustmentType || b.adjustmentType === "batch",
+        );
         const totalBoxesFromBatches = realBatches.reduce(
-          (sum, b) => sum + (Number(b.boxes) || 0),
+          (s, b) => s + (Number(b.boxes) || 0),
           0,
         );
         const totalAmount = realBatches.reduce(
-          (sum, b) => sum + (Number(b.amount) || 0),
+          (s, b) => s + (Number(b.amount) || 0),
           0,
         );
-
-        const addAdj = Number(report.addStockAdjustment || 0);
-        const removeAdj = Number(report.removeStockAdjustment || 0);
+        const addAdj = Number(existingReport.addStockAdjustment || 0);
+        const removeAdj = Number(existingReport.removeStockAdjustment || 0);
         const totalBoxes = Math.max(
           0,
           totalBoxesFromBatches + addAdj - removeAdj,
         );
-        const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+        const averagePrice =
+          totalBoxesFromBatches > 0 ? totalAmount / totalBoxesFromBatches : 0;
 
         let status = "In Stock";
         if (totalBoxes <= 0) status = "Out of Stock";
-        else if (totalBoxes < (report.minStockLevel || 10))
+        else if (totalBoxes < (existingReport.minStockLevel || 10))
           status = "Low Stock";
 
         await ReportInHand.updateOne(
-          { _id: report._id },
+          { _id: existingReport._id },
           {
             $set: {
+              batches: fifoResult,
               totalBoxesFromBatches,
               totalBoxes,
               totalAmount,
@@ -158,49 +274,97 @@ const recalculateReportInHandStock = async () => {
             },
           },
         );
-      } catch (err) {
-        console.error(
-          `Failed to recalculate stock for ${report.productName}:`,
-          err.message,
+
+        console.log(
+          `✅ FIFO removal done for "${productName}" (invoice: ${invoiceNumber})`,
         );
+        continue;
       }
+
+      // ── Step 3: Recalculate totals from the updated batch list ─────────────
+      const realBatches = updatedBatches.filter(
+        (b) => !b.adjustmentType || b.adjustmentType === "batch",
+      );
+      const totalBoxesFromBatches = realBatches.reduce(
+        (s, b) => s + (Number(b.boxes) || 0),
+        0,
+      );
+      const totalAmount = realBatches.reduce(
+        (s, b) => s + (Number(b.amount) || 0),
+        0,
+      );
+      const addAdj = Number(existingReport.addStockAdjustment || 0);
+      const removeAdj = Number(existingReport.removeStockAdjustment || 0);
+      const totalBoxes = Math.max(
+        0,
+        totalBoxesFromBatches + addAdj - removeAdj,
+      );
+      const averagePrice =
+        totalBoxesFromBatches > 0 ? totalAmount / totalBoxesFromBatches : 0;
+
+      let status = "In Stock";
+      if (totalBoxes <= 0) status = "Out of Stock";
+      else if (totalBoxes < (existingReport.minStockLevel || 10))
+        status = "Low Stock";
+
+      await ReportInHand.updateOne(
+        { _id: existingReport._id },
+        {
+          $set: {
+            batches: updatedBatches,
+            totalBoxesFromBatches,
+            totalBoxes,
+            totalAmount,
+            averagePrice,
+            status,
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      console.log(
+        `✅ Exact batch removed from ReportInHand for "${productName}" (invoice: ${invoiceNumber})`,
+      );
     }
-    console.log("✅ ReportInHand stock recalculated after revert");
   } catch (err) {
-    console.error("❌ recalculateReportInHandStock failed:", err.message);
+    console.error(
+      "❌ removePurchaseInvoiceBatchesFromStock failed:",
+      err.message,
+    );
   }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: After restoring a purchase invoice, add its batches back to
-// ReportInHand so the stock totals reflect the reverted state.
+// CORE HELPER: Add batches BACK to ReportInHand when restoring a deleted invoice
 // ─────────────────────────────────────────────────────────────────────────────
-const restorePurchaseBatchesToStock = async (invoiceData) => {
+const restorePurchaseInvoiceBatchesToStock = async (invoiceData) => {
   try {
     const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
       .default;
+
     const products = invoiceData.products || [];
+    const invoiceNumber = invoiceData.invoiceNumber || "unknown";
 
     for (const product of products) {
       const productName = (product.productName || "").toLowerCase().trim();
       if (!productName) continue;
 
       const qty = Number(product.quantityPerBoxStrip || 0);
-      const lc = Number(product.lc || 0);
-      const fob = Number(product.fob || 0);
-      const cif = Number(product.cif || 0);
-      const amount = qty * lc;
+      if (qty <= 0) continue;
+
+      const lcValue = Number(product.lc || 0);
+      const fobValue = Number(product.fob || 0);
+      const cifValue = Number(product.cif || 0);
+      const amount = qty * lcValue;
       const expiryDate = product.expiryDate
         ? new Date(product.expiryDate)
         : null;
 
-      if (qty <= 0) continue;
-
       const newBatch = {
         boxes: qty,
-        lc,
-        fob,
-        cif,
+        lc: lcValue,
+        fob: fobValue,
+        cif: cifValue,
         amount,
         expiryDate,
         date: product.date ? new Date(product.date) : new Date(),
@@ -232,7 +396,8 @@ const restorePurchaseBatchesToStock = async (invoiceData) => {
           0,
           totalBoxesFromBatches + addAdj - removeAdj,
         );
-        const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+        const averagePrice =
+          totalBoxesFromBatches > 0 ? totalAmount / totalBoxesFromBatches : 0;
 
         let status = "In Stock";
         if (totalBoxes <= 0) status = "Out of Stock";
@@ -254,136 +419,101 @@ const restorePurchaseBatchesToStock = async (invoiceData) => {
           },
         );
       } else {
-        const totalBoxesFromBatches = qty;
-        const totalBoxes = qty;
-        const averagePrice = lc;
-
+        // Create a new ReportInHand entry for this product
         await ReportInHand.create({
           productName,
           supplierName: invoiceData.supplierName || "Unknown",
           type: product.type || "",
           sellingPrice: Number(product.sellingPrice || 0),
           batches: [newBatch],
-          totalBoxesFromBatches,
-          totalBoxes,
+          totalBoxesFromBatches: qty,
+          totalBoxes: qty,
           totalAmount: amount,
-          averagePrice,
+          averagePrice: lcValue,
           addStockAdjustment: 0,
           removeStockAdjustment: 0,
-          status: "In Stock",
+          status: qty > 0 ? "In Stock" : "Out of Stock",
           minStockLevel: 10,
         });
       }
+
+      console.log(
+        `✅ Batch restored to ReportInHand for "${productName}" (invoice: ${invoiceNumber})`,
+      );
     }
-    console.log(
-      `✅ Purchase batches restored to stock for invoice: ${invoiceData.invoiceNumber}`,
-    );
   } catch (err) {
-    console.error("❌ restorePurchaseBatchesToStock failed:", err.message);
+    console.error(
+      "❌ restorePurchaseInvoiceBatchesToStock failed:",
+      err.message,
+    );
   }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: After removing a purchase invoice (revert CREATE), subtract its
-// batches from ReportInHand
+// CORE HELPER: Recalculate ALL ReportInHand totals (safety net after any revert)
 // ─────────────────────────────────────────────────────────────────────────────
-const removePurchaseBatchesFromStock = async (invoiceData) => {
+const recalculateAllReportInHandTotals = async () => {
   try {
     const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
       .default;
-    const products = invoiceData.products || [];
+    const allReports = await ReportInHand.find({}).lean();
 
-    for (const product of products) {
-      const productName = (product.productName || "").toLowerCase().trim();
-      if (!productName) continue;
+    for (const report of allReports) {
+      try {
+        const batches = report.batches || [];
+        const realBatches = batches.filter(
+          (b) => !b.adjustmentType || b.adjustmentType === "batch",
+        );
+        const totalBoxesFromBatches = realBatches.reduce(
+          (sum, b) => sum + (Number(b.boxes) || 0),
+          0,
+        );
+        const totalAmount = realBatches.reduce(
+          (sum, b) => sum + (Number(b.amount) || 0),
+          0,
+        );
+        const addAdj = Number(report.addStockAdjustment || 0);
+        const removeAdj = Number(report.removeStockAdjustment || 0);
+        const totalBoxes = Math.max(
+          0,
+          totalBoxesFromBatches + addAdj - removeAdj,
+        );
+        const averagePrice =
+          totalBoxesFromBatches > 0 ? totalAmount / totalBoxesFromBatches : 0;
 
-      const qty = Number(product.quantityPerBoxStrip || 0);
-      if (qty <= 0) continue;
+        let status = "In Stock";
+        if (totalBoxes <= 0) status = "Out of Stock";
+        else if (totalBoxes < (report.minStockLevel || 10))
+          status = "Low Stock";
 
-      const existingReport = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${productName}$`, "i") },
-      });
-
-      if (!existingReport) continue;
-
-      let remainingToRemove = qty;
-      const batches = [...(existingReport.batches || [])];
-      batches.sort((a, b) => new Date(b.date) - new Date(a.date)); // newest first for revert
-
-      const updatedBatches = [];
-      for (const batch of batches) {
-        if (remainingToRemove <= 0) {
-          updatedBatches.push(batch);
-          continue;
-        }
-        if (batch.adjustmentType && batch.adjustmentType !== "batch") {
-          updatedBatches.push(batch);
-          continue;
-        }
-        const available = Number(batch.boxes || 0);
-        if (available <= remainingToRemove) {
-          remainingToRemove -= available;
-          // Don't push — effectively remove this batch
-        } else {
-          const lc = Number(batch.lc || 0);
-          updatedBatches.push({
-            ...batch,
-            boxes: available - remainingToRemove,
-            amount: (available - remainingToRemove) * lc,
-          });
-          remainingToRemove = 0;
-        }
-      }
-
-      const realBatches = updatedBatches.filter(
-        (b) => !b.adjustmentType || b.adjustmentType === "batch",
-      );
-      const totalBoxesFromBatches = realBatches.reduce(
-        (s, b) => s + (Number(b.boxes) || 0),
-        0,
-      );
-      const totalAmount = realBatches.reduce(
-        (s, b) => s + (Number(b.amount) || 0),
-        0,
-      );
-      const addAdj = Number(existingReport.addStockAdjustment || 0);
-      const removeAdj = Number(existingReport.removeStockAdjustment || 0);
-      const totalBoxes = Math.max(
-        0,
-        totalBoxesFromBatches + addAdj - removeAdj,
-      );
-      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
-
-      let status = "In Stock";
-      if (totalBoxes <= 0) status = "Out of Stock";
-      else if (totalBoxes < (existingReport.minStockLevel || 10))
-        status = "Low Stock";
-
-      await ReportInHand.updateOne(
-        { _id: existingReport._id },
-        {
-          $set: {
-            batches: updatedBatches,
-            totalBoxesFromBatches,
-            totalBoxes,
-            totalAmount,
-            averagePrice,
-            status,
-            updatedAt: new Date(),
+        await ReportInHand.updateOne(
+          { _id: report._id },
+          {
+            $set: {
+              totalBoxesFromBatches,
+              totalBoxes,
+              totalAmount,
+              averagePrice,
+              status,
+              updatedAt: new Date(),
+            },
           },
-        },
-      );
+        );
+      } catch (err) {
+        console.error(
+          `❌ Failed to recalculate stock for "${report.productName}":`,
+          err.message,
+        );
+      }
     }
-    console.log(
-      `✅ Purchase batches removed from stock for invoice: ${invoiceData.invoiceNumber}`,
-    );
+    console.log("✅ All ReportInHand totals recalculated after revert");
   } catch (err) {
-    console.error("❌ removePurchaseBatchesFromStock failed:", err.message);
+    console.error("❌ recalculateAllReportInHandTotals failed:", err.message);
   }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: After restoring a sale invoice (revert DELETE), deduct stock again
+// Sale stock helpers (unchanged logic — kept as-is)
 // ─────────────────────────────────────────────────────────────────────────────
 const restoreSaleDeductionsToStock = async (saleData) => {
   try {
@@ -400,7 +530,6 @@ const restoreSaleDeductionsToStock = async (saleData) => {
       const totalQty = salesQty + bonusQty;
       if (totalQty <= 0) continue;
 
-      // For MR Sales, stock was in MR hand — skip warehouse deduction
       if (saleData.saleType === "MR Sale") continue;
 
       const existingReport = await ReportInHand.findOne({
@@ -409,8 +538,6 @@ const restoreSaleDeductionsToStock = async (saleData) => {
 
       if (!existingReport) continue;
 
-      // Re-deduct from stock (since we're restoring the sale record,
-      // the sale deduction needs to be reapplied)
       const newRemoveAdj =
         Number(existingReport.removeStockAdjustment || 0) + totalQty;
 
@@ -458,9 +585,6 @@ const restoreSaleDeductionsToStock = async (saleData) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: After removing a sale invoice (revert CREATE), restore stock
-// ─────────────────────────────────────────────────────────────────────────────
 const removeSaleDeductionsFromStock = async (saleData) => {
   try {
     const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
@@ -633,7 +757,7 @@ router.get("/", async (req, res) => {
     }
 
     if (activityType === "normal") {
-      filter.action = { $in: ["DELETE", "UPDATE", "CREATE"] };
+      filter.action = { $in: ["DELETE", "UPDATE", "CREATE", "IMPORT"] };
       filter.isReverted = { $ne: true };
     } else if (activityType === "revert") {
       filter.action = "REVERT";
@@ -740,8 +864,13 @@ router.get("/stats/summary", async (req, res) => {
   }
 });
 
-// ─── POST /:id/revert ────────────────────────────────────────────────────────
-// ✅ FIXED: Now recalculates stock totals after reverting purchase/sale records
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /:id/revert
+// Handles: DELETE → restore docs + re-add batches
+//          UPDATE → roll back to previous state + recalc
+//          CREATE → delete the created doc + remove its batches from stock
+//          IMPORT → delete all imported docs + remove all their batches from stock
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/:id/revert", protect, async (req, res) => {
   try {
     const role = req.user?.role;
@@ -759,7 +888,7 @@ router.post("/:id/revert", protect, async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Already reverted." });
-    if (!["DELETE", "UPDATE", "CREATE"].includes(log.action)) {
+    if (!["DELETE", "UPDATE", "CREATE", "IMPORT"].includes(log.action)) {
       return res.status(400).json({
         success: false,
         message: `Cannot revert action: ${log.action}`,
@@ -778,7 +907,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 
     let revertSummary = {};
 
-    // ─── DELETE revert: restore deleted records + fix stock ──────────────
+    // ─── DELETE revert: restore deleted records + add batches back ────────
     if (log.action === "DELETE") {
       const rows = log.previousSnapshots?.length
         ? log.previousSnapshots
@@ -822,26 +951,23 @@ router.post("/:id/revert", protect, async (req, res) => {
         }
       }
 
-      // ✅ KEY FIX: After restoring records, update stock calculations
+      // Re-add batches for all successfully restored purchase invoices
       if (restoredDocs.length > 0) {
         if (log.tableName === "purchase") {
-          // Restore each invoice's batches back into ReportInHand
           for (const doc of restoredDocs) {
-            await restorePurchaseBatchesToStock(doc);
+            await restorePurchaseInvoiceBatchesToStock(doc);
           }
         } else if (log.tableName === "sales") {
-          // Re-apply sale deductions to stock
           for (const doc of restoredDocs) {
             await restoreSaleDeductionsToStock(doc);
           }
         }
-        // Final recalculation pass to ensure all totals are accurate
-        await recalculateReportInHandStock();
+        await recalculateAllReportInHandTotals();
       }
 
       revertSummary = { restored, failed };
 
-      // ─── UPDATE revert: roll back to previous state ───────────────────────
+      // ─── UPDATE revert: roll back fields to previous state ────────────────
     } else if (log.action === "UPDATE") {
       const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
       if (!prevDoc) {
@@ -865,17 +991,16 @@ router.post("/:id/revert", protect, async (req, res) => {
         { new: true, runValidators: false },
       );
 
-      // ✅ KEY FIX: Recalculate stock after update revert
       if (
         updated &&
         (log.tableName === "purchase" || log.tableName === "sales")
       ) {
-        await recalculateReportInHandStock();
+        await recalculateAllReportInHandTotals();
       }
 
       revertSummary = { rolledBack: updated ? 1 : 0 };
 
-      // ─── CREATE revert: delete the created record + fix stock ─────────────
+      // ─── CREATE revert: delete the created record + remove its batches ────
     } else if (log.action === "CREATE") {
       const newDoc = log.newSnapshots?.[0]?.data || log.newData;
       if (!newDoc) {
@@ -900,24 +1025,128 @@ router.post("/:id/revert", protect, async (req, res) => {
         });
       }
 
-      // ✅ KEY FIX: Before deleting, undo the stock effect of this record
+      // ── Remove the exact batches this invoice added to ReportInHand ──────
       if (log.tableName === "purchase") {
-        await removePurchaseBatchesFromStock(newDoc);
+        await removePurchaseInvoiceBatchesFromStock(newDoc);
       } else if (log.tableName === "sales") {
         await removeSaleDeductionsFromStock(newDoc);
       }
 
       await Model.findByIdAndDelete(targetId);
 
-      // Final recalculation pass
+      // ── Recalculate all totals as a safety net ────────────────────────────
       if (log.tableName === "purchase" || log.tableName === "sales") {
-        await recalculateReportInHandStock();
+        await recalculateAllReportInHandTotals();
       }
 
       revertSummary = { deleted: 1 };
+
+      // ─── IMPORT revert: delete ALL imported records + remove their batches ─
+    } else if (log.action === "IMPORT") {
+      // Collect all imported invoice documents from the snapshot
+      const importedRows = log.newSnapshots?.length
+        ? log.newSnapshots
+        : Array.isArray(log.newData)
+          ? log.newData.map((d) => ({ data: d }))
+          : log.newData
+            ? [{ data: log.newData }]
+            : [];
+
+      // Also handle the case where newData has a nested `invoices` array
+      // (as logged by the import route in purcharsing.js)
+      let invoiceDocuments = [];
+
+      if (importedRows.length > 0) {
+        for (const row of importedRows) {
+          const docData = row.data || row;
+          // If the snapshot stored the summary object with an `invoices` array
+          if (
+            docData.invoices &&
+            Array.isArray(docData.invoices) &&
+            docData.invoices.length > 0
+          ) {
+            // We have invoice summaries but not full docs — fetch from DB
+            for (const inv of docData.invoices) {
+              if (inv.invoiceNumber) {
+                try {
+                  const fullDoc = await Model.findOne({
+                    invoiceNumber: inv.invoiceNumber,
+                  }).lean();
+                  if (fullDoc) invoiceDocuments.push(fullDoc);
+                } catch (e) {
+                  console.error(
+                    `Failed to fetch invoice ${inv.invoiceNumber}:`,
+                    e.message,
+                  );
+                }
+              }
+            }
+          } else if (docData._id) {
+            // Normal snapshot with full document data
+            invoiceDocuments.push(docData);
+          }
+        }
+      }
+
+      if (!invoiceDocuments.length) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "No imported records found to revert. The snapshot may not contain full invoice data.",
+        });
+      }
+
+      let deletedCount = 0;
+      let failedCount = 0;
+
+      for (const docData of invoiceDocuments) {
+        const recordId = docData._id;
+        if (!recordId) {
+          failedCount++;
+          continue;
+        }
+        try {
+          const existing = await Model.findById(recordId);
+          if (existing) {
+            // Remove the batches this import added to ReportInHand
+            if (log.tableName === "purchase") {
+              await removePurchaseInvoiceBatchesFromStock(
+                existing.toObject ? existing.toObject() : existing,
+              );
+            } else if (log.tableName === "sales") {
+              await removeSaleDeductionsFromStock(
+                existing.toObject ? existing.toObject() : existing,
+              );
+            }
+            await Model.findByIdAndDelete(recordId);
+            deletedCount++;
+          } else {
+            console.warn(
+              `⚠️ Imported record ${recordId} not found in DB — already deleted?`,
+            );
+            failedCount++;
+          }
+        } catch (e) {
+          console.error(
+            `❌ Failed to delete imported record ${recordId}:`,
+            e.message,
+          );
+          failedCount++;
+        }
+      }
+
+      // Recalculate all stock totals once after all deletions
+      if (
+        deletedCount > 0 &&
+        (log.tableName === "purchase" || log.tableName === "sales")
+      ) {
+        await recalculateAllReportInHandTotals();
+      }
+
+      revertSummary = { deleted: deletedCount, failed: failedCount };
     }
 
-    // Create the revert log entry
+    // ── Write the REVERT activity log entry ───────────────────────────────
     const revertLog = await ActivityLog.create({
       userId: req.user._id || req.user.id,
       userName: req.user.name || req.user.userName || "Super Admin",
@@ -936,7 +1165,7 @@ router.post("/:id/revert", protect, async (req, res) => {
       ipAddress:
         req.ip || req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || null,
       userAgent: req.headers["user-agent"] || null,
-      description: `Reverted ${log.action} action. Original log ID: ${log._id}. Stock recalculated.`,
+      description: `Reverted ${log.action} action. Original log ID: ${log._id}. Stock recalculated. Summary: ${JSON.stringify(revertSummary)}`,
     });
 
     await ActivityLog.findByIdAndUpdate(log._id, {
@@ -959,7 +1188,6 @@ router.post("/:id/revert", protect, async (req, res) => {
 });
 
 // ─── POST /:id/revert-single ────────────────────────────────────────────────
-// ✅ FIXED: Now recalculates stock totals after reverting a single record
 router.post("/:id/revert-single", protect, async (req, res) => {
   try {
     const role = req.user?.role;
@@ -995,10 +1223,9 @@ router.post("/:id/revert-single", protect, async (req, res) => {
           : [];
 
     if (!rows.length || recordIndex >= rows.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid record index",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid record index" });
     }
 
     const targetRow = rows[recordIndex];
@@ -1032,16 +1259,15 @@ router.post("/:id/revert-single", protect, async (req, res) => {
       });
       await doc.save();
 
-      // ✅ KEY FIX: Restore stock for this single record
+      // Re-add the batches for this single restored invoice
       if (log.tableName === "purchase") {
-        await restorePurchaseBatchesToStock(docData);
+        await restorePurchaseInvoiceBatchesToStock(docData);
       } else if (log.tableName === "sales") {
         await restoreSaleDeductionsToStock(docData);
       }
 
-      // Final recalculation to make sure all totals are right
       if (log.tableName === "purchase" || log.tableName === "sales") {
-        await recalculateReportInHandStock();
+        await recalculateAllReportInHandTotals();
       }
 
       await ActivityLog.create({
@@ -1117,7 +1343,7 @@ router.get("/export", async (req, res) => {
     }
 
     if (activityType === "normal") {
-      filter.action = { $in: ["DELETE", "UPDATE", "CREATE"] };
+      filter.action = { $in: ["DELETE", "UPDATE", "CREATE", "IMPORT"] };
       filter.isReverted = { $ne: true };
     } else if (activityType === "revert") {
       filter.action = "REVERT";

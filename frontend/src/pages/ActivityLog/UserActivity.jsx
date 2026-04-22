@@ -38,10 +38,9 @@ const ACTION_STYLE = {
 // ─────────────────────────────────────────────────────────────────────────────
 const getJanToPreviousMonthRange = () => {
   const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth(); // 0 = Jan, 3 = Apr, 4 = May, etc.
+  const currentMonth = new Date().getMonth();
 
   if (currentMonth === 0) {
-    // January - show previous year's full year
     const previousYear = currentYear - 1;
     return {
       startDate: `${previousYear}-01-01`,
@@ -50,21 +49,10 @@ const getJanToPreviousMonthRange = () => {
     };
   }
 
-  // For months Feb-Dec, show Jan to previous month
-  const endDate = new Date(currentYear, currentMonth, 0); // Last day of previous month
+  const endDate = new Date(currentYear, currentMonth, 0);
   const monthNames = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
   ];
   const endMonthName = monthNames[currentMonth - 1];
 
@@ -93,44 +81,32 @@ const formatDateTime = (iso) => {
   return `${day} ${month} ${year} ${time}`;
 };
 
-// Skip _id and __v from snapshots
 const SKIP_FIELDS = ["__v", "_id"];
 
-// Flatten objects, skip _id and __v
 const flatten = (obj, prefix = "") => {
   if (!obj || typeof obj !== "object") return {};
   return Object.entries(obj).reduce((acc, [k, v]) => {
     if (SKIP_FIELDS.includes(k)) return acc;
     const key = prefix ? `${prefix}.${k}` : k;
-    if (
-      v &&
-      typeof v === "object" &&
-      !Array.isArray(v) &&
-      !(v instanceof Date)
-    ) {
+    if (v && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date)) {
       Object.assign(acc, flatten(v, key));
     } else if (Array.isArray(v)) {
       acc[key] = JSON.stringify(v);
     } else {
-      acc[key] =
-        v == null ? "" : v instanceof Date ? formatDateTime(v) : String(v);
+      acc[key] = v == null ? "" : v instanceof Date ? formatDateTime(v) : String(v);
     }
     return acc;
   }, {});
 };
 
-// Human readable key, with special handling for "date" when table is customers
 const humanKey = (key, tableName) => {
-  if (tableName === "customers" && key === "date") {
-    return "Joining Date";
-  }
+  if (tableName === "customers" && key === "date") return "Joining Date";
   return key
     .replace(/([A-Z])/g, " $1")
     .replace(/\./g, " › ")
     .replace(/^./, (c) => c.toUpperCase());
 };
 
-// Helper to get field label for snapshot tables
 const getFieldLabel = (field, tableName) => humanKey(field, tableName);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,10 +140,7 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
         const recordId = doc._id || doc.id || `record-${idx}`;
 
         return (
-          <div
-            key={idx}
-            className="border border-red-200 rounded-lg overflow-hidden"
-          >
+          <div key={idx} className="border border-red-200 rounded-lg overflow-hidden">
             <div className="bg-red-50 px-4 py-2 flex items-center justify-between">
               <span className="text-xs font-bold text-red-700 uppercase tracking-wide">
                 Record {rows.length > 1 ? `#${idx + 1}` : ""}{" "}
@@ -185,10 +158,7 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
             <table className="w-full text-sm">
               <tbody>
                 {entries.map(([k, v]) => (
-                  <tr
-                    key={k}
-                    className="border-t border-red-100 hover:bg-red-50"
-                  >
+                  <tr key={k} className="border-t border-red-100 hover:bg-red-50">
                     <td className="px-4 py-2 font-medium text-red-800 w-1/3 align-top">
                       {getFieldLabel(k, log.tableName)}
                     </td>
@@ -207,7 +177,7 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UpdateDiffTable – before / after diff (no _id, __v)
+// UpdateDiffTable – before / after diff
 // ─────────────────────────────────────────────────────────────────────────────
 const UpdateDiffTable = ({ log }) => {
   const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
@@ -222,9 +192,7 @@ const UpdateDiffTable = ({ log }) => {
 
   const prevFlat = flatten(prevDoc || {});
   const newFlat = flatten(newDoc || {});
-  const allKeys = [
-    ...new Set([...Object.keys(prevFlat), ...Object.keys(newFlat)]),
-  ];
+  const allKeys = [...new Set([...Object.keys(prevFlat), ...Object.keys(newFlat)])];
 
   const changed = allKeys.filter((k) => prevFlat[k] !== newFlat[k]);
   const unchanged = allKeys.filter((k) => prevFlat[k] === newFlat[k]);
@@ -314,9 +282,7 @@ const GenericSnapshotTable = ({ log }) => {
       ? log.previousSnapshots
       : null;
 
-  const flat = flatten(
-    snapshots?.[0]?.data || log.newData || log.previousData || {},
-  );
+  const flat = flatten(snapshots?.[0]?.data || log.newData || log.previousData || {});
   const entries = Object.entries(flat);
   if (!entries.length)
     return (
@@ -373,10 +339,7 @@ const DetailModal = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -397,17 +360,11 @@ const DetailModal = ({
               )}
             </div>
             <h2 className="text-lg font-bold text-gray-800">
-              {log.actionLabel ||
-                `${log.action} on ${log.tableLabel || log.tableName}`}
+              {log.actionLabel || `${log.action} on ${log.tableLabel || log.tableName}`}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              {formatDateTime(log.createdAt)}
-            </p>
+            <p className="text-xs text-gray-500 mt-0.5">{formatDateTime(log.createdAt)}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none mt-0.5"
-          >
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none mt-0.5">
             ×
           </button>
         </div>
@@ -424,20 +381,15 @@ const DetailModal = ({
                 <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">
                   {label}
                 </span>
-                <span className="text-gray-700 font-medium truncate">
-                  {value}
-                </span>
+                <span className="text-gray-700 font-medium truncate">{value}</span>
               </div>
             ))}
           </div>
-          {/* Description as full width row */}
           <div className="flex flex-col mt-2">
             <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">
               Description
             </span>
-            <span className="text-gray-700 font-medium">
-              {log.description || "—"}
-            </span>
+            <span className="text-gray-700 font-medium">{log.description || "—"}</span>
           </div>
         </div>
 
@@ -450,26 +402,22 @@ const DetailModal = ({
           </div>
         )}
 
-        {/* Snapshot content (scrollable) */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {renderContent()}
-        </div>
+        {/* Snapshot content */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">{renderContent()}</div>
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 px-5 py-4 border-t bg-gray-50 rounded-b-2xl">
-          {isSuperAdmin &&
-            !log.isReverted &&
-            ["DELETE", "UPDATE"].includes(log.action) && (
-              <button
-                onClick={() => {
-                  onClose();
-                  onRevertClick(log);
-                }}
-                className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
-              >
-                <RotateCcw size={14} /> Revert All
-              </button>
-            )}
+          {isSuperAdmin && !log.isReverted && ["DELETE", "UPDATE", "IMPORT"].includes(log.action) && (
+            <button
+              onClick={() => {
+                onClose();
+                onRevertClick(log);
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              <RotateCcw size={14} /> Revert All
+            </button>
+          )}
           <button
             onClick={onClose}
             className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-semibold rounded-lg transition-colors"
@@ -485,14 +433,7 @@ const DetailModal = ({
 // ─────────────────────────────────────────────────────────────────────────────
 // Revert Confirm Modal
 // ─────────────────────────────────────────────────────────────────────────────
-const RevertModal = ({
-  log,
-  recordId,
-  recordIndex,
-  onConfirm,
-  onCancel,
-  loading,
-}) => {
+const RevertModal = ({ log, recordId, recordIndex, onConfirm, onCancel, loading }) => {
   if (!log) return null;
 
   const isSingleRecord = recordId !== null && recordId !== undefined;
@@ -507,9 +448,7 @@ const RevertModal = ({
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-        <h3 className="text-lg font-bold text-gray-800 mb-3">
-          ⚠️ Confirm Revert
-        </h3>
+        <h3 className="text-lg font-bold text-gray-800 mb-3">⚠️ Confirm Revert</h3>
         <p className="text-sm text-gray-600 leading-relaxed mb-5">
           {message}
           <br />
@@ -557,10 +496,9 @@ const Toast = ({ msg, type }) => (
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
 const UserActivity = ({ currentUser: propCurrentUser }) => {
-  // Try to get currentUser from multiple storage locations
   const [currentUser, setCurrentUser] = useState(null);
   const [userLoading, setUserLoading] = useState(true);
-  const [activityTypeTab, setActivityTypeTab] = useState("all"); // "all", "normal", "revert"
+  const [activityTypeTab, setActivityTypeTab] = useState("all");
 
   useEffect(() => {
     const getUserFromStorage = () => {
@@ -570,16 +508,8 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
           setUserLoading(false);
           return;
         }
-
-        const possibleKeys = [
-          "user",
-          "currentUser",
-          "userData",
-          "authUser",
-          "userInfo",
-        ];
+        const possibleKeys = ["user", "currentUser", "userData", "authUser", "userInfo"];
         let userData = null;
-
         for (const key of possibleKeys) {
           const storedUser = localStorage.getItem(key);
           if (storedUser) {
@@ -589,7 +519,6 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             } catch (e) {}
           }
         }
-
         if (!userData) {
           for (const key of possibleKeys) {
             const sessionUser = sessionStorage.getItem(key);
@@ -601,19 +530,14 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             }
           }
         }
-
-        if (userData) {
-          setCurrentUser(userData);
-        }
+        if (userData) setCurrentUser(userData);
       } catch (error) {
         console.error("Error getting user from storage:", error);
       } finally {
         setUserLoading(false);
       }
     };
-
     getUserFromStorage();
-
     window.addEventListener("storage", getUserFromStorage);
     return () => window.removeEventListener("storage", getUserFromStorage);
   }, [propCurrentUser]);
@@ -645,7 +569,6 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
 
   const inputRef = useRef(null);
 
-  // Get dynamic Jan to previous month range
   const janToPreviousMonthRange = getJanToPreviousMonthRange();
 
   const showToast = (msg, type = "success") => {
@@ -656,32 +579,21 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
   const getDateFilter = useCallback(() => {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, "0");
-    const ymd = (d) =>
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
     switch (selectedTab) {
       case "today":
         return { startDate: ymd(now), endDate: now.toISOString() };
       case "month":
-        return {
-          startDate: ymd(new Date(now.getFullYear(), now.getMonth(), 1)),
-          endDate: now.toISOString(),
-        };
+        return { startDate: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), endDate: now.toISOString() };
       case "janToPreviousMonth":
-        return {
-          startDate: janToPreviousMonthRange.startDate,
-          endDate: janToPreviousMonthRange.endDate,
-        };
+        return { startDate: janToPreviousMonthRange.startDate, endDate: janToPreviousMonthRange.endDate };
       case "custom":
         return {
-          startDate: dateRange.start
-            ? new Date(dateRange.start).toISOString()
-            : undefined,
-          endDate: dateRange.end
-            ? new Date(dateRange.end + "T23:59:59").toISOString()
-            : undefined,
+          startDate: dateRange.start ? new Date(dateRange.start).toISOString() : undefined,
+          endDate: dateRange.end ? new Date(dateRange.end + "T23:59:59").toISOString() : undefined,
         };
-      default: // "all"
+      default:
         return {};
     }
   }, [selectedTab, dateRange, janToPreviousMonthRange]);
@@ -700,16 +612,10 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
         if (!res.data.success) return;
         const formatted = res.data.data.map((u) => ({
           value: u.value,
-          label:
-            u.type === "staff"
-              ? u.label.replace("(N/A)", "").trim() + " (MR)"
-              : u.label,
+          label: u.type === "staff" ? u.label.replace("(N/A)", "").trim() + " (MR)" : u.label,
           type: u.type,
         }));
-        setUsers([
-          { value: "all", label: "👥 All Users", type: "all" },
-          ...formatted,
-        ]);
+        setUsers([{ value: "all", label: "👥 All Users", type: "all" }, ...formatted]);
       })
       .catch(console.error);
   }, []);
@@ -722,16 +628,14 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
         const params = {
           page: goPage,
           limit: 50,
-          activityType: activityTypeTab, // "all", "normal", "revert"
+          activityType: activityTypeTab,
         };
         if (activeUser && activeUser !== "all") params.userId = activeUser;
         if (searchTerm.trim()) params.search = searchTerm.trim();
         if (dateFilter.startDate) params.startDate = dateFilter.startDate;
         if (dateFilter.endDate) params.endDate = dateFilter.endDate;
 
-        const res = await axios.get(`${backendUrl}/api/activity-logs`, {
-          params,
-        });
+        const res = await axios.get(`${backendUrl}/api/activity-logs`, { params });
         setRecords(res.data.logs || []);
         setTotal(res.data.total || 0);
         setTotalPages(res.data.totalPages || 1);
@@ -743,7 +647,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
         setLoading(false);
       }
     },
-    [activeUser, searchTerm, getDateFilter, activityTypeTab],
+    [activeUser, searchTerm, getDateFilter, activityTypeTab]
   );
 
   useEffect(() => {
@@ -761,9 +665,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
       if (dateFilter.endDate) params.set("endDate", dateFilter.endDate);
       params.set("activityType", activityTypeTab);
 
-      const res = await fetch(
-        `${backendUrl}/api/activity-logs/export?${params}`,
-      );
+      const res = await fetch(`${backendUrl}/api/activity-logs/export?${params}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -783,9 +685,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     if (!revertLog) return;
     setReverting(true);
     try {
-      const res = await axios.post(
-        `${backendUrl}/api/activity-logs/${revertLog._id}/revert`,
-      );
+      const res = await axios.post(`${backendUrl}/api/activity-logs/${revertLog._id}/revert`);
       if (res.data.success) {
         showToast("Action reverted successfully!");
         setRevertLog(null);
@@ -805,10 +705,10 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     const { log, recordId, recordIndex } = singleRecordRevert;
     setReverting(true);
     try {
-      const res = await axios.post(
-        `${backendUrl}/api/activity-logs/${log._id}/revert-single`,
-        { recordId, recordIndex },
-      );
+      const res = await axios.post(`${backendUrl}/api/activity-logs/${log._id}/revert-single`, {
+        recordId,
+        recordIndex,
+      });
       if (res.data.success) {
         showToast(`Record #${recordIndex + 1} reverted successfully!`);
         setSingleRecordRevert(null);
@@ -823,7 +723,6 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     }
   };
 
-  // Render activity type tabs (All, Normal, Revert)
   const renderActivityTypeTabs = () => {
     const tabs = [
       { key: "all", label: "All", color: "indigo" },
@@ -832,9 +731,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     ];
 
     return (
-      <div
-        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}
-      >
+      <div className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}>
         <div className="flex flex-wrap gap-2">
           {tabs.map(({ key, label, color }) => (
             <button
@@ -853,14 +750,11 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             </button>
           ))}
         </div>
-        <div
-          className={`flex items-center gap-2 mt-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
-        >
+        <div className={`flex items-center gap-2 mt-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}>
           <span>
-            {activityTypeTab === "all" &&
-              "📋 Showing all records (both normal and reverted)"}
+            {activityTypeTab === "all" && "📋 Showing all records (both normal and reverted)"}
             {activityTypeTab === "normal" &&
-              "✅ Showing only normal records (DELETE & UPDATE actions that are NOT reverted)"}
+              "✅ Showing only normal records (DELETE, UPDATE, CREATE, IMPORT actions that are NOT reverted)"}
             {activityTypeTab === "revert" && "↩️ Showing only reverted records"}
           </span>
         </div>
@@ -881,21 +775,13 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
     <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
       {toast && <Toast msg={toast.msg} type={toast.type} />}
 
-      {isMobileView && (
-        <Sidebar
-          isOpen={sidebarOpen}
-          toggleSidebar={() => setSidebarOpen(false)}
-          isMobile
-        />
-      )}
+      {isMobileView && <Sidebar isOpen={sidebarOpen} toggleSidebar={() => setSidebarOpen(false)} isMobile />}
 
       <DetailModal
         log={selectedLog}
         onClose={() => setSelectedLog(null)}
         onRevertClick={(log) => setRevertLog(log)}
-        onRevertSingleRecord={(log, recordId, recordIndex) =>
-          setSingleRecordRevert({ log, recordId, recordIndex })
-        }
+        onRevertSingleRecord={(log, recordId, recordIndex) => setSingleRecordRevert({ log, recordId, recordIndex })}
         isSuperAdmin={isSuperAdmin}
       />
       <RevertModal
@@ -919,10 +805,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
       {isMobileView && (
         <div className="flex justify-between items-center mb-3 bg-gradient-to-r from-indigo-50 to-blue-50 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-2 rounded-full bg-white shadow-sm active:bg-gray-100"
-            >
+            <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-full bg-white shadow-sm active:bg-gray-100">
               <Menu size={20} className="text-gray-700" />
             </button>
             <Activity className="w-5 h-5 text-indigo-600" />
@@ -942,9 +825,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
               <Activity className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-gray-800">
-                User Activity Logs
-              </h1>
+              <h1 className="text-2xl font-bold text-gray-800">User Activity Logs</h1>
               <p className="text-sm text-gray-500">
                 Track all user actions • Auto-deleted after 30 days
               </p>
@@ -960,10 +841,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-              <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                size={16}
-              />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
               {searchTerm && (
                 <button
                   onClick={() => setSearchTerm("")}
@@ -995,28 +873,20 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
           />
-          <Search
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-            size={15}
-          />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
           {searchTerm && (
-            <button
-              onClick={() => setSearchTerm("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
-            >
+            <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
               <X size={14} />
             </button>
           )}
         </div>
       )}
 
-      {/* Activity Type Tabs (All, Normal, Revert) */}
+      {/* Activity Type Tabs */}
       {renderActivityTypeTabs()}
 
       {/* Filter box */}
-      <div
-        className={`bg-white rounded-xl shadow-sm ${isMobileView ? "p-3" : "p-4"} space-y-3 mb-4 border border-gray-200`}
-      >
+      <div className={`bg-white rounded-xl shadow-sm ${isMobileView ? "p-3" : "p-4"} space-y-3 mb-4 border border-gray-200`}>
         <div className="flex flex-wrap gap-2">
           {[
             { key: "today", label: "Today" },
@@ -1046,9 +916,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
               <input
                 type="date"
                 value={dateRange.start}
-                onChange={(e) =>
-                  setDateRange({ ...dateRange, start: e.target.value })
-                }
+                onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -1056,16 +924,11 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             <input
               type="date"
               value={dateRange.end}
-              onChange={(e) =>
-                setDateRange({ ...dateRange, end: e.target.value })
-              }
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             {(dateRange.start || dateRange.end) && (
-              <button
-                onClick={() => setDateRange({ start: "", end: "" })}
-                className="text-red-500 text-sm hover:text-red-700"
-              >
+              <button onClick={() => setDateRange({ start: "", end: "" })} className="text-red-500 text-sm hover:text-red-700">
                 Clear
               </button>
             )}
@@ -1090,31 +953,22 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             <>
               <span>•</span>
               <span>
-                User:{" "}
-                <span className="font-medium">
-                  {users.find((u) => u.value === activeUser)?.label ||
-                    activeUser}
-                </span>
+                User: <span className="font-medium">{users.find((u) => u.value === activeUser)?.label || activeUser}</span>
               </span>
             </>
           )}
           {activityTypeTab !== "all" && (
             <>
               <span>•</span>
-              <span
-                className={`font-medium ${activityTypeTab === "revert" ? "text-orange-600" : ""}`}
-              >
+              <span className={`font-medium ${activityTypeTab === "revert" ? "text-orange-600" : ""}`}>
                 {activityTypeTab === "revert" ? "Reverted Only" : "Normal Only"}
               </span>
             </>
           )}
- 
         </div>
 
         <div className="w-full sm:w-80">
-          <label className="block text-xs font-medium text-gray-700 mb-1">
-            Select User
-          </label>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Select User</label>
           <SearchableDropdown
             options={users}
             value={activeUser}
@@ -1125,51 +979,25 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
       </div>
 
       {/* Stats cards */}
-      <div
-        className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-4"}`}
-      >
+      <div className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-4"}`}>
         {[
-          {
-            label: "Total Activity",
-            value: total,
-            color: "border-green-500",
-            sub: "All records",
-          },
+          { label: "Total Activity", value: total, color: "border-green-500", sub: "All records" },
           {
             label: "Selected User",
-            value:
-              activeUser === "all"
-                ? "All Users"
-                : users.find((u) => u.value === activeUser)?.label || "—",
+            value: activeUser === "all" ? "All Users" : users.find((u) => u.value === activeUser)?.label || "—",
             color: "border-blue-500",
             sub: "Current filter",
             small: true,
           },
-          {
-            label: "Search Results",
-            value: records.length,
-            color: "border-purple-500",
-            sub: "Matching records",
-          },
-          {
-            label: "Unique Actions",
-            value: new Set(records.map((r) => r.action)).size,
-            color: "border-orange-500",
-            sub: "Action types",
-          },
+          { label: "Search Results", value: records.length, color: "border-purple-500", sub: "Matching records" },
+          { label: "Unique Actions", value: new Set(records.map((r) => r.action)).size, color: "border-orange-500", sub: "Action types" },
         ].map(({ label, value, color, sub, small }) => (
           <div
             key={label}
             className={`bg-white rounded-xl shadow-sm p-4 border-l-4 ${color} border border-gray-200 hover:shadow-md transition-shadow`}
           >
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
-              {label}
-            </p>
-            <h2
-              className={`font-bold text-gray-800 mt-1 ${small ? "text-sm truncate" : "text-2xl"}`}
-            >
-              {value}
-            </h2>
+            <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
+            <h2 className={`font-bold text-gray-800 mt-1 ${small ? "text-sm truncate" : "text-2xl"}`}>{value}</h2>
             <p className="text-xs text-gray-400 mt-1">{sub}</p>
           </div>
         ))}
@@ -1177,21 +1005,14 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
 
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm overflow-x-auto border border-gray-200">
-        <table
-          className={`w-full text-center ${isMobileView ? "min-w-[640px] text-xs" : "text-sm"}`}
-        >
+        <table className={`w-full text-center ${isMobileView ? "min-w-[640px] text-xs" : "text-sm"}`}>
           <thead className="bg-gradient-to-r from-gray-50 to-gray-100 text-gray-700 border-b">
             <tr>
-              {["Date & Time", "User", "Action", "Details", "Status", ""].map(
-                (col) => (
-                  <th
-                    key={col}
-                    className={`${isMobileView ? "p-3" : "p-4"} font-semibold text-left`}
-                  >
-                    {col}
-                  </th>
-                ),
-              )}
+              {["Date & Time", "User", "Action", "Details", "Status", ""].map((col) => (
+                <th key={col} className={`${isMobileView ? "p-3" : "p-4"} font-semibold text-left`}>
+                  {col}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -1209,12 +1030,8 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                 <td colSpan={6} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Activity size={48} className="text-gray-300" />
-                    <p className="text-gray-400 font-medium">
-                      No activity data found
-                    </p>
-                    <p className="text-gray-400 text-sm">
-                      Try changing your filters or search criteria
-                    </p>
+                    <p className="text-gray-400 font-medium">No activity data found</p>
+                    <p className="text-gray-400 text-sm">Try changing your filters or search criteria</p>
                   </div>
                 </td>
               </tr>
@@ -1223,27 +1040,15 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                 <tr
                   key={r._id || i}
                   className={`border-t hover:bg-gray-50 transition-colors duration-150 ${
-                    r.isReverted
-                      ? "bg-orange-50"
-                      : i % 2 === 0
-                        ? "bg-white"
-                        : "bg-gray-50/50"
+                    r.isReverted ? "bg-orange-50" : i % 2 === 0 ? "bg-white" : "bg-gray-50/50"
                   }`}
                 >
-                  <td
-                    className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap text-gray-600 font-mono text-xs`}
-                  >
+                  <td className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap text-gray-600 font-mono text-xs`}>
                     {formatDateTime(r.createdAt)}
                   </td>
                   <td className={`${isMobileView ? "p-3" : "p-4"} text-left`}>
-                    <span className="font-medium text-gray-800">
-                      {r.userName || "System"}
-                    </span>
-                    {r.userRole && (
-                      <span className="block text-xs text-gray-400">
-                        {r.userRole}
-                      </span>
-                    )}
+                    <span className="font-medium text-gray-800">{r.userName || "System"}</span>
+                    {r.userRole && <span className="block text-xs text-gray-400">{r.userRole}</span>}
                   </td>
                   <td className={`${isMobileView ? "p-3" : "p-4"} text-left`}>
                     <span
@@ -1269,9 +1074,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                       </span>
                     )}
                   </td>
-                  <td
-                    className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap`}
-                  >
+                  <td className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap`}>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setSelectedLog(r)}
@@ -1279,16 +1082,14 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                       >
                         <Eye size={12} /> View
                       </button>
-                      {isSuperAdmin &&
-                        !r.isReverted &&
-                        ["DELETE", "UPDATE"].includes(r.action) && (
-                          <button
-                            onClick={() => setRevertLog(r)}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-lg text-xs font-semibold transition-colors"
-                          >
-                            <RotateCcw size={12} /> Revert
-                          </button>
-                        )}
+                      {isSuperAdmin && !r.isReverted && ["DELETE", "UPDATE", "IMPORT"].includes(r.action) && (
+                        <button
+                          onClick={() => setRevertLog(r)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-lg text-xs font-semibold transition-colors"
+                        >
+                          <RotateCcw size={12} /> Revert
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1308,21 +1109,17 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
           >
             <ChevronLeft size={14} /> Prev
           </button>
-          {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map(
-            (p) => (
-              <button
-                key={p}
-                onClick={() => fetchActivity(p)}
-                className={`px-3 py-1.5 rounded-lg text-sm border font-medium transition-colors ${
-                  p === page
-                    ? "bg-indigo-600 text-white border-indigo-600"
-                    : "border-gray-300 hover:bg-gray-50"
-                }`}
-              >
-                {p}
-              </button>
-            ),
-          )}
+          {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map((p) => (
+            <button
+              key={p}
+              onClick={() => fetchActivity(p)}
+              className={`px-3 py-1.5 rounded-lg text-sm border font-medium transition-colors ${
+                p === page ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
           <button
             disabled={page === totalPages}
             onClick={() => fetchActivity(page + 1)}
