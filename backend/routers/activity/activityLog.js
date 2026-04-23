@@ -104,7 +104,7 @@ export const logActivity = async (req, options = {}) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PURCHASE helpers (unchanged)
+// PURCHASE helpers
 // ─────────────────────────────────────────────────────────────────────────────
 const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
   try {
@@ -494,16 +494,7 @@ const recalculateAllReportInHandTotals = async () => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FIXED: restoreSaleDeductionsToStock
-//
-// Root cause of the bug: the old implementation only decremented
-// `removeStockAdjustment`, but `totalAmount` is computed by summing
-// batch.amount values — those were never restored, so the stock VALUE
-// stayed low even after reverting.
-//
-// Fix: restore the actual batch boxes + amounts (reverse-FIFO), then
-// recalculate ALL derived fields (totalBoxesFromBatches, totalAmount,
-// averagePrice, totalBoxes, status) from scratch.
+// SALE helpers - FIXED to properly handle stock value
 // ─────────────────────────────────────────────────────────────────────────────
 const restoreSaleDeductionsToStock = async (saleData) => {
   try {
@@ -543,14 +534,13 @@ const restoreSaleDeductionsToStock = async (saleData) => {
       );
 
       // Reverse-FIFO: add stock back to the newest real batch first
-      // (mirrors the original FIFO deduction which took from oldest first)
       const realBatchIndicesByNewest = batches
         .map((b, idx) => ({ idx, b }))
         .filter(({ b }) => !b.adjustmentType || b.adjustmentType === "batch")
         .sort((a, b_) => {
           const dateA = a.b.date ? new Date(a.b.date) : new Date(0);
           const dateB = b_.b.date ? new Date(b_.b.date) : new Date(0);
-          return dateB - dateA; // newest first
+          return dateB - dateA;
         });
 
       for (const { idx } of realBatchIndicesByNewest) {
@@ -565,7 +555,7 @@ const restoreSaleDeductionsToStock = async (saleData) => {
         remainingToRestore = 0;
       }
 
-      // If product was fully depleted (no real batches left), create one
+      // If product was fully depleted, create a new batch
       if (remainingToRestore > 0) {
         batches.push({
           batchNumber: `RESTORE-${Date.now()}`,
@@ -584,7 +574,7 @@ const restoreSaleDeductionsToStock = async (saleData) => {
       const prevRemoveAdj = Number(existingReport.removeStockAdjustment || 0);
       const newRemoveAdj = Math.max(0, prevRemoveAdj - totalQty);
 
-      // Recalculate ALL derived fields from the now-restored batches
+      // Recalculate ALL derived fields
       const realBatches = batches.filter(
         (b) => !b.adjustmentType || b.adjustmentType === "batch",
       );
@@ -639,13 +629,6 @@ const restoreSaleDeductionsToStock = async (saleData) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FIXED: removeSaleDeductionsFromStock
-//
-// Used when reverting a CREATE action (undoing a sale that shouldn't exist).
-// Same fix: deduct from actual batch boxes/amounts via FIFO, then recalculate
-// all totals from scratch instead of just bumping removeStockAdjustment.
-// ─────────────────────────────────────────────────────────────────────────────
 const removeSaleDeductionsFromStock = async (saleData) => {
   try {
     const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
@@ -680,7 +663,7 @@ const removeSaleDeductionsFromStock = async (saleData) => {
         .sort((a, b_) => {
           const dateA = a.b.date ? new Date(a.b.date) : new Date(0);
           const dateB = b_.b.date ? new Date(b_.b.date) : new Date(0);
-          return dateA - dateB; // oldest first
+          return dateA - dateB;
         });
 
       let remaining = totalQty;
@@ -754,9 +737,7 @@ const removeSaleDeductionsFromStock = async (saleData) => {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Helper: Flatten nested objects for Excel export
-// ─────────────────────────────────────────────────────────────────────────────
 const flattenObject = (obj, parentKey = "", result = {}) => {
   if (!obj || typeof obj !== "object") return result;
   for (let [key, value] of Object.entries(obj)) {
@@ -962,7 +943,7 @@ router.get("/stats/summary", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /:id/revert  (all four action types)
+// POST /:id/revert (all four action types) - FIXED for sales and purchase
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/:id/revert", protect, async (req, res) => {
   try {
@@ -1000,7 +981,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 
     let revertSummary = {};
 
-    // ── DELETE revert: restore deleted records + add batches back ─────────
+    // ── DELETE revert: restore deleted records ────────────────────────────────
     if (log.action === "DELETE") {
       const rows = log.previousSnapshots?.length
         ? log.previousSnapshots
@@ -1060,7 +1041,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 
       revertSummary = { restored, failed };
 
-      // ── UPDATE revert: roll back fields to previous state ──────────────────
+      // ── UPDATE revert: roll back fields to previous state ────────────────────
     } else if (log.action === "UPDATE") {
       const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
       if (!prevDoc) {
@@ -1088,6 +1069,14 @@ router.post("/:id/revert", protect, async (req, res) => {
           // Re-apply the stock effect of the OLD (pre-edit) state
           await removeSaleDeductionsFromStock(prevDoc);
         }
+      } else if (log.tableName === "purchase") {
+        const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+        if (newDoc) {
+          // Remove the stock effect of the NEW (post-edit) purchase
+          await removePurchaseInvoiceBatchesFromStock(newDoc);
+          // Re-apply the stock effect of the OLD (pre-edit) purchase
+          await restorePurchaseInvoiceBatchesToStock(prevDoc);
+        }
       }
 
       const { _id, __v, createdAt, updatedAt, ...prevFields } = prevDoc;
@@ -1106,7 +1095,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 
       revertSummary = { rolledBack: updated ? 1 : 0 };
 
-      // ── CREATE revert: delete the created record + remove its stock effect ──
+      // ── CREATE revert: delete the created record ─────────────────────────────
     } else if (log.action === "CREATE") {
       const newDoc = log.newSnapshots?.[0]?.data || log.newData;
       if (!newDoc) {
@@ -1146,7 +1135,7 @@ router.post("/:id/revert", protect, async (req, res) => {
 
       revertSummary = { deleted: 1 };
 
-      // ── IMPORT revert: delete ALL imported records + restore their stock ────
+      // ── IMPORT revert: delete ALL imported records ───────────────────────────
     } else if (log.action === "IMPORT") {
       const importedRows = log.newSnapshots?.length
         ? log.newSnapshots
@@ -1212,7 +1201,6 @@ router.post("/:id/revert", protect, async (req, res) => {
                 existing.toObject ? existing.toObject() : existing,
               );
             } else if (log.tableName === "sales") {
-              // Reverting an IMPORT = restoring the stock that was deducted
               await restoreSaleDeductionsToStock(
                 existing.toObject ? existing.toObject() : existing,
               );
@@ -1244,7 +1232,7 @@ router.post("/:id/revert", protect, async (req, res) => {
       revertSummary = { deleted: deletedCount, failed: failedCount };
     }
 
-    // ── Write the REVERT activity log entry ───────────────────────────────
+    // ── Write the REVERT activity log entry ───────────────────────────────────
     const revertLog = await ActivityLog.create({
       userId: req.user._id || req.user.id,
       userName: req.user.name || req.user.userName || "Super Admin",
@@ -1360,7 +1348,6 @@ router.post("/:id/revert-single", protect, async (req, res) => {
       if (log.tableName === "purchase") {
         await restorePurchaseInvoiceBatchesToStock(docData);
       } else if (log.tableName === "sales") {
-        // Restoring a deleted sale → re-apply its stock deduction
         await removeSaleDeductionsFromStock(docData);
       }
 

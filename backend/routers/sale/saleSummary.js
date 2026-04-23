@@ -778,9 +778,6 @@ const deductStockFromReportInHand = async (
   }
 };
 
-// ==========================================
-// restoreStockToReportInHand
-// ==========================================
 const restoreStockToReportInHand = async (
   productName,
   quantity,
@@ -793,6 +790,7 @@ const restoreStockToReportInHand = async (
     if (ownSession) {
       session.startTransaction();
     }
+
     const restoredQty = fixPrecision(quantity);
 
     if (restoredQty <= 0) {
@@ -802,26 +800,107 @@ const restoreStockToReportInHand = async (
       }
       return { success: true, restored: 0 };
     }
+
     const stockItem = await findStockItemFlexible(productName, session);
 
     if (stockItem) {
+      console.log(`📦 Restoring stock for "${productName}"`);
+      console.log(`   Restoring qty: ${restoredQty}`);
+      console.log(
+        `   Current removeStockAdjustment: ${stockItem.removeStockAdjustment}`,
+      );
+
+      // ─────────────────────────────────────────────────────────
+      // STEP 1: Restore actual batch boxes (reverse of FIFO deduction)
+      // We fill batches in REVERSE order (latest first = LIFO restore)
+      // to mirror what was deducted FIFO
+      // ─────────────────────────────────────────────────────────
+      const realBatchIndices = [];
+      stockItem.batches.forEach((batch, idx) => {
+        const type = batch.adjustmentType;
+        if (!type || type === "batch") realBatchIndices.push(idx);
+      });
+
+      // Sort descending by date → restore into most-recent batch first
+      realBatchIndices.sort((a, b) => {
+        const dateA = stockItem.batches[a].date
+          ? new Date(stockItem.batches[a].date)
+          : new Date(0);
+        const dateB = stockItem.batches[b].date
+          ? new Date(stockItem.batches[b].date)
+          : new Date(0);
+        return dateB - dateA; // newest first
+      });
+
+      let remainingToRestore = restoredQty;
+
+      for (const idx of realBatchIndices) {
+        if (remainingToRestore <= 0) break;
+
+        const batch = stockItem.batches[idx];
+        const batchLC = fixPrecision(Number(batch.lc || 0));
+
+        // We don't have a hard cap here since we're restoring what was taken.
+        // Add back as much as needed into each batch slot.
+        const restoreToThisBatch = remainingToRestore;
+        const newBatchBoxes = fixPrecision(
+          (Number(batch.boxes) || 0) + restoreToThisBatch,
+        );
+
+        stockItem.batches[idx].boxes = newBatchBoxes;
+        stockItem.batches[idx].amount = fixPrecision(newBatchBoxes * batchLC);
+
+        remainingToRestore = 0; // fully restored in one batch (simplest correct approach)
+      }
+
+      // If no real batches exist at all, create a placeholder batch
+      if (realBatchIndices.length === 0 && remainingToRestore > 0) {
+        stockItem.batches.push({
+          boxes: remainingToRestore,
+          lc: 0,
+          fob: 0,
+          cif: 0,
+          amount: 0,
+          expiryDate: new Date(
+            new Date().setFullYear(new Date().getFullYear() + 1),
+          ),
+          date: new Date(),
+          adjustmentType: "batch",
+        });
+        remainingToRestore = 0;
+      }
+
+      // ─────────────────────────────────────────────────────────
+      // STEP 2: Recalculate totalBoxesFromBatches from restored batches
+      // ─────────────────────────────────────────────────────────
+      let totalBoxesFromBatches = 0;
+      let newTotalAmount = 0;
+
+      for (const batch of stockItem.batches) {
+        const type = batch.adjustmentType;
+        if (!type || type === "batch") {
+          const boxes = fixPrecision(Number(batch.boxes || 0));
+          const lc = fixPrecision(Number(batch.lc || 0));
+          const batchAmount = fixPrecision(boxes * lc);
+          batch.amount = batchAmount;
+          totalBoxesFromBatches = fixPrecision(totalBoxesFromBatches + boxes);
+          newTotalAmount = fixPrecision(newTotalAmount + batchAmount);
+        }
+      }
+
+      stockItem.totalBoxesFromBatches = totalBoxesFromBatches;
+
+      // ─────────────────────────────────────────────────────────
+      // STEP 3: Also reduce removeStockAdjustment to keep totalBoxes consistent
+      // ─────────────────────────────────────────────────────────
       const previousRemoveAdj = fixPrecision(
         Number(stockItem.removeStockAdjustment || 0),
       );
       const newRemoveStockAdjustment = fixPrecision(
         Math.max(0, previousRemoveAdj - restoredQty),
       );
+      stockItem.removeStockAdjustment = newRemoveStockAdjustment;
 
-      let totalBoxesFromBatches = 0;
-      for (const batch of stockItem.batches) {
-        const type = batch.adjustmentType;
-        if (!type || type === "batch") {
-          totalBoxesFromBatches = fixPrecision(
-            totalBoxesFromBatches + (Number(batch.boxes) || 0),
-          );
-        }
-      }
-      stockItem.totalBoxesFromBatches = totalBoxesFromBatches;
       const addStockAdjustment = fixPrecision(
         Number(stockItem.addStockAdjustment || 0),
       );
@@ -832,22 +911,12 @@ const restoreStockToReportInHand = async (
         ),
       );
 
-      let newTotalAmount = 0;
-      for (const batch of stockItem.batches) {
-        const type = batch.adjustmentType;
-        if (!type || type === "batch") {
-          const boxes = fixPrecision(Number(batch.boxes || 0));
-          const lc = fixPrecision(Number(batch.lc || 0));
-          const batchAmount = fixPrecision(boxes * lc);
-          batch.amount = batchAmount;
-          newTotalAmount = fixPrecision(newTotalAmount + batchAmount);
-        }
-      }
-
+      // ─────────────────────────────────────────────────────────
+      // STEP 4: Recalculate averagePrice from restored amounts
+      // ─────────────────────────────────────────────────────────
       const newAveragePrice =
         newTotalBoxes > 0 ? fixPrecision(newTotalAmount / newTotalBoxes) : 0;
 
-      stockItem.removeStockAdjustment = newRemoveStockAdjustment;
       stockItem.totalAmount = newTotalAmount;
       stockItem.averagePrice = newAveragePrice;
       stockItem.status =
@@ -856,30 +925,44 @@ const restoreStockToReportInHand = async (
           : newTotalBoxes > 0
             ? "Low Stock"
             : "Out of Stock";
-
       stockItem.updatedAt = new Date();
+
+      console.log(`✅ Stock fully restored for "${productName}"`);
+      console.log(`   totalBoxesFromBatches: ${totalBoxesFromBatches}`);
+      console.log(
+        `   removeStockAdjustment: ${previousRemoveAdj} → ${newRemoveStockAdjustment}`,
+      );
+      console.log(`   newTotalBoxes: ${newTotalBoxes}`);
+      console.log(`   newTotalAmount: ${newTotalAmount}`);
+      console.log(`   newAveragePrice: ${newAveragePrice}`);
+
       await stockItem.save({ session });
 
       if (ownSession) {
         await session.commitTransaction();
         session.endSession();
       }
+
       return {
         success: true,
         restored: restoredQty,
         newStockLevel: newTotalBoxes,
-        oldStockLevel: fixPrecision(newTotalBoxes - restoredQty),
         newAmount: newTotalAmount,
+        newAveragePrice,
         message: `Successfully restored ${restoredQty} units`,
       };
     } else {
+      // No stock item found — create a new one as fallback
+      console.log(
+        `📦 Creating new stock item for "${productName}" with ${restoredQty} boxes`,
+      );
+
       const newStockItem = new ReportInHand({
         productName: normalizeProductName(productName),
         supplierName: "System",
         type: "System",
         batches: [
           {
-            batchNumber: `NEW-${Date.now()}`,
             boxes: restoredQty,
             lc: 0,
             fob: 0,
@@ -907,6 +990,7 @@ const restoreStockToReportInHand = async (
         await session.commitTransaction();
         session.endSession();
       }
+
       return {
         success: true,
         restored: restoredQty,
@@ -2848,24 +2932,21 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
     });
   }
 });
+
 router.get("/all", async (req, res) => {
   try {
     const { search = "", tab = "All", saleType = "all" } = req.query;
     const matchConditions = buildMatchConditions(search, tab, saleType);
 
-    // ── Single aggregation replaces the old find() + per-document findById() loop ──
     const enrichedSales = await SaleSummary.aggregate([
       { $match: matchConditions },
       { $sort: { recordingDate: -1 } },
-
-      // $lookup joins Customer in one DB round-trip instead of N findById calls
       {
         $lookup: {
-          from: "customers", // MongoDB collection name (check yours: db.getCollectionNames())
+          from: "customers",
           localField: "customerId",
           foreignField: "_id",
           as: "_customerDoc",
-          // Only pull the 4 fields we actually use — keeps the payload small
           pipeline: [
             {
               $project: {
@@ -2878,8 +2959,6 @@ router.get("/all", async (req, res) => {
           ],
         },
       },
-
-      // Flatten the joined array and map to the same field names the frontend expects
       {
         $addFields: {
           customerPhone: {
@@ -2894,8 +2973,6 @@ router.get("/all", async (req, res) => {
           },
         },
       },
-
-      // Drop the raw joined array — frontend never sees it
       { $unset: "_customerDoc" },
     ]);
 
@@ -3640,12 +3717,10 @@ router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
     if (validIds.length === 0)
       return res.status(400).json({ error: "No valid ObjectIds provided" });
 
-    // Get full documents before deletion for logging
     const toDelete = await SaleSummary.find({ _id: { $in: validIds } }).lean();
 
     const result = await SaleSummary.deleteMany({ _id: { $in: validIds } });
 
-    // Log bulk delete activity
     if (result.deletedCount > 0) {
       await logActivity(req, {
         action: "DELETE",
@@ -3671,6 +3746,9 @@ router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
+// ==========================================
+// DELETE SALE - FIXED VERSION
+// ==========================================
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const { id } = req.params;
   const session = await mongoose.startSession();
@@ -3679,6 +3757,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     const saleToDelete = await SaleSummary.findById(id).session(session);
     if (!saleToDelete) throw new Error("Sales record not found.");
 
+    // Handle MR Cash refund
     if (saleToDelete.paidAmount > 0 && saleToDelete.mrName) {
       const mrCashUpdate = await updateMRCashes(
         saleToDelete.mrName,
@@ -3694,11 +3773,17 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
         );
     }
 
+    // Restore stock for each product
     for (const product of saleToDelete.products || []) {
       const salesQty = Number(product.salesQty) || 0;
       const bonusQty = Number(product.bonusQty) || 0;
       const totalQty = salesQty + bonusQty;
+
       if (totalQty > 0) {
+        console.log(
+          `🔄 Restoring ${totalQty} boxes of "${product.productName}" to stock (deleting sale ${saleToDelete.invoiceNumber})`,
+        );
+
         if (saleToDelete.saleType === "MR Sale" && product.mrId) {
           const deleteMrName = (
             product.mrName ||
@@ -3714,10 +3799,23 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
             deleteMrName,
           );
         } else {
-          await restoreStockToReportInHand(
+          const restoreResult = await restoreStockToReportInHand(
             product.productName,
             totalQty,
             session,
+          );
+
+          if (!restoreResult.success) {
+            console.error(
+              `❌ Failed to restore stock for ${product.productName}: ${restoreResult.message}`,
+            );
+            throw new Error(
+              `Failed to restore stock for ${product.productName}: ${restoreResult.message}`,
+            );
+          }
+
+          console.log(
+            `✅ Stock restored for "${product.productName}": +${totalQty} boxes, New stock level: ${restoreResult.newStockLevel}`,
           );
         }
       }
@@ -3725,7 +3823,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 
     await SaleSummary.findByIdAndDelete(id).session(session);
 
-    // Log delete activity
     await logActivity(req, {
       action: "DELETE",
       actionLabel: `Deleted Sale: ${saleToDelete.invoiceNumber}`,
@@ -3734,19 +3831,25 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       recordId: saleToDelete._id,
       referenceNumber: saleToDelete.invoiceNumber,
       previousData: saleToDelete.toObject(),
-      description: `Sale invoice ${saleToDelete.invoiceNumber} permanently deleted`,
+      description: `Sale invoice ${saleToDelete.invoiceNumber} permanently deleted. Stock restored: ${saleToDelete.products.reduce((sum, p) => sum + (Number(p.salesQty) + Number(p.bonusQty)), 0)} boxes restored.`,
     });
 
     await session.commitTransaction();
     session.endSession();
 
     res.status(200).json({
+      success: true,
       message: "Sales record deleted successfully and stock restored.",
       deletedSale: saleToDelete,
+      stockRestored: saleToDelete.products.reduce(
+        (sum, p) => sum + (Number(p.salesQty) + Number(p.bonusQty)),
+        0,
+      ),
     });
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
+    console.error("❌ DELETE error:", err);
     res
       .status(500)
       .json({ error: err.message || "Failed to delete sales record." });
@@ -4288,7 +4391,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       { new: true, runValidators: true, session },
     );
 
-    // Log update activity
     await logActivity(req, {
       action: "UPDATE",
       actionLabel: `Updated Sale: ${updatedSale.invoiceNumber}`,
@@ -4529,7 +4631,6 @@ router.get("/analytics/custom-range", async (req, res) => {
   }
 });
 
-// ==================== UPDATED ROUTE ====================
 router.get("/table-data", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
@@ -4540,7 +4641,6 @@ router.get("/table-data", async (req, res) => {
       end.setHours(23, 59, 59, 999);
       dateFilter = { invoiceDate: { $gte: start, $lte: end } };
     } else if (period === "All") {
-      // No date filter – fetch all records
       dateFilter = {};
     } else {
       const dateRange = getTableDateRanges(period);
@@ -4614,7 +4714,6 @@ router.get("/table-data", async (req, res) => {
   }
 });
 
-// ✅ FIXED: UTC‑based date ranges for periods
 const getTableDateRanges = (period) => {
   const now = new Date();
   switch (period) {
@@ -4653,9 +4752,6 @@ const getTableDateRanges = (period) => {
   }
 };
 
-// ==========================================
-// Credit Sale Not Received (unchanged)
-// ==========================================
 router.get("/credit-sale-not-received", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
@@ -4750,7 +4846,6 @@ router.get("/credit-sale-not-received", async (req, res) => {
   }
 });
 
-// ✅ ADD LOG ACTIVITY FOR EXPORT
 router.post("/download-excel", async (req, res) => {
   try {
     const { period, startDate, endDate, search, tab, saleType } = req.body;
@@ -4867,7 +4962,6 @@ router.post("/download-excel", async (req, res) => {
       bookType: "xlsx",
     });
 
-    // Log export activity
     await logActivity(req, {
       action: "EXPORT",
       actionLabel: `Exported Sale List (${sales.length} records)`,
@@ -4914,10 +5008,7 @@ router.get("/all-paginated", async (req, res) => {
       { $match: matchConditions },
       {
         $facet: {
-          // Count total matching docs (for pagination controls)
           total: [{ $count: "n" }],
-
-          // Fetch only the current page
           data: [
             { $sort: { recordingDate: -1 } },
             { $skip: skip },

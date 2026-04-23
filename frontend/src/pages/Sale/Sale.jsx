@@ -59,7 +59,6 @@ const getCurrentUserRole = () => {
   try {
     const token = localStorage.getItem("token");
     if (!token) return null;
-    // JWT payload is the second segment (base64url encoded)
     const payload = JSON.parse(atob(token.split(".")[1]));
     return payload?.role || null;
   } catch {
@@ -68,7 +67,6 @@ const getCurrentUserRole = () => {
 };
 
 const isSuperAdmin = () => getCurrentUserRole() === "super admin";
-// ─────────────────────────────────────────────────────────────────────────────
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem("token");
@@ -109,6 +107,253 @@ const filterNumericInput = (value, allowDecimal = true) => {
     filtered = filtered.replace(".", "");
   }
   return filtered;
+};
+// ==========================================
+// EditProductModal - For editing product quantities with text inputs that only accept numbers
+// ==========================================
+const EditProductModal = ({
+  isOpen,
+  onClose,
+  products,
+  onUpdateProducts,
+  title = "Edit Products",
+}) => {
+  const [editableProducts, setEditableProducts] = useState([]);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  useEffect(() => {
+    if (products) {
+      setEditableProducts(products.map(p => ({ ...p, _tempId: Math.random().toString() })));
+      setHasChanges(false);
+    }
+  }, [products]);
+
+  // Helper function to filter numeric input
+  const filterNumericValue = (value, allowDecimal = true) => {
+    if (value === '' || value === undefined) return '';
+    let filtered = value.replace(/[^\d.]/g, '');
+    const parts = filtered.split('.');
+    if (parts.length > 2) {
+      filtered = parts[0] + '.' + parts.slice(1).join('');
+    }
+    if (!allowDecimal) {
+      filtered = filtered.replace('.', '');
+    }
+    // Remove leading zeros
+    if (filtered.startsWith('0') && filtered.length > 1 && !filtered.startsWith('0.')) {
+      filtered = filtered.replace(/^0+/, '');
+      if (filtered === '') filtered = '0';
+    }
+    return filtered;
+  };
+
+  const updateProductField = (index, field, value) => {
+    const updated = [...editableProducts];
+    
+    // Filter the input value to only allow numbers
+    let filteredValue = value;
+    if (field === 'salesQty' || field === 'bonusQty') {
+      filteredValue = filterNumericValue(value, false);
+    } else if (field === 'sellingPrice' || field === 'discount') {
+      filteredValue = filterNumericValue(value, true);
+    }
+    
+    const numValue = parseFloat(filteredValue) || 0;
+    
+    if (field === 'salesQty' || field === 'bonusQty') {
+      updated[index][field] = numValue;
+      updated[index].totalQty = (updated[index].salesQty || 0) + (updated[index].bonusQty || 0);
+      
+      const sellingPrice = updated[index].sellingPrice || 0;
+      const discount = updated[index].discount || 0;
+      updated[index].netSellingAmount = (sellingPrice * (updated[index].salesQty || 0)) - discount;
+      updated[index].amount = (sellingPrice * (updated[index].salesQty || 0)) - discount;
+      
+      updated[index].averageUnitPrice = updated[index].totalQty > 0 
+        ? updated[index].netSellingAmount / updated[index].totalQty 
+        : 0;
+    }
+    
+    if (field === 'sellingPrice') {
+      updated[index][field] = numValue;
+      updated[index].netSellingAmount = (numValue * (updated[index].salesQty || 0)) - (updated[index].discount || 0);
+      updated[index].amount = (numValue * (updated[index].salesQty || 0)) - (updated[index].discount || 0);
+      updated[index].averageUnitPrice = updated[index].totalQty > 0 
+        ? updated[index].netSellingAmount / updated[index].totalQty 
+        : 0;
+    }
+    
+    if (field === 'discount') {
+      updated[index][field] = numValue;
+      updated[index].netSellingAmount = ((updated[index].sellingPrice || 0) * (updated[index].salesQty || 0)) - numValue;
+      updated[index].amount = ((updated[index].sellingPrice || 0) * (updated[index].salesQty || 0)) - numValue;
+      updated[index].averageUnitPrice = updated[index].totalQty > 0 
+        ? updated[index].netSellingAmount / updated[index].totalQty 
+        : 0;
+    }
+    
+    setEditableProducts(updated);
+    setHasChanges(true);
+  };
+
+  const handleSave = () => {
+    const cleanedProducts = editableProducts.map(({ _tempId, ...product }) => product);
+    onUpdateProducts(cleanedProducts);
+    onClose();
+  };
+
+  const canSave = hasChanges && editableProducts.length > 0;
+
+  if (!isOpen) return null;
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[60]">
+      <div className="bg-white w-full max-w-5xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+        >
+          <X size={20} />
+        </button>
+        <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
+          <Edit size={20} /> {title}
+        </h2>
+        <p className="text-sm text-gray-600 mb-4">
+          Edit product quantities, prices, or discounts. Changes will recalculate totals automatically.
+        </p>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead className="bg-gray-100 sticky top-0">
+              <tr>
+                <th className="px-3 py-2 text-left">Product Name</th>
+                <th className="px-3 py-2 text-left">Sales Qty</th>
+                <th className="px-3 py-2 text-left">Bonus Qty</th>
+                <th className="px-3 py-2 text-left">Total Qty</th>
+                <th className="px-3 py-2 text-left">Selling Price ($)</th>
+                <th className="px-3 py-2 text-left">Discount ($)</th>
+                <th className="px-3 py-2 text-left">Net Amount ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {editableProducts.map((product, idx) => (
+                <tr key={product._tempId} className="border-b hover:bg-gray-50">
+                  <td className="px-3 py-2 font-medium">
+                    {product.productName || product.name}
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={product.salesQty || 0}
+                      onChange={(e) => updateProductField(idx, 'salesQty', e.target.value)}
+                      onKeyDown={(e) => {
+                        // Prevent 'e', 'E', '-', '+' characters
+                        if (e.key === 'e' || e.key === 'E' || e.key === '-' || e.key === '+') {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="w-24 border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-200"
+                      placeholder="0"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={product.bonusQty || 0}
+                      onChange={(e) => updateProductField(idx, 'bonusQty', e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'e' || e.key === 'E' || e.key === '-' || e.key === '+') {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="w-24 border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-200"
+                      placeholder="0"
+                    />
+                  </td>
+                  <td className="px-3 py-2 font-medium">
+                    {(product.salesQty || 0) + (product.bonusQty || 0)}
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={product.sellingPrice || 0}
+                      onChange={(e) => updateProductField(idx, 'sellingPrice', e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'e' || e.key === 'E') {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="w-28 border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-200"
+                      placeholder="0.00"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={product.discount || 0}
+                      onChange={(e) => updateProductField(idx, 'discount', e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'e' || e.key === 'E') {
+                          e.preventDefault();
+                        }
+                      }}
+                      className="w-28 border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-indigo-200"
+                      placeholder="0.00"
+                    />
+                  </td>
+                  <td className="px-3 py-2 font-medium text-indigo-600">
+                    ${(product.netSellingAmount || 0).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="bg-gray-50 font-semibold">
+              <tr>
+                <td className="px-3 py-2">Total</td>
+                <td className="px-3 py-2">
+                  {editableProducts.reduce((sum, p) => sum + (p.salesQty || 0), 0)}
+                </td>
+                <td className="px-3 py-2">
+                  {editableProducts.reduce((sum, p) => sum + (p.bonusQty || 0), 0)}
+                </td>
+                <td className="px-3 py-2">
+                  {editableProducts.reduce((sum, p) => sum + (p.salesQty || 0) + (p.bonusQty || 0), 0)}
+                </td>
+                <td className="px-3 py-2">-</td>
+                <td className="px-3 py-2 text-red-600">
+                  ${editableProducts.reduce((sum, p) => sum + (p.discount || 0), 0).toFixed(2)}
+                </td>
+                <td className="px-3 py-2 text-green-600">
+                  ${editableProducts.reduce((sum, p) => sum + (p.netSellingAmount || 0), 0).toFixed(2)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        
+        <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!canSave}
+            className={`px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer ${canSave ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+          >
+            <Save size={16} /> Save Changes
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
 };
 
 // ==========================================
@@ -709,28 +954,28 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
                         >
                           <td className="px-4 py-3 text-gray-400 text-xs font-mono">
                             {inv.row ? `#${inv.row}` : "—"}
-                          </td>
+                           </td>
                           <td className="px-4 py-3 font-semibold text-gray-800">
                             {inv.invoiceNumber || "Unknown"}
-                          </td>
+                           </td>
                           <td className="px-4 py-3 text-gray-600 text-xs">
                             {inv.mrName || "—"}
-                          </td>
+                           </td>
                           <td className="px-4 py-3 text-gray-600 text-xs">
                             {inv.customerName || "—"}
-                          </td>
+                           </td>
                           <td className="px-4 py-3">
                             <span
                               className={`text-xs font-semibold px-2 py-1 rounded-full border ${color}`}
                             >
                               {label}
                             </span>
-                          </td>
+                           </td>
                           <td className="px-4 py-3 text-red-700 text-xs max-w-xs leading-relaxed">
                             {isLong && !isExpanded
                               ? `${reason.slice(0, 90)}…`
                               : reason}
-                          </td>
+                           </td>
                           <td className="px-3 py-3 text-center">
                             {isLong && (
                               <button
@@ -746,7 +991,7 @@ const FailedInvoicesModal = ({ isOpen, onClose, failedInvoices }) => {
                                 )}
                               </button>
                             )}
-                          </td>
+                           </td>
                         </tr>
                         {isExpanded && (
                           <tr className="border-t border-red-100 bg-red-50">
@@ -1072,7 +1317,7 @@ const MrStockValidationModal = ({ isOpen, onClose, stockIssues, onCancel }) => {
 };
 
 // ==========================================
-// ImportSalesModal  (unchanged logic, kept intact)
+// ImportSalesModal (unchanged logic, kept intact)
 // ==========================================
 const ImportSalesModal = ({
   isOpen,
@@ -2505,7 +2750,6 @@ const ProductDetailsModal = ({
   products,
   title = "Product Details",
 }) => {
-  // ── Only superadmin sees LC and Profit/Loss ──
   const showSensitiveColumns = isSuperAdmin();
 
   if (!isOpen) return null;
@@ -2561,7 +2805,6 @@ const ProductDetailsModal = ({
             <table className="w-full text-sm text-center border-collapse">
               <thead className="bg-gray-100">
                 <tr>
-                  {/* Base columns — always visible */}
                   {[
                     "Product Name",
                     "Sales Qty",
@@ -2580,7 +2823,6 @@ const ProductDetailsModal = ({
                       {h}
                     </th>
                   ))}
-                  {/* Sensitive columns — superadmin only */}
                   {showSensitiveColumns && (
                     <>
                       <th className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap border-b">
@@ -2634,7 +2876,6 @@ const ProductDetailsModal = ({
                     </tr>
                   );
                 })}
-                {/* Totals row */}
                 <tr className="bg-gray-100 font-semibold">
                   <td className="px-3 py-2">Total</td>
                   <td className="px-3 py-2">{totals.totalSalesQty}</td>
@@ -2710,7 +2951,10 @@ const Sales = () => {
   const { statuses, loading } = useInitialSaleData();
   const [saleTypeTab, setSaleTypeTab] = useState("all");
 
-  // ── Role check (computed once per render, stable) ──
+  // State for product editing
+  const [isEditProductModalOpen, setIsEditProductModalOpen] = useState(false);
+  const [pendingProductUpdates, setPendingProductUpdates] = useState(null);
+
   const canSeeSensitiveData = useMemo(() => isSuperAdmin(), []);
 
   const [isMobileView, setIsMobileView] = useState(false);
@@ -2792,18 +3036,15 @@ const Sales = () => {
     );
     setSales(sortedData);
   }, []);
-  // In Sales.jsx, replace the fetchSaleSummaries function with:
 
   const fetchSaleSummaries = useCallback(async () => {
     try {
       setLoadingData(true);
       const response = await axios.get(`${backendUrl}/api/sales/all`, {
-        // headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-             headers: {
+        headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-  
       });
 
       if (
@@ -2832,22 +3073,6 @@ const Sales = () => {
       setLoadingData(false);
     }
   }, [processSalesData]);
-  // const fetchSaleSummaries = useCallback(async () => {
-  //   try {
-  //     setLoadingData(true);
-  //     const res = await fetch(`${backendUrl}/api/sales/all`, {
-  //       headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
-  //     });
-  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-  //     const data = await res.json();
-  //     processSalesData(data.summaries);
-  //   } catch (error) {
-  //     showToast("error", error.message || "Error fetching sale summaries");
-  //     setSales([]);
-  //   } finally {
-  //     setLoadingData(false);
-  //   }
-  // }, [processSalesData]);
 
   const checkPurchaseInventories = useCallback(async () => {
     try {
@@ -3052,7 +3277,6 @@ const Sales = () => {
     }
   }, [selected, fetchSaleSummaries]);
 
-  // ── Table columns — LC and P/L only for superadmin ──────────────────────
   const tableColumns = useMemo(() => {
     const base = [
       "invoiceNumber",
@@ -3203,6 +3427,7 @@ const Sales = () => {
     setIsViewModalOpen(true);
   }, []);
 
+  // Enhanced editSale function with product processing
   const editSale = useCallback(
     (sale) => {
       setSelectedSale(sale);
@@ -3211,9 +3436,20 @@ const Sales = () => {
           mr.mrName?.toLowerCase().trim() ===
           (sale.mrName || "").toLowerCase().trim(),
       );
+      
+      const processedProducts = (sale.products || []).map(p => ({
+        ...p,
+        salesQty: p.salesQty || 0,
+        bonusQty: p.bonusQty || 0,
+        totalQty: (p.salesQty || 0) + (p.bonusQty || 0),
+        sellingPrice: p.sellingPrice || 0,
+        discount: p.discount || 0,
+        netSellingAmount: p.netSellingAmount || ((p.sellingPrice || 0) * (p.salesQty || 0)) - (p.discount || 0),
+      }));
+      
       setForm({
         ...sale,
-        products: sale.products || [],
+        products: processedProducts,
         mrId: matchedMr
           ? String(matchedMr._id)
           : sale.mrId
@@ -3385,6 +3621,29 @@ const Sales = () => {
     [customerList],
   );
 
+  // Handle product update from EditProductModal
+  const handleProductUpdate = useCallback((updatedProducts) => {
+    setPendingProductUpdates(updatedProducts);
+    const confirmChanges = async () => {
+      const result = await confirmDialog({
+        title: "Update Products",
+        text: "Updating product quantities will affect the total amount. Are you sure?",
+        icon: "warning",
+        confirmButtonText: "Yes, update",
+        cancelButtonText: "Cancel",
+      });
+      if (result.isConfirmed) {
+        setForm(prev => ({
+          ...prev,
+          products: updatedProducts
+        }));
+        showToast("success", "Products updated. Please save the sale to apply changes.");
+      }
+      setPendingProductUpdates(null);
+    };
+    confirmChanges();
+  }, []);
+
   const customerOptions = useMemo(() => {
     if (customerList.length === 0 && !customerListLoading)
       return [{ value: "", label: "No Customers Available", disabled: true }];
@@ -3485,13 +3744,25 @@ const Sales = () => {
     setForm((prev) => ({ ...prev, customerZone: value.trim() }));
   };
 
+  // Enhanced handleUpdateSale with product recalculation
   const handleUpdateSale = useCallback(
     async (e) => {
       e.preventDefault();
       try {
         const totals = calculateProductTotals(form.products);
+        
+        const updatedProducts = form.products.map(p => ({
+          ...p,
+          salesQty: p.salesQty || 0,
+          bonusQty: p.bonusQty || 0,
+          totalQty: (p.salesQty || 0) + (p.bonusQty || 0),
+          netSellingAmount: p.netSellingAmount || ((p.sellingPrice || 0) * (p.salesQty || 0)) - (p.discount || 0),
+          amount: p.amount || ((p.sellingPrice || 0) * (p.salesQty || 0)) - (p.discount || 0),
+        }));
+        
         const updatedForm = {
           ...form,
+          products: updatedProducts,
           totalAmount: totals.totalAmount,
           dueAmount: totals.netAmount - parseFloat(form.paidAmount || 0),
           paymentStatus: computePaymentStatus(
@@ -3503,17 +3774,20 @@ const Sales = () => {
               ? Number(form.creditDays)
               : DEFAULT_CREDIT_DAYS,
         };
+        
         const token = localStorage.getItem("token");
         const res = await axios.put(
           `${backendUrl}/api/sales/${form._id}`,
           updatedForm,
           { headers: { Authorization: `Bearer ${token}` } },
         );
+        
         if (res.status === 200) {
           showToast("success", "Sales record updated successfully");
           setIsEditModalOpen(false);
           setSelectedSale(null);
           fetchSaleSummaries();
+          window.dispatchEvent(new CustomEvent("inventory-updated"));
         }
       } catch (err) {
         showToast(
@@ -3608,7 +3882,6 @@ const Sales = () => {
             "Due Amount": sale.dueAmount || 0,
             "Sale Type": isMRSaleDoc(sale) ? "MR Sale" : "Normal Sale",
           };
-          // Only include LC and Profit/Loss for superadmin exports
           if (canSeeSensitiveData) {
             row["LC"] = product.lc || 0;
             row["Profit/Loss"] = product.profitLoss || 0;
@@ -3669,11 +3942,20 @@ const Sales = () => {
         customerList={customerList}
         productsList={productsList}
       />
+      
       <ProductDetailsModal
         isOpen={isProductModalOpen}
         onClose={() => setIsProductModalOpen(false)}
         products={selectedSaleProducts}
         title="Product Details"
+      />
+
+      <EditProductModal
+        isOpen={isEditProductModalOpen}
+        onClose={() => setIsEditProductModalOpen(false)}
+        products={pendingProductUpdates}
+        onUpdateProducts={handleProductUpdate}
+        title="Edit Sale Products"
       />
 
       {/* ── EDIT MODAL ── */}
@@ -3829,36 +4111,48 @@ const Sales = () => {
                   )}
                 </div>
 
+                {/* Enhanced Products Section with Edit Products Button */}
                 <div className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-lg font-medium text-gray-700">
                       Products ({form.products?.length || 0})
                     </h3>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSaleProducts(form.products || []);
-                        setIsProductModalOpen(true);
-                      }}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
-                    >
-                      View All Products
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSaleProducts(form.products || []);
+                          setIsProductModalOpen(true);
+                        }}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer text-sm"
+                      >
+                        <Eye size={16} className="inline mr-1" /> View Details
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingProductUpdates(form.products || []);
+                          setIsEditProductModalOpen(true);
+                        }}
+                        className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 cursor-pointer text-sm"
+                      >
+                        <Edit size={16} className="inline mr-1" /> Edit Products
+                      </button>
+                    </div>
                   </div>
+                  
                   {form.products && form.products.length > 0 ? (
                     <div className="space-y-2 max-h-48 overflow-y-auto">
                       {form.products.map((product, index) => (
-                        <div
-                          key={index}
-                          className="border border-gray-200 rounded-lg p-3"
-                        >
+                        <div key={index} className="border border-gray-200 rounded-lg p-3">
                           <h4 className="font-medium text-gray-800">
                             {product.productName || `Product ${index + 1}`}
                           </h4>
-                          <div className="text-sm text-gray-600 mt-1">
-                            Qty: {product.salesQty || 0} | Bonus:{" "}
-                            {product.bonusQty || 0} | Price: $
-                            {(product.sellingPrice || 0).toFixed(2)}
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm text-gray-600 mt-1">
+                            <div>Sales Qty: <span className="font-semibold">{product.salesQty || 0}</span></div>
+                            <div>Bonus Qty: <span className="font-semibold">{product.bonusQty || 0}</span></div>
+                            <div>Price: <span className="font-semibold">${(product.sellingPrice || 0).toFixed(2)}</span></div>
+                            <div>Net: <span className="font-semibold text-indigo-600">${(product.netSellingAmount || 0).toFixed(2)}</span></div>
                           </div>
                         </div>
                       ))}
@@ -3884,7 +4178,6 @@ const Sales = () => {
                       <div className="font-semibold text-gray-800">{val}</div>
                     </div>
                   ))}
-                  {/* Profit/Loss in edit modal — superadmin only */}
                   {canSeeSensitiveData && (
                     <div className="bg-gray-50 p-3 rounded-lg">
                       <div className="text-xs text-gray-500">Profit/Loss</div>
@@ -4037,7 +4330,7 @@ const Sales = () => {
           document.body,
         )}
 
-      {/* ── View Modal ── */}
+      {/* ── View Modal ── (keeping as is) */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
@@ -4135,7 +4428,6 @@ const Sales = () => {
                 )}
               </div>
 
-              {/* Financial summary — Profit/Loss only for superadmin */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4 mb-6">
                 {[
                   ["Total Amount", `$${formTotals.totalAmount.toFixed(2)}`],
