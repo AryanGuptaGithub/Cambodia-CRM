@@ -98,7 +98,7 @@ const calculateStockStatus = (boxes) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// updateReportInHand - UPDATED to handle product updates correctly
+// updateReportInHand
 // ─────────────────────────────────────────────────────────────────────────────
 const updateReportInHand = async (
   productData,
@@ -129,7 +129,6 @@ const updateReportInHand = async (
       await getStandardizedProductName(productName);
     const finalProductName = normalizeProductName(standardizedProductName);
 
-    // For subtract operation or when updating, we need to handle quantity difference
     if (operation === "subtract") {
       const existingDoc = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
@@ -195,13 +194,11 @@ const updateReportInHand = async (
         },
       );
     } else if (operation === "update") {
-      // For update operation: remove old quantity and add new quantity
       const existingDoc = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
       }).lean();
 
       if (!existingDoc) {
-        // If no existing stock, just add the new quantity
         const lcValue = Number(lc || 0);
         const amount = newQty * lcValue;
 
@@ -240,7 +237,6 @@ const updateReportInHand = async (
         return;
       }
 
-      // First, subtract the old quantity
       let remainingToRemove = oldQty;
       const batches = [...(existingDoc.batches || [])];
       batches.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -268,7 +264,6 @@ const updateReportInHand = async (
         }
       }
 
-      // Then, add the new quantity as a new batch
       if (newQty > 0) {
         const lcValue = Number(lc || 0);
         const amount = newQty * lcValue;
@@ -286,7 +281,6 @@ const updateReportInHand = async (
           adjustmentType: "batch",
         };
 
-        // Check if batch already exists to avoid duplicates
         if (!batchExists(updatedBatches, newBatch)) {
           updatedBatches.push(newBatch);
         }
@@ -452,6 +446,8 @@ const buildProductMaps = async (products) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: process raw product lines → final product array + totalAmount
+// ✅ FIXED: now reads lc/lcNumber (both), quantityPerBoxStrip/qtyBox (both),
+//           expiryDate/expiredDate (both) so both Add form and Import work
 // ─────────────────────────────────────────────────────────────────────────────
 const processProductLines = async (rawProducts) => {
   const {
@@ -464,14 +460,21 @@ const processProductLines = async (rawProducts) => {
   let totalAmount = 0;
   const products = await Promise.all(
     rawProducts.map(async (p) => {
-      const qty = Number(p.quantityPerBoxStrip || 0);
-      const productBatch = productBatchMap.get(p.productId);
-      const lc = Number(p.lc) || productBatch?.lc || 0;
-      const fob = Number(p.fob) || productBatch?.fob || 0;
-      const cif = Number(p.cif) || productBatch?.cif || 0;
+      // ✅ Accept both quantityPerBoxStrip (from Add form) and qtyBox (legacy)
+      const qty = Number(p.quantityPerBoxStrip ?? p.qtyBox ?? 0);
+
+      const productBatch = p.productId
+        ? productBatchMap.get(p.productId.toString())
+        : null;
+
+      // ✅ Accept both lc (from Add form) and lcNumber (from import)
+      const lc = Number(p.lc ?? p.lcNumber ?? productBatch?.lc ?? 0);
+      const fob = Number(p.fob ?? productBatch?.fob ?? 0);
+      const cif = Number(p.cif ?? productBatch?.cif ?? 0);
       const amount = qty * lc;
       totalAmount += amount;
 
+      // Resolve product name
       let productNameToUse = p.productName;
       if (p.productId && productNameMap.has(p.productId.toString())) {
         productNameToUse = productNameMap.get(p.productId.toString());
@@ -483,10 +486,13 @@ const processProductLines = async (rawProducts) => {
         (p.productId && productSellingPriceMap.get(p.productId.toString())) ||
         0;
 
+      // ✅ Accept both expiryDate (from Add form) and expiredDate (legacy)
+      const expiryDate = p.expiryDate ?? p.expiredDate ?? null;
+
       return {
         productName: productNameToUse,
-        type: p.type || productTypeMap.get(p.productId) || "",
-        expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
+        type: p.type || productTypeMap.get(p.productId?.toString()) || "",
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
         quantityPerBoxStrip: qty,
         lc,
         fob,
@@ -872,7 +878,7 @@ router.get("/", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /  –  Create purchase invoice                         ✅ LOGGED
+// POST /  –  Create purchase invoice
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   try {
@@ -895,6 +901,7 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // ✅ processProductLines now handles lc/lcNumber and quantityPerBoxStrip/qtyBox
     const { products, totalAmount } = await processProductLines(data.products);
 
     const invoice = await purchaseInventory.create({
@@ -904,7 +911,7 @@ router.post("/", async (req, res) => {
       totalAmount,
     });
 
-    // Update stock - ADD operation
+    // Update stock
     for (const p of products) {
       await updateReportInHand(
         {
@@ -950,7 +957,7 @@ router.post("/", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PUT /:id  –  Update purchase invoice - FIXED to only update changed products
+// PUT /:id  –  Update purchase invoice
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
@@ -958,7 +965,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     const oldInvoice = await purchaseInventory.findById(id).lean();
     if (!oldInvoice) return res.status(404).json({ message: "Not found" });
 
-    // Create maps for old and new products for comparison
     const oldProductsMap = new Map();
     for (const p of oldInvoice.products || []) {
       oldProductsMap.set(p.productName, p);
@@ -969,13 +975,11 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       newProductsMap.set(p.productName, p);
     }
 
-    // Get all unique product names
     const allProductNames = new Set([
       ...oldProductsMap.keys(),
       ...newProductsMap.keys(),
     ]);
 
-    // Process each product - only update changed ones
     for (const productName of allProductNames) {
       const oldProduct = oldProductsMap.get(productName);
       const newProduct = newProductsMap.get(productName);
@@ -984,16 +988,12 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         ? Number(oldProduct.quantityPerBoxStrip || 0)
         : 0;
       const newQty = newProduct
-        ? Number(newProduct.quantityPerBoxStrip || 0)
+        ? Number(newProduct.quantityPerBoxStrip ?? newProduct.qtyBox ?? 0)
         : 0;
 
-      if (oldQty === newQty) {
-        // No change - skip
-        continue;
-      }
+      if (oldQty === newQty) continue;
 
       if (oldQty > 0 && newQty === 0) {
-        // Product removed - subtract old quantity
         await updateReportInHand(
           {
             productName: oldProduct.productName || "",
@@ -1010,16 +1010,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           0,
         );
       } else if (oldQty === 0 && newQty > 0) {
-        // New product added - add new quantity
         await updateReportInHand(
           {
             productName: newProduct.productName || "",
             supplierName: req.body.supplierName || oldInvoice.supplierName,
             quantityPerBoxStrip: newQty,
-            lc: newProduct.lc || 0,
+            lc: Number(newProduct.lc ?? newProduct.lcNumber ?? 0),
             fob: newProduct.fob || 0,
             cif: newProduct.cif || 0,
-            expiryDate: newProduct.expiryDate,
+            expiryDate: newProduct.expiryDate ?? newProduct.expiredDate,
             type: newProduct.type || "",
             sellingPrice: newProduct.sellingPrice || 0,
           },
@@ -1027,16 +1026,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
           0,
         );
       } else if (oldQty > 0 && newQty > 0 && oldQty !== newQty) {
-        // Quantity changed - update using the update operation
         await updateReportInHand(
           {
             productName: newProduct.productName || "",
             supplierName: req.body.supplierName || oldInvoice.supplierName,
             quantityPerBoxStrip: newQty,
-            lc: newProduct.lc || 0,
+            lc: Number(newProduct.lc ?? newProduct.lcNumber ?? 0),
             fob: newProduct.fob || 0,
             cif: newProduct.cif || 0,
-            expiryDate: newProduct.expiryDate,
+            expiryDate: newProduct.expiryDate ?? newProduct.expiredDate,
             type: newProduct.type || "",
             sellingPrice: newProduct.sellingPrice || 0,
           },
@@ -1046,7 +1044,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       }
     }
 
-    // Process new products
     const { products: processedProducts, totalAmount } =
       await processProductLines(req.body.products || []);
 
@@ -1083,14 +1080,13 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELETE /:id  –  Delete single invoice                      ✅ LOGGED
+// DELETE /:id  –  Delete single invoice
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
     const invoice = await purchaseInventory.findById(req.params.id).lean();
     if (!invoice) return res.status(404).json({ error: "Not found" });
 
-    // Subtract stock for all products
     for (const p of invoice.products || []) {
       await updateReportInHand(
         {
@@ -1131,7 +1127,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DELETE /  –  Bulk delete invoices                          ✅ LOGGED
+// DELETE /  –  Bulk delete invoices
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
@@ -1143,7 +1139,6 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
     if (invoices.length === 0)
       return res.status(404).json({ error: "No purchases found" });
 
-    // Subtract stock for all invoices
     for (const inv of invoices) {
       for (const p of inv.products || []) {
         await updateReportInHand(
@@ -1188,7 +1183,7 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /import  –  Bulk import invoices                      ✅ LOGGED
+// POST /import  –  Bulk import invoices
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/import", async (req, res) => {
   try {
@@ -1208,7 +1203,9 @@ router.post("/import", async (req, res) => {
         const processedProducts = await Promise.all(
           invoiceData.products.map(async (product) => {
             const quantityPerBoxStrip =
-              parseFloat(product.quantityPerBoxStrip) || 0;
+              parseFloat(product.quantityPerBoxStrip) ||
+              parseFloat(product.qtyBox) ||
+              0;
             let lc =
               parseFloat(product.lc) || parseFloat(product.lcNumber) || 0;
             let fob = parseFloat(product.fob) || 0;
@@ -1242,14 +1239,14 @@ router.post("/import", async (req, res) => {
                 sellingPrice = productInfo.sellingPrice || 0;
             }
 
-            const expiryDate = product.expiryDate
-              ? new Date(product.expiryDate)
-              : null;
+            // ✅ Accept both expiryDate and expiredDate from import data
+            const expiryDate =
+              product.expiryDate ?? product.expiredDate ?? null;
             const amount = quantityPerBoxStrip * lc;
             return {
               productName: productNameToUse,
               type: product.type || productInfo?.type || "",
-              expiryDate,
+              expiryDate: expiryDate ? new Date(expiryDate) : null,
               quantityPerBoxStrip,
               lc,
               fob,
@@ -1342,7 +1339,7 @@ router.post("/import", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Remaining unchanged utility / report routes
+// Remaining utility / report routes (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post("/reports-in-hand/merge-decimal-variations", async (req, res) => {

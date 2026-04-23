@@ -30,6 +30,14 @@ const formatDateForLog = (date) => {
   return new Date(date).toISOString().split("T")[0];
 };
 
+// Helper to ensure 2 decimal places without rounding errors
+const toFixedAmount = (value) => {
+  const num = typeof value === "number" ? value : parseFloat(value);
+  if (isNaN(num)) return 0;
+  // Use Math.round to avoid floating point issues
+  return Math.round(num * 100) / 100;
+};
+
 // ─────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────
@@ -60,19 +68,14 @@ const getPendingAdvance = async (employeeId, session = null) => {
     ]);
     if (session) agg = agg.session(session);
     const result = await agg;
-    return result[0]?.total || 0;
+    return toFixedAmount(result[0]?.total || 0);
   } catch {
     return 0;
   }
 };
 
 // ─────────────────────────────────────────────
-// CORE: Calculate salary
-// New rules:
-//   workingDays = days in month − Sundays − holidays (approved leave type="holiday")
-//   if presentDays >= workingDays → netSalary = fullBasicSalary (no deduction)
-//   if presentDays < workingDays  → deduct only unpaid leaves taken
-//   NO per-minute, NO extra time, NO adjusted basic
+// CORE: Calculate salary with exact values
 // ─────────────────────────────────────────────
 const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
   const employee = await Staff.findById(employeeId).session(session);
@@ -84,21 +87,19 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
   if (!basicPayroll)
     throw new Error("Basic payroll record not found for employee");
 
-  const fullBasicSalary = parseFloat(basicPayroll.currentBasicSalary || 0);
+  const fullBasicSalary = toFixedAmount(basicPayroll.currentBasicSalary || 0);
 
   const [year, month] = period.split("-").map(Number);
   const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
   const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
   const actualDaysInMonth = new Date(year, month, 0).getDate();
 
-  // ── Fetch all approved leaves for the month ──────────────────────────────
   const leaveRecords = await Leave.find({
     userId: employeeId,
     leaveDate: { $gte: startDate, $lte: endDate },
     status: "approved",
   }).session(session || null);
 
-  // ── Count holiday dates (to subtract from working days) ──────────────────
   const holidayDatesSet = new Set();
   for (const leave of leaveRecords) {
     if (leave.leaveType === "holiday") {
@@ -107,7 +108,6 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
     }
   }
 
-  // ── Working days = all days − Sundays − holidays ──────────────────────────
   let workingDaysInMonth = 0;
   for (
     let d = new Date(startDate);
@@ -121,9 +121,10 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
     }
   }
 
-  const perDaySalary = fullBasicSalary / workingDaysInMonth;
+  if (workingDaysInMonth === 0) workingDaysInMonth = 1;
 
-  // ── Attendance: present days ──────────────────────────────────────────────
+  const perDaySalary = toFixedAmount(fullBasicSalary / workingDaysInMonth);
+
   const attendanceRecords = await Attendance.find({
     userId: employeeId,
     loginTime: { $gte: startDate, $lte: endDate },
@@ -135,7 +136,6 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
   );
   const presentDays = presentDatesSet.size;
 
-  // ── Count unpaid leaves taken ─────────────────────────────────────────────
   let unpaidLeaveDays = 0;
   let paidLeaveDays = 0;
   let swapLeaveDays = 0;
@@ -146,7 +146,6 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
     const leaveDate = new Date(leave.leaveDate);
     const ds = leaveDate.toISOString().split("T")[0];
     const dow = leaveDate.getUTCDay();
-    // Only count working-day leaves (not Sundays, not holidays already excluded)
     if (dow !== 0 && !leaveDatesSet.has(ds)) {
       leaveDatesSet.add(ds);
       totalLeaveDays++;
@@ -163,25 +162,21 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
     }
   }
 
-  // ── Salary rule ───────────────────────────────────────────────────────────
-  // If present >= working days → full salary (attended all working days)
-  // If present < working days  → deduct only for unpaid leaves
-  let leaveDeduction = 0;
+  let leaveDeduction = toFixedAmount(0);
   let netSalaryBeforeAllowances;
 
   if (presentDays >= workingDaysInMonth) {
-    // Full salary — no deduction
     netSalaryBeforeAllowances = fullBasicSalary;
   } else {
-    // Deduct only unpaid leave days
-    leaveDeduction = unpaidLeaveDays * perDaySalary;
-    netSalaryBeforeAllowances = fullBasicSalary - leaveDeduction;
+    leaveDeduction = toFixedAmount(unpaidLeaveDays * perDaySalary);
+    netSalaryBeforeAllowances = toFixedAmount(fullBasicSalary - leaveDeduction);
     if (netSalaryBeforeAllowances < 0) netSalaryBeforeAllowances = 0;
   }
 
   const advanceDeduction = await getPendingAdvance(employeeId, session);
-
-  const totalSalary = Math.max(0, netSalaryBeforeAllowances - advanceDeduction);
+  const totalSalary = toFixedAmount(
+    Math.max(0, netSalaryBeforeAllowances - advanceDeduction),
+  );
 
   return {
     employee: {
@@ -192,25 +187,22 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
     period,
     salaryCalculation: {
       basicSalary: fullBasicSalary,
-      perDaySalary,
+      perDaySalary: perDaySalary,
       actualDaysInMonth,
-      workingDaysInMonth, // days in month minus Sundays minus holidays
+      workingDaysInMonth,
       presentDays,
       totalLeaves: totalLeaveDays,
       paidLeaves: paidLeaveDays,
       unpaidLeaves: unpaidLeaveDays,
       swapLeaves: swapLeaveDays,
-      leaveDeduction,
-      advanceDeduction,
-      totalSalary, // net before allowances
+      leaveDeduction: leaveDeduction,
+      advanceDeduction: advanceDeduction,
+      totalSalary: totalSalary,
       isFull: presentDays >= workingDaysInMonth,
     },
   };
 };
 
-// ─────────────────────────────────────────────
-// HELPER: Get "Withdraw" category
-// ─────────────────────────────────────────────
 let _withdrawCategory = null;
 const getWithdrawCategory = async (session = null) => {
   if (_withdrawCategory) return _withdrawCategory;
@@ -241,9 +233,6 @@ const getWithdrawCategory = async (session = null) => {
   return { _id: null, name: "Withdraw" };
 };
 
-// ─────────────────────────────────────────────
-// HELPER: Get "Salary" category
-// ─────────────────────────────────────────────
 let _salaryCategory = null;
 const getSalaryCategory = async (session = null) => {
   if (_salaryCategory) return _salaryCategory;
@@ -271,9 +260,6 @@ const getSalaryCategory = async (session = null) => {
   }
 };
 
-// ─────────────────────────────────────────────
-// HELPER: Create Cash & Bank Transaction + Expense
-// ─────────────────────────────────────────────
 const createPayrollFinancialRecords = async ({
   payrollNetSalary,
   payrollCode,
@@ -285,6 +271,14 @@ const createPayrollFinancialRecords = async ({
   createdBy,
   session,
 }) => {
+  // Skip creating expense if net salary is zero or negative
+  if (!payrollNetSalary || payrollNetSalary <= 0) {
+    console.log(
+      `Skipping expense creation for ${payrollCode} - Net salary: ${payrollNetSalary}`,
+    );
+    return;
+  }
+
   const payrollDate = new Date();
   const remarks = `Salary payment - ${employeeName} (${period})`;
 
@@ -292,36 +286,38 @@ const createPayrollFinancialRecords = async ({
   const salaryCategory = await getSalaryCategory(session);
 
   for (const { account, amount } of sourceAccounts) {
-    const txn = new Transaction({
-      categoryType: withdrawCategory.name,
-      sourceAccount: account.name || account.code || "Unknown Account",
-      source: account._id,
-      destination: null,
-      supplier: employeeId,
-      date: payrollDate,
-      amount: amount,
-      exchangeLoss: 0,
-      finalAmount: amount,
-      accountType: "Company Account",
-      remarks: remarks,
-      description: remarks,
-      invoiceNo: "NA",
-      isConversionLoss: false,
-      transactionType: "payment outward",
-      importStatus: "imported",
-      importErrors: [],
-    });
-    await txn.save({ session });
+    if (amount > 0) {
+      const txn = new Transaction({
+        categoryType: withdrawCategory.name,
+        sourceAccount: account.name || account.code || "Unknown Account",
+        source: account._id,
+        destination: null,
+        supplier: employeeId,
+        date: payrollDate,
+        amount: toFixedAmount(amount),
+        exchangeLoss: 0,
+        finalAmount: toFixedAmount(amount),
+        accountType: "Company Account",
+        remarks: remarks,
+        description: remarks,
+        invoiceNo: "NA",
+        isConversionLoss: false,
+        transactionType: "payment outward",
+        importStatus: "imported",
+        importErrors: [],
+      });
+      await txn.save({ session });
+    }
   }
 
   const resolvedCategoryId = salaryCategory._id || withdrawCategory._id;
-  if (resolvedCategoryId) {
+  if (resolvedCategoryId && payrollNetSalary > 0) {
     const resolvedSourceAccountId = sourceAccounts[0]?.account?._id || null;
     const expense = new Expense({
       category: resolvedCategoryId,
       categoryType: resolvedCategoryId,
-      amount: parseFloat(Number(payrollNetSalary).toFixed(2)),
-      finalAmount: parseFloat(Number(payrollNetSalary).toFixed(2)),
+      amount: toFixedAmount(payrollNetSalary),
+      finalAmount: toFixedAmount(payrollNetSalary),
       exchangeLoss: 0,
       description: remarks,
       remarks: remarks,
@@ -343,8 +339,8 @@ const createPayrollFinancialRecords = async ({
       sources: sourceAccounts.map(({ account, amount }) => ({
         accountId: account._id,
         accountName: account.name || account.code || "Unknown Account",
-        amount: amount,
-        finalAmount: amount,
+        amount: toFixedAmount(amount),
+        finalAmount: toFixedAmount(amount),
       })),
     });
     await expense.save({ session });
@@ -395,7 +391,7 @@ router.get("/basic-payroll/employee/:employeeId", async (req, res) => {
       data: {
         _id: basicPayroll._id,
         employeeId: basicPayroll.employeeId,
-        currentBasicSalary: basicPayroll.currentBasicSalary || 0,
+        currentBasicSalary: toFixedAmount(basicPayroll.currentBasicSalary || 0),
         currentEffectiveFrom: basicPayroll.currentEffectiveFrom,
         employeeName: basicPayroll.employeeName,
       },
@@ -479,7 +475,10 @@ router.get("/", async (req, res) => {
     }).lean();
     const basicSalaryMap = {};
     basicPayrolls.forEach(
-      (bp) => (basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0),
+      (bp) =>
+        (basicSalaryMap[bp.employeeId] = toFixedAmount(
+          bp.currentBasicSalary || 0,
+        )),
     );
 
     const transformedPayrolls = payrolls.map((payroll) => {
@@ -585,7 +584,10 @@ router.get("/export/csv", async (req, res) => {
     }).lean();
     const basicSalaryMap = {};
     basicPayrolls.forEach(
-      (bp) => (basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0),
+      (bp) =>
+        (basicSalaryMap[bp.employeeId] = toFixedAmount(
+          bp.currentBasicSalary || 0,
+        )),
     );
 
     const transformed = payrolls.map((payroll) => {
@@ -615,7 +617,9 @@ router.get("/export/csv", async (req, res) => {
       }
       obj.displayBasicSalary = obj.basicSalary;
       obj.allowancesCSV = obj.allowances
-        ? obj.allowances.map((a) => `${a.type}: $${a.amount}`).join("; ")
+        ? obj.allowances
+            .map((a) => `${a.type}: $${toFixedAmount(a.amount)}`)
+            .join("; ")
         : "";
       return obj;
     });
@@ -642,13 +646,11 @@ router.get("/export/csv", async (req, res) => {
     );
     res.status(200).send(csvData);
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to export",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to export",
+      error: error.message,
+    });
   }
 });
 
@@ -728,8 +730,8 @@ router.get("/available-sources", async (req, res) => {
       .lean();
     const options = accounts.map((account) => ({
       value: account._id,
-      label: `${account.name || account.code || "Account"} ($${(account.totalAmount || account.balance || 0).toFixed(2)})`,
-      balance: account.totalAmount || account.balance || 0,
+      label: `${account.name || account.code || "Account"} ($${toFixedAmount(account.totalAmount || account.balance || 0).toFixed(2)})`,
+      balance: toFixedAmount(account.totalAmount || account.balance || 0),
     }));
     res.status(200).json({ success: true, data: options });
   } catch (error) {
@@ -760,7 +762,9 @@ router.get("/:id", async (req, res) => {
       data.teamName = data.employeeId.teamName;
       data.contactNo = data.employeeId.contactNo;
       data.email = data.employeeId.email;
-      data.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0;
+      data.employeeBasicSalary = toFixedAmount(
+        basicPayroll?.currentBasicSalary || 0,
+      );
     }
     data.displayBasicSalary = data.basicSalary;
     res.status(200).json({ success: true, data });
@@ -778,9 +782,19 @@ router.get("/:id", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// POST / — Create payroll
+// POST / — Create payroll (FIXED - Ensures netSalary >= 0)
+// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// POST / — Create payroll (FIXED - With Debug Logs)
+// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// POST / — Create payroll (FIXED - Use source amount as payment)
 // ─────────────────────────────────────────────
 router.post("/", protect, allowAdminOnly, async (req, res) => {
+  console.log("=".repeat(80));
+  console.log("📝 PAYROLL CREATION STARTED");
+  console.log("=".repeat(80));
+
   const session = await mongoose.startSession();
   try {
     await session.startTransaction();
@@ -798,13 +812,19 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       sources,
     } = req.body;
 
+    console.log("\n📥 INPUT DATA:");
+    console.log("  employeeId:", employeeId);
+    console.log("  period:", period);
+    console.log("  allowances:", JSON.stringify(allowances, null, 2));
+    console.log("  deductions:", deductions);
+    console.log("  sources:", JSON.stringify(sources, null, 2));
+
+    // Validation checks
     if (!employeeId || !period)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Employee ID and period are required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID and period are required",
+      });
 
     if (!/^\d{4}-\d{2}$/.test(period))
       return res
@@ -812,73 +832,67 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Period must be YYYY-MM" });
 
     if (!sources || !Array.isArray(sources) || sources.length === 0)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "At least one source account is required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "At least one source account is required",
+      });
 
     for (let i = 0; i < sources.length; i++) {
       const src = sources[i];
       if (!src.accountId)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: `Source at index ${i} missing accountId`,
-          });
+        return res.status(400).json({
+          success: false,
+          message: `Source at index ${i} missing accountId`,
+        });
       if (!mongoose.Types.ObjectId.isValid(src.accountId))
         return res
           .status(400)
           .json({ success: false, message: `Invalid accountId at index ${i}` });
       if (src.amount === undefined || src.amount === null)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: `Source at index ${i} missing amount`,
-          });
-      const amountNum = parseFloat(src.amount);
+        return res.status(400).json({
+          success: false,
+          message: `Source at index ${i} missing amount`,
+        });
+      const amountNum = toFixedAmount(src.amount);
       if (isNaN(amountNum) || amountNum <= 0)
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: `Source at index ${i} must have a positive amount`,
-          });
+        return res.status(400).json({
+          success: false,
+          message: `Source at index ${i} must have a positive amount`,
+        });
     }
 
+    console.log("\n👤 Fetching employee...");
     const employee = await Staff.findById(employeeId).session(session);
     if (!employee)
       return res
         .status(404)
         .json({ success: false, message: "Employee not found" });
+    console.log("  Employee found:", employee.medicalRepName);
 
+    console.log("\n💰 Fetching basic payroll...");
     const basicPayroll = await MrBasicPayroll.findOne({ employeeId }).session(
       session,
     );
     if (!basicPayroll)
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "Basic payroll not found. Set basic salary first.",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "Basic payroll not found. Set basic salary first.",
+      });
+    console.log("  Current Basic Salary:", basicPayroll.currentBasicSalary);
 
+    console.log("\n🔍 Checking for existing payroll...");
     const existingPayroll = await Payroll.findOne({
       employeeId,
       period,
     }).session(session);
     if (existingPayroll)
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "Payroll already exists for this employee in this period",
-        });
+      return res.status(409).json({
+        success: false,
+        message: "Payroll already exists for this employee in this period",
+      });
+    console.log("  No existing payroll found");
 
-    // Calculate salary with new logic
+    console.log("\n📊 Calculating salary for period...");
     const salaryData = await calculateSalaryForPeriod(
       employeeId,
       period,
@@ -886,73 +900,117 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     );
     const sc = salaryData.salaryCalculation;
 
+    console.log("\n📈 SALARY CALCULATION RESULT:");
+    console.log("  basicSalary:", sc.basicSalary);
+    console.log("  workingDaysInMonth:", sc.workingDaysInMonth);
+    console.log("  presentDays:", sc.presentDays);
+    console.log("  totalLeaves:", sc.totalLeaves);
+    console.log("  paidLeaves:", sc.paidLeaves);
+    console.log("  unpaidLeaves:", sc.unpaidLeaves);
+    console.log("  leaveDeduction:", sc.leaveDeduction);
+    console.log("  advanceDeduction:", sc.advanceDeduction);
+    console.log("  totalSalary (after leave+advance):", sc.totalSalary);
+    console.log("  isFull:", sc.isFull);
+
     const fullBasicSalaryNum = sc.basicSalary;
     const advanceDeduction = sc.advanceDeduction;
     const leaveDeduction = sc.leaveDeduction;
 
-    // Process allowances
+    console.log("\n📝 Processing Allowances...");
+    // Process allowances - EXACT values, no rounding errors
     let totalAllowance = 0;
     const processedAllowances = [];
     if (allowances && Array.isArray(allowances)) {
-      for (const allowance of allowances) {
+      for (let i = 0; i < allowances.length; i++) {
+        const allowance = allowances[i];
+        console.log(`  Allowance ${i + 1}:`, allowance);
         if (!allowance.type || allowance.amount === undefined)
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: "Each allowance must have type and amount",
-            });
-        const amt = parseFloat(allowance.amount);
+          return res.status(400).json({
+            success: false,
+            message: "Each allowance must have type and amount",
+          });
+        const amt = toFixedAmount(allowance.amount);
         if (isNaN(amt) || amt < 0)
-          return res
-            .status(400)
-            .json({
-              success: false,
-              message: "Allowance amount must be non-negative",
-            });
-        totalAllowance += amt;
-        processedAllowances.push({ type: allowance.type.trim(), amount: amt });
+          return res.status(400).json({
+            success: false,
+            message: "Allowance amount must be non-negative",
+          });
+
+        if (amt > 0) {
+          totalAllowance += amt;
+          processedAllowances.push({
+            type: allowance.type.trim(),
+            amount: amt,
+          });
+          console.log(`    Added allowance: ${allowance.type} = ${amt}`);
+        }
       }
     }
+    console.log("  totalAllowance:", totalAllowance);
 
-    const deductionsNum = parseFloat(deductions) || 0;
+    const deductionsNum = toFixedAmount(deductions || 0);
+    console.log("\n💰 Deductions:", deductionsNum);
 
-    // Net salary: totalSalary (basic − unpaidLeaveDeduction − advance) + allowances − extra deductions
-    const calculatedNetSalary = Math.max(
-      0,
-      sc.totalSalary + totalAllowance - deductionsNum,
-    );
-
-    // Deduct from each source account
-    const sourceAccounts = [];
+    // 🔥 CRITICAL FIX: Calculate total from source accounts (this is what will be paid)
+    let totalSourceAmount = 0;
     for (const src of sources) {
+      totalSourceAmount += toFixedAmount(src.amount);
+    }
+    console.log("\n💰 Total Source Amount (Payment):", totalSourceAmount);
+
+    // 🔥 FIX: Use totalSourceAmount as the net salary (what actually gets paid)
+    // The calculated net salary is just for reference, actual payment is what user enters
+    const calculatedNetSalary = toFixedAmount(totalSourceAmount);
+    console.log("\n🧮 NET SALARY (from sources):", calculatedNetSalary);
+    console.log("  Note: Using source amount as actual payment");
+    
+    // Also calculate the theoretical net salary for reference
+    const theoreticalNetSalary = toFixedAmount(
+      Math.max(0, sc.totalSalary + totalAllowance - deductionsNum)
+    );
+    console.log("  Theoretical net salary (calculated):", theoreticalNetSalary);
+
+    console.log("\n🏦 Processing source accounts...");
+    const sourceAccounts = [];
+    for (let i = 0; i < sources.length; i++) {
+      const src = sources[i];
+      console.log(
+        `  Source ${i + 1}: accountId=${src.accountId}, amount=${src.amount}`,
+      );
       const account = await Account.findById(src.accountId).session(session);
       if (!account)
         throw new Error(`Source account ${src.accountId} not found`);
-      const amount = parseFloat(src.amount);
+      const amount = toFixedAmount(src.amount);
+      console.log(
+        `    Account: ${account.name}, Balance before: ${account.totalAmount}`,
+      );
       if (account.totalAmount < amount)
         throw new Error(
           `Insufficient balance in ${account.name}. Available: ${account.totalAmount}, Required: ${amount}`,
         );
-      account.totalAmount -= amount;
+      account.totalAmount = toFixedAmount(account.totalAmount - amount);
+      console.log(`    Balance after: ${account.totalAmount}`);
       await account.save({ session });
       sourceAccounts.push({ account, amount });
     }
 
+    console.log("\n🏷️ Generating payroll code...");
     const payrollCode = await generateNextPayrollCode(session);
+    console.log("  payrollCode:", payrollCode);
 
+    console.log("\n💾 Creating payroll record...");
     const payroll = new Payroll({
       employeeId: new mongoose.Types.ObjectId(employeeId),
       period,
       basicSalary: fullBasicSalaryNum,
       adjustedBasicSalary: sc.isFull
         ? fullBasicSalaryNum
-        : fullBasicSalaryNum - leaveDeduction,
+        : toFixedAmount(Math.max(0, fullBasicSalaryNum - leaveDeduction)),
       extraTimeAmount: 0,
       allowances: processedAllowances,
-      totalAllowance,
+      totalAllowance: totalAllowance,
       deductions: deductionsNum,
-      netSalary: calculatedNetSalary,
+      netSalary: calculatedNetSalary,  // 🔥 FIX: Use source amount as net salary
       status: status || "pending",
       paymentMethod: paymentMethod || "bank",
       bankAccount: bankAccount || "",
@@ -977,18 +1035,33 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       },
     });
 
+    console.log("\n📋 PAYROLL SUMMARY:");
+    console.log("  basicSalary:", payroll.basicSalary);
+    console.log("  adjustedBasicSalary:", payroll.adjustedBasicSalary);
+    console.log("  totalAllowance:", payroll.totalAllowance);
+    console.log("  deductions:", payroll.deductions);
+    console.log("  netSalary (actual payment):", payroll.netSalary);
+    console.log(
+      "  attendanceInfo:",
+      JSON.stringify(payroll.attendanceInfo, null, 2),
+    );
+
     await payroll.save({ session });
+    console.log("  ✅ Payroll saved successfully");
 
     if (advanceDeduction > 0) {
+      console.log("\n🔄 Updating advance deductions...");
       await MrAdvance.updateMany(
         { employeeId, status: "pending" },
         { $set: { status: "adjusted" } },
         { session },
       );
+      console.log("  ✅ Advances marked as adjusted");
     }
 
+    console.log("\n💰 Creating financial records...");
     await createPayrollFinancialRecords({
-      payrollNetSalary: calculatedNetSalary,
+      payrollNetSalary: calculatedNetSalary,  // 🔥 FIX: Use source amount
       payrollCode: payroll.payrollCode,
       payrollId: payroll._id,
       employeeId: payroll.employeeId,
@@ -998,8 +1071,10 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       createdBy: payroll.createdBy,
       session,
     });
+    console.log("  ✅ Financial records created");
 
     await session.commitTransaction();
+    console.log("\n✅ Transaction committed successfully");
 
     await payroll.populate(
       "employeeId",
@@ -1026,6 +1101,9 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     }
     responseData.displayBasicSalary = fullBasicSalaryNum;
 
+    console.log("\n✅ PAYROLL CREATION COMPLETED SUCCESSFULLY");
+    console.log("=".repeat(80));
+
     res.status(201).json({
       success: true,
       message: "Payroll created successfully.",
@@ -1035,38 +1113,34 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     try {
       await session.abortTransaction();
     } catch (_) {}
-    console.error("Payroll creation error:", error);
+    console.error("\n❌ PAYROLL CREATION ERROR:", error);
+    console.error("  Stack:", error.stack);
+    console.log("=".repeat(80));
+
     if (error.name === "ValidationError")
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Validation error",
-          errors: Object.values(error.errors).map((v) => v.message),
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: Object.values(error.errors).map((v) => v.message),
+      });
     if (error.code === 11000)
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "Payroll already exists for this period",
-        });
+      return res.status(409).json({
+        success: false,
+        message: "Payroll already exists for this period",
+      });
     if (error.message.includes("Insufficient balance"))
       return res.status(400).json({ success: false, message: error.message });
     if (error.message.includes("not found"))
       return res.status(404).json({ success: false, message: error.message });
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to create payroll",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to create payroll",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
 });
-
 // ─────────────────────────────────────────────
 // POST /bulk
 // ─────────────────────────────────────────────
@@ -1142,25 +1216,30 @@ router.post("/bulk", protect, allowAdminOnly, async (req, res) => {
         continue;
       }
 
-      const basicNum = parseFloat(basicSalary) || 0;
-      const allowanceNum = parseFloat(totalAllowance) || 0;
-      const deductionNum = parseFloat(deductions) || 0;
+      const basicNum = toFixedAmount(basicSalary);
+      const allowanceNum = toFixedAmount(totalAllowance);
+      const deductionNum = toFixedAmount(deductions);
       let netSalaryValue =
         netSalary !== undefined &&
         netSalary !== null &&
         !isNaN(parseFloat(netSalary))
-          ? parseFloat(netSalary)
-          : basicNum + allowanceNum - deductionNum;
+          ? toFixedAmount(netSalary)
+          : toFixedAmount(basicNum + allowanceNum - deductionNum);
+      // FIXED: Ensure net salary is never negative
       if (netSalaryValue < 0) netSalaryValue = 0;
 
       const processedAllowances = Array.isArray(allowances)
         ? allowances
             .filter(
-              (a) => a?.type && a?.amount !== undefined && a?.amount !== null,
+              (a) =>
+                a?.type &&
+                a?.amount !== undefined &&
+                a?.amount !== null &&
+                toFixedAmount(a.amount) > 0,
             )
             .map((a) => ({
               type: String(a.type).trim(),
-              amount: parseFloat(a.amount) || 0,
+              amount: toFixedAmount(a.amount),
             }))
         : [];
 
@@ -1241,13 +1320,11 @@ router.post("/bulk", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Bulk payroll failed",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Bulk payroll failed",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -1291,8 +1368,9 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     }
 
     if (basicSalary !== undefined)
-      payroll.basicSalary = parseFloat(basicSalary);
-    if (deductions !== undefined) payroll.deductions = parseFloat(deductions);
+      payroll.basicSalary = toFixedAmount(basicSalary);
+    if (deductions !== undefined)
+      payroll.deductions = toFixedAmount(deductions);
     if (status) payroll.status = status;
     if (paymentMethod) payroll.paymentMethod = paymentMethod;
     if (bankAccount !== undefined) payroll.bankAccount = bankAccount;
@@ -1301,18 +1379,22 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     if (enabled !== undefined) payroll.enabled = enabled;
 
     if (allowances && Array.isArray(allowances)) {
-      payroll.allowances = allowances.map((a) => ({
-        type: a.type.trim(),
-        amount: parseFloat(a.amount),
-      }));
+      payroll.allowances = allowances
+        .filter((a) => toFixedAmount(a.amount) > 0)
+        .map((a) => ({
+          type: a.type.trim(),
+          amount: toFixedAmount(a.amount),
+        }));
       payroll.totalAllowance = payroll.allowances.reduce(
         (t, a) => t + a.amount,
         0,
       );
     }
 
-    let newNetSalary =
-      payroll.basicSalary + payroll.totalAllowance - payroll.deductions;
+    let newNetSalary = toFixedAmount(
+      payroll.basicSalary + payroll.totalAllowance - payroll.deductions,
+    );
+    // FIXED: Ensure net salary is never negative
     if (newNetSalary < 0) newNetSalary = 0;
     payroll.netSalary = newNetSalary;
 
@@ -1332,7 +1414,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       referenceNumber: payroll.payrollCode,
       previousData: previousRecord,
       newData: payroll.toObject(),
-      description: `Payroll ${payroll.payrollCode} for ${toTitleCase(payroll.employeeId?.medicalRepName || "Unknown")} updated. Net Salary: $${previousRecord.netSalary?.toFixed(2) || 0} → $${payroll.netSalary.toFixed(2)}`,
+      description: `Payroll ${payroll.payrollCode} for ${toTitleCase(payroll.employeeId?.medicalRepName || "Unknown")} updated. Net Salary: $${toFixedAmount(previousRecord.netSalary || 0).toFixed(2)} → $${payroll.netSalary.toFixed(2)}`,
       refField: "payrollCode",
     });
 
@@ -1343,40 +1425,35 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     if (responseData.employeeId) {
       responseData.employeeName = responseData.employeeId.medicalRepName;
       responseData.teamName = responseData.employeeId.teamName;
-      responseData.employeeBasicSalary =
-        basicPayrollRec?.currentBasicSalary || 0;
+      responseData.employeeBasicSalary = toFixedAmount(
+        basicPayrollRec?.currentBasicSalary || 0,
+      );
     }
     responseData.displayBasicSalary = responseData.basicSalary;
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Payroll updated successfully",
-        data: responseData,
-      });
+    res.status(200).json({
+      success: true,
+      message: "Payroll updated successfully",
+      data: responseData,
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
     if (error.name === "ValidationError")
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Validation error",
-          errors: Object.values(error.errors).map((v) => v.message),
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: Object.values(error.errors).map((v) => v.message),
+      });
     if (error.name === "CastError")
       return res
         .status(400)
         .json({ success: false, message: "Invalid payroll ID" });
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to update payroll",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to update payroll",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -1413,13 +1490,11 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "payrollCode",
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Payroll deleted successfully",
-        data: { id: req.params.id },
-      });
+    res.status(200).json({
+      success: true,
+      message: "Payroll deleted successfully",
+      data: { id: req.params.id },
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
@@ -1428,13 +1503,11 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Invalid payroll ID" });
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete payroll",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete payroll",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -1481,24 +1554,20 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
       refField: "payrollCode",
     });
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: `${result.deletedCount} payroll(s) deleted`,
-        data: { deletedCount: result.deletedCount },
-      });
+    res.status(200).json({
+      success: true,
+      message: `${result.deletedCount} payroll(s) deleted`,
+      data: { deletedCount: result.deletedCount },
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to delete payrolls",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete payrolls",
+      error: error.message,
+    });
   } finally {
     await session.endSession();
   }
@@ -1555,10 +1624,10 @@ router.get("/export", protect, allowAdminOnly, async (req, res) => {
       "Employee Name": p.employeeId?.medicalRepName || "Unknown",
       Team: p.employeeId?.teamName || "Unknown",
       Period: p.period,
-      "Basic Salary": p.basicSalary,
-      "Total Allowance": p.totalAllowance,
-      Deductions: p.deductions,
-      "Net Salary": p.netSalary,
+      "Basic Salary": toFixedAmount(p.basicSalary),
+      "Total Allowance": toFixedAmount(p.totalAllowance),
+      Deductions: toFixedAmount(p.deductions),
+      "Net Salary": toFixedAmount(p.netSalary),
       Status: p.status,
       "Payment Method": p.paymentMethod,
       "Created At": formatDateForLog(p.createdAt),

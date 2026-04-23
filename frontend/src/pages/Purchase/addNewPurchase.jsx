@@ -5,7 +5,6 @@ import "react-datepicker/dist/react-datepicker.css";
 import { showToast } from "../../utils/toast";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import { Eye, EyeOff, PlusSquare, MinusSquare } from "lucide-react";
-import { handleNumericInputChange } from "../../utils/inputValidators.jsx";
 
 // Import reusable API functions
 import {
@@ -19,15 +18,15 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const INITIAL_PRODUCT_STATE = {
   productId: "",
   productName: "",
-  qtyBox: "",
-  lcNumber: "",
+  quantityPerBoxStrip: "", // ✅ renamed to match backend
+  lc: "", // ✅ renamed from lcNumber to match backend
   cif: "",
   fob: "",
   amount: "",
-  expiredDate: "",
+  expiryDate: "", // ✅ renamed from expiredDate to match backend
   remainingStock: 0,
-  type: "", // Added type field
-  sellingPrice: "", // ADDED: sellingPrice field
+  type: "",
+  sellingPrice: "",
 };
 
 const INITIAL_FORM_STATE = {
@@ -55,10 +54,7 @@ const usePurchaseForm = () => {
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [expandedProductIndex, setExpandedProductIndex] = useState(0);
-  const [loading, setLoading] = useState({
-    products: false,
-    suppliers: false,
-  });
+  const [loading, setLoading] = useState({ products: false, suppliers: false });
   const [isSuppliersEmpty, setIsSuppliersEmpty] = useState(false);
   const [isProductsEmpty, setIsProductsEmpty] = useState(false);
 
@@ -71,7 +67,7 @@ const usePurchaseForm = () => {
     setForm((prev) => ({
       ...prev,
       products: prev.products.map((product, i) =>
-        i === index ? { ...product, [field]: value } : product
+        i === index ? { ...product, [field]: value } : product,
       ),
     }));
   }, []);
@@ -82,10 +78,8 @@ const usePurchaseForm = () => {
   }, []);
 
   const isProductExpanded = useCallback(
-    (index) => {
-      return expandedProductIndex === index;
-    },
-    [expandedProductIndex]
+    (index) => expandedProductIndex === index,
+    [expandedProductIndex],
   );
 
   /* ───── Add/Remove Products ───── */
@@ -111,7 +105,7 @@ const usePurchaseForm = () => {
         });
       }
     },
-    [form.products.length]
+    [form.products.length],
   );
 
   /* ───── Field Validation ───── */
@@ -124,36 +118,29 @@ const usePurchaseForm = () => {
       "receivedDate",
     ];
     return required.every(
-      (field) => formData[field] && formData[field].toString().trim()
+      (field) => formData[field] && formData[field].toString().trim(),
     );
   }, []);
 
-  const isProductValid = useCallback((product) => {
-    return (
-      product.productId &&
-      parseNumber(product.qtyBox) > 0 &&
-      product.expiredDate
-    );
-  }, []);
+  const isProductFilled = useCallback(
+    (product) => product.productId && product.productName.trim() !== "",
+    [],
+  );
 
-  const isProductFilled = useCallback((product) => {
-    return product.productId && product.productName.trim() !== "";
-  }, []);
-
-  const hasAtLeastOneProduct = useCallback((products) => {
-    return products.some(
-      (product) => product.productId && product.productName.trim() !== ""
-    );
-  }, []);
+  const hasAtLeastOneProduct = useCallback(
+    (products) =>
+      products.some(
+        (product) => product.productId && product.productName.trim() !== "",
+      ),
+    [],
+  );
 
   /* ───── Amount Calculation ───── */
+  // ✅ Uses updated field names: lc and quantityPerBoxStrip
   const calculateProductAmount = useCallback((product) => {
-    const lcValue = parseNumber(product.lcNumber);
-    const fobValue = parseNumber(product.fob);
-    const qtyBoxValue = parseNumber(product.qtyBox);
-
-    const baseValue = lcValue;
-    const amount = baseValue * qtyBoxValue;
+    const lcValue = parseNumber(product.lc);
+    const qtyValue = parseNumber(product.quantityPerBoxStrip);
+    const amount = lcValue * qtyValue;
     return Math.round(amount * 100) / 100;
   }, []);
 
@@ -163,36 +150,32 @@ const usePurchaseForm = () => {
       const { name, value } = e.target;
       updateFormField(name, value);
     },
-    [updateFormField]
+    [updateFormField],
   );
 
   const handleProductChange = useCallback(
-    (index, field, value) => {
-      updateProduct(index, field, value);
-    },
-    [updateProduct]
+    (index, field, value) => updateProduct(index, field, value),
+    [updateProduct],
   );
 
   const handleDateChange = useCallback(
     (name, date) => {
       updateFormField(name, date ? new Date(date).toISOString() : "");
     },
-    [updateFormField]
+    [updateFormField],
   );
 
   const handleProductDateChange = useCallback(
     (index, name, date) => {
       updateProduct(index, name, date ? new Date(date).toISOString() : "");
     },
-    [updateProduct]
+    [updateProduct],
   );
 
   /* ───── Dropdown Handlers ───── */
   const handleProductSelection = useCallback(
     (index, productId) => {
-      const selectedProduct = products.find(
-        (product) => product.value === productId
-      );
+      const selectedProduct = products.find((p) => p.value === productId);
       if (selectedProduct) {
         setForm((prev) => ({
           ...prev,
@@ -202,49 +185,39 @@ const usePurchaseForm = () => {
                   ...product,
                   productId: selectedProduct.value,
                   productName: selectedProduct.label,
-                  lcNumber: selectedProduct.lc || selectedProduct.lcNumber || 0,
+                  lc: selectedProduct.lc || 0, // ✅ use lc
                   fob: selectedProduct.fob || 0,
                   cif: selectedProduct.cif || 0,
                   type: selectedProduct.type || "Tablet",
                   remainingStock: selectedProduct.remainingStock || 0,
-                  sellingPrice: selectedProduct.sellingPrice || 0, // ADDED: Set sellingPrice from selected product
-                  qtyBox: product.qtyBox,
-                  expiredDate: product.expiredDate,
+                  sellingPrice: selectedProduct.sellingPrice || 0,
+                  quantityPerBoxStrip: product.quantityPerBoxStrip, // preserve qty
+                  expiryDate: product.expiryDate, // preserve date
                   amount: product.amount,
                 }
-              : product
+              : product,
           ),
         }));
       }
     },
-    [products]
+    [products],
   );
 
   const handleSupplierChange = useCallback(
     (supplierId) => {
-      const selectedSupplier = suppliers.find(
-        (supplier) => supplier.value === supplierId
-      );
+      const selectedSupplier = suppliers.find((s) => s.value === supplierId);
       if (selectedSupplier) {
         updateFormField("supplierId", selectedSupplier.value);
         updateFormField("supplierName", selectedSupplier.label);
       }
     },
-    [suppliers, updateFormField]
-  );
-
-  const handleFobUpdate = useCallback(
-    (index, fobValue) => {
-      updateProduct(index, "fob", fobValue);
-    },
-    [updateProduct]
+    [suppliers, updateFormField],
   );
 
   /* ───── Validation ───── */
   const validate = useCallback(() => {
     const newErrors = {};
 
-    // Common fields validation
     if (!form.invoiceNumber?.trim())
       newErrors.invoiceNumber = "Invoice number is required";
     if (!form.supplierId)
@@ -252,7 +225,6 @@ const usePurchaseForm = () => {
     if (!form.deliveryNumber?.trim())
       newErrors.deliveryNumber = "Delivery number is required";
 
-    // Date validation
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -268,38 +240,31 @@ const usePurchaseForm = () => {
       newErrors.receivedDate = "Received date cannot be in the future";
     }
 
-    // Products validation
+    // ✅ Validate using correct field names
     form.products.forEach((product, index) => {
       if (product.productId) {
-        if (!product.productId)
-          newErrors[`productId_${index}`] = "Product selection is required";
-
-        const qtyBoxNum = parseNumber(product.qtyBox);
+        const qtyNum = parseNumber(product.quantityPerBoxStrip);
         const fobNum = parseNumber(product.fob);
         const cifNum = parseNumber(product.cif);
-        const lcNumberStr = String(product.lcNumber || "");
+        const lcStr = String(product.lc || "");
 
-        if (qtyBoxNum <= 0)
-          newErrors[`qtyBox_${index}`] = "Box quantity must be greater than 0";
-        if (qtyBoxNum > 100000)
-          newErrors[`qtyBox_${index}`] =
+        if (qtyNum <= 0)
+          newErrors[`quantityPerBoxStrip_${index}`] =
+            "Box quantity must be greater than 0";
+        if (qtyNum > 100000)
+          newErrors[`quantityPerBoxStrip_${index}`] =
             "Box quantity seems too large, please verify";
         if (fobNum < 0) newErrors[`fob_${index}`] = "FOB cannot be negative";
         if (cifNum < 0) newErrors[`cif_${index}`] = "CIF cannot be negative";
-
-        if (!lcNumberStr.trim() && fobNum <= 0) {
-          newErrors[`lcNumber_${index}`] = "Either LC or FOB is required";
-        }
-
-        if (!product.expiredDate)
-          newErrors[`expiredDate_${index}`] = "Expired date is required";
+        if (!lcStr.trim() && fobNum <= 0)
+          newErrors[`lc_${index}`] = "Either LC or FOB is required";
+        if (!product.expiryDate)
+          newErrors[`expiryDate_${index}`] = "Expiry date is required";
       }
     });
 
-    // Check if at least one product is filled
-    if (!hasAtLeastOneProduct(form.products)) {
+    if (!hasAtLeastOneProduct(form.products))
       newErrors.products = "At least one product is required";
-    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -317,24 +282,22 @@ const usePurchaseForm = () => {
           if (product.batches && Array.isArray(product.batches)) {
             totalBoxes = product.batches.reduce(
               (sum, batch) => sum + (batch.boxes || 0),
-              0
+              0,
             );
           } else if (product.totalBoxes !== undefined) {
             totalBoxes = product.totalBoxes;
           }
-
           return {
             value: product._id || product.id,
             label: product.productName || product.name,
             lc: product.lc || product.lcNumber || 0,
             fob: product.fob || 0,
             cif: product.cif || 0,
-            type: product.type || "Tablet", // Added type field
+            type: product.type || "Tablet",
             remainingStock: totalBoxes,
-            sellingPrice: product.sellingPrice || 0, // ADDED: Include sellingPrice
+            sellingPrice: product.sellingPrice || 0,
           };
         });
-
         setProducts(transformedProducts);
         setIsProductsEmpty(transformedProducts.length === 0);
       } else {
@@ -381,12 +344,10 @@ const usePurchaseForm = () => {
 
   /* ───── Stock Calculation ───── */
   const calculateFutureStock = useCallback((currentStock, purchaseQty) => {
-    const current = parseNumber(currentStock);
-    const purchase = parseNumber(purchaseQty);
-    return current + purchase;
+    return parseNumber(currentStock) + parseNumber(purchaseQty);
   }, []);
 
-  // Auto-calculate amount when relevant fields change for each product
+  // ✅ Auto-calculate amount using updated field names
   useEffect(() => {
     setForm((prev) => ({
       ...prev,
@@ -396,7 +357,10 @@ const usePurchaseForm = () => {
       })),
     }));
   }, [
-    form.products.map((p) => `${p.lcNumber}-${p.fob}-${p.qtyBox}`).join(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    form.products
+      .map((p) => `${p.lc}-${p.fob}-${p.quantityPerBoxStrip}`)
+      .join(),
     calculateProductAmount,
   ]);
 
@@ -418,10 +382,8 @@ const usePurchaseForm = () => {
     handleProductDateChange,
     handleProductSelection,
     handleSupplierChange,
-    handleFobUpdate,
     toggleProductView,
     isProductExpanded,
-    isProductValid,
     isProductFilled,
     areCommonFieldsFilled,
     hasAtLeastOneProduct,
@@ -472,7 +434,7 @@ const InputField = React.memo(
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
     </div>
-  )
+  ),
 );
 
 const DatePickerField = React.memo(
@@ -488,34 +450,28 @@ const DatePickerField = React.memo(
     placeholder = "Select a date",
     className = "",
     maxDate = null,
-  }) => {
-    const today = new Date();
-
-    return (
-      <div className="flex flex-col">
-        <label className="text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-        <DatePicker
-          selected={value ? new Date(value) : null}
-          onChange={(date) => onChange(name, date)}
-          dateFormat="yyyy-MM-dd"
-          placeholderText={placeholder}
-          readOnly={readOnly}
-          disabled={disabled}
-          maxDate={maxDate || today}
-          className={`w-full border px-3 py-2 rounded-lg ${
-            error ? "border-red-500" : "border-gray-300"
-          } ${
-            readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""
-          } ${className}`}
-          autoComplete="off"
-        />
-        {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-      </div>
-    );
-  }
+  }) => (
+    <div className="flex flex-col">
+      <label className="text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <DatePicker
+        selected={value ? new Date(value) : null}
+        onChange={(date) => onChange(name, date)}
+        dateFormat="yyyy-MM-dd"
+        placeholderText={placeholder}
+        readOnly={readOnly}
+        disabled={disabled}
+        maxDate={maxDate || new Date()}
+        className={`w-full border px-3 py-2 rounded-lg ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
+        autoComplete="off"
+      />
+      {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+    </div>
+  ),
 );
 
 const ProductDatePickerField = React.memo(
@@ -542,7 +498,6 @@ const ProductDatePickerField = React.memo(
           {label}
           {required && <span className="text-red-500 ml-1">*</span>}
         </label>
-
         <DatePicker
           selected={value ? new Date(value) : null}
           onChange={(date) => onChange(name, date)}
@@ -552,9 +507,7 @@ const ProductDatePickerField = React.memo(
           disabled={disabled}
           className={`w-full border px-3 py-2 rounded-lg ${
             error ? "border-red-500" : "border-gray-300"
-          } ${
-            readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""
-          } ${className}`}
+          } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
           showYearDropdown={showYearDropdown}
           showMonthDropdown={showMonthDropdown}
           dropdownMode="select"
@@ -563,11 +516,10 @@ const ProductDatePickerField = React.memo(
           filterDate={(date) => date >= today && date <= maxYearDate}
           yearDropdownItemNumber={2040 - today.getFullYear() + 1}
         />
-
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
       </div>
     );
-  }
+  },
 );
 
 const NumericInputField = React.memo(
@@ -587,10 +539,7 @@ const NumericInputField = React.memo(
     const handleNumericChange = (e) => {
       const { value } = e.target;
       const regex = allowDecimal ? /^-?\d*\.?\d*$/ : /^-?\d*$/;
-
-      if (value === "" || regex.test(value)) {
-        onChange(e);
-      }
+      if (value === "" || regex.test(value)) onChange(e);
     };
 
     return (
@@ -616,7 +565,7 @@ const NumericInputField = React.memo(
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
       </div>
     );
-  }
+  },
 );
 
 /* ────────────────────── MAIN COMPONENT ────────────────────── */
@@ -638,7 +587,6 @@ const AddNewPurchase = () => {
     handleProductDateChange,
     handleProductSelection,
     handleSupplierChange,
-    handleFobUpdate,
     toggleProductView,
     isProductExpanded,
     isProductFilled,
@@ -653,16 +601,14 @@ const AddNewPurchase = () => {
 
   /* ───── Memoized Options ───── */
   const productOptions = useMemo(() => {
-    if (isProductsEmpty) {
+    if (isProductsEmpty)
       return [{ value: "", label: "No Products Available", disabled: true }];
-    }
     return [{ value: "", label: "Select Product" }, ...products];
   }, [products, isProductsEmpty]);
 
   const supplierOptions = useMemo(() => {
-    if (isSuppliersEmpty) {
+    if (isSuppliersEmpty)
       return [{ value: "", label: "No Suppliers Available", disabled: true }];
-    }
     return [{ value: "", label: "Select Supplier" }, ...suppliers];
   }, [suppliers, isSuppliersEmpty]);
 
@@ -672,23 +618,6 @@ const AddNewPurchase = () => {
     fetchSuppliers();
   }, [fetchProducts, fetchSuppliers]);
 
-  /* ───── Enhanced Handlers ───── */
-  const enhancedHandleChange = useCallback(
-    (e) => handleChange(e),
-    [handleChange]
-  );
-
-  const enhancedProductChange = useCallback(
-    (index, field, value) => {
-      if (field === "fob") {
-        handleFobUpdate(index, value);
-      } else {
-        handleProductChange(index, field, value);
-      }
-    },
-    [handleProductChange, handleFobUpdate]
-  );
-
   /* ───── Submit Handler ───── */
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -696,7 +625,7 @@ const AddNewPurchase = () => {
     if (isSuppliersEmpty || isProductsEmpty) {
       showToast(
         "error",
-        "Cannot add purchase. No suppliers or products available."
+        "Cannot add purchase. No suppliers or products available.",
       );
       return;
     }
@@ -704,6 +633,7 @@ const AddNewPurchase = () => {
     if (!validate()) return;
 
     try {
+      // ✅ All field names now exactly match what the backend's processProductLines expects
       const submissionData = {
         invoiceNumber: form.invoiceNumber,
         deliveryNumber: form.deliveryNumber,
@@ -713,18 +643,18 @@ const AddNewPurchase = () => {
         receivedDate: form.receivedDate,
         remarks: form.remarks,
         products: form.products
-          .filter((product) => product.productId) // Only include products with productId
+          .filter((product) => product.productId)
           .map((product) => ({
             productId: product.productId,
             productName: product.productName,
-            qtyBox: parseFloat(product.qtyBox) || 0,
-            lc: product.lcNumber, // Note: Changed from lcNumber to lc to match backend
+            quantityPerBoxStrip: parseFloat(product.quantityPerBoxStrip) || 0, // ✅ correct key
+            lc: parseFloat(product.lc) || 0, // ✅ correct key
             cif: parseFloat(product.cif) || 0,
             fob: parseFloat(product.fob) || 0,
             amount: parseFloat(product.amount) || 0,
-            expiredDate: product.expiredDate,
-            type: product.type || "Tablet", // Added type field with default
-            sellingPrice: parseFloat(product.sellingPrice) || 0, // ADDED: sellingPrice to backend
+            expiryDate: product.expiryDate || null, // ✅ correct key
+            type: product.type || "Tablet",
+            sellingPrice: parseFloat(product.sellingPrice) || 0,
           })),
       };
 
@@ -756,10 +686,8 @@ const AddNewPurchase = () => {
     return areCommonFieldsFilled(form) && hasAtLeastOneProduct(form.products);
   }, [form, isFormDisabled, areCommonFieldsFilled, hasAtLeastOneProduct]);
 
-  // Check if current product is valid for enabling "Add Product" button
   const isCurrentProductValid = useCallback(() => {
     if (isFormDisabled) return false;
-
     const currentProduct = form.products[form.products.length - 1];
     return isProductFilled(currentProduct);
   }, [form.products, isFormDisabled, isProductFilled]);
@@ -809,8 +737,8 @@ const AddNewPurchase = () => {
                   {isSuppliersEmpty && isProductsEmpty
                     ? "No suppliers and products found. Please add at least one supplier and one product first."
                     : isSuppliersEmpty
-                    ? "No suppliers found. Please add at least one supplier first."
-                    : "No products found. Please add at least one product first."}
+                      ? "No suppliers found. Please add at least one supplier first."
+                      : "No products found. Please add at least one product first."}
                 </p>
               </div>
             </div>
@@ -824,30 +752,27 @@ const AddNewPurchase = () => {
           <h3 className="text-lg font-semibold mb-4 text-gray-700">
             Common Information
           </h3>
-
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <InputField
               label="Invoice Number"
               name="invoiceNumber"
               value={form.invoiceNumber}
-              onChange={enhancedHandleChange}
+              onChange={handleChange}
               error={errors.invoiceNumber}
               placeholder="INV-001-A"
               required
               disabled={isFormDisabled}
             />
-
             <InputField
               label="Delivery Number"
               name="deliveryNumber"
               value={form.deliveryNumber}
-              onChange={enhancedHandleChange}
+              onChange={handleChange}
               error={errors.deliveryNumber}
               placeholder="DEL-001-A"
               required
               disabled={isFormDisabled}
             />
-
             <SearchableDropdown
               label="Supplier"
               value={form.supplierId}
@@ -861,7 +786,6 @@ const AddNewPurchase = () => {
               loading={loading.suppliers}
               disabled={isSuppliersEmpty}
             />
-
             <DatePickerField
               label="Invoice Date"
               name="invoiceDate"
@@ -872,7 +796,6 @@ const AddNewPurchase = () => {
               maxDate={new Date()}
               disabled={isFormDisabled}
             />
-
             <DatePickerField
               label="Received Date"
               name="receivedDate"
@@ -894,7 +817,7 @@ const AddNewPurchase = () => {
 
           {form.products.map((product, index) => {
             const currentStock = product.remainingStock || 0;
-            const purchaseQty = parseNumber(product.qtyBox) || 0;
+            const purchaseQty = parseNumber(product.quantityPerBoxStrip) || 0; // ✅ updated field name
             const futureStock = calculateFutureStock(currentStock, purchaseQty);
 
             return (
@@ -939,13 +862,11 @@ const AddNewPurchase = () => {
                       >
                         {isProductExpanded(index) ? (
                           <>
-                            <EyeOff size={16} />
-                            Hide Details
+                            <EyeOff size={16} /> Hide Details
                           </>
                         ) : (
                           <>
-                            <Eye size={16} />
-                            Show Details
+                            <Eye size={16} /> Show Details
                           </>
                         )}
                       </button>
@@ -984,69 +905,75 @@ const AddNewPurchase = () => {
                         loading={loading.products}
                         disabled={isProductsEmpty}
                       />
+
+                      {/* ✅ quantityPerBoxStrip field */}
                       <NumericInputField
                         label="Box Quantity"
-                        name={`qtyBox_${index}`}
-                        value={product.qtyBox}
+                        name={`quantityPerBoxStrip_${index}`}
+                        value={product.quantityPerBoxStrip}
                         onChange={(e) =>
-                          enhancedProductChange(index, "qtyBox", e.target.value)
+                          handleProductChange(
+                            index,
+                            "quantityPerBoxStrip",
+                            e.target.value,
+                          )
                         }
-                        error={errors[`qtyBox_${index}`]}
+                        error={errors[`quantityPerBoxStrip_${index}`]}
                         placeholder="0"
                         required
                         allowDecimal={false}
                         disabled={isFormDisabled}
                       />
+
+                      {/* ✅ lc field */}
                       <NumericInputField
                         label="LC (USD)"
-                        name={`lcNumber_${index}`}
-                        value={product.lcNumber}
+                        name={`lc_${index}`}
+                        value={product.lc}
                         onChange={(e) =>
-                          enhancedProductChange(
-                            index,
-                            "lcNumber",
-                            e.target.value
-                          )
+                          handleProductChange(index, "lc", e.target.value)
                         }
-                        error={errors[`lcNumber_${index}`]}
+                        error={errors[`lc_${index}`]}
                         placeholder="0.00"
                         allowDecimal={true}
                         disabled={isFormDisabled}
                       />
+
                       <NumericInputField
                         label="FOB (USD)"
                         name={`fob_${index}`}
                         value={product.fob}
                         onChange={(e) =>
-                          enhancedProductChange(index, "fob", e.target.value)
+                          handleProductChange(index, "fob", e.target.value)
                         }
                         error={errors[`fob_${index}`]}
                         placeholder="0.00"
                         allowDecimal={true}
                         disabled={isFormDisabled}
                       />
+
                       <NumericInputField
                         label="CIF (USD)"
                         name={`cif_${index}`}
                         value={product.cif}
                         onChange={(e) =>
-                          enhancedProductChange(index, "cif", e.target.value)
+                          handleProductChange(index, "cif", e.target.value)
                         }
                         error={errors[`cif_${index}`]}
                         placeholder="0.00"
                         allowDecimal={true}
                         disabled={isFormDisabled}
                       />
-                      {/* ADDED: Selling Price Field */}
+
                       <NumericInputField
                         label="Selling Price (USD)"
                         name={`sellingPrice_${index}`}
                         value={product.sellingPrice}
                         onChange={(e) =>
-                          enhancedProductChange(
+                          handleProductChange(
                             index,
                             "sellingPrice",
-                            e.target.value
+                            e.target.value,
                           )
                         }
                         error={errors[`sellingPrice_${index}`]}
@@ -1054,14 +981,16 @@ const AddNewPurchase = () => {
                         allowDecimal={true}
                         disabled={isFormDisabled}
                       />
+
+                      {/* ✅ expiryDate field */}
                       <ProductDatePickerField
-                        label="Expired Date"
-                        name={`expiredDate_${index}`}
-                        value={product.expiredDate}
+                        label="Expiry Date"
+                        name={`expiryDate_${index}`}
+                        value={product.expiryDate}
                         onChange={(name, date) =>
-                          handleProductDateChange(index, "expiredDate", date)
+                          handleProductDateChange(index, "expiryDate", date)
                         }
-                        error={errors[`expiredDate_${index}`]}
+                        error={errors[`expiryDate_${index}`]}
                         required
                         disabled={isFormDisabled}
                         showYearDropdown
@@ -1074,7 +1003,6 @@ const AddNewPurchase = () => {
                         </label>
                         <input
                           type="text"
-                          name={`amount_${index}`}
                           value={
                             product.amount
                               ? parseFloat(product.amount).toFixed(2)
@@ -1084,11 +1012,10 @@ const AddNewPurchase = () => {
                           readOnly
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          Calculated: (FOB or LC) × Box Quantity
+                          Calculated: LC × Box Quantity
                         </p>
                       </div>
 
-                      {/* Display Product Type */}
                       {product.type && (
                         <div className="flex flex-col">
                           <label className="text-sm font-medium text-gray-700 mb-1">
@@ -1122,7 +1049,7 @@ const AddNewPurchase = () => {
           <textarea
             name="remarks"
             value={form.remarks}
-            onChange={enhancedHandleChange}
+            onChange={handleChange}
             placeholder="Additional notes or comments"
             rows={3}
             disabled={isFormDisabled}

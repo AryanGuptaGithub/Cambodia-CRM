@@ -1,4 +1,3 @@
-// models/expenses/addExpense.js
 import mongoose from "mongoose";
 
 const expenseSchema = new mongoose.Schema(
@@ -21,12 +20,12 @@ const expenseSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: 0.01,
+      min: 0, // Changed from 0.01 to 0 to allow zero amounts
       validate: {
         validator: function (v) {
-          return v > 0;
+          return v >= 0; // Changed from > 0 to >= 0 to allow zero
         },
-        message: "Amount must be greater than 0",
+        message: "Amount must be greater than or equal to 0",
       },
     },
     sourceAccount: {
@@ -37,7 +36,7 @@ const expenseSchema = new mongoose.Schema(
     // ── MR linkage (only for tour-related expense categories) ──────────────
     mrId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "MedicalRepresentative", // adjust ref name to match your MR model
+      ref: "MedicalRepresentative",
       default: null,
     },
     mrName: {
@@ -81,9 +80,10 @@ expenseSchema.index({ sourceAccount: 1 });
 expenseSchema.index({ createdAt: -1 });
 expenseSchema.index({ mrId: 1 });
 
+// Updated pre-save hook to allow zero amounts but prevent negative amounts
 expenseSchema.pre("save", function (next) {
-  if (this.amount <= 0) {
-    next(new Error("Amount must be greater than 0"));
+  if (this.amount < 0) {
+    next(new Error("Amount cannot be negative"));
   } else {
     next();
   }
