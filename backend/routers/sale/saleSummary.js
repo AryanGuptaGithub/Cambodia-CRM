@@ -17,6 +17,7 @@ import { logActivity } from "../activity/activityLog.js";
 const router = express.Router();
 const importProgressMap = new Map();
 let isImportInProgress = false;
+/*  **/
 
 const fixPrecision = (num) => {
   if (typeof num !== "number") return num;
@@ -185,20 +186,6 @@ const mergeInvoiceProducts = async (
         mrSalePurchasePrice = deductionResult.mrSalePurchasePrice || 0;
         totalCostAmount = fixPrecision(totalCostAmount + amountDeducted);
       } else {
-        const stockItem = await findStockItemFlexible(productName, session);
-        if (!stockItem)
-          throw new Error(`Product "${productName}" not found in inventory`);
-
-        const currentAvailableStock = fixPrecision(
-          Number(stockItem.totalBoxes || 0),
-        );
-        if (currentAvailableStock < totalQty) {
-          const shortage = fixPrecision(totalQty - currentAvailableStock);
-          throw new Error(
-            `Insufficient stock for ${productName}. Required: ${totalQty}, Available: ${currentAvailableStock}, Short by: ${shortage}`,
-          );
-        }
-
         const deductionResult = await deductStockFromReportInHand(
           productName,
           salesQty,
@@ -206,6 +193,7 @@ const mergeInvoiceProducts = async (
           existingInvoice.invoiceNumber,
           session,
         );
+
         if (!deductionResult.success) {
           throw new Error(
             `Stock deduction failed for ${productName}: ${deductionResult.message}`,
@@ -214,12 +202,11 @@ const mergeInvoiceProducts = async (
 
         amountDeducted = deductionResult.amountDeducted || 0;
         totalCostAmount = fixPrecision(totalCostAmount + amountDeducted);
+        lc = deductionResult.lc || 0;
 
-        const productRecord = await findProductRecordFlexible(
-          productName,
-          session,
+        console.log(
+          `📊 [mergeInvoiceProducts] ${productName} - Using LC from stock deduction: ${lc}`,
         );
-        lc = productRecord?.lc || 0;
       }
 
       const sellingPrice = fixPrecision(
@@ -246,6 +233,7 @@ const mergeInvoiceProducts = async (
         ep.mrSalePurchasePrice = fixPrecision(
           (ep.mrSalePurchasePrice || 0) + mrSalePurchasePrice,
         );
+        ep.lc = lc;
       } else {
         const productEntry = {
           productName,
@@ -434,6 +422,24 @@ const findProductRecordFlexible = async (productName, session = null) => {
           );
         }
       }
+    }
+
+    if (product && product.batches && product.batches.length > 0) {
+      const sortedBatches = [...product.batches].sort(
+        (a, b) =>
+          new Date(b.date || b.createdAt || 0) -
+          new Date(a.date || a.createdAt || 0),
+      );
+      const latestBatch = sortedBatches[0];
+
+      const productObj = product.toObject ? product.toObject() : product;
+      productObj.latestBatchLc = latestBatch.lc || product.lc || 0;
+      productObj.lc = latestBatch.lc || product.lc || 0;
+
+      console.log(
+        `📊 [findProductRecordFlexible] ${product.productName} - Latest batch LC: ${productObj.lc}`,
+      );
+      return productObj;
     }
 
     return product;
@@ -695,6 +701,8 @@ const deductStockFromReportInHand = async (
 
     let remainingToDeduct = totalQty;
     let totalCostDeducted = 0;
+    let usedLC = 0;
+    let usedLCFromBatch = null;
 
     for (const idx of realBatchIndices) {
       if (remainingToDeduct <= 0) break;
@@ -707,6 +715,15 @@ const deductStockFromReportInHand = async (
       );
       const costFromThisBatch = fixPrecision(deductFromThisBatch * batchLC);
       totalCostDeducted = fixPrecision(totalCostDeducted + costFromThisBatch);
+
+      if (usedLCFromBatch === null && deductFromThisBatch > 0) {
+        usedLC = batchLC;
+        usedLCFromBatch = true;
+        console.log(
+          `📊 [deductStockFromReportInHand] Using LC ${usedLC} from batch for ${productName}`,
+        );
+      }
+
       const newBatchBoxes = fixPrecision(batchBoxes - deductFromThisBatch);
       stockItem.batches[idx].boxes = newBatchBoxes;
       stockItem.batches[idx].amount = fixPrecision(newBatchBoxes * batchLC);
@@ -771,6 +788,7 @@ const deductStockFromReportInHand = async (
       amountDeducted: totalCostDeducted,
       averageUnitPrice: newAveragePrice,
       productExists: true,
+      lc: usedLC,
     };
   } catch (error) {
     console.error(`❌ Stock deduction error for ${productName}:`, error);
@@ -810,18 +828,12 @@ const restoreStockToReportInHand = async (
         `   Current removeStockAdjustment: ${stockItem.removeStockAdjustment}`,
       );
 
-      // ─────────────────────────────────────────────────────────
-      // STEP 1: Restore actual batch boxes (reverse of FIFO deduction)
-      // We fill batches in REVERSE order (latest first = LIFO restore)
-      // to mirror what was deducted FIFO
-      // ─────────────────────────────────────────────────────────
       const realBatchIndices = [];
       stockItem.batches.forEach((batch, idx) => {
         const type = batch.adjustmentType;
         if (!type || type === "batch") realBatchIndices.push(idx);
       });
 
-      // Sort descending by date → restore into most-recent batch first
       realBatchIndices.sort((a, b) => {
         const dateA = stockItem.batches[a].date
           ? new Date(stockItem.batches[a].date)
@@ -829,7 +841,7 @@ const restoreStockToReportInHand = async (
         const dateB = stockItem.batches[b].date
           ? new Date(stockItem.batches[b].date)
           : new Date(0);
-        return dateB - dateA; // newest first
+        return dateB - dateA;
       });
 
       let remainingToRestore = restoredQty;
@@ -839,9 +851,6 @@ const restoreStockToReportInHand = async (
 
         const batch = stockItem.batches[idx];
         const batchLC = fixPrecision(Number(batch.lc || 0));
-
-        // We don't have a hard cap here since we're restoring what was taken.
-        // Add back as much as needed into each batch slot.
         const restoreToThisBatch = remainingToRestore;
         const newBatchBoxes = fixPrecision(
           (Number(batch.boxes) || 0) + restoreToThisBatch,
@@ -849,11 +858,9 @@ const restoreStockToReportInHand = async (
 
         stockItem.batches[idx].boxes = newBatchBoxes;
         stockItem.batches[idx].amount = fixPrecision(newBatchBoxes * batchLC);
-
-        remainingToRestore = 0; // fully restored in one batch (simplest correct approach)
+        remainingToRestore = 0;
       }
 
-      // If no real batches exist at all, create a placeholder batch
       if (realBatchIndices.length === 0 && remainingToRestore > 0) {
         stockItem.batches.push({
           boxes: remainingToRestore,
@@ -870,9 +877,6 @@ const restoreStockToReportInHand = async (
         remainingToRestore = 0;
       }
 
-      // ─────────────────────────────────────────────────────────
-      // STEP 2: Recalculate totalBoxesFromBatches from restored batches
-      // ─────────────────────────────────────────────────────────
       let totalBoxesFromBatches = 0;
       let newTotalAmount = 0;
 
@@ -890,9 +894,6 @@ const restoreStockToReportInHand = async (
 
       stockItem.totalBoxesFromBatches = totalBoxesFromBatches;
 
-      // ─────────────────────────────────────────────────────────
-      // STEP 3: Also reduce removeStockAdjustment to keep totalBoxes consistent
-      // ─────────────────────────────────────────────────────────
       const previousRemoveAdj = fixPrecision(
         Number(stockItem.removeStockAdjustment || 0),
       );
@@ -911,9 +912,6 @@ const restoreStockToReportInHand = async (
         ),
       );
 
-      // ─────────────────────────────────────────────────────────
-      // STEP 4: Recalculate averagePrice from restored amounts
-      // ─────────────────────────────────────────────────────────
       const newAveragePrice =
         newTotalBoxes > 0 ? fixPrecision(newTotalAmount / newTotalBoxes) : 0;
 
@@ -952,7 +950,6 @@ const restoreStockToReportInHand = async (
         message: `Successfully restored ${restoredQty} units`,
       };
     } else {
-      // No stock item found — create a new one as fallback
       console.log(
         `📦 Creating new stock item for "${productName}" with ${restoredQty} boxes`,
       );
@@ -1043,7 +1040,7 @@ const validateMR = async (mrName, session = null) => {
     const query = Staff.findOne({
       medicalRepNameLower: cleanedMrName.toLowerCase(),
     });
-    if (session) query.session(session);
+    if (session) query = query.session(session);
     const mr = await query;
 
     if (!mr) {
@@ -1315,99 +1312,49 @@ const updateMRCashes = async (
   isRefund = false,
   auditNote = null,
 ) => {
-  console.log(`\n🔵 [updateMRCashes] CALLED`);
-  console.log(`   mrName       : ${mrName}`);
-  console.log(`   amount       : ${amount}`);
-  console.log(`   invoiceNumber: ${invoiceNumber}`);
-  console.log(`   date         : ${date}`);
-  console.log(`   isRefund     : ${isRefund}`);
-  console.log(`   auditNote    : ${auditNote}`);
-
   try {
     const cleanAmount = fixPrecision(Number(amount) || 0);
-    console.log(`   cleanAmount (after fixPrecision): ${cleanAmount}`);
 
     if (cleanAmount === 0) {
-      console.log(`   ⚠️  cleanAmount is 0 → skipping MR Cash update`);
       return { success: true, skipped: true, reason: "Amount is zero" };
     }
 
     if (!mrName || mrName.trim() === "") {
-      console.log(`   ❌ mrName is empty or missing → throwing error`);
       throw new Error("medicalRepName is required to update MR Cash");
     }
 
     const normalizedName = mrName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    console.log(`   normalizedName (regex-escaped): ${normalizedName}`);
 
     const defaultNote = isRefund
       ? `Refund for invoice ${invoiceNumber}: -${cleanAmount}`
       : `Sale invoice ${invoiceNumber}: +${cleanAmount}`;
     const transactionNote = auditNote || defaultNote;
-    console.log(`   transactionNote (final): ${transactionNote}`);
 
-    console.log(
-      `   🔍 Searching MRCash by mrName = "${normalizedName}" (case-insensitive)...`,
-    );
     let mrCash = await MRCash.findOne({
       mrName: { $regex: new RegExp(`^${normalizedName}$`, "i") },
     }).session(session);
-    console.log(
-      `   MRCash by-name lookup: ${mrCash ? `FOUND → _id=${mrCash._id}, mrId=${mrCash.mrId}, currentCash=${mrCash.currentCash}` : "NOT FOUND"}`,
-    );
 
     let mr;
     if (mrCash) {
-      console.log(`   🔍 Fetching Staff by mrCash.mrId = ${mrCash.mrId}...`);
       mr = await Staff.findById(mrCash.mrId).session(session);
-      console.log(
-        `   Staff by-id lookup: ${mr ? `FOUND → name="${mr.medicalRepName}"` : "NOT FOUND (falling back to name search)"}`,
-      );
-
       if (!mr) {
-        console.warn(
-          `   ⚠️  Staff _id ${mrCash.mrId} not found. Falling back to name search.`,
-        );
         mr = await Staff.findOne({
           medicalRepName: { $regex: new RegExp(`^${normalizedName}$`, "i") },
         }).session(session);
-        console.log(
-          `   Staff name-fallback: ${mr ? `FOUND → _id=${mr._id}` : "NOT FOUND"}`,
-        );
       }
     } else {
-      console.log(
-        `   🔍 Searching Staff for medicalRepName = "${normalizedName}" (case-insensitive)...`,
-      );
       mr = await Staff.findOne({
         medicalRepName: { $regex: new RegExp(`^${normalizedName}$`, "i") },
       }).session(session);
-      console.log(
-        `   Staff lookup result: ${mr ? `FOUND → _id=${mr._id}, name="${mr.medicalRepName}"` : "NOT FOUND"}`,
-      );
     }
 
     if (!mr) {
-      console.log(`   ❌ MR not found in Staff → throwing error`);
       throw new Error(`MR not found with name "${mrName}"`);
     }
 
     if (!mrCash) {
       const initialCash = isRefund ? 0 : cleanAmount;
-      console.log(
-        `   isRefund=${isRefund} → initialCash set to: ${initialCash}`,
-      );
 
-      if (isRefund && cleanAmount > 0) {
-        console.warn(
-          `⚠️  MR Cash record not found for "${mrName}" during refund. ` +
-            `Cash initialised to 0 (would have been -${cleanAmount}).`,
-        );
-      }
-
-      console.log(
-        `   📝 Creating new MRCash document for mrId=${mr._id}, mrName="${mr.medicalRepName}"...`,
-      );
       mrCash = new MRCash({
         mrId: mr._id,
         mrName: mr.medicalRepName,
@@ -1418,9 +1365,7 @@ const updateMRCashes = async (
         isActive: true,
       });
 
-      console.log(`   💾 Saving new MRCash → currentCash=${initialCash}...`);
       await mrCash.save({ session });
-      console.log(`   ✅ New MRCash saved successfully`);
 
       return {
         success: true,
@@ -1434,60 +1379,22 @@ const updateMRCashes = async (
     }
 
     const previousAmount = fixPrecision(mrCash.currentCash || 0);
-    console.log(`   previousAmount (current cash in DB): ${previousAmount}`);
-
     let newCashAmount;
 
     if (isRefund) {
-      console.log(
-        `   isRefund=true → SUBTRACTING ${cleanAmount} from ${previousAmount}`,
-      );
       const raw = fixPrecision(previousAmount - cleanAmount);
-      console.log(`   raw result (${previousAmount} - ${cleanAmount}): ${raw}`);
-
-      if (raw < 0) {
-        console.warn(
-          `⚠️  MR Cash for "${mrName}" would go negative ` +
-            `(${previousAmount} - ${cleanAmount} = ${raw}). Clamped to 0.`,
-        );
-        console.log(`   raw < 0 → clamping newCashAmount to 0`);
-        newCashAmount = 0;
-      } else {
-        console.log(`   raw >= 0 → newCashAmount = ${raw}`);
-        newCashAmount = raw;
-      }
+      newCashAmount = raw < 0 ? 0 : raw;
     } else {
-      console.log(
-        `   isRefund=false → ADDING ${cleanAmount} to ${previousAmount}`,
-      );
       newCashAmount = fixPrecision(previousAmount + cleanAmount);
-      console.log(
-        `   newCashAmount (${previousAmount} + ${cleanAmount}): ${newCashAmount}`,
-      );
     }
 
-    console.log(
-      `   📊 Cash transition: ${previousAmount} → ${newCashAmount} (delta: ${fixPrecision(newCashAmount - previousAmount)})`,
-    );
-
     mrCash.currentCash = newCashAmount;
-    console.log(`   mrCash.currentCash set to: ${mrCash.currentCash}`);
-
     mrCash.notes = mrCash.notes
       ? `${mrCash.notes}\n${transactionNote}`
       : transactionNote;
-    console.log(`   mrCash.notes updated (appended transactionNote)`);
-
     mrCash.updatedAt = new Date();
-    console.log(`   mrCash.updatedAt set to: ${mrCash.updatedAt}`);
 
-    console.log(
-      `   💾 Saving updated MRCash _id=${mrCash._id} for mrId=${mrCash.mrId}...`,
-    );
     await mrCash.save({ session });
-    console.log(
-      `   ✅ MRCash saved successfully → previousAmount=${previousAmount}, newAmount=${newCashAmount}, isRefund=${isRefund}`,
-    );
 
     return {
       success: true,
@@ -1499,11 +1406,7 @@ const updateMRCashes = async (
       isRefund,
     };
   } catch (error) {
-    console.error(
-      `❌ [updateMRCashes] ERROR for mrName="${mrName}", invoiceNumber="${invoiceNumber}"`,
-    );
-    console.error(`   error.message: ${error.message}`);
-    console.error(`   stack: ${error.stack}`);
+    console.error(`❌ [updateMRCashes] ERROR:`, error.message);
     return { success: false, error: error.message };
   }
 };
@@ -1767,7 +1670,7 @@ async function restoreStockToMRHand(
 }
 
 // ==========================================
-// parseUTCDate helper — stores date exactly as selected (no offset)
+// parseUTCDate helper
 // ==========================================
 const parseUTCDate = (dateStr) => {
   if (!dateStr) return new Date();
@@ -1775,18 +1678,52 @@ const parseUTCDate = (dateStr) => {
   return new Date(Date.UTC(y, m - 1, d));
 };
 
-// ==========================================
-// parseInvoiceDate helper — FIX: stores date exactly as selected (no +1/+2 day offset)
-// ==========================================
 const parseInvoiceDate = (dateStr) => {
   if (!dateStr) return new Date();
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d));
 };
 
-// ==========================================
-// CREATE SALE (Manual)
-// ==========================================
+const getTableDateRanges = (period) => {
+  const now = new Date();
+  switch (period) {
+    case "Today": {
+      const start = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+      );
+      const end = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+      return { start, end };
+    }
+    case "Month":
+      return {
+        start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+        end: now,
+      };
+    case "Year":
+      return {
+        start: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)),
+        end: now,
+      };
+    default:
+      const start = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+      );
+      return { start, end: now };
+  }
+};
+
+/* suraj  **/
+
 router.post("/create", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1826,6 +1763,7 @@ router.post("/create", async (req, res) => {
       totalCostAmount = 0;
     const stockDeductionResults = [];
 
+    // Pre-check stock availability
     for (const p of data.products || []) {
       const salesQty = fixPrecision(Number(p.salesQty) || 0);
       const bonusQty = fixPrecision(Number(p.bonusQty) || 0);
@@ -1833,6 +1771,7 @@ router.post("/create", async (req, res) => {
       if (totalQty <= 0) continue;
 
       if (isMRSale) {
+        // MR Sale stock check...
         if (!p.mrId)
           throw new Error(`MR not selected for product: ${p.productName}`);
 
@@ -1862,10 +1801,7 @@ router.post("/create", async (req, res) => {
 
         if (!mrProduct) {
           throw new Error(
-            `Product "${p.productName}" not found in ${mrStock.mrName}'s stock. Available: ${
-              mrStock.productsInHand?.map((p) => p.productName).join(", ") ||
-              "None"
-            }`,
+            `Product "${p.productName}" not found in ${mrStock.mrName}'s stock.`,
           );
         }
 
@@ -1876,6 +1812,7 @@ router.post("/create", async (req, res) => {
           );
         }
       } else {
+        // Normal Sale stock check...
         const stockItem = await findStockItemFlexible(p.productName, session);
         if (!stockItem)
           throw new Error(`Product "${p.productName}" not found in inventory`);
@@ -1898,6 +1835,7 @@ router.post("/create", async (req, res) => {
       }
     }
 
+    // Process each product and deduct stock
     for (const p of data.products || []) {
       const salesQty = fixPrecision(Number(p.salesQty) || 0);
       const bonusQty = fixPrecision(Number(p.bonusQty) || 0);
@@ -1941,12 +1879,7 @@ router.post("/create", async (req, res) => {
           mrSalePurchasePrice,
         });
       } else {
-        const productRecord = await findProductRecordFlexible(
-          p.productName,
-          session,
-        );
-        lc = productRecord?.lc || Number(p.lc) || 0;
-
+        // ✅ NORMAL SALE: Get LC from the stock deduction (actual batch LC)
         const deductionResult = await deductStockFromReportInHand(
           p.productName.trim(),
           salesQty,
@@ -1963,6 +1896,14 @@ router.post("/create", async (req, res) => {
 
         const amountDeducted = deductionResult.amountDeducted || 0;
         totalCostAmount = fixPrecision(totalCostAmount + amountDeducted);
+
+        // ✅ IMPORTANT: Use the LC from the deduction result
+        // DO NOT overwrite with productRecord?.lc
+        lc = deductionResult.lc || 0;
+
+        console.log(
+          `📊 [Sale Create] ${p.productName} - Using LC from stock deduction: ${lc}`,
+        );
 
         stockDeductionResults.push({
           product: p.productName.trim(),
@@ -2047,6 +1988,8 @@ router.post("/create", async (req, res) => {
       isMRSale,
     };
 
+    console.log("values of lclc", saleData);
+
     const sale = await SaleSummary.create([saleData], { session });
 
     if (paidAmount > 0 && mrName) {
@@ -2062,7 +2005,6 @@ router.post("/create", async (req, res) => {
         console.warn(`⚠️ Failed to update MR Cash: ${mrCashUpdate.error}`);
     }
 
-    // ✅ Log create activity
     await logActivity(req, {
       action: "CREATE",
       actionLabel: `Created Sale: ${sale[0].invoiceNumber}`,
@@ -4713,44 +4655,6 @@ router.get("/table-data", async (req, res) => {
       .json({ success: false, message: error.message, data: [], count: 0 });
   }
 });
-
-const getTableDateRanges = (period) => {
-  const now = new Date();
-  switch (period) {
-    case "Today": {
-      const start = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-      );
-      const end = new Date(
-        Date.UTC(
-          now.getUTCFullYear(),
-          now.getUTCMonth(),
-          now.getUTCDate(),
-          23,
-          59,
-          59,
-          999,
-        ),
-      );
-      return { start, end };
-    }
-    case "Month":
-      return {
-        start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-        end: now,
-      };
-    case "Year":
-      return {
-        start: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)),
-        end: now,
-      };
-    default:
-      const start = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-      );
-      return { start, end: now };
-  }
-};
 
 router.get("/credit-sale-not-received", async (req, res) => {
   try {

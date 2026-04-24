@@ -2,8 +2,8 @@ import express from "express";
 import mongoose from "mongoose";
 import SalesReturn from "../../models/sale/saleReturn.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
-import ProductInventory from "../../models/purcharsing/purchaseInventory.js";
 import Customer from "../../models/master/customer.js";
+import ReportInHand from "../../models/reports/reportsInHand.js";
 import ExcelJS from "exceljs";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
@@ -11,7 +11,6 @@ import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
 
-// Helper function to format dates for Excel
 const formatDateToReadable = (dateString) => {
   const date = new Date(dateString);
   return date.toLocaleDateString("en-US", {
@@ -30,54 +29,277 @@ const toTitleCase = (str) => {
     .join(" ");
 };
 
-// Helper function to calculate product totals with profit/loss
-const calculateProductTotals = (products) => {
-  return products.reduce(
-    (totals, product) => {
-      const salesQty = parseFloat(product.salesQty) || 0;
-      const bonusQty = parseFloat(product.bonusQty) || 0;
-      const sellingPrice = parseFloat(product.sellingPrice) || 0;
-      const discount = parseFloat(product.discount) || 0;
-      const returnQuantity = parseFloat(product.returnQuantity) || 0;
-      const lc = parseFloat(product.lc) || 0;
+// ================== Helper Functions ==================
 
-      // Calculate amounts based on used quantity
-      const usedQty = parseFloat(product.usedQty) || salesQty - returnQuantity;
-      const amount = usedQty * sellingPrice;
-      const netSellingAmount = amount - discount;
-      const totalQty = usedQty + bonusQty;
-      const usedAmount = usedQty * sellingPrice;
-      const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
+/**
+ * ADD: Push a return batch into ReportInHand when a sale return is created.
+ *
+ * IMPORTANT: This must be called AFTER insertMany so we have the REAL
+ * savedReturn._id to store in the batch. The schema's pre-save hook sums all
+ * batches to compute totalBoxes/totalAmount automatically.
+ */
+const addReturnBatchToStock = async (
+  productName,
+  returnQuantity,
+  invoiceNumber,
+  saleReturnId, // must be the real saved SalesReturn._id
+  lc,
+) => {
+  try {
+    let reportInHand = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") },
+    });
 
-      // Calculate profit/loss
-      const profitLoss = netSellingAmount - usedQty * lc;
+    if (!reportInHand) {
+      reportInHand = new ReportInHand({
+        productName: productName.toLowerCase(),
+        batches: [],
+        pendingReturns: [],
+      });
+    }
 
-      // Update product with calculated values
-      product.amount = amount;
-      product.netSellingAmount = netSellingAmount;
-      product.totalQty = totalQty;
-      product.usedQty = usedQty;
-      product.usedAmount = usedAmount;
-      product.averageUnitPrice = averageUnitPrice;
-      product.profitLoss = profitLoss;
+    const returnLc = lc || reportInHand.averagePrice || 0;
+    const returnAmount = returnQuantity * returnLc;
 
-      // Update total amount
-      totals.totalAmount += netSellingAmount;
+    reportInHand.batches.push({
+      boxes: returnQuantity,
+      lc: returnLc,
+      amount: returnAmount,
+      adjustmentType: "return",
+      date: new Date(),
+      saleReturnId: saleReturnId, // ← real _id stored here for later lookup
+      invoiceNumber: invoiceNumber,
+    });
 
-      return totals;
-    },
-    { totalAmount: 0 },
+    reportInHand.pendingReturns.push({
+      saleReturnId: saleReturnId,
+      invoiceNumber: invoiceNumber,
+      quantity: returnQuantity,
+      originalLc: returnLc,
+      status: "pending",
+      returnDate: new Date(),
+    });
+
+    await reportInHand.save();
+
+    console.log(
+      `✅ Added return batch for "${productName}": ${returnQuantity} boxes ` +
+        `at LC ${returnLc}, saleReturnId=${saleReturnId}, ` +
+        `totalBoxes=${reportInHand.totalBoxes}, totalAmount=${reportInHand.totalAmount}`,
+    );
+
+    return { success: true, reportInHand };
+  } catch (error) {
+    console.error(
+      `❌ addReturnBatchToStock failed for "${productName}":`,
+      error,
+    );
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * REMOVE: Delete the return batch from ReportInHand when a sale return is deleted.
+ *
+ * ROOT CAUSE FIX:
+ * The original POST code created a `tempSaleReturnId = new mongoose.Types.ObjectId()`
+ * BEFORE calling insertMany, so the saleReturnId stored in the batch was a random
+ * temp ID — NOT the actual SalesReturn._id. When DELETE ran, it tried to match
+ * by the real record._id, which never matched the temp ID → batch never removed
+ * → totalBoxes/totalAmount stayed at 9939/11926.8 instead of reverting to 9899/11878.8.
+ *
+ * Fix: POST now calls addReturnBatchToStock AFTER insertMany with the real _id.
+ * This function tries an exact match first, then falls back to invoiceNumber-only
+ * to handle any batches created with the old broken code.
+ */
+const removeReturnBatchFromStock = async (
+  productName,
+  returnQuantity,
+  invoiceNumber,
+  saleReturnId, // the real SalesReturn._id
+  lc,
+) => {
+  try {
+    const reportInHand = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") },
+    });
+
+    if (!reportInHand) {
+      console.log(`⚠️ ReportInHand not found for "${productName}" — skipping`);
+      return { success: false, error: "Product not found in inventory" };
+    }
+
+    // Step 1: Exact match by saleReturnId + invoiceNumber
+    let returnBatchIndex = reportInHand.batches.findIndex(
+      (batch) =>
+        batch.adjustmentType === "return" &&
+        batch.invoiceNumber === invoiceNumber &&
+        batch.saleReturnId?.toString() === saleReturnId?.toString(),
+    );
+
+    // Step 2: Fallback — match by invoiceNumber + adjustmentType only
+    // Handles batches created with old broken temp-ID code
+    if (returnBatchIndex === -1) {
+      console.log(
+        `⚠️ Exact saleReturnId match failed for "${productName}", ` +
+          `trying invoiceNumber-only fallback...`,
+      );
+      returnBatchIndex = reportInHand.batches.findIndex(
+        (batch) =>
+          batch.adjustmentType === "return" &&
+          batch.invoiceNumber === invoiceNumber,
+      );
+    }
+
+    if (returnBatchIndex === -1) {
+      console.log(
+        `⚠️ No return batch found for "${productName}", invoice "${invoiceNumber}"`,
+      );
+      return { success: false, error: "Return batch not found" };
+    }
+
+    const removedBatch = reportInHand.batches[returnBatchIndex];
+    console.log(
+      `🗑️ Removing return batch for "${productName}": ` +
+        `${removedBatch.boxes} boxes, amount=${removedBatch.amount}`,
+    );
+
+    // Remove the return batch entirely
+    reportInHand.batches.splice(returnBatchIndex, 1);
+
+    // Remove from pendingReturns
+    const pendingIndex = reportInHand.pendingReturns.findIndex(
+      (pr) =>
+        pr.invoiceNumber === invoiceNumber ||
+        pr.saleReturnId?.toString() === saleReturnId?.toString(),
+    );
+    if (pendingIndex !== -1) {
+      reportInHand.pendingReturns.splice(pendingIndex, 1);
+    }
+
+    await reportInHand.save();
+
+    console.log(
+      `✅ Return batch removed for "${productName}": ` +
+        `totalBoxes=${reportInHand.totalBoxes}, totalAmount=${reportInHand.totalAmount}`,
+    );
+
+    return { success: true, reportInHand };
+  } catch (error) {
+    console.error(
+      `❌ removeReturnBatchFromStock failed for "${productName}":`,
+      error,
+    );
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * ADJUST: Handle quantity difference when a sale return is updated (PUT /:id).
+ */
+const updateStockQuantityDifference = async (
+  productName,
+  oldQuantity,
+  newQuantity,
+  invoiceNumber,
+  saleReturnId,
+  lc,
+) => {
+  const diff = newQuantity - oldQuantity;
+  if (diff === 0) return { success: true };
+
+  if (diff > 0) {
+    console.log(
+      `📦 Return increase for "${productName}": +${diff} boxes (${oldQuantity} → ${newQuantity})`,
+    );
+    return await addReturnBatchToStock(
+      productName,
+      diff,
+      invoiceNumber,
+      saleReturnId,
+      lc,
+    );
+  }
+
+  // diff < 0 — shrink or remove the existing return batch
+  const removeQty = Math.abs(diff);
+  console.log(
+    `📦 Return decrease for "${productName}": -${removeQty} boxes (${oldQuantity} → ${newQuantity})`,
   );
+
+  const reportInHand = await ReportInHand.findOne({
+    productName: { $regex: new RegExp(`^${productName}$`, "i") },
+  });
+
+  if (!reportInHand) return { success: true };
+
+  // Exact match first, then fallback
+  let returnBatchIndex = reportInHand.batches.findIndex(
+    (batch) =>
+      batch.adjustmentType === "return" &&
+      batch.invoiceNumber === invoiceNumber &&
+      batch.saleReturnId?.toString() === saleReturnId?.toString(),
+  );
+
+  if (returnBatchIndex === -1) {
+    returnBatchIndex = reportInHand.batches.findIndex(
+      (batch) =>
+        batch.adjustmentType === "return" &&
+        batch.invoiceNumber === invoiceNumber,
+    );
+  }
+
+  if (returnBatchIndex === -1) {
+    console.log(`⚠️ Return batch not found for "${productName}" during update`);
+    return { success: true };
+  }
+
+  const currentBatch = reportInHand.batches[returnBatchIndex];
+  const newBatchQty = currentBatch.boxes - removeQty;
+
+  if (newBatchQty <= 0) {
+    reportInHand.batches.splice(returnBatchIndex, 1);
+    console.log(`✅ Return batch removed entirely for "${productName}"`);
+  } else {
+    currentBatch.boxes = newBatchQty;
+    currentBatch.amount = newBatchQty * currentBatch.lc;
+    console.log(
+      `✅ Return batch reduced to ${newBatchQty} boxes for "${productName}"`,
+    );
+  }
+
+  // Update pendingReturns quantity
+  const pendingIndex = reportInHand.pendingReturns.findIndex(
+    (pr) => pr.invoiceNumber === invoiceNumber,
+  );
+  if (pendingIndex !== -1) {
+    if (newQuantity <= 0) {
+      reportInHand.pendingReturns.splice(pendingIndex, 1);
+    } else {
+      reportInHand.pendingReturns[pendingIndex].quantity = newQuantity;
+    }
+  }
+
+  await reportInHand.save();
+  console.log(
+    `📊 Stock adjusted for "${productName}": ` +
+      `totalBoxes=${reportInHand.totalBoxes}, totalAmount=${reportInHand.totalAmount}`,
+  );
+
+  return { success: true };
 };
 
 // ================== POST / ==================
 router.post("/", protect, async (req, res) => {
+  console.log("🚀 [START] POST /sales-return endpoint called");
+
   try {
     const data = req.body;
     const records = Array.isArray(data) ? data : [data];
 
     if (records.length === 0) {
       return res.status(400).json({
+        success: false,
         message: "Expected a non‑empty array of sales return records",
       });
     }
@@ -93,72 +315,17 @@ router.post("/", protect, async (req, res) => {
 
     const processedData = await Promise.all(
       records.map(async (record, index) => {
-        // Validate required fields
         for (const field of requiredFields) {
-          if (record[field] === undefined || record[field] === null) {
+          if (
+            record[field] === undefined ||
+            record[field] === null ||
+            record[field] === ""
+          ) {
             throw new Error(
               `Missing required field "${field}" in record ${index + 1}`,
             );
           }
         }
-
-        // ---- CUSTOMER HANDLING ----
-        let customerId;
-        let customerIdRaw = record.customerId;
-        let customerCodeRaw = record.customerCode;
-
-        if (customerIdRaw && typeof customerIdRaw === "object") {
-          if (customerIdRaw._id) {
-            customerIdRaw = customerIdRaw._id;
-          } else {
-            throw new Error(
-              `Invalid customerId object format in record ${index + 1}: missing _id`,
-            );
-          }
-        }
-
-        const customerIdValue = customerIdRaw
-          ? String(customerIdRaw).trim()
-          : "";
-        const customerCodeValue = customerCodeRaw
-          ? String(customerCodeRaw).trim()
-          : "";
-
-        if (
-          customerIdValue &&
-          mongoose.Types.ObjectId.isValid(customerIdValue)
-        ) {
-          customerId = new mongoose.Types.ObjectId(customerIdValue);
-        } else if (customerIdValue) {
-          const customer = await Customer.findOne({ code: customerIdValue });
-          if (!customer) {
-            throw new Error(
-              `Customer not found with code "${customerIdValue}" in record ${index + 1}`,
-            );
-          }
-          customerId = customer._id;
-        } else if (customerCodeValue) {
-          const customer = await Customer.findOne({ code: customerCodeValue });
-          if (!customer) {
-            throw new Error(
-              `Customer not found with code "${customerCodeValue}" in record ${index + 1}`,
-            );
-          }
-          customerId = customer._id;
-        } else {
-          const customer = await Customer.findOne({
-            name: record.customerName,
-          });
-          if (!customer) {
-            throw new Error(
-              `Customer not found with name "${record.customerName}" in record ${index + 1}`,
-            );
-          }
-          customerId = customer._id;
-        }
-
-        record.customerId = customerId;
-        // ---------------------------------
 
         if (!Array.isArray(record.products) || record.products.length === 0) {
           throw new Error(
@@ -166,127 +333,165 @@ router.post("/", protect, async (req, res) => {
           );
         }
 
-        const { totalAmount } = calculateProductTotals(record.products);
+        // Customer lookup
+        let customerId = null;
+        try {
+          if (
+            record.customerId &&
+            mongoose.Types.ObjectId.isValid(record.customerId)
+          ) {
+            customerId = new mongoose.Types.ObjectId(record.customerId);
+          } else {
+            const customer = await Customer.findOne({
+              name: { $regex: new RegExp(`^${record.customerName}$`, "i") },
+            });
+            if (customer) customerId = customer._id;
+          }
+        } catch (customerError) {
+          console.error("Customer handling error:", customerError);
+        }
 
-        const amount = parseFloat(record.amount) || 0;
-        const dueAmount = Math.max(0, totalAmount - amount);
+        // Map products — do NOT update stock here, wait for real _id after insertMany
+        const mappedProducts = record.products.map((p) => {
+          const salesQty = Number(p.salesQty) || 0;
+          const bonusQty = Number(p.bonusQty) || 0;
+          const sellingPrice = Number(p.sellingPrice) || 0;
+          const discount = Number(p.discount) || 0;
+          const lc = Number(p.lc) || 0;
+          const returnQuantity = Math.min(
+            Number(p.returnQuantity) || 0,
+            salesQty,
+          );
+          const usedQty = salesQty - returnQuantity;
 
+          const amount = usedQty * sellingPrice;
+          const netSellingAmount = amount - discount;
+          const totalQty = usedQty + bonusQty;
+          const usedAmount = usedQty * sellingPrice;
+          const averageUnitPrice =
+            totalQty > 0 ? netSellingAmount / totalQty : 0;
+          const profitLoss = netSellingAmount - usedQty * lc;
+
+          return {
+            productName: p.productName || "",
+            salesQty,
+            bonusQty,
+            sellingPrice,
+            discount,
+            lc,
+            returnQuantity,
+            usedQty,
+            usedPrice: sellingPrice,
+            usedAmount,
+            totalQty,
+            amount,
+            netSellingAmount,
+            averageUnitPrice,
+            profitLoss,
+            isProductAccept: false,
+          };
+        });
+
+        const totalAmount = mappedProducts.reduce(
+          (sum, p) => sum + p.netSellingAmount,
+          0,
+        );
+        const paidAmount = parseFloat(record.paidAmount) || 0;
+        const dueAmount = Math.max(0, totalAmount - paidAmount);
         const creditDays = parseInt(record.creditDays) || 0;
-        const dueDate =
-          creditDays > 0
-            ? new Date(
-                new Date(record.invoiceDate).setDate(
-                  new Date(record.invoiceDate).getDate() + creditDays,
-                ),
-              )
-            : new Date(record.invoiceDate);
 
-        const mappedProducts = record.products.map((p) => ({
-          ...p,
-          salesQty: Number(p.salesQty) || 0,
-          bonusQty: Number(p.bonusQty) || 0,
-          sellingPrice: Number(p.sellingPrice) || 0,
-          discount: Number(p.discount) || 0,
-          lc: Number(p.lc) || 0,
-          returnQuantity: Number(p.returnQuantity) || 0,
-          usedPrice: Number(p.usedPrice) || 0,
-          usedQty: Number(p.usedQty) || 0,
-          usedAmount: Number(p.usedAmount) || 0,
-        }));
+        let dueDate = null;
+        if (record.invoiceDate && creditDays > 0) {
+          const invoiceDateObj = new Date(record.invoiceDate);
+          dueDate = new Date(
+            invoiceDateObj.setDate(invoiceDateObj.getDate() + creditDays),
+          );
+        }
 
-        const processedRecord = {
-          ...record,
+        return {
+          recordingDate: record.recordingDate,
+          invoiceNumber: record.invoiceNumber,
+          invoiceDate: record.invoiceDate,
+          mrName: record.mrName,
+          customerName: record.customerName,
           customerId,
           products: mappedProducts,
           creditDays,
           dueDate,
           deliveryDate: record.deliveryDate || record.invoiceDate,
-          amount,
+          paidAmount,
           dueAmount,
           totalAmount,
-          paymentStatus: record.paymentStatus || "Pending",
+          paymentStatus: record.paymentStatus || "Credit",
           remark: record.remark || "",
+          createdAt: new Date(),
+          updatedAt: new Date(),
         };
-        return processedRecord;
       }),
     );
 
+    // ── Save first to get real _id values ────────────────────────────────────
     const savedReturns = await SalesReturn.insertMany(processedData);
+    console.log(`✅ ${savedReturns.length} sales return records saved`);
+    console.log(`   IDs: ${savedReturns.map((r) => r._id).join(", ")}`);
 
-    // Update inventory with return quantities
-    const inventoryUpdatePromises = processedData.flatMap((record) =>
-      record.products.map(async (product) => {
+    // ── Update ReportInHand with REAL savedReturn._id ─────────────────────────
+    // This ensures removeReturnBatchFromStock can find the batch by exact match
+    // when the sale return is later deleted.
+    for (let i = 0; i < savedReturns.length; i++) {
+      const savedReturn = savedReturns[i];
+      const record = processedData[i];
+
+      for (const product of record.products) {
         if (product.returnQuantity > 0) {
-          const inventoryItem = await ProductInventory.findOne({
-            productName: product.productName,
-          });
-
-          if (inventoryItem) {
-            inventoryItem.totalBoxes += product.returnQuantity;
-
-            if (inventoryItem.batches && inventoryItem.batches.length > 0) {
-              inventoryItem.batches[0].boxes += product.returnQuantity;
-              inventoryItem.batches[0].amount =
-                inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
-            } else {
-              inventoryItem.batches.push({
-                boxes: product.returnQuantity,
-                lc: product.lc || 0.9,
-                fob: 1.1,
-                cif: 1.2,
-                amount: product.returnQuantity * (product.lc || 0.9),
-                expiryDate: new Date("2029-11-21"),
-                date: new Date(),
-              });
-            }
-
-            inventoryItem.totalAmount = inventoryItem.batches.reduce(
-              (sum, batch) => sum + batch.amount,
-              0,
+          console.log(
+            `🔄 Updating ReportInHand for "${product.productName}": ` +
+              `${product.returnQuantity} boxes, saleReturnId=${savedReturn._id}`,
+          );
+          const result = await addReturnBatchToStock(
+            product.productName,
+            product.returnQuantity,
+            record.invoiceNumber,
+            savedReturn._id, // ← REAL _id, NOT a temp ObjectId
+            product.lc,
+          );
+          if (!result.success) {
+            console.log(
+              `⚠️ ReportInHand update failed for "${product.productName}": ${result.error}`,
             );
-            inventoryItem.status =
-              inventoryItem.totalBoxes > inventoryItem.minStockLevel
-                ? "In Stock"
-                : "Out of Stock";
-
-            await inventoryItem.save();
           }
         }
-      }),
-    );
+      }
+    }
 
-    await Promise.all(inventoryUpdatePromises);
-
-    // Update SaleSummary: set isProductAccept = false for returned products
-    const updatePromises = processedData.flatMap((record) =>
-      record.products.map((product) =>
-        SaleSummary.updateMany(
-          {
-            invoiceNumber: record.invoiceNumber,
-            "products.productName": product.productName,
-            customerId: record.customerId,
-          },
-          {
-            $set: {
-              "products.$.isProductAccept": false,
-              "products.$.returnQuantity": product.returnQuantity,
-              "products.$.usedQty": product.usedQty,
-              "products.$.usedPrice": product.usedPrice,
-              "products.$.usedAmount": product.usedAmount,
-              "products.$.profitLoss": product.profitLoss,
-              "products.$.netSellingAmount": product.netSellingAmount,
-              "products.$.amount": product.amount,
-              "products.$.totalQty": product.totalQty,
-              "products.$.averageUnitPrice": product.averageUnitPrice,
+    // Update SaleSummary
+    try {
+      const updatePromises = processedData.flatMap((record) =>
+        record.products.map((product) =>
+          SaleSummary.updateMany(
+            {
+              invoiceNumber: record.invoiceNumber,
+              "products.productName": product.productName,
             },
-          },
+            {
+              $set: {
+                "products.$.isProductAccept": false,
+                "products.$.returnQuantity": product.returnQuantity,
+                "products.$.usedQty": product.usedQty,
+                "products.$.usedAmount": product.usedAmount,
+                "products.$.profitLoss": product.profitLoss,
+              },
+            },
+          ),
         ),
-      ),
-    );
+      );
+      await Promise.all(updatePromises);
+      console.log(`✅ Sale summaries updated`);
+    } catch (updateError) {
+      console.error(`⚠️ Error updating sale summaries:`, updateError.message);
+    }
 
-    await Promise.all(updatePromises);
-
-    // Log activity for each created return
+    // Log activities
     for (const savedReturn of savedReturns) {
       await logActivity(req, {
         action: "CREATE",
@@ -298,23 +503,22 @@ router.post("/", protect, async (req, res) => {
         newData: {
           invoiceNumber: savedReturn.invoiceNumber,
           customerName: savedReturn.customerName,
-          mrName: savedReturn.mrName,
           totalAmount: savedReturn.totalAmount,
-          productsCount: savedReturn.products.length,
         },
-        description: `Sales return created for invoice ${savedReturn.invoiceNumber} - Customer: ${toTitleCase(savedReturn.customerName)}`,
-        refField: "invoiceNumber",
+        description: `Sales return created for invoice ${savedReturn.invoiceNumber}`,
       });
     }
 
     return res.status(201).json({
-      message: `${savedReturns.length} sales return records saved successfully, and related sales updated.`,
+      success: true,
+      message: `${savedReturns.length} sales return record(s) saved successfully`,
       data: savedReturns,
     });
   } catch (error) {
-    console.error("❌ Error saving sales returns:", error);
+    console.error(`❌ Error saving sales returns:`, error);
     return res.status(500).json({
-      message: "Server error",
+      success: false,
+      message: error.message || "Server error while saving sales return",
       error: error.message,
     });
   }
@@ -346,17 +550,96 @@ router.get("/", async (req, res) => {
       .sort({ createdAt: -1 });
 
     return res.status(200).json({
+      success: true,
       message: "Sales return records fetched successfully.",
       data: returns,
     });
   } catch (error) {
     console.error("Error fetching sales return records:", error);
     return res.status(500).json({
+      success: false,
       message: "Server error",
       error: error.message,
     });
   }
 });
+
+// ================== GET /pending-returns/:productName ==================
+router.get("/pending-returns/:productName", async (req, res) => {
+  try {
+    const { productName } = req.params;
+    const reportInHand = await ReportInHand.findOne({ productName });
+
+    if (!reportInHand) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found in inventory",
+      });
+    }
+
+    const pendingReturns = reportInHand.getPendingReturnsForDropdown();
+    return res.status(200).json({ success: true, data: pendingReturns });
+  } catch (error) {
+    console.error("Error fetching pending returns:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
+// ================== POST /process-pending-return ==================
+router.post(
+  "/process-pending-return",
+  protect,
+  allowAdminOnly,
+  async (req, res) => {
+    try {
+      const { productName, pendingReturnId } = req.body;
+
+      if (!productName || !pendingReturnId) {
+        return res.status(400).json({
+          success: false,
+          message: "productName and pendingReturnId are required",
+        });
+      }
+
+      const reportInHand = await ReportInHand.findOne({ productName });
+
+      if (!reportInHand) {
+        return res.status(404).json({
+          success: false,
+          message: "Product not found in inventory",
+        });
+      }
+
+      await reportInHand.processPendingReturn(pendingReturnId);
+
+      await logActivity(req, {
+        action: "UPDATE",
+        actionLabel: `Processed Pending Return for ${productName}`,
+        tableName: "reportinhands",
+        tableLabel: "Report In Hand",
+        recordId: reportInHand._id,
+        description: `Processed pending return for product ${productName}`,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Pending return processed successfully",
+        data: reportInHand,
+      });
+    } catch (error) {
+      console.error("Error processing pending return:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
+    }
+  },
+);
 
 // ================== GET /:id ==================
 router.get("/:id", async (req, res) => {
@@ -382,10 +665,7 @@ router.get("/:id", async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      success: true,
-      data: saleReturn,
-    });
+    return res.status(200).json({ success: true, data: saleReturn });
   } catch (error) {
     console.error("Error fetching sales return:", error);
     return res.status(500).json({
@@ -441,6 +721,19 @@ router.put("/update-product", protect, allowAdminOnly, async (req, res) => {
         ? Number(returnQuantity)
         : product.returnQuantity;
 
+    const previousReturnQuantity = product.returnQuantity || 0;
+
+    if (updatedReturnQuantity !== previousReturnQuantity) {
+      await updateStockQuantityDifference(
+        productName,
+        previousReturnQuantity,
+        updatedReturnQuantity,
+        invoiceNumber,
+        null,
+        product.lc,
+      );
+    }
+
     const usedQty = Math.max(0, updatedSalesQty - updatedReturnQuantity);
     const totalQty = usedQty + updatedBonusQty;
     const amount = usedQty * product.sellingPrice;
@@ -454,13 +747,13 @@ router.put("/update-product", protect, allowAdminOnly, async (req, res) => {
       salesQty: updatedSalesQty,
       bonusQty: updatedBonusQty,
       returnQuantity: updatedReturnQuantity,
-      usedQty: usedQty,
-      totalQty: totalQty,
-      amount: amount,
-      netSellingAmount: netSellingAmount,
-      usedAmount: usedAmount,
-      averageUnitPrice: averageUnitPrice,
-      profitLoss: profitLoss,
+      usedQty,
+      totalQty,
+      amount,
+      netSellingAmount,
+      usedAmount,
+      averageUnitPrice,
+      profitLoss,
       isProductAccept:
         updatedReturnQuantity > 0 ? false : product.isProductAccept,
     };
@@ -469,41 +762,14 @@ router.put("/update-product", protect, allowAdminOnly, async (req, res) => {
       (sum, prod) => sum + prod.netSellingAmount,
       0,
     );
-    const totalDueAmount = Math.max(
-      0,
-      totalNetSellingAmount - saleRecord.amount,
-    );
-
     saleRecord.totalAmount = totalNetSellingAmount;
-    saleRecord.dueAmount = totalDueAmount;
+    saleRecord.dueAmount = Math.max(
+      0,
+      totalNetSellingAmount - saleRecord.paidAmount,
+    );
 
     await saleRecord.save();
 
-    if (returnQuantity !== undefined && returnQuantity > 0) {
-      const inventoryItem = await ProductInventory.findOne({ productName });
-      if (inventoryItem) {
-        const returnQtyDifference = returnQuantity - product.returnQuantity;
-        if (returnQtyDifference !== 0) {
-          inventoryItem.totalBoxes += returnQtyDifference;
-          if (inventoryItem.batches && inventoryItem.batches.length > 0) {
-            inventoryItem.batches[0].boxes += returnQtyDifference;
-            inventoryItem.batches[0].amount =
-              inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
-          }
-          inventoryItem.totalAmount = inventoryItem.batches.reduce(
-            (sum, batch) => sum + batch.amount,
-            0,
-          );
-          inventoryItem.status =
-            inventoryItem.totalBoxes > inventoryItem.minStockLevel
-              ? "In Stock"
-              : "Out of Stock";
-          await inventoryItem.save();
-        }
-      }
-    }
-
-    // Log activity
     await logActivity(req, {
       action: "UPDATE",
       actionLabel: `Updated Product in Sales Return: ${productName}`,
@@ -549,12 +815,12 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     const updatedData = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid sales return ID" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid sales return ID",
+      });
     }
 
-    // Get previous record before update
     const previousRecord = await SalesReturn.findById(id).lean();
     if (!previousRecord) {
       return res.status(404).json({
@@ -581,93 +847,82 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       }
     }
 
-    // ---- CUSTOMER HANDLING ----
-    let customerId;
-    let customerIdRaw = updatedData.customerId;
-    let customerCodeRaw = updatedData.customerCode;
+    // Handle stock changes per product
+    for (const newProduct of updatedData.products) {
+      const oldProduct = previousRecord.products.find(
+        (p) => p.productName === newProduct.productName,
+      );
 
-    if (customerIdRaw && typeof customerIdRaw === "object") {
-      if (customerIdRaw._id) {
-        customerIdRaw = customerIdRaw._id;
-      } else {
-        throw new Error(`Invalid customerId object format: missing _id`);
+      if (oldProduct) {
+        const oldReturnQty = oldProduct.returnQuantity || 0;
+        const newReturnQty = Number(newProduct.returnQuantity) || 0;
+
+        if (oldReturnQty !== newReturnQty) {
+          await updateStockQuantityDifference(
+            newProduct.productName,
+            oldReturnQty,
+            newReturnQty,
+            updatedData.invoiceNumber,
+            id,
+            newProduct.lc || oldProduct.lc || 0,
+          );
+        }
       }
     }
-
-    const customerIdValue = customerIdRaw ? String(customerIdRaw).trim() : "";
-    const customerCodeValue = customerCodeRaw
-      ? String(customerCodeRaw).trim()
-      : "";
-
-    if (customerIdValue && mongoose.Types.ObjectId.isValid(customerIdValue)) {
-      customerId = new mongoose.Types.ObjectId(customerIdValue);
-    } else if (customerIdValue) {
-      const customer = await Customer.findOne({ code: customerIdValue });
-      if (!customer) {
-        return res.status(404).json({
-          success: false,
-          message: `Customer not found with code "${customerIdValue}"`,
-        });
-      }
-      customerId = customer._id;
-    } else if (customerCodeValue) {
-      const customer = await Customer.findOne({ code: customerCodeValue });
-      if (!customer) {
-        return res.status(404).json({
-          success: false,
-          message: `Customer not found with code "${customerCodeValue}"`,
-        });
-      }
-      customerId = customer._id;
-    } else {
-      const customer = await Customer.findOne({
-        name: updatedData.customerName,
-      });
-      if (!customer) {
-        return res.status(404).json({
-          success: false,
-          message: `Customer not found with name "${updatedData.customerName}"`,
-        });
-      }
-      customerId = customer._id;
-    }
-    updatedData.customerId = customerId;
-    // ------------------------------------------------
-
-    // Recalculate totals
-    const { totalAmount } = calculateProductTotals(updatedData.products);
-    const amount = parseFloat(updatedData.amount) || 0;
-    const dueAmount = Math.max(0, totalAmount - amount);
-    const creditDays = parseInt(updatedData.creditDays) || 0;
-    const invoiceDate = new Date(updatedData.invoiceDate);
-    const dueDate =
-      creditDays > 0
-        ? new Date(invoiceDate.setDate(invoiceDate.getDate() + creditDays))
-        : invoiceDate;
 
     const mappedProducts = updatedData.products.map((p) => ({
-      ...p,
+      productName: p.productName || "",
       salesQty: Number(p.salesQty) || 0,
       bonusQty: Number(p.bonusQty) || 0,
       sellingPrice: Number(p.sellingPrice) || 0,
       discount: Number(p.discount) || 0,
       lc: Number(p.lc) || 0,
       returnQuantity: Number(p.returnQuantity) || 0,
-      usedPrice: Number(p.usedPrice) || 0,
+      usedPrice: Number(p.usedPrice) || Number(p.sellingPrice) || 0,
       usedQty: Number(p.usedQty) || 0,
       usedAmount: Number(p.usedAmount) || 0,
+      totalQty: Number(p.totalQty) || 0,
+      amount: Number(p.amount) || 0,
+      netSellingAmount: Number(p.netSellingAmount) || 0,
+      averageUnitPrice: Number(p.averageUnitPrice) || 0,
+      profitLoss: Number(p.profitLoss) || 0,
+      isProductAccept: p.isProductAccept || false,
     }));
 
+    const totalAmount = mappedProducts.reduce(
+      (sum, p) => sum + (p.netSellingAmount || 0),
+      0,
+    );
+    const paidAmount =
+      parseFloat(updatedData.paidAmount) || parseFloat(updatedData.amount) || 0;
+    const dueAmount = Math.max(0, totalAmount - paidAmount);
+    const creditDays = parseInt(updatedData.creditDays) || 0;
+
+    let dueDate = null;
+    if (updatedData.invoiceDate && creditDays > 0) {
+      const invoiceDateObj = new Date(updatedData.invoiceDate);
+      dueDate = new Date(
+        invoiceDateObj.setDate(invoiceDateObj.getDate() + creditDays),
+      );
+    }
+
     const updateData = {
-      ...updatedData,
-      customerId,
+      recordingDate: updatedData.recordingDate,
+      invoiceNumber: updatedData.invoiceNumber,
+      invoiceDate: updatedData.invoiceDate,
+      mrName: updatedData.mrName,
+      customerName: updatedData.customerName,
+      customerId: updatedData.customerId,
       products: mappedProducts,
       creditDays,
-      dueDate,
+      dueDate: dueDate || updatedData.dueDate,
       deliveryDate: updatedData.deliveryDate || updatedData.invoiceDate,
-      amount,
+      paidAmount,
       dueAmount,
       totalAmount,
+      paymentStatus: updatedData.paymentStatus || "Credit",
+      remark: updatedData.remark || "",
+      updatedAt: new Date(),
     };
 
     const updatedReturn = await SalesReturn.findByIdAndUpdate(id, updateData, {
@@ -676,12 +931,35 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     });
 
     if (!updatedReturn) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Sales return record not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Sales return record not found",
+      });
     }
 
-    // Log activity
+    try {
+      const updatePromises = updatedReturn.products.map((product) =>
+        SaleSummary.updateMany(
+          {
+            invoiceNumber: updatedReturn.invoiceNumber,
+            "products.productName": product.productName,
+          },
+          {
+            $set: {
+              "products.$.isProductAccept": product.isProductAccept,
+              "products.$.returnQuantity": product.returnQuantity,
+              "products.$.usedQty": product.usedQty,
+              "products.$.usedAmount": product.usedAmount,
+              "products.$.profitLoss": product.profitLoss,
+            },
+          },
+        ),
+      );
+      await Promise.all(updatePromises);
+    } catch (updateError) {
+      console.error("⚠️ Error updating sale summaries:", updateError.message);
+    }
+
     await logActivity(req, {
       action: "UPDATE",
       actionLabel: `Updated Sales Return: ${updatedReturn.invoiceNumber}`,
@@ -714,9 +992,93 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating sales return:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
+// ================== DELETE /:id ==================
+router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid sales return ID",
+    });
+  }
+
+  try {
+    const recordToDelete = await SalesReturn.findById(id);
+
+    if (!recordToDelete) {
+      return res.status(404).json({
+        success: false,
+        message: "Sales return not found",
+      });
+    }
+
+    console.log(`🗑️ Deleting sales return: ${recordToDelete.invoiceNumber}`);
+
+    // Remove the return batch from ReportInHand using real _id
+    for (const product of recordToDelete.products) {
+      if (product.returnQuantity > 0) {
+        console.log(
+          `   Removing return for "${product.productName}": ` +
+            `${product.returnQuantity} boxes, saleReturnId=${recordToDelete._id}`,
+        );
+        const result = await removeReturnBatchFromStock(
+          product.productName,
+          product.returnQuantity,
+          recordToDelete.invoiceNumber,
+          recordToDelete._id, // ← real _id for matching
+          product.lc,
+        );
+        if (result.success) {
+          console.log(
+            `   ✅ Stock reverted for "${product.productName}": ` +
+              `totalBoxes=${result.reportInHand?.totalBoxes}, ` +
+              `totalAmount=${result.reportInHand?.totalAmount}`,
+          );
+        } else {
+          console.log(
+            `   ⚠️ Stock revert issue for "${product.productName}": ${result.error}`,
+          );
+        }
+      }
+    }
+
+    await SalesReturn.findByIdAndDelete(id);
+
+    await logActivity(req, {
+      action: "DELETE",
+      actionLabel: `Deleted Sales Return: ${recordToDelete.invoiceNumber}`,
+      tableName: "salesreturns",
+      tableLabel: "Sales Return",
+      recordId: recordToDelete._id,
+      referenceNumber: recordToDelete.invoiceNumber,
+      previousData: {
+        invoiceNumber: recordToDelete.invoiceNumber,
+        customerName: recordToDelete.customerName,
+        totalAmount: recordToDelete.totalAmount,
+      },
+      description: `Deleted sales return for invoice ${recordToDelete.invoiceNumber}`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Sales return deleted successfully and stock restored",
+    });
+  } catch (error) {
+    console.error("Error deleting sales return:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while deleting sales return",
+      error: error.message,
+    });
   }
 });
 
@@ -752,6 +1114,26 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
     }
 
     const recordsToDelete = await SalesReturn.find({ _id: { $in: validIds } });
+    console.log(`🗑️ Bulk deleting ${recordsToDelete.length} sales returns`);
+
+    for (const record of recordsToDelete) {
+      console.log(`   Processing: ${record.invoiceNumber}`);
+      for (const product of record.products) {
+        if (product.returnQuantity > 0) {
+          console.log(
+            `      Removing ${product.returnQuantity} boxes of "${product.productName}", ` +
+              `saleReturnId=${record._id}`,
+          );
+          await removeReturnBatchFromStock(
+            product.productName,
+            product.returnQuantity,
+            record.invoiceNumber,
+            record._id, // ← real _id
+            product.lc,
+          );
+        }
+      }
+    }
 
     const result = await SalesReturn.deleteMany({ _id: { $in: validIds } });
 
@@ -762,41 +1144,6 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
       });
     }
 
-    // Revert inventory changes
-    const inventoryRevertPromises = recordsToDelete.flatMap((record) =>
-      record.products.map(async (product) => {
-        if (product.returnQuantity > 0) {
-          const inventoryItem = await ProductInventory.findOne({
-            productName: product.productName,
-          });
-
-          if (inventoryItem) {
-            inventoryItem.totalBoxes -= product.returnQuantity;
-
-            if (inventoryItem.batches && inventoryItem.batches.length > 0) {
-              inventoryItem.batches[0].boxes -= product.returnQuantity;
-              inventoryItem.batches[0].amount =
-                inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
-            }
-
-            inventoryItem.totalAmount = inventoryItem.batches.reduce(
-              (sum, batch) => sum + batch.amount,
-              0,
-            );
-            inventoryItem.status =
-              inventoryItem.totalBoxes > inventoryItem.minStockLevel
-                ? "In Stock"
-                : "Out of Stock";
-
-            await inventoryItem.save();
-          }
-        }
-      }),
-    );
-
-    await Promise.all(inventoryRevertPromises);
-
-    // Log bulk delete activity
     await logActivity(req, {
       action: "DELETE",
       actionLabel: `Bulk Deleted ${result.deletedCount} Sales Return(s)`,
@@ -813,7 +1160,7 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `${result.deletedCount} sale return(s) deleted successfully`,
+      message: `${result.deletedCount} sale return(s) deleted successfully and stock restored`,
       deletedCount: result.deletedCount,
     });
   } catch (error) {
@@ -821,100 +1168,6 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error while deleting sale returns",
-      error: error.message,
-    });
-  }
-});
-
-// ================== DELETE /:id ==================
-router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
-  const { id } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({
-      success: false,
-      message: "Invalid sales return ID",
-    });
-  }
-
-  try {
-    const recordToDelete = await SalesReturn.findById(id);
-
-    if (!recordToDelete) {
-      return res.status(404).json({
-        success: false,
-        message: "Sales return not found",
-      });
-    }
-
-    const deleted = await SalesReturn.findByIdAndDelete(id);
-
-    // Revert inventory changes
-    const inventoryRevertPromises = recordToDelete.products.map(
-      async (product) => {
-        if (product.returnQuantity > 0) {
-          const inventoryItem = await ProductInventory.findOne({
-            productName: product.productName,
-          });
-
-          if (inventoryItem) {
-            inventoryItem.totalBoxes -= product.returnQuantity;
-
-            if (inventoryItem.batches && inventoryItem.batches.length > 0) {
-              inventoryItem.batches[0].boxes -= product.returnQuantity;
-              inventoryItem.batches[0].amount =
-                inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
-            }
-
-            inventoryItem.totalAmount = inventoryItem.batches.reduce(
-              (sum, batch) => sum + batch.amount,
-              0,
-            );
-            inventoryItem.status =
-              inventoryItem.totalBoxes > inventoryItem.minStockLevel
-                ? "In Stock"
-                : "Out of Stock";
-
-            await inventoryItem.save();
-          }
-        }
-      },
-    );
-
-    await Promise.all(inventoryRevertPromises);
-
-    // Log activity
-    await logActivity(req, {
-      action: "DELETE",
-      actionLabel: `Deleted Sales Return: ${recordToDelete.invoiceNumber}`,
-      tableName: "salesreturns",
-      tableLabel: "Sales Return",
-      recordId: recordToDelete._id,
-      referenceNumber: recordToDelete.invoiceNumber,
-      previousData: {
-        invoiceNumber: recordToDelete.invoiceNumber,
-        customerName: recordToDelete.customerName,
-        mrName: recordToDelete.mrName,
-        totalAmount: recordToDelete.totalAmount,
-        products: recordToDelete.products.map((p) => ({
-          productName: p.productName,
-          returnQuantity: p.returnQuantity,
-        })),
-      },
-      description: `Deleted sales return for invoice ${recordToDelete.invoiceNumber} - Customer: ${toTitleCase(recordToDelete.customerName)}`,
-      refField: "invoiceNumber",
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Sales return deleted successfully",
-      data: deleted,
-    });
-  } catch (error) {
-    console.error("Error deleting sales return:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while deleting sales return",
       error: error.message,
     });
   }
@@ -965,8 +1218,7 @@ router.post("/download-excel", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Sales Return Summary");
 
-    // Title Rows
-    worksheet.mergeCells("A1:AC1");
+    worksheet.mergeCells("A1:AD1");
     worksheet.getCell("A1").value = "HEALTHCARE SOUTH EAST ASIA";
     worksheet.getCell("A1").font = { bold: true, size: 16 };
     worksheet.getCell("A1").alignment = {
@@ -974,7 +1226,7 @@ router.post("/download-excel", async (req, res) => {
       horizontal: "center",
     };
 
-    worksheet.mergeCells("A2:AC2");
+    worksheet.mergeCells("A2:AD2");
     worksheet.getCell("A2").value =
       `Sales Return Summary (${formatDateToReadable(startDate)} - ${formatDateToReadable(endDate)})`;
     worksheet.getCell("A2").font = { bold: true, size: 14 };
@@ -983,7 +1235,6 @@ router.post("/download-excel", async (req, res) => {
       horizontal: "center",
     };
 
-    // Column Definitions
     worksheet.columns = [
       { key: "no", width: 5 },
       { key: "recordingDate", width: 18 },
@@ -996,7 +1247,7 @@ router.post("/download-excel", async (req, res) => {
       { key: "bonusQty", width: 10 },
       { key: "totalQty", width: 10 },
       { key: "sellingPrice", width: 12 },
-      { key: "amount", width: 12 },
+      { key: "productAmount", width: 12 },
       { key: "discount", width: 10 },
       { key: "netSellingAmount", width: 25 },
       { key: "averageUnitPrice", width: 25 },
@@ -1010,14 +1261,13 @@ router.post("/download-excel", async (req, res) => {
       { key: "creditDays", width: 15 },
       { key: "dueDate", width: 15 },
       { key: "deliveryDate", width: 20 },
-      { key: "amount", width: 15 },
+      { key: "paidAmount", width: 15 },
       { key: "dueAmount", width: 15 },
       { key: "totalAmount", width: 15 },
       { key: "paymentStatus", width: 15 },
       { key: "remark", width: 20 },
     ];
 
-    // Header Row
     const headerRow = worksheet.getRow(3);
     headerRow.values = [
       "No",
@@ -1031,7 +1281,7 @@ router.post("/download-excel", async (req, res) => {
       "Bonus Qty",
       "Total Qty",
       "Selling Price",
-      "Amount",
+      "Product Amount",
       "Discount",
       "Net Selling Amount",
       "Average Unit Price",
@@ -1045,7 +1295,7 @@ router.post("/download-excel", async (req, res) => {
       "Credit Days",
       "Due Date",
       "Delivery Date",
-      "Amount",
+      "Paid Amount",
       "Due Amount",
       "Total Amount",
       "Payment Status",
@@ -1055,7 +1305,6 @@ router.post("/download-excel", async (req, res) => {
     headerRow.alignment = { vertical: "middle", horizontal: "center" };
     headerRow.height = 20;
 
-    // Data
     let index = 0;
     filteredReturns.forEach((sale) => {
       sale.products.forEach((prod) => {
@@ -1072,7 +1321,7 @@ router.post("/download-excel", async (req, res) => {
           bonusQty: prod.bonusQty,
           totalQty: prod.totalQty,
           sellingPrice: prod.sellingPrice,
-          amount: prod.amount,
+          productAmount: prod.amount,
           discount: prod.discount,
           netSellingAmount: prod.netSellingAmount,
           averageUnitPrice: prod.averageUnitPrice,
@@ -1086,7 +1335,7 @@ router.post("/download-excel", async (req, res) => {
           creditDays: sale.creditDays,
           dueDate: sale.dueDate,
           deliveryDate: sale.deliveryDate,
-          amount: sale.amount,
+          paidAmount: sale.paidAmount,
           dueAmount: sale.dueAmount,
           totalAmount: sale.totalAmount,
           paymentStatus: sale.paymentStatus,
@@ -1096,7 +1345,6 @@ router.post("/download-excel", async (req, res) => {
     });
 
     const fileName = `sales_return_summary_${formatDateToReadable(startDate)}_to_${formatDateToReadable(endDate)}.xlsx`;
-
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

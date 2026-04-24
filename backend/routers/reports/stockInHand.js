@@ -21,7 +21,7 @@ const getNonExpiredBatches = (batches) => {
 
 // ==========================================
 // Helper: compute signed boxes/amount from a list of batches
-// (respects "batch"/"add" as +, "remove" as -)
+// (respects "batch"/"add" as +, "remove" as -, "return" as +)
 // ==========================================
 const processBatches = (batches) => {
   let boxes = 0;
@@ -42,8 +42,13 @@ const processBatches = (batches) => {
 
     let sign = 0;
     const adjType = batch.adjustmentType?.toLowerCase();
-    if (adjType === "batch" || adjType === "add" || !adjType) {
-      sign = 1;
+    if (
+      adjType === "batch" ||
+      adjType === "add" ||
+      adjType === "return" ||
+      !adjType
+    ) {
+      sign = 1; // batch, add, and return all add to stock
     } else if (adjType === "remove") {
       sign = -1;
     } else {
@@ -61,7 +66,12 @@ const processBatches = (batches) => {
       totalBatchLC += (batch.lc || 0) * batchBoxes;
     }
 
-    processed.push({ ...(batch.toObject?.() || batch), sign });
+    processed.push({
+      ...(batch.toObject?.() || batch),
+      sign,
+      adjustmentTypeDisplay:
+        adjType === "return" ? "Return" : adjType || "Batch",
+    });
   }
 
   const avgLC = totalBatchBoxes > 0 ? totalBatchLC / totalBatchBoxes : 0;
@@ -104,7 +114,7 @@ const buildCombinedProductMap = async (searchFilter = null) => {
       status: report.status || (boxes === 0 ? "Out of Stock" : "In Stock"),
       minStockLevel: report.minStockLevel || 0,
       averagePrice: report.averagePrice || 0,
-      batches: processedBatches,
+      batches: processedBatches, // Now includes return batches with adjustmentTypeDisplay
       type: report.type || "",
       mrBoxes: 0,
       mrAmount: 0,
@@ -113,6 +123,8 @@ const buildCombinedProductMap = async (searchFilter = null) => {
       totalAmount: parseFloat(amount.toFixed(2)),
       totalDeductions: warehouseDeductions,
       totalNetAmount: parseFloat(warehouseNetAmount.toFixed(2)),
+      returnStockAdjustment: report.returnStockAdjustment || 0,
+      totalPendingReturnBoxes: report.totalPendingReturnBoxes || 0,
     });
   }
 
@@ -158,6 +170,8 @@ const buildCombinedProductMap = async (searchFilter = null) => {
           totalAmount: 0,
           totalDeductions: 0,
           totalNetAmount: 0,
+          returnStockAdjustment: 0,
+          totalPendingReturnBoxes: 0,
         });
       }
 
@@ -210,6 +224,8 @@ const computeSummary = (products) =>
       acc.totalMrAmount += p.mrAmount;
       acc.totalAmount += p.totalAmount;
       acc.totalNetAmount += p.totalNetAmount;
+      acc.totalReturnStockAdjustment += p.returnStockAdjustment || 0;
+      acc.totalPendingReturnBoxes += p.totalPendingReturnBoxes || 0;
       return acc;
     },
     {
@@ -222,6 +238,8 @@ const computeSummary = (products) =>
       totalMrAmount: 0,
       totalAmount: 0,
       totalNetAmount: 0,
+      totalReturnStockAdjustment: 0,
+      totalPendingReturnBoxes: 0,
     },
   );
 
@@ -255,6 +273,8 @@ router.get("/product/:productName", async (req, res) => {
       data: {
         totalBoxes: boxes,
         batches: processedBatches,
+        returnStockAdjustment: report.returnStockAdjustment || 0,
+        totalPendingReturnBoxes: report.totalPendingReturnBoxes || 0,
       },
     });
   } catch (error) {
@@ -281,7 +301,11 @@ router.get("/combined-stock", async (req, res) => {
     res.status(200).json({
       success: true,
       count: combinedProducts.length,
-      summary,
+      summary: {
+        ...summary,
+        totalReturnStockAdjustment: summary.totalReturnStockAdjustment,
+        totalPendingReturnBoxes: summary.totalPendingReturnBoxes,
+      },
       products: combinedProducts,
     });
   } catch (error) {
@@ -412,6 +436,8 @@ router.get("/", async (req, res) => {
       grandTotalBoxes: summary.totalBoxes,
       grandTotalAmount: summary.totalAmount,
       grandTotalNetAmount: summary.totalNetAmount,
+      totalReturnStockAdjustment: summary.totalReturnStockAdjustment,
+      totalPendingReturnBoxes: summary.totalPendingReturnBoxes,
       inStockCount,
       lowStockCount,
       criticalCount,
@@ -443,7 +469,7 @@ router.get("/average-price/export", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Stock Report");
 
-    worksheet.mergeCells("A1:L1");
+    worksheet.mergeCells("A1:N1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "Combined Stock In Hand Report (Non‑expired Only)";
     titleCell.font = { bold: true, size: 16 };
@@ -473,6 +499,14 @@ router.get("/average-price/export", async (req, res) => {
     );
     addRow("Net Usable Value:", $(summary.totalWarehouseNetAmount));
     addRow("MR Amount:", $(summary.totalMrAmount));
+    addRow(
+      "Return Stock Adjustment:",
+      summary.totalReturnStockAdjustment.toLocaleString(),
+    );
+    addRow(
+      "Pending Return Boxes:",
+      summary.totalPendingReturnBoxes.toLocaleString(),
+    );
     currentRow++;
 
     const headerRowNum = currentRow;
@@ -488,6 +522,9 @@ router.get("/average-price/export", async (req, res) => {
       "MR Amount ($)",
       "Total Boxes",
       "Avg Price ($)",
+      "Return Adj",
+      "Pending Returns",
+      "Batch Details",
     ];
     headers.forEach((h, i) => {
       worksheet.getCell(headerRowNum, i + 1).value = h;
@@ -519,6 +556,17 @@ router.get("/average-price/export", async (req, res) => {
       row.getCell(10).value = p.totalBoxes || 0;
       row.getCell(11).value = p.averagePrice || 0;
       row.getCell(11).numFmt = "$#,##0.00";
+      row.getCell(12).value = p.returnStockAdjustment || 0;
+      row.getCell(13).value = p.totalPendingReturnBoxes || 0;
+
+      // Batch details as a string summary
+      const batchSummary = (p.batches || [])
+        .map(
+          (b) =>
+            `${b.adjustmentTypeDisplay || b.adjustmentType}: ${b.boxes} boxes @ LC ${b.lc || 0}`,
+        )
+        .join("; ");
+      row.getCell(14).value = batchSummary || "No batches";
     });
 
     worksheet.columns = [
@@ -533,6 +581,9 @@ router.get("/average-price/export", async (req, res) => {
       { width: 16 },
       { width: 12 },
       { width: 14 },
+      { width: 12 },
+      { width: 14 },
+      { width: 50 },
     ];
 
     const dataEndRow = headerRowNum + allProducts.length;
@@ -599,6 +650,8 @@ router.get("/efficient", async (req, res) => {
       grandTotalBoxes: summary.totalBoxes,
       grandTotalAmount: summary.totalAmount,
       grandTotalNetAmount: summary.totalNetAmount,
+      totalReturnStockAdjustment: summary.totalReturnStockAdjustment,
+      totalPendingReturnBoxes: summary.totalPendingReturnBoxes,
       totalPages: Math.ceil(allProducts.length / limitNum),
       currentPage: pageNum,
       reports: paginatedProducts,
@@ -638,6 +691,8 @@ router.get("/all", async (req, res) => {
       grandTotalBoxes: summary.totalBoxes,
       grandTotalAmount: summary.totalAmount,
       grandTotalNetAmount: summary.totalNetAmount,
+      totalReturnStockAdjustment: summary.totalReturnStockAdjustment,
+      totalPendingReturnBoxes: summary.totalPendingReturnBoxes,
       reports: allProducts,
     });
   } catch (error) {
@@ -715,6 +770,8 @@ router.get("/summary/total-boxes", async (req, res) => {
         totalBoxes: summary.totalBoxes,
         totalAmount: summary.totalAmount,
         totalNetAmount: summary.totalNetAmount,
+        totalReturnStockAdjustment: summary.totalReturnStockAdjustment,
+        totalPendingReturnBoxes: summary.totalPendingReturnBoxes,
         averageBoxesPerProduct: parseFloat(avgBoxesPerProduct.toFixed(2)),
         averageNetAmountPerProduct: parseFloat(
           avgNetAmountPerProduct.toFixed(2),
@@ -808,13 +865,15 @@ router.get("/:id", async (req, res) => {
         warehouseDeductions,
         warehouseNetAmount,
         netUsableAmount: parseFloat(warehouseNetAmount.toFixed(2)),
-        batches: processedBatches,
+        batches: processedBatches, // Now includes return batches with adjustmentTypeDisplay
         mrBoxes,
         mrAmount,
         mrBreakdown,
         totalBoxes,
         totalAmount: amount + mrAmount,
         totalNetAmount: warehouseNetAmount + mrAmount,
+        returnStockAdjustment: report.returnStockAdjustment || 0,
+        totalPendingReturnBoxes: report.totalPendingReturnBoxes || 0,
       },
     });
   } catch (error) {
@@ -859,6 +918,8 @@ router.get("/search/:productName", async (req, res) => {
       grandTotalBoxes: summary.totalBoxes,
       grandTotalAmount: summary.totalAmount,
       grandTotalNetAmount: summary.totalNetAmount,
+      totalReturnStockAdjustment: summary.totalReturnStockAdjustment,
+      totalPendingReturnBoxes: summary.totalPendingReturnBoxes,
       totalPages: Math.ceil(allProducts.length / limitNum),
       currentPage: pageNum,
       reports: paginatedProducts,
@@ -933,6 +994,8 @@ router.get("/supplier/:supplierName", async (req, res) => {
           totalBoxes: boxes + mrBoxes,
           totalAmount: amount + mrAmount,
           totalNetAmount: warehouseNetAmount + mrAmount,
+          returnStockAdjustment: report.returnStockAdjustment || 0,
+          totalPendingReturnBoxes: report.totalPendingReturnBoxes || 0,
         };
       }),
     );
@@ -954,6 +1017,14 @@ router.get("/supplier/:supplierName", async (req, res) => {
       (s, r) => s + (r.warehouseDeductions || 0),
       0,
     );
+    const totalReturnAdj = filteredReports.reduce(
+      (s, r) => s + (r.returnStockAdjustment || 0),
+      0,
+    );
+    const totalPendingReturns = filteredReports.reduce(
+      (s, r) => s + (r.totalPendingReturnBoxes || 0),
+      0,
+    );
 
     res.status(200).json({
       success: true,
@@ -963,6 +1034,8 @@ router.get("/supplier/:supplierName", async (req, res) => {
       totalAmount: totalAmountSum,
       totalDeductions: totalDeductionsSum,
       totalNetAmount: totalNetAmountSum,
+      totalReturnStockAdjustment: totalReturnAdj,
+      totalPendingReturnBoxes: totalPendingReturns,
       totalPages: Math.ceil(filteredReports.length / limitNum),
       currentPage: pageNum,
       reports: paginatedReports,

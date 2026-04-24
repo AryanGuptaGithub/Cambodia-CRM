@@ -15,32 +15,32 @@ const productSchema = new Schema({
   amount: { type: Number, required: true, set: roundToTwo },
   discount: { type: Number, default: 0, min: 0, set: roundToTwo },
   netSellingAmount: { type: Number, required: true, set: roundToTwo },
-  averageUnitPrice: { type: Number, set: roundToTwo },
+  averageUnitPrice: { type: Number, default: 0, set: roundToTwo },
   lc: { type: Number, default: 0, set: roundToTwo },
-  profitLoss: { type: Number, set: roundToTwo },
+  profitLoss: { type: Number, default: 0, set: roundToTwo },
   isProductAccept: { type: Boolean, default: true },
-  returnQuantity: { type: Number, default: 0, min: 0 }, // NEW: For returns
-  usedQty: { type: Number, default: 0, min: 0 }, // NEW: For returns
-  usedPrice: { type: Number, default: 0, set: roundToTwo }, // NEW: For returns
-  usedAmount: { type: Number, default: 0, set: roundToTwo }, // NEW: For returns
+  returnQuantity: { type: Number, default: 0, min: 0 },
+  usedQty: { type: Number, default: 0, min: 0 },
+  usedPrice: { type: Number, default: 0, set: roundToTwo },
+  usedAmount: { type: Number, default: 0, set: roundToTwo },
 });
 
 const salesReturnSchema = new Schema(
   {
     recordingDate: { type: Date, required: true },
-    invoiceNumber: { type: String, required: true },
+    invoiceNumber: { type: String, required: true, trim: true },
     invoiceDate: { type: Date, required: true },
-    mrName: { type: String, required: true },
-    customerName: { type: String, required: true },
+    mrName: { type: String, required: true, trim: true },
+    customerName: { type: String, required: true, trim: true },
     customerId: {
       type: Schema.Types.ObjectId,
       ref: "Customer",
-      required: true,
+      required: false,
     },
-    
-    // Products array like in Sales
+
+    // Products array
     products: [productSchema],
-    
+
     // Financial fields
     creditDays: { type: Number, default: 0 },
     dueDate: { type: Date },
@@ -48,21 +48,26 @@ const salesReturnSchema = new Schema(
     paidAmount: { type: Number, default: 0, set: roundToTwo },
     dueAmount: { type: Number, default: 0, set: roundToTwo },
     totalAmount: { type: Number, required: true, set: roundToTwo },
-    
+
     // Return specific fields
     returnReason: { type: String, default: "" },
-    
+
     paymentStatus: {
       type: String,
       enum: ["Cash", "Credit", "Partial Paid", "Paid", "Pending"],
       required: true,
+      default: "Pending",
     },
     remark: { type: String, default: "" },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
+// Compound index for faster lookups
 salesReturnSchema.index({ invoiceNumber: 1, customerId: 1 });
+salesReturnSchema.index({ invoiceNumber: 1 });
+salesReturnSchema.index({ customerId: 1 });
+salesReturnSchema.index({ createdAt: -1 });
 
 const SalesReturn = mongoose.model("SalesReturn", salesReturnSchema);
 

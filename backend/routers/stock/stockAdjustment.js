@@ -57,30 +57,6 @@ const getBestLcFallback = (reportItem) => {
 };
 
 // ==================== Helper: warehouse summary ====================
-const getWarehouseInventorySummary = async (overrideMap = null) => {
-  const allReports = await ReportInHand.find({}).lean();
-  let totalAmount = 0;
-  let totalProducts = 0;
-
-  for (const report of allReports) {
-    let boxes = report.totalBoxes || 0;
-    let amount = report.totalAmount || 0;
-
-    if (overrideMap) {
-      const key = (report.productName || "").toLowerCase();
-      if (overrideMap.has(key)) {
-        const fresh = overrideMap.get(key);
-        boxes = fresh.totalBoxes;
-        amount = fresh.totalAmount;
-      }
-    }
-    if (boxes > 0) {
-      totalAmount += amount;
-      totalProducts++;
-    }
-  }
-  return { totalAmount: fixPrecision(totalAmount), totalProducts };
-};
 
 // ==================== Core: recalculate totals ====================
 const recalculateTotals = (reportItem) => {
@@ -801,6 +777,90 @@ router.get("/summary/warehouse", async (req, res) => {
     });
   }
 });
+
+const getWarehouseInventorySummary = async (overrideMap = null) => {
+  const allReports = await ReportInHand.find({}).lean();
+  let totalAmount = 0;
+  let totalProducts = 0;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (const report of allReports) {
+    let netBoxes = 0;
+    let netAmount = 0;
+
+    if (
+      report.batches &&
+      Array.isArray(report.batches) &&
+      report.batches.length > 0
+    ) {
+      for (const batch of report.batches) {
+        // Skip expired batches
+        if (batch.expiryDate) {
+          const expiry = new Date(batch.expiryDate);
+          expiry.setHours(0, 0, 0, 0);
+          if (expiry < today) continue;
+        }
+
+        let boxes = batch.boxes || 0;
+        let amount = batch.amount || 0;
+
+        // Apply override if provided
+        if (overrideMap) {
+          const key = (report.productName || "").toLowerCase();
+          if (overrideMap.has(key)) {
+            const fresh = overrideMap.get(key);
+            boxes = fresh.totalBoxes;
+            amount = fresh.totalAmount;
+          }
+        }
+
+        const adjType = batch.adjustmentType?.toLowerCase();
+
+        // ✅ Match processBatches: batch, add, return, and undefined all add to stock
+        if (
+          adjType === "batch" ||
+          adjType === "add" ||
+          adjType === "return" ||
+          !adjType
+        ) {
+          netBoxes += boxes;
+          netAmount += amount;
+        } else if (adjType === "remove") {
+          netBoxes -= boxes;
+          netAmount -= amount;
+        }
+        // else: unknown type — skip (matches processBatches behavior)
+      }
+    } else {
+      // Fallback if no batches array
+      netBoxes = report.totalBoxes || 0;
+      netAmount = report.totalAmount || 0;
+
+      if (report.expiryDate) {
+        const expiry = new Date(report.expiryDate);
+        expiry.setHours(0, 0, 0, 0);
+        if (expiry < today) {
+          netBoxes = 0;
+          netAmount = 0;
+        }
+      }
+    }
+
+    // ✅ Apply MR sale deductions to match warehouseNetAmount in the router
+    const deductions = report.totalMrSaleDeductions || 0;
+    const warehouseNetAmount = netAmount - deductions;
+
+    // Only count products with positive net boxes (matches router filter: totalBoxes >= 0 uses >=, but summary used > 0)
+    if (netBoxes > 0) {
+      totalAmount += warehouseNetAmount; // ✅ Use net amount after deductions
+      totalProducts++;
+    }
+  }
+
+  return { totalAmount: fixPrecision(totalAmount), totalProducts };
+};
 
 // ==================== REPAIR: recalc all products ====================
 router.post(

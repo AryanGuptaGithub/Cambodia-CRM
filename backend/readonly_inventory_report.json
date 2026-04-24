@@ -1,0 +1,4392 @@
+{
+  "reportinhands": null,
+  "test": {
+    "databaseName": "test",
+    "collectionName": "products",
+    "totalProductsAnalyzed": 59,
+    "totalProductsWithStock": 0,
+    "totalProductsOutOfStock": 59,
+    "summary": {
+      "totalActiveAmount": "0.00",
+      "totalMrDeductions": "0.00",
+      "totalActiveBoxes": 0,
+      "totalExpiredBoxes": 0,
+      "totalRemovedBoxes": 0,
+      "totalExpiringSoonBoxes": 0,
+      "totalPotentialRevenue": "0.00",
+      "netRealizableValue": "0.00"
+    },
+    "productDetails": [
+      {
+        "productId": "699560c52dfafd5ece0d1e39",
+        "productName": "ecocid 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c52dfafd5ece0d1e3c",
+        "productName": "ecoflam 400",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c52dfafd5ece0d1e3f",
+        "productName": "ecofloxcin 200",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c52dfafd5ece0d1e42",
+        "productName": "ecolevo 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 7,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e45",
+        "productName": "ecomol 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e48",
+        "productName": "ecopred 5",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e4b",
+        "productName": "ecothrocin 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 18,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e4e",
+        "productName": "ecovastin 10",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e51",
+        "productName": "ecovastin 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e54",
+        "productName": "ecozin 5",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e57",
+        "productName": "ecozin m",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e5a",
+        "productName": "ecozole 400",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e5d",
+        "productName": "esoprazole 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e60",
+        "productName": "kamzole 200",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 4.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e63",
+        "productName": "sirmox 250 cap",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e66",
+        "productName": "sirmox cl 1000",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 22,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e69",
+        "productName": "sirmox cl 228.5",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "bottle",
+        "baseSellingPrice": 1.8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e6c",
+        "productName": "sirmox cl 625",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 18,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e6f",
+        "productName": "suprafen 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e72",
+        "productName": "sirmox 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 3.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e75",
+        "productName": "sirmox 250 syp",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "bottle",
+        "baseSellingPrice": 1.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e78",
+        "productName": "ecoflaz 6",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 7,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e7b",
+        "productName": "liasix",
+        "supplierName": "merit organics co ltd",
+        "type": "inj",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e7e",
+        "productName": "carboxykam 0.5",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 1.1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e81",
+        "productName": "bupikam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 1.25,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e84",
+        "productName": "tranekam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e87",
+        "productName": "carespas",
+        "supplierName": "merit organics co ltd",
+        "type": "tab",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e8a",
+        "productName": "rosukam 10",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e8d",
+        "productName": "rosukam 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e90",
+        "productName": "ecothrocin 250",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 12,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e93",
+        "productName": "platokam 75",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e96",
+        "productName": "becofast z",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 10,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e99",
+        "productName": "digekam",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e9c",
+        "productName": "lidokam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e9f",
+        "productName": "lidokam plus",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 3.57,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ea2",
+        "productName": "dorzakam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 3.21,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ea5",
+        "productName": "ecopine",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 1.57,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ea8",
+        "productName": "hyalukam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eab",
+        "productName": "ondekam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 2.86,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eae",
+        "productName": "atrokam 0.6",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 3.93,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eb1",
+        "productName": "diclokam 75",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 4.64,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eb4",
+        "productName": "ferrokam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 12.86,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eb7",
+        "productName": "profokam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 3.21,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eba",
+        "productName": "lotekam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 3.57,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ebd",
+        "productName": "bupikam heavy",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 7.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec0",
+        "productName": "pankam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 1.79,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec3",
+        "productName": "glycikam sr 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec6",
+        "productName": "glycikam sr 1000",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec9",
+        "productName": "glycikam sr g1",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ecc",
+        "productName": "glycikam sr g2",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 4.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ecf",
+        "productName": "telmakam 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ed2",
+        "productName": "telmakam 40",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.3,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ed5",
+        "productName": "esoprazole 40",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ed8",
+        "productName": "tadakam 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.7,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1edb",
+        "productName": "acekam p forte",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.3,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ede",
+        "productName": "etorikam 90",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ee1",
+        "productName": "alu alu ecocid 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 1.8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ee4",
+        "productName": "amlocare",
+        "supplierName": "merit organics co ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.25,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ee7",
+        "productName": "metcare 500",
+        "supplierName": "merit organics co ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.25,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      }
+    ],
+    "fullDetails": [
+      {
+        "productId": "699560c52dfafd5ece0d1e39",
+        "productName": "ecocid 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c52dfafd5ece0d1e3c",
+        "productName": "ecoflam 400",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c52dfafd5ece0d1e3f",
+        "productName": "ecofloxcin 200",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c52dfafd5ece0d1e42",
+        "productName": "ecolevo 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 7,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e45",
+        "productName": "ecomol 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e48",
+        "productName": "ecopred 5",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e4b",
+        "productName": "ecothrocin 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 18,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e4e",
+        "productName": "ecovastin 10",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e51",
+        "productName": "ecovastin 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e54",
+        "productName": "ecozin 5",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e57",
+        "productName": "ecozin m",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e5a",
+        "productName": "ecozole 400",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e5d",
+        "productName": "esoprazole 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e60",
+        "productName": "kamzole 200",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 4.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e63",
+        "productName": "sirmox 250 cap",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e66",
+        "productName": "sirmox cl 1000",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 22,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e69",
+        "productName": "sirmox cl 228.5",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "bottle",
+        "baseSellingPrice": 1.8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e6c",
+        "productName": "sirmox cl 625",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 18,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e6f",
+        "productName": "suprafen 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e72",
+        "productName": "sirmox 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 3.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e75",
+        "productName": "sirmox 250 syp",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "bottle",
+        "baseSellingPrice": 1.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e78",
+        "productName": "ecoflaz 6",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 7,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e7b",
+        "productName": "liasix",
+        "supplierName": "merit organics co ltd",
+        "type": "inj",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e7e",
+        "productName": "carboxykam 0.5",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 1.1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e81",
+        "productName": "bupikam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 1.25,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e84",
+        "productName": "tranekam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e87",
+        "productName": "carespas",
+        "supplierName": "merit organics co ltd",
+        "type": "tab",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e8a",
+        "productName": "rosukam 10",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e8d",
+        "productName": "rosukam 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e90",
+        "productName": "ecothrocin 250",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 12,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e93",
+        "productName": "platokam 75",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e96",
+        "productName": "becofast z",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 10,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e99",
+        "productName": "digekam",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e9c",
+        "productName": "lidokam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 2.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1e9f",
+        "productName": "lidokam plus",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 3.57,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ea2",
+        "productName": "dorzakam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 3.21,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ea5",
+        "productName": "ecopine",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 1.57,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ea8",
+        "productName": "hyalukam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eab",
+        "productName": "ondekam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 2.86,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eae",
+        "productName": "atrokam 0.6",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 3.93,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eb1",
+        "productName": "diclokam 75",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 4.64,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eb4",
+        "productName": "ferrokam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 12.86,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eb7",
+        "productName": "profokam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 3.21,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1eba",
+        "productName": "lotekam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "eye drop",
+        "baseSellingPrice": 3.57,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ebd",
+        "productName": "bupikam heavy",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 7.5,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec0",
+        "productName": "pankam",
+        "supplierName": "kamla lifesciences ltd",
+        "type": "inj",
+        "baseSellingPrice": 1.79,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec3",
+        "productName": "glycikam sr 500",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec6",
+        "productName": "glycikam sr 1000",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ec9",
+        "productName": "glycikam sr g1",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.1,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ecc",
+        "productName": "glycikam sr g2",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 4.2,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ecf",
+        "productName": "telmakam 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.4,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c62dfafd5ece0d1ed2",
+        "productName": "telmakam 40",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.3,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ed5",
+        "productName": "esoprazole 40",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 6,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ed8",
+        "productName": "tadakam 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 2.7,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1edb",
+        "productName": "acekam p forte",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 3.3,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ede",
+        "productName": "etorikam 90",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "tab",
+        "baseSellingPrice": 8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ee1",
+        "productName": "alu alu ecocid 20",
+        "supplierName": "impulse pharma pvt ltd",
+        "type": "cap",
+        "baseSellingPrice": 1.8,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ee4",
+        "productName": "amlocare",
+        "supplierName": "merit organics co ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.25,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      },
+      {
+        "productId": "699560c72dfafd5ece0d1ee7",
+        "productName": "metcare 500",
+        "supplierName": "merit organics co ltd",
+        "type": "tab",
+        "baseSellingPrice": 1.25,
+        "totals": {
+          "active": {
+            "amount": "0.00",
+            "boxes": 0,
+            "mrDeductions": "0.00"
+          },
+          "expired": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "removed": {
+            "amount": "0.00",
+            "boxes": 0
+          },
+          "expiringSoon": {
+            "boxes": 0
+          },
+          "potentialRevenue": "0.00"
+        },
+        "batchBreakdown": {
+          "totalBatches": 0,
+          "activeBatches": 0,
+          "expiredBatches": 0,
+          "removedBatches": 0
+        },
+        "details": {
+          "activeBatches": [],
+          "expiredBatches": [],
+          "removedBatches": []
+        }
+      }
+    ]
+  },
+  "comparison": {},
+  "generatedAt": "2026-04-24T11:13:44.341Z"
+}

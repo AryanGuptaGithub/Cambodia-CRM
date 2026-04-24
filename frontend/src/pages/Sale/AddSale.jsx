@@ -1434,17 +1434,10 @@ const AddSale = () => {
     ];
   }, [mrStockList, mrStockListLoading]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // FIX: For Normal Sale, show only ACTIVE MRs from mrList.
-  // For MR Sale, the MR dropdown is per-product and uses mrStockOptions above
-  // (those come from /mr-stock/mrs-with-stock and are unaffected).
-  // ─────────────────────────────────────────────────────────────────────────
   const mrOptions = useMemo(() => {
-    // Filter active MRs only for normal sale
     const activeMrList =
       saleType === "normal"
         ? mrList.filter((mr) => {
-            // Support common active/status field patterns from Staff model
             if (mr.isActive !== undefined) return mr.isActive === true;
             if (mr.status !== undefined)
               return (
@@ -1453,7 +1446,6 @@ const AddSale = () => {
                 mr.status === true
               );
             if (mr.active !== undefined) return mr.active === true;
-            // If no recognised active field exists, include the MR by default
             return true;
           })
         : mrList;
@@ -1479,7 +1471,6 @@ const AddSale = () => {
       })),
     ];
   }, [mrList, mrListLoading, saleType]);
-  // ─────────────────────────────────────────────────────────────────────────
 
   const fetchMRAvailableProducts = useCallback(
     async (mrId, index) => {
@@ -1680,6 +1671,7 @@ const AddSale = () => {
     checkRequiredData();
   }, [checkRequiredData]);
 
+  // ✅ FIXED: Get product details with correct LC from latest purchase batch
   const getProductDetails = useCallback(
     (productName, index) => {
       if (saleType === "mr") {
@@ -1702,20 +1694,43 @@ const AddSale = () => {
         return { lc: "", fob: "", cif: "", sellingPrice: "" };
       }
 
+      // For normal sale - Get correct LC from product's latest purchase batch
       const product = products.find((p) => p.productName === productName);
       if (!product) {
         return { lc: "", fob: "", cif: "", sellingPrice: "" };
       }
-      let lc = product.lc || 0;
-      let fob = product.fob || 0;
-      let cif = product.cif || 0;
+
+      let lc = 0;
+      let fob = 0;
+      let cif = 0;
       let sellingPrice = product.sellingPrice || "";
+
+      // Check if product has batches from purchases
       if (product.batches && product.batches.length > 0) {
-        const firstBatch = product.batches[0];
-        lc = firstBatch.lc || lc;
-        fob = firstBatch.fob || fob;
-        cif = firstBatch.cif || cif;
+        // Get the latest batch by date (most recent purchase)
+        const sortedBatches = [...product.batches].sort(
+          (a, b) =>
+            new Date(b.date || b.createdAt || 0) -
+            new Date(a.date || a.createdAt || 0),
+        );
+        const latestBatch = sortedBatches[0];
+        lc = latestBatch.lc || product.lc || 0;
+        fob = latestBatch.fob || product.fob || 0;
+        cif = latestBatch.cif || product.cif || 0;
+
+        console.log(
+          `📊 [getProductDetails] ${productName} - Using LC from batch: ${lc}`,
+        );
+      } else {
+        // Fallback to product's own lc field
+        lc = product.lc || 0;
+        fob = product.fob || 0;
+        cif = product.cif || 0;
+        console.log(
+          `📊 [getProductDetails] ${productName} - Using LC from product: ${lc}`,
+        );
       }
+
       return {
         lc: lc.toString(),
         fob: fob.toString(),
@@ -1803,6 +1818,7 @@ const AddSale = () => {
     [saleType, mrAvailableProducts, productNames],
   );
 
+  // ✅ FIXED: Enhanced product change with proper LC handling
   const enhancedProductChange = useCallback(
     (index, field, value) => {
       if (isFormDisabled) return;
@@ -1811,9 +1827,23 @@ const AddSale = () => {
 
       if (field === "productName") {
         const productDetails = getProductDetails(value, index);
-        updateProduct(index, "lc", productDetails.lc);
+
+        // Only update LC if it's not already set correctly
+        const currentProduct = form.products[index];
+        const shouldUpdateLc =
+          !currentProduct.lc ||
+          currentProduct.lc === "0" ||
+          currentProduct.lc === "" ||
+          parseFloat(currentProduct.lc) === 0;
+
+        if (shouldUpdateLc) {
+          updateProduct(index, "lc", productDetails.lc);
+          console.log(`✅ Setting LC for ${value} to: ${productDetails.lc}`);
+        }
+
         updateProduct(index, "fob", productDetails.fob);
         updateProduct(index, "cif", productDetails.cif);
+
         if (productDetails.sellingPrice) {
           updateProduct(index, "sellingPrice", productDetails.sellingPrice);
         }
