@@ -16,6 +16,19 @@ import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// Categories that require an MR to be selected
+const TOUR_MR_CATEGORY_KEYWORDS = [
+  "tour allowance",
+  "tour petrol expense",
+  "province marketing expense",
+  "rent expense - vans",
+];
+
+const isMrRequiredCategory = (categoryName = "") => {
+  const lower = categoryName.toLowerCase().trim();
+  return TOUR_MR_CATEGORY_KEYWORDS.some((kw) => lower.includes(kw));
+};
+
 const expensesAPI = {
   fetchExpenses: async () => {
     const resp = await axios.get(`${backendUrl}/api/expenses`);
@@ -55,6 +68,9 @@ const Expenses = () => {
     description: "",
     amount: "",
     date: "",
+    // mrId and mrName come from the expense itself — read-only, passed through as-is
+    mrId: "",
+    mrName: "",
   });
   const [updateLoading, setUpdateLoading] = useState(false);
   const [categoryBalances, setCategoryBalances] = useState({});
@@ -63,11 +79,9 @@ const Expenses = () => {
   const expensesPerPage = 10;
   const navigate = useNavigate();
 
-  // ✅ SuperAdmin check
   const userRole = localStorage.getItem("role")?.toLowerCase();
   const isSuperAdmin = userRole === "super admin" || userRole === "superadmin";
 
-  // Responsive states
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -124,6 +138,29 @@ const Expenses = () => {
     [expenseCategories],
   );
 
+  // Whether the currently selected edit category needs an MR
+  const editCategoryName = useMemo(() => {
+    if (!editForm.category) return "";
+    const cat = expenseCategories.find((c) => c._id === editForm.category);
+    return cat?.category || "";
+  }, [editForm.category, expenseCategories]);
+
+  const editNeedsMr = useMemo(
+    () => isMrRequiredCategory(editCategoryName),
+    [editCategoryName],
+  );
+
+  // Whether a given expense row needs MR (for display in table/card)
+  const expenseNeedsMr = useCallback(
+    (exp) => {
+      const catName =
+        exp.category?.category ||
+        (typeof exp.category === "string" ? getCategoryName(exp.category) : "");
+      return isMrRequiredCategory(catName);
+    },
+    [getCategoryName],
+  );
+
   const filteredExpenses = useMemo(() => {
     if (!searchQuery) return expenses;
     const lower = searchQuery.toLowerCase();
@@ -133,12 +170,14 @@ const Expenses = () => {
       const desc = exp.description ?? exp.remarks ?? "";
       const dt = formatDateToReadable(exp.date).toLowerCase();
       const amountStr = (exp.amount ?? 0).toString();
+      const mrName = (exp.mrName ?? "").toLowerCase();
       return (
         sourceName.toLowerCase().includes(lower) ||
         catName.toLowerCase().includes(lower) ||
         desc.toLowerCase().includes(lower) ||
         dt.includes(lower) ||
-        amountStr.includes(lower)
+        amountStr.includes(lower) ||
+        mrName.includes(lower)
       );
     });
   }, [expenses, searchQuery, getCategoryName]);
@@ -190,7 +229,6 @@ const Expenses = () => {
 
   const handleDelete = useCallback(
     async (id) => {
-      // ✅ Block SuperAdmin
       if (isSuperAdmin) {
         showToast("error", "SuperAdmin cannot delete expenses");
         return;
@@ -254,7 +292,6 @@ const Expenses = () => {
 
   const handleEdit = useCallback(
     (exp) => {
-      // ✅ Block SuperAdmin
       if (isSuperAdmin) {
         showToast("error", "SuperAdmin cannot edit expenses");
         return;
@@ -266,6 +303,9 @@ const Expenses = () => {
         description: exp.description || exp.remarks || "",
         amount: exp.amount?.toString() || "",
         date: exp.date ? new Date(exp.date).toISOString().split("T")[0] : "",
+        // Read mrId and mrName directly from the expense — no external lookup needed
+        mrId: exp.mrId?._id || exp.mrId || "",
+        mrName: exp.mrName || "",
       });
       setIsEditModalOpen(true);
     },
@@ -293,6 +333,15 @@ const Expenses = () => {
       return;
     }
 
+    // Validate MR is present when category requires it
+    if (editNeedsMr && !editForm.mrId) {
+      showToast(
+        "error",
+        `This expense requires an MR for category "${editCategoryName}". Please go back and create the expense with an MR selected.`,
+      );
+      return;
+    }
+
     try {
       setUpdateLoading(true);
       const payload = {
@@ -301,7 +350,12 @@ const Expenses = () => {
         description: editForm.description?.trim() || "",
         amount: newAmt,
         date: editForm.date,
+        // Pass mrId and mrName through as-is from the original expense
+        ...(editNeedsMr && editForm.mrId
+          ? { mrId: editForm.mrId, mrName: editForm.mrName }
+          : {}),
       };
+
       const updateRes = await expensesAPI.updateExpense(
         editingExpense._id,
         payload,
@@ -347,73 +401,86 @@ const Expenses = () => {
     return result;
   };
 
-  // ✅ Mobile card - SuperAdmin sees View Only
-  const MobileExpenseCard = ({ exp, onEdit, onDelete }) => (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
-      <div className="flex justify-between items-start mb-3">
-        <div className="flex-1">
-          <p className="text-sm text-gray-500">
-            Source:{" "}
-            {exp.sourceAccount?.name ||
-              (typeof exp.sourceAccount === "string"
-                ? exp.sourceAccount
-                : getSafeValue(exp, "sourceAccount.name", "Unknown"))}
-          </p>
-          <p className="text-sm text-gray-500 mt-1">
-            Category:{" "}
-            {exp.category?.category ||
-              (typeof exp.category === "string"
-                ? getCategoryName(exp.category)
-                : getSafeValue(exp, "category.category", "Unknown"))}
-          </p>
+  // Mobile card
+  const MobileExpenseCard = ({ exp, onEdit, onDelete }) => {
+    const needsMr = expenseNeedsMr(exp);
+    return (
+      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
+        <div className="flex justify-between items-start mb-3">
+          <div className="flex-1">
+            <p className="text-sm text-gray-500">
+              Source:{" "}
+              {exp.sourceAccount?.name ||
+                (typeof exp.sourceAccount === "string"
+                  ? exp.sourceAccount
+                  : getSafeValue(exp, "sourceAccount.name", "Unknown"))}
+            </p>
+            <p className="text-sm text-gray-500 mt-1">
+              Category:{" "}
+              {exp.category?.category ||
+                (typeof exp.category === "string"
+                  ? getCategoryName(exp.category)
+                  : getSafeValue(exp, "category.category", "Unknown"))}
+            </p>
+            {/* Show MR in mobile card if category requires it */}
+            {needsMr && (
+              <p className="text-sm text-indigo-600 mt-1 font-medium">
+                MR:{" "}
+                {exp.mrName ? (
+                  exp.mrName
+                ) : (
+                  <span className="text-red-500 italic">Not assigned</span>
+                )}
+              </p>
+            )}
+          </div>
+          <div className="text-right">
+            <p className="font-bold text-green-600 text-lg">
+              ${formatCurrency(exp.amount || 0)}
+            </p>
+          </div>
         </div>
-        <div className="text-right">
-          <p className="font-bold text-green-600 text-lg">
-            ${formatCurrency(exp.amount || 0)}
-          </p>
-        </div>
-      </div>
 
-      <div className="space-y-2 text-sm">
-        <div className="flex">
-          <span className="text-gray-600 w-24">Description:</span>
-          <span className="text-gray-800 flex-1">
-            {exp.description || exp.remarks || "-"}
-          </span>
+        <div className="space-y-2 text-sm">
+          <div className="flex">
+            <span className="text-gray-600 w-24">Description:</span>
+            <span className="text-gray-800 flex-1">
+              {exp.description || exp.remarks || "-"}
+            </span>
+          </div>
+          <div className="flex">
+            <span className="text-gray-600 w-24">Date:</span>
+            <span className="text-gray-800 flex-1">
+              {exp.date ? formatDateToReadable(exp.date) : "-"}
+            </span>
+          </div>
         </div>
-        <div className="flex">
-          <span className="text-gray-600 w-24">Date:</span>
-          <span className="text-gray-800 flex-1">
-            {exp.date ? formatDateToReadable(exp.date) : "-"}
-          </span>
-        </div>
-      </div>
 
-      {/* ✅ SuperAdmin sees View Only label, others see Edit/Delete */}
-      {isSuperAdmin ? (
-        <div className="mt-3 pt-2 border-t border-gray-100 text-center">
-          <span className="text-xs bg-gray-100 text-gray-500 px-3 py-1 rounded-full italic">
-            👁️ View Only
-          </span>
-        </div>
-      ) : (
-        <div className="flex justify-end gap-4 mt-3 pt-2 border-t border-gray-100">
-          <button
-            onClick={() => onEdit(exp)}
-            className="text-green-600 hover:text-green-800 p-2 active:bg-green-50 rounded-full"
-          >
-            <Edit size={20} />
-          </button>
-          <button
-            onClick={() => onDelete(exp._id)}
-            className="text-red-600 hover:text-red-800 p-2 active:bg-red-50 rounded-full"
-          >
-            <Trash2 size={20} />
-          </button>
-        </div>
-      )}
-    </div>
-  );
+        {isSuperAdmin ? (
+          <div className="mt-3 pt-2 border-t border-gray-100 text-center">
+            <span className="text-xs bg-gray-100 text-gray-500 px-3 py-1 rounded-full italic">
+              👁️ View Only
+            </span>
+          </div>
+        ) : (
+          <div className="flex justify-end gap-4 mt-3 pt-2 border-t border-gray-100">
+            <button
+              onClick={() => onEdit(exp)}
+              className="text-green-600 hover:text-green-800 p-2 active:bg-green-50 rounded-full"
+            >
+              <Edit size={20} />
+            </button>
+            <button
+              onClick={() => onDelete(exp._id)}
+              className="text-red-600 hover:text-red-800 p-2 active:bg-red-50 rounded-full"
+            >
+              <Trash2 size={20} />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (loading && expenses.length === 0) {
     return (
@@ -426,7 +493,6 @@ const Expenses = () => {
 
   return (
     <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
-      {/* ✅ Sidebar for mobile */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -435,7 +501,6 @@ const Expenses = () => {
         />
       )}
 
-      {/* ✅ Mobile Header with Hamburger */}
       {isMobileView && (
         <div className="bg-gray-200 shadow-sm px-4 py-3 flex items-center justify-between sticky top-0 z-40 rounded-2xl mb-4">
           <div className="flex items-center gap-2">
@@ -447,7 +512,6 @@ const Expenses = () => {
             </button>
             <h1 className="text-base font-bold text-gray-800">Expenses</h1>
           </div>
-          {/* ✅ SuperAdmin badge on mobile */}
           {isSuperAdmin && (
             <span className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-full font-medium">
               👁️ View Only
@@ -456,11 +520,9 @@ const Expenses = () => {
         </div>
       )}
 
-      {/* ✅ Desktop Header */}
       {!isMobileView && (
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div className="flex items-center gap-3">
-            {/* ✅ Hide Add button for SuperAdmin */}
             {!isSuperAdmin && (
               <button
                 onClick={() => navigate("/expenselayout/expenses/new")}
@@ -489,7 +551,6 @@ const Expenses = () => {
         </div>
       )}
 
-      {/* ✅ Mobile Search Bar */}
       {isMobileView && (
         <div className="relative mb-4">
           <Search
@@ -507,7 +568,6 @@ const Expenses = () => {
         </div>
       )}
 
-      {/* ✅ Mobile Add Button - hidden for SuperAdmin */}
       {isMobileView && !isSuperAdmin && (
         <button
           onClick={() => navigate("/expenselayout/expenses/new")}
@@ -529,7 +589,7 @@ const Expenses = () => {
         </div>
       )}
 
-      {/* ✅ Desktop Table */}
+      {/* Desktop Table */}
       <div className="hidden md:block bg-white shadow rounded-xl overflow-x-auto w-full">
         <table className="min-w-[800px] w-full border-collapse bg-white rounded-2xl text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -551,10 +611,10 @@ const Expenses = () => {
               </th>
               <th className="p-3 text-sm font-medium">Source Account</th>
               <th className="p-3 text-sm font-medium">Expense Category</th>
+              <th className="p-3 text-sm font-medium">MR</th>
               <th className="p-3 text-sm font-medium">Description</th>
               <th className="p-3 text-sm font-medium">Amount ($)</th>
               <th className="p-3 text-sm font-medium">Date</th>
-              {/* ✅ Hide Actions column header for SuperAdmin */}
               {!isSuperAdmin && (
                 <th className="p-3 text-sm font-medium">Actions</th>
               )}
@@ -564,7 +624,7 @@ const Expenses = () => {
             {currentExpenses.length === 0 ? (
               <tr>
                 <td
-                  colSpan={isSuperAdmin ? 7 : 7}
+                  colSpan={isSuperAdmin ? 7 : 8}
                   className="p-4 text-center text-gray-500"
                 >
                   {searchQuery
@@ -575,76 +635,94 @@ const Expenses = () => {
                 </td>
               </tr>
             ) : (
-              currentExpenses.map((exp, idx) => (
-                <tr
-                  key={exp._id}
-                  className={`hover:bg-gray-50 ${
-                    (idx + 1) % expensesPerPage === 0 ||
-                    idx + 1 === currentExpenses.length
-                      ? ""
-                      : "border-b"
-                  }`}
-                >
-                  <td className="p-3">
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedRows.includes(exp._id)}
-                        onChange={() => handleSelectRow(exp._id)}
-                      />
-                      <span>
-                        {(currentPage - 1) * expensesPerPage + idx + 1}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="p-3 capitalize">
-                    {exp.sourceAccount?.name ||
-                      (typeof exp.sourceAccount === "string"
-                        ? exp.sourceAccount
-                        : getSafeValue(exp, "sourceAccount.name", ""))}
-                  </td>
-                  <td className="p-3">
-                    {exp.category?.category ||
-                      (typeof exp.category === "string"
-                        ? getCategoryName(exp.category)
-                        : getSafeValue(exp, "category.category", ""))}
-                  </td>
-                  <td className="p-3">
-                    {exp.description || exp.remarks || ""}
-                  </td>
-                  <td className="p-3 font-semibold">
-                    {formatCurrency(exp.amount || 0)}
-                  </td>
-                  <td className="p-3">
-                    {exp.date ? formatDateToReadable(exp.date) : ""}
-                  </td>
-
-                  {!isSuperAdmin && (
+              currentExpenses.map((exp, idx) => {
+                const needsMr = expenseNeedsMr(exp);
+                return (
+                  <tr
+                    key={exp._id}
+                    className={`hover:bg-gray-50 ${
+                      (idx + 1) % expensesPerPage === 0 ||
+                      idx + 1 === currentExpenses.length
+                        ? ""
+                        : "border-b"
+                    }`}
+                  >
                     <td className="p-3">
-                      <div className="flex items-center justify-center gap-3">
-                        <button
-                          className="text-green-600 hover:text-green-800"
-                          onClick={() => handleEdit(exp)}
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button
-                          className="text-red-600 hover:text-red-800"
-                          onClick={() => handleDelete(exp._id)}
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedRows.includes(exp._id)}
+                          onChange={() => handleSelectRow(exp._id)}
+                        />
+                        <span>
+                          {(currentPage - 1) * expensesPerPage + idx + 1}
+                        </span>
                       </div>
                     </td>
-                  )}
-                </tr>
-              ))
+                    <td className="p-3 capitalize">
+                      {exp.sourceAccount?.name ||
+                        (typeof exp.sourceAccount === "string"
+                          ? exp.sourceAccount
+                          : getSafeValue(exp, "sourceAccount.name", ""))}
+                    </td>
+                    <td className="p-3">
+                      {exp.category?.category ||
+                        (typeof exp.category === "string"
+                          ? getCategoryName(exp.category)
+                          : getSafeValue(exp, "category.category", ""))}
+                    </td>
+                    {/* MR column — read directly from exp.mrName */}
+                    <td className="p-3">
+                      {needsMr ? (
+                        exp.mrName ? (
+                          <span className="text-indigo-700 font-medium">
+                            {exp.mrName}
+                          </span>
+                        ) : (
+                          <span className="text-red-500 italic text-xs">
+                            Not assigned
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      {exp.description || exp.remarks || ""}
+                    </td>
+                    <td className="p-3 font-semibold">
+                      {formatCurrency(exp.amount || 0)}
+                    </td>
+                    <td className="p-3">
+                      {exp.date ? formatDateToReadable(exp.date) : ""}
+                    </td>
+                    {!isSuperAdmin && (
+                      <td className="p-3">
+                        <div className="flex items-center justify-center gap-3">
+                          <button
+                            className="text-green-600 hover:text-green-800"
+                            onClick={() => handleEdit(exp)}
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button
+                            className="text-red-600 hover:text-red-800"
+                            onClick={() => handleDelete(exp._id)}
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
 
-      {/* ✅ Mobile Card View */}
+      {/* Mobile Card View */}
       <div className="md:hidden">
         {currentExpenses.length > 0 ? (
           currentExpenses.map((exp) => (
@@ -752,7 +830,7 @@ const Expenses = () => {
         </div>
       )}
 
-      {/* ✅ Edit Modal - hidden for SuperAdmin */}
+      {/* Edit Modal */}
       {isEditModalOpen &&
         !isSuperAdmin &&
         ReactDOM.createPortal(
@@ -794,6 +872,7 @@ const Expenses = () => {
                     ))}
                   </select>
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Expense Category
@@ -814,6 +893,33 @@ const Expenses = () => {
                     ))}
                   </select>
                 </div>
+
+                {/* MR display — read-only, shown only when category needs it */}
+                {editNeedsMr && (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      MR
+                      <span className="ml-2 text-xs text-indigo-500 font-normal">
+                        (assigned at creation — cannot be changed here)
+                      </span>
+                    </label>
+                    <div className="w-full border px-3 py-2 rounded-lg bg-gray-50 text-gray-800 flex items-center gap-2">
+                      {editForm.mrName ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
+                          <span className="font-medium text-indigo-700">
+                            {editForm.mrName}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-red-500 italic text-sm">
+                          No MR assigned to this expense
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Amount ($)
@@ -838,6 +944,7 @@ const Expenses = () => {
                     </p>
                   )}
                 </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Date
@@ -852,6 +959,7 @@ const Expenses = () => {
                     required
                   />
                 </div>
+
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Description
@@ -869,6 +977,7 @@ const Expenses = () => {
                     placeholder="Enter expense description..."
                   />
                 </div>
+
                 <div className="md:col-span-2 mt-4 flex justify-end gap-3">
                   <button
                     type="button"

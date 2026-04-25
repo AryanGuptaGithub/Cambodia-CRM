@@ -17,20 +17,6 @@ const handleServerError = (res, err, message = "Server error", code = 500) => {
   res.status(code).json({ success: false, message, error: err.message });
 };
 
-const handleDuplicateError = (res, err, entityName = "expense") => {
-  let field = "field";
-  let value = "Unknown";
-  try {
-    field = Object.keys(err.keyPattern || {})[0];
-    value = err.keyValue?.[field] || "Unknown";
-  } catch (e) {}
-  return res.status(400).json({
-    success: false,
-    message: `A ${entityName} with this ${field} <b style="color:#EF4444">${value}</b> already exists.`,
-    field,
-  });
-};
-
 const toTitleCase = (str) => {
   if (!str) return "";
   return str
@@ -61,23 +47,62 @@ const isTourMRCategory = (categoryName = "") => {
   return TOUR_MR_CATEGORY_KEYWORDS.some((kw) => lower === kw);
 };
 
-// Helper function to convert Sr number to category ObjectId
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+/**
+ * Safely extract an ObjectId string from a value that could be:
+ *  - a plain ObjectId string  "abc123..."
+ *  - a populated object       { _id: "abc123...", name: "..." }
+ *  - a Mongoose ObjectId instance
+ *  - a numeric Sr number string "3"
+ */
+const extractId = (value) => {
+  if (!value) return null;
+  if (typeof value === "object" && value !== null) {
+    // populated object or ObjectId instance
+    return value._id ? String(value._id) : String(value);
+  }
+  return String(value);
+};
+
+/**
+ * Convert a category value to a valid ObjectId.
+ * Handles: ObjectId string, populated object {_id, category}, numeric Sr number.
+ */
 const convertSrToCategoryId = async (categoryValue) => {
-  if (typeof categoryValue === "string" && /^\d+$/.test(categoryValue)) {
+  // Handle populated object { _id, category }
+  if (
+    typeof categoryValue === "object" &&
+    categoryValue !== null &&
+    categoryValue._id
+  ) {
+    return categoryValue._id;
+  }
+
+  const strVal = String(categoryValue).trim();
+
+  // If it is already a valid ObjectId string, return as-is
+  if (isValidObjectId(strVal)) {
+    return strVal;
+  }
+
+  // If it is a numeric Sr number
+  if (/^\d+$/.test(strVal)) {
     const categories = await addExpenseCategary.find().sort({ category: 1 });
-    const srNumber = parseInt(categoryValue);
+    const srNumber = parseInt(strVal);
     if (srNumber >= 1 && srNumber <= categories.length) {
       return categories[srNumber - 1]._id;
     } else {
       throw new Error(
-        `Invalid category Sr number: ${categoryValue}. Please select a valid category.`,
+        `Invalid category Sr number: ${strVal}. Please select a valid category.`,
       );
     }
   }
-  return categoryValue;
-};
 
-const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+  throw new Error(
+    `Invalid category value: ${strVal}. Must be a valid ID or Sr number.`,
+  );
+};
 
 const getDateRangeForPeriod = (period) => {
   const currentDate = new Date();
@@ -381,7 +406,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// ─── POST / – Create expense with activity logging ────────────────────────────
+// ─── POST / – Create expense ──────────────────────────────────────────────────
 router.post("/", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -434,7 +459,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Selected category does not exist" });
     }
 
-    // ── MR validation for tour-related categories ────────────────────────
     const needsMR = isTourMRCategory(categoryExists.category);
     if (needsMR && !expenseData.mrId) {
       await session.abortTransaction();
@@ -445,7 +469,9 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       });
     }
 
-    if (!isValidObjectId(expenseData.sourceAccount)) {
+    // Extract plain ID from sourceAccount (handles populated object or string)
+    const sourceAccountId = extractId(expenseData.sourceAccount);
+    if (!isValidObjectId(sourceAccountId)) {
       await session.abortTransaction();
       session.endSession();
       return res
@@ -453,9 +479,9 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Invalid source account ID format" });
     }
 
-    const sourceAccount = await Destination.findById(
-      expenseData.sourceAccount,
-    ).session(session);
+    const sourceAccount = await Destination.findById(sourceAccountId).session(
+      session,
+    );
     if (!sourceAccount) {
       await session.abortTransaction();
       session.endSession();
@@ -474,7 +500,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     }
 
     await Destination.findByIdAndUpdate(
-      expenseData.sourceAccount,
+      sourceAccountId,
       { $inc: { totalAmount: -amount } },
       { session },
     );
@@ -482,6 +508,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     const newExpense = new Expense({
       ...expenseData,
       category: categoryId,
+      sourceAccount: sourceAccountId,
       amount,
       mrId: needsMR && expenseData.mrId ? expenseData.mrId : null,
       mrName: needsMR && expenseData.mrName ? expenseData.mrName : null,
@@ -511,7 +538,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Log activity
     await logActivity(req, {
       action: "CREATE",
       actionLabel: `Created Expense: ${toTitleCase(savedExpense.category.category)} - ₹${savedExpense.amount}`,
@@ -535,9 +561,9 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     console.error("Error creating expense:", error);
 
     if (
-      error.message.includes("Invalid category Sr number") ||
-      error.message.includes("Insufficient balance") ||
-      error.message.includes("Medical Representative is required")
+      error.message?.includes("Invalid category") ||
+      error.message?.includes("Insufficient balance") ||
+      error.message?.includes("Medical Representative is required")
     ) {
       return res.status(400).json({ success: false, message: error.message });
     }
@@ -559,14 +585,14 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ─── PUT /:id – Update expense with activity logging ──────────────────────────
+// ─── PUT /:id – Update expense ────────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
     if (!isValidObjectId(id)) {
       await session.abortTransaction();
@@ -576,19 +602,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Invalid expense ID format" });
     }
 
-    // Get previous record for logging
-    const previousRecord = await Expense.findById(id)
-      .populate("category", "category")
-      .lean();
-
-    if (!previousRecord) {
-      await session.abortTransaction();
-      session.endSession();
-      return res
-        .status(404)
-        .json({ success: false, message: "Expense not found" });
-    }
-
+    // ── Validate required fields ──────────────────────────────────────────
     if (
       !updateData.date ||
       !updateData.category ||
@@ -613,7 +627,16 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       });
     }
 
-    const categoryId = await convertSrToCategoryId(updateData.category);
+    // ── Resolve category — handles ObjectId string, populated obj, or Sr# ──
+    let categoryId;
+    try {
+      categoryId = await convertSrToCategoryId(updateData.category);
+    } catch (err) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ success: false, message: err.message });
+    }
+
     if (!isValidObjectId(categoryId)) {
       await session.abortTransaction();
       session.endSession();
@@ -633,7 +656,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Selected category does not exist" });
     }
 
-    // ── MR validation for tour-related categories ────────────────────────
     const needsMR = isTourMRCategory(categoryExists.category);
     if (needsMR && !updateData.mrId) {
       await session.abortTransaction();
@@ -644,7 +666,9 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       });
     }
 
-    if (!isValidObjectId(updateData.sourceAccount)) {
+    // ── Resolve sourceAccount — handles populated obj {_id, name} or string ──
+    const newSourceAccountId = extractId(updateData.sourceAccount);
+    if (!isValidObjectId(newSourceAccountId)) {
       await session.abortTransaction();
       session.endSession();
       return res
@@ -652,6 +676,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Invalid source account ID format" });
     }
 
+    // ── Fetch existing expense ────────────────────────────────────────────
     const existingExpense = await Expense.findById(id).session(session);
     if (!existingExpense) {
       await session.abortTransaction();
@@ -661,13 +686,19 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Expense not found" });
     }
 
+    // Capture previous state for activity log (before any mutation)
+    const previousRecord = await Expense.findById(id)
+      .populate("category", "category")
+      .populate("sourceAccount", "name")
+      .lean();
+
     const oldAmount = existingExpense.amount || 0;
-    const oldSourceAccountId = existingExpense.sourceAccount?.toString();
-    const newSourceAccountId = updateData.sourceAccount;
+    const oldSourceAccountId = extractId(existingExpense.sourceAccount);
     let newSourceAccountName = null;
     let newSourceAccountType = "bank";
 
     if (oldSourceAccountId !== newSourceAccountId) {
+      // ── Source account changed ────────────────────────────────────────
       const newSourceAccount =
         await Destination.findById(newSourceAccountId).session(session);
       if (!newSourceAccount) {
@@ -687,13 +718,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         });
       }
 
-      if (oldSourceAccountId) {
+      // Refund old account
+      if (oldSourceAccountId && isValidObjectId(oldSourceAccountId)) {
         await Destination.findByIdAndUpdate(
           oldSourceAccountId,
           { $inc: { totalAmount: oldAmount } },
           { session },
         );
       }
+      // Deduct from new account
       await Destination.findByIdAndUpdate(
         newSourceAccountId,
         { $inc: { totalAmount: -newAmount } },
@@ -703,8 +736,17 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       newSourceAccountName = newSourceAccount.name;
       newSourceAccountType = newSourceAccount.type || "bank";
     } else {
+      // ── Same source account — adjust for amount difference ────────────
       const currentSourceAccount =
         await Destination.findById(newSourceAccountId).session(session);
+      if (!currentSourceAccount) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(404)
+          .json({ success: false, message: "Source account not found" });
+      }
+
       const amountDifference = newAmount - oldAmount;
 
       if (
@@ -731,11 +773,17 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       newSourceAccountType = currentSourceAccount.type || "bank";
     }
 
+    // ── Apply update ──────────────────────────────────────────────────────
+    // Remove populated objects from updateData before saving
+    delete updateData.category;
+    delete updateData.sourceAccount;
+
     const updatedExpense = await Expense.findByIdAndUpdate(
       id,
       {
         ...updateData,
         category: categoryId,
+        sourceAccount: newSourceAccountId,
         amount: newAmount,
         mrId: needsMR && updateData.mrId ? updateData.mrId : null,
         mrName: needsMR && updateData.mrName ? updateData.mrName : null,
@@ -745,6 +793,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       .populate("category", "category")
       .populate("sourceAccount", "name");
 
+    // ── Replace transaction ───────────────────────────────────────────────
     await Transaction.deleteOne({ referenceId: id }).session(session);
 
     const newTransaction = new Transaction({
@@ -765,7 +814,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Log activity
+    // ── Log activity ──────────────────────────────────────────────────────
     await logActivity(req, {
       action: "UPDATE",
       actionLabel: `Updated Expense: ${toTitleCase(updatedExpense.category.category)} - ₹${updatedExpense.amount}`,
@@ -791,9 +840,9 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     console.error("Error updating expense:", error);
 
     if (
-      error.message.includes("Invalid category Sr number") ||
-      error.message.includes("Insufficient balance") ||
-      error.message.includes("Medical Representative is required")
+      error.message?.includes("Invalid category") ||
+      error.message?.includes("Insufficient balance") ||
+      error.message?.includes("Medical Representative is required")
     ) {
       return res.status(400).json({ success: false, message: error.message });
     }
@@ -815,7 +864,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ─── DELETE /:id – Delete expense with activity logging ───────────────────────
+// ─── DELETE /:id – Delete expense ─────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -830,7 +879,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
         .json({ success: false, message: "Invalid expense ID" });
     }
 
-    // Get full record before deletion for logging
     const expense = await Expense.findById(id)
       .populate("category", "category")
       .populate("sourceAccount", "name")
@@ -859,7 +907,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Log activity
     await logActivity(req, {
       action: "DELETE",
       actionLabel: `Deleted Expense: ${toTitleCase(expense.category?.category || "Unknown")} - ₹${expense.amount}`,
@@ -894,7 +941,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
-// ─── DELETE /bulk – Bulk delete expenses with activity logging ────────────────
+// ─── DELETE /bulk – Bulk delete expenses ─────────────────────────────────────
 router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -916,13 +963,11 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
       });
     }
 
-    // Get full records before deletion for logging
     const toDelete = await Expense.find({ _id: { $in: validIds } })
       .populate("category", "category")
       .populate("sourceAccount", "name")
       .session(session);
 
-    // Refund amounts to source accounts
     for (const expense of toDelete) {
       if (expense.sourceAccount) {
         await Destination.findByIdAndUpdate(
@@ -944,7 +989,6 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Log activity
     await logActivity(req, {
       action: "DELETE",
       actionLabel: `Bulk Deleted ${result.deletedCount} Expense(s)`,
