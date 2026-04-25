@@ -15,6 +15,7 @@ const TABLE_MODEL_MAP = {
   expenses: () => import("../../models/expenses/addExpense.js"),
   staff: () => import("../../models/staffMember/staff.js"),
   StockAdjustment: () => import("../../models/stock/stockAdjustment.js"),
+  stockadjustments: () => import("../../models/stock/stockAdjustment.js"),
   stockTransfer: () => import("../../models/stock/stockTransfer.js"),
   purchaseReturn: () => import("../../models/purcharsing/purchaseReturns.js"),
   paymentsOut: () => import("../../models/purcharsing/purchaseOut.js"),
@@ -103,6 +104,344 @@ export const logActivity = async (req, options = {}) => {
   }
 };
 
+// Helper function for precision
+const fixPrecision = (num) => {
+  if (typeof num !== "number") return num;
+  return Math.round(num * 100) / 100;
+};
+
+
+const applyStockAdjustmentToReport = async (
+  adjustmentData,
+  isRevert = false,
+) => {
+  try {
+    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
+      .default;
+
+    // Extract adjustment data
+    let adjustmentType, boxes, lc, adjustmentId, productName;
+
+    if (adjustmentData.adjustmentType) {
+      adjustmentType = adjustmentData.adjustmentType;
+      boxes = Number(adjustmentData.boxQuantity || adjustmentData.boxes || 0);
+      lc = Number(adjustmentData.unitCost || adjustmentData.lc || 0);
+      adjustmentId = adjustmentData._id;
+      productName = adjustmentData.productName;
+    } else if (adjustmentData.data) {
+      const data = adjustmentData.data;
+      adjustmentType = data.adjustmentType;
+      boxes = Number(data.boxQuantity || data.boxes || 0);
+      lc = Number(data.unitCost || data.lc || 0);
+      adjustmentId = data._id;
+      productName = data.productName;
+    } else {
+      adjustmentType = adjustmentData.adjustmentType;
+      boxes = Number(adjustmentData.boxQuantity || 0);
+      lc = Number(adjustmentData.unitCost || 0);
+      adjustmentId = adjustmentData._id;
+      productName = adjustmentData.productName;
+    }
+
+    if (!productName) {
+      console.warn("⚠️ No product name found in adjustment data");
+      return;
+    }
+
+    const productNameLower = productName.toLowerCase().trim();
+    if (!productNameLower) return;
+
+    if (boxes <= 0) {
+      console.warn(`⚠️ No boxes to process for product "${productName}"`);
+      return;
+    }
+
+    const existingReport = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productNameLower}$`, "i") },
+    });
+
+    if (!existingReport) {
+      console.warn(`⚠️ No ReportInHand found for product "${productName}"`);
+      return;
+    }
+
+    let batches = [...(existingReport.batches || [])];
+    let updated = false;
+
+    if (!isRevert) {
+      // NORMAL OPERATION - Apply the adjustment as is
+      if (adjustmentType === "add") {
+        // ADD stock: Create a new add batch
+        const amount = fixPrecision(boxes * lc);
+        const newBatch = {
+          _id: new mongoose.Types.ObjectId(),
+          boxes: boxes,
+          lc: lc,
+          fob: Number(adjustmentData.fob || 0),
+          cif: Number(adjustmentData.cif || 0),
+          amount: amount,
+          sellingPrice: Number(adjustmentData.sellingPrice || 0),
+          expiryDate: adjustmentData.expiryDate
+            ? new Date(adjustmentData.expiryDate)
+            : null,
+          date: adjustmentData.date
+            ? new Date(adjustmentData.date)
+            : new Date(),
+          adjustmentType: "add",
+          adjustmentId: adjustmentId,
+          batchNumber: `ADJ-ADD-${Date.now()}`,
+          isReversal: false,
+        };
+        batches.push(newBatch);
+        updated = true;
+        console.log(
+          `✅ Applied ADD for product "${productName}": +${boxes} boxes, amount: ${amount}`,
+        );
+      } else if (adjustmentType === "remove") {
+        // REMOVE stock: Need to remove boxes from existing stock
+        let remainingToRemove = boxes;
+        const updatedBatches = [];
+
+        // Sort batches by date (oldest first) for FIFO removal
+        const sortedBatches = [...batches].sort(
+          (a, b) => new Date(a.date || 0) - new Date(b.date || 0),
+        );
+
+        for (const batch of sortedBatches) {
+          if (remainingToRemove <= 0) {
+            updatedBatches.push(batch);
+            continue;
+          }
+
+          // Only remove from stock batches (batch type or add type)
+          if (
+            batch.adjustmentType === "batch" ||
+            batch.adjustmentType === "add"
+          ) {
+            const currentBoxes = Number(batch.boxes || 0);
+            if (currentBoxes <= remainingToRemove) {
+              // Remove entire batch
+              remainingToRemove -= currentBoxes;
+              // Don't add this batch (it's fully removed)
+            } else {
+              // Partially remove from this batch
+              const newBoxes = fixPrecision(currentBoxes - remainingToRemove);
+              batch.boxes = newBoxes;
+              batch.amount = fixPrecision(newBoxes * Number(batch.lc || 0));
+              updatedBatches.push(batch);
+              remainingToRemove = 0;
+            }
+          } else {
+            // Keep non-stock batches (remove adjustments, returns, etc.)
+            updatedBatches.push(batch);
+          }
+        }
+
+        // Create a removal record for tracking
+        const removalBatch = {
+          _id: new mongoose.Types.ObjectId(),
+          boxes: boxes,
+          lc: lc,
+          fob: Number(adjustmentData.fob || 0),
+          cif: Number(adjustmentData.cif || 0),
+          amount: fixPrecision(boxes * lc),
+          sellingPrice: Number(adjustmentData.sellingPrice || 0),
+          expiryDate: adjustmentData.expiryDate
+            ? new Date(adjustmentData.expiryDate)
+            : null,
+          date: adjustmentData.date
+            ? new Date(adjustmentData.date)
+            : new Date(),
+          adjustmentType: "remove",
+          adjustmentId: adjustmentId,
+          batchNumber: `ADJ-REMOVE-${Date.now()}`,
+          isReversal: false,
+        };
+        updatedBatches.push(removalBatch);
+
+        batches = updatedBatches;
+        updated = true;
+        const removedQty = boxes - remainingToRemove;
+        console.log(
+          `✅ Applied REMOVE for "${productName}": -${removedQty} boxes`,
+        );
+      }
+    } else {
+      // REVERT OPERATION - Do the opposite of the original adjustment
+      if (adjustmentType === "add") {
+        // Reverting an ADD: Remove the add batch and restore stock
+        // Find and remove the specific add batch
+        let batchIndex = batches.findIndex(
+          (b) =>
+            b.adjustmentId &&
+            b.adjustmentId.toString() === adjustmentId?.toString(),
+        );
+
+        if (batchIndex !== -1) {
+          // Remove the add batch
+          batches.splice(batchIndex, 1);
+          updated = true;
+          console.log(
+            `✅ Reverted ADD for product "${productName}": Removed add batch`,
+          );
+        } else {
+          console.warn(
+            `⚠️ Could not find add batch to revert for adjustment ${adjustmentId}`,
+          );
+        }
+      } else if (adjustmentType === "remove") {
+        // Reverting a REMOVE: Add the stock back
+        // Find the removal batch by adjustmentId
+        let removalBatchIndex = batches.findIndex(
+          (b) =>
+            b.adjustmentType === "remove" &&
+            b.adjustmentId &&
+            b.adjustmentId.toString() === adjustmentId?.toString(),
+        );
+
+        if (removalBatchIndex !== -1) {
+          // Remove the removal batch
+          batches.splice(removalBatchIndex, 1);
+
+          // Now add the stock back to the batches
+          let remainingToAdd = boxes;
+
+          // First try to find a batch with the same LC that we can add back to
+          let foundBatch = false;
+          for (const batch of batches) {
+            if (remainingToAdd <= 0) break;
+
+            if (
+              (batch.adjustmentType === "batch" ||
+                batch.adjustmentType === "add") &&
+              Math.abs(Number(batch.lc || 0) - lc) < 0.0001
+            ) {
+              // Add to existing batch with same LC
+              batch.boxes = fixPrecision(
+                Number(batch.boxes || 0) + remainingToAdd,
+              );
+              batch.amount = fixPrecision(
+                Number(batch.boxes) * Number(batch.lc || 0),
+              );
+              remainingToAdd = 0;
+              foundBatch = true;
+              break;
+            }
+          }
+
+          // If no matching batch found, create a new restore batch
+          if (!foundBatch && remainingToAdd > 0) {
+            const restoreBatch = {
+              _id: new mongoose.Types.ObjectId(),
+              boxes: remainingToAdd,
+              lc: lc,
+              fob: Number(adjustmentData.fob || 0),
+              cif: Number(adjustmentData.cif || 0),
+              amount: fixPrecision(remainingToAdd * lc),
+              sellingPrice: Number(adjustmentData.sellingPrice || 0),
+              expiryDate: adjustmentData.expiryDate
+                ? new Date(adjustmentData.expiryDate)
+                : null,
+              date: adjustmentData.date
+                ? new Date(adjustmentData.date)
+                : new Date(),
+              adjustmentType: "add", // Add back as an add batch
+              adjustmentId: adjustmentId,
+              batchNumber: `REVERT-RESTORE-${Date.now()}`,
+              isReversal: true,
+            };
+            batches.push(restoreBatch);
+          }
+
+          updated = true;
+          console.log(
+            `✅ Reverted REMOVE for product "${productName}": Added back ${boxes} boxes`,
+          );
+        } else {
+          console.warn(
+            `⚠️ Could not find removal batch to revert for adjustment ${adjustmentId}`,
+          );
+        }
+      }
+    }
+
+    if (!updated) {
+      console.warn(`⚠️ No changes made for product "${productName}"`);
+      return;
+    }
+
+    // Recalculate all totals
+    let totalBoxesFromBatches = 0;
+    let addStockAdjustment = 0;
+    let removeStockAdjustment = 0;
+    let returnStockAdjustment = 0;
+    let totalAmount = 0;
+
+    for (const batch of batches) {
+      const type = batch.adjustmentType;
+      const batchBoxes = Number(batch.boxes || 0);
+      const batchAmount = Number(batch.amount || 0);
+
+      if (type === "batch") {
+        totalBoxesFromBatches += batchBoxes;
+        totalAmount += batchAmount;
+      } else if (type === "return") {
+        returnStockAdjustment += batchBoxes;
+        totalAmount += batchAmount;
+      } else if (type === "add") {
+        addStockAdjustment += batchBoxes;
+        totalAmount += batchAmount;
+      } else if (type === "remove") {
+        removeStockAdjustment += batchBoxes;
+        // Remove batches don't contribute to total amount (they represent stock taken out)
+        // but we track the quantity separately
+      }
+    }
+
+    const totalBoxes = fixPrecision(
+      totalBoxesFromBatches +
+        addStockAdjustment +
+        returnStockAdjustment -
+        removeStockAdjustment,
+    );
+    const fixedAmount = fixPrecision(totalAmount);
+    const averagePrice =
+      totalBoxes > 0 ? fixPrecision(fixedAmount / totalBoxes) : 0;
+
+    let status = "In Stock";
+    if (totalBoxes <= 0) status = "Out of Stock";
+    else if (totalBoxes < (existingReport.minStockLevel || 10))
+      status = "Low Stock";
+
+    await ReportInHand.updateOne(
+      { _id: existingReport._id },
+      {
+        $set: {
+          batches: batches,
+          totalBoxesFromBatches: fixPrecision(totalBoxesFromBatches),
+          addStockAdjustment: fixPrecision(addStockAdjustment),
+          removeStockAdjustment: fixPrecision(removeStockAdjustment),
+          returnStockAdjustment: fixPrecision(returnStockAdjustment),
+          totalBoxes: totalBoxes,
+          totalAmount: fixedAmount,
+          averagePrice: averagePrice,
+          status: status,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    const actionText = isRevert ? "Reverted" : "Applied";
+    const adjType = adjustmentType === "add" ? "ADD" : "REMOVE";
+    console.log(
+      `✅ ${actionText} ${adjType} for "${productName}": ${boxes} boxes. New total: ${totalBoxes} boxes, amount: ${fixedAmount}`,
+    );
+  } catch (err) {
+    console.error("❌ applyStockAdjustmentToReport failed:", err.message);
+    throw err;
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PURCHASE helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,7 +479,6 @@ const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
       }
 
       const batches = [...(existingReport.batches || [])];
-
       let removed = false;
       const updatedBatches = [];
 
@@ -180,7 +518,7 @@ const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
           updatedBatches.push({
             ...(batch.toObject ? batch.toObject() : batch),
             boxes: newBoxes,
-            amount: newBoxes * lcValue,
+            amount: fixPrecision(newBoxes * lcValue),
           });
           removed = true;
           continue;
@@ -190,13 +528,8 @@ const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
       }
 
       if (!removed) {
-        console.warn(
-          `⚠️ No exact batch match for "${productName}" qty=${qty} lc=${lcValue} — falling back to FIFO removal`,
-        );
-
         let remaining = qty;
         const fifoResult = [];
-
         const sortable = updatedBatches
           .slice()
           .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
@@ -218,7 +551,7 @@ const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
             fifoResult.push({
               ...(batch.toObject ? batch.toObject() : batch),
               boxes: newBoxes,
-              amount: newBoxes * Number(batch.lc || 0),
+              amount: fixPrecision(newBoxes * Number(batch.lc || 0)),
             });
             remaining = 0;
           }
@@ -254,18 +587,14 @@ const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
           {
             $set: {
               batches: fifoResult,
-              totalBoxesFromBatches,
-              totalBoxes,
-              totalAmount,
-              averagePrice,
+              totalBoxesFromBatches: fixPrecision(totalBoxesFromBatches),
+              totalBoxes: fixPrecision(totalBoxes),
+              totalAmount: fixPrecision(totalAmount),
+              averagePrice: fixPrecision(averagePrice),
               status,
               updatedAt: new Date(),
             },
           },
-        );
-
-        console.log(
-          `✅ FIFO removal done for "${productName}" (invoice: ${invoiceNumber})`,
         );
         continue;
       }
@@ -300,18 +629,14 @@ const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
         {
           $set: {
             batches: updatedBatches,
-            totalBoxesFromBatches,
-            totalBoxes,
-            totalAmount,
-            averagePrice,
+            totalBoxesFromBatches: fixPrecision(totalBoxesFromBatches),
+            totalBoxes: fixPrecision(totalBoxes),
+            totalAmount: fixPrecision(totalAmount),
+            averagePrice: fixPrecision(averagePrice),
             status,
             updatedAt: new Date(),
           },
         },
-      );
-
-      console.log(
-        `✅ Exact batch removed from ReportInHand for "${productName}" (invoice: ${invoiceNumber})`,
       );
     }
   } catch (err) {
@@ -340,7 +665,7 @@ const restorePurchaseInvoiceBatchesToStock = async (invoiceData) => {
       const lcValue = Number(product.lc || 0);
       const fobValue = Number(product.fob || 0);
       const cifValue = Number(product.cif || 0);
-      const amount = qty * lcValue;
+      const amount = fixPrecision(qty * lcValue);
       const expiryDate = product.expiryDate
         ? new Date(product.expiryDate)
         : null;
@@ -394,10 +719,10 @@ const restorePurchaseInvoiceBatchesToStock = async (invoiceData) => {
           {
             $set: {
               batches: updatedBatches,
-              totalBoxesFromBatches,
-              totalBoxes,
-              totalAmount,
-              averagePrice,
+              totalBoxesFromBatches: fixPrecision(totalBoxesFromBatches),
+              totalBoxes: fixPrecision(totalBoxes),
+              totalAmount: fixPrecision(totalAmount),
+              averagePrice: fixPrecision(averagePrice),
               status,
               updatedAt: new Date(),
             },
@@ -420,10 +745,6 @@ const restorePurchaseInvoiceBatchesToStock = async (invoiceData) => {
           minStockLevel: 10,
         });
       }
-
-      console.log(
-        `✅ Batch restored to ReportInHand for "${productName}" (invoice: ${invoiceNumber})`,
-      );
     }
   } catch (err) {
     console.error(
@@ -442,25 +763,40 @@ const recalculateAllReportInHandTotals = async () => {
     for (const report of allReports) {
       try {
         const batches = report.batches || [];
-        const realBatches = batches.filter(
-          (b) => !b.adjustmentType || b.adjustmentType === "batch",
-        );
-        const totalBoxesFromBatches = realBatches.reduce(
-          (sum, b) => sum + (Number(b.boxes) || 0),
-          0,
-        );
-        const totalAmount = realBatches.reduce(
-          (sum, b) => sum + (Number(b.amount) || 0),
-          0,
-        );
-        const addAdj = Number(report.addStockAdjustment || 0);
-        const removeAdj = Number(report.removeStockAdjustment || 0);
+        let totalBoxesFromBatches = 0;
+        let addStockAdjustment = 0;
+        let removeStockAdjustment = 0;
+        let returnStockAdjustment = 0;
+        let totalAmount = 0;
+
+        for (const batch of batches) {
+          const type = batch.adjustmentType;
+          const batchBoxes = Number(batch.boxes || 0);
+          const batchAmount = Number(batch.amount || 0);
+
+          if (type === "batch") {
+            totalBoxesFromBatches += batchBoxes;
+            totalAmount += batchAmount;
+          } else if (type === "return") {
+            returnStockAdjustment += batchBoxes;
+            totalAmount += batchAmount;
+          } else if (type === "add") {
+            addStockAdjustment += batchBoxes;
+            totalAmount += batchAmount;
+          } else if (type === "remove") {
+            removeStockAdjustment += batchBoxes;
+            totalAmount -= batchAmount;
+          }
+        }
+
         const totalBoxes = Math.max(
           0,
-          totalBoxesFromBatches + addAdj - removeAdj,
+          totalBoxesFromBatches +
+            addStockAdjustment +
+            returnStockAdjustment -
+            removeStockAdjustment,
         );
-        const averagePrice =
-          totalBoxesFromBatches > 0 ? totalAmount / totalBoxesFromBatches : 0;
+        const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
 
         let status = "In Stock";
         if (totalBoxes <= 0) status = "Out of Stock";
@@ -471,10 +807,13 @@ const recalculateAllReportInHandTotals = async () => {
           { _id: report._id },
           {
             $set: {
-              totalBoxesFromBatches,
-              totalBoxes,
-              totalAmount,
-              averagePrice,
+              totalBoxesFromBatches: fixPrecision(totalBoxesFromBatches),
+              addStockAdjustment: fixPrecision(addStockAdjustment),
+              removeStockAdjustment: fixPrecision(removeStockAdjustment),
+              returnStockAdjustment: fixPrecision(returnStockAdjustment),
+              totalBoxes: fixPrecision(totalBoxes),
+              totalAmount: fixPrecision(totalAmount),
+              averagePrice: fixPrecision(averagePrice),
               status,
               updatedAt: new Date(),
             },
@@ -494,7 +833,7 @@ const recalculateAllReportInHandTotals = async () => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SALE helpers - FIXED to properly handle stock value
+// SALE helpers
 // ─────────────────────────────────────────────────────────────────────────────
 const restoreSaleDeductionsToStock = async (saleData) => {
   try {
@@ -511,7 +850,6 @@ const restoreSaleDeductionsToStock = async (saleData) => {
       const totalQty = salesQty + bonusQty;
       if (totalQty <= 0) continue;
 
-      // MR Sales: stock lives in stockInMRHand, not ReportInHand
       if (saleData.saleType === "MR Sale") continue;
 
       const existingReport = await ReportInHand.findOne({
@@ -528,12 +866,10 @@ const restoreSaleDeductionsToStock = async (saleData) => {
       const lcValue = Number(product.lc || 0);
       let remainingToRestore = totalQty;
 
-      // Work on a mutable copy of the batches array
       const batches = (existingReport.batches || []).map((b) =>
         b.toObject ? b.toObject() : { ...b },
       );
 
-      // Reverse-FIFO: add stock back to the newest real batch first
       const realBatchIndicesByNewest = batches
         .map((b, idx) => ({ idx, b }))
         .filter(({ b }) => !b.adjustmentType || b.adjustmentType === "batch")
@@ -546,16 +882,14 @@ const restoreSaleDeductionsToStock = async (saleData) => {
       for (const { idx } of realBatchIndicesByNewest) {
         if (remainingToRestore <= 0) break;
         const batchLC = Number(batches[idx].lc ?? lcValue);
-        const newBoxes =
-          Math.round(
-            (Number(batches[idx].boxes || 0) + remainingToRestore) * 1e6,
-          ) / 1e6;
+        const newBoxes = fixPrecision(
+          Number(batches[idx].boxes || 0) + remainingToRestore,
+        );
         batches[idx].boxes = newBoxes;
-        batches[idx].amount = Math.round(newBoxes * batchLC * 100) / 100;
+        batches[idx].amount = fixPrecision(newBoxes * batchLC);
         remainingToRestore = 0;
       }
 
-      // If product was fully depleted, create a new batch
       if (remainingToRestore > 0) {
         batches.push({
           batchNumber: `RESTORE-${Date.now()}`,
@@ -563,18 +897,16 @@ const restoreSaleDeductionsToStock = async (saleData) => {
           lc: lcValue,
           fob: Number(product.fob || 0),
           cif: Number(product.cif || 0),
-          amount: Math.round(remainingToRestore * lcValue * 100) / 100,
+          amount: fixPrecision(remainingToRestore * lcValue),
           expiryDate: null,
           date: new Date(),
           adjustmentType: "batch",
         });
       }
 
-      // Fix removeStockAdjustment counter too
       const prevRemoveAdj = Number(existingReport.removeStockAdjustment || 0);
       const newRemoveAdj = Math.max(0, prevRemoveAdj - totalQty);
 
-      // Recalculate ALL derived fields
       const realBatches = batches.filter(
         (b) => !b.adjustmentType || b.adjustmentType === "batch",
       );
@@ -591,10 +923,7 @@ const restoreSaleDeductionsToStock = async (saleData) => {
         0,
         totalBoxesFromBatches + addAdj - newRemoveAdj,
       );
-      const averagePrice =
-        totalBoxes > 0
-          ? Math.round((totalAmount / totalBoxes) * 1000) / 1000
-          : 0;
+      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
 
       let status = "In Stock";
       if (totalBoxes <= 0) status = "Out of Stock";
@@ -606,22 +935,15 @@ const restoreSaleDeductionsToStock = async (saleData) => {
         {
           $set: {
             batches,
-            totalBoxesFromBatches,
-            totalBoxes,
-            totalAmount,
-            averagePrice,
-            removeStockAdjustment: newRemoveAdj,
+            totalBoxesFromBatches: fixPrecision(totalBoxesFromBatches),
+            totalBoxes: fixPrecision(totalBoxes),
+            totalAmount: fixPrecision(totalAmount),
+            averagePrice: fixPrecision(averagePrice),
+            removeStockAdjustment: fixPrecision(newRemoveAdj),
             status,
             updatedAt: new Date(),
           },
         },
-      );
-
-      console.log(
-        `✅ restoreSaleDeductionsToStock: "${productName}" ` +
-          `+${totalQty} boxes restored, ` +
-          `totalAmount: ${existingReport.totalAmount?.toFixed(2)} → ${totalAmount.toFixed(2)}, ` +
-          `totalBoxes: ${existingReport.totalBoxes} → ${totalBoxes}`,
       );
     }
   } catch (err) {
@@ -656,7 +978,6 @@ const removeSaleDeductionsFromStock = async (saleData) => {
         b.toObject ? b.toObject() : { ...b },
       );
 
-      // FIFO deduction: oldest real batch first
       const realBatchIndicesByOldest = batches
         .map((b, idx) => ({ idx, b }))
         .filter(({ b }) => !b.adjustmentType || b.adjustmentType === "batch")
@@ -672,17 +993,15 @@ const removeSaleDeductionsFromStock = async (saleData) => {
         const batchBoxes = Number(batches[idx].boxes || 0);
         const batchLC = Number(batches[idx].lc || 0);
         const deduct = Math.min(batchBoxes, remaining);
-        const newBoxes = Math.round((batchBoxes - deduct) * 1e6) / 1e6;
+        const newBoxes = fixPrecision(batchBoxes - deduct);
         batches[idx].boxes = newBoxes;
-        batches[idx].amount = Math.round(newBoxes * batchLC * 100) / 100;
-        remaining = Math.round((remaining - deduct) * 1e6) / 1e6;
+        batches[idx].amount = fixPrecision(newBoxes * batchLC);
+        remaining = fixPrecision(remaining - deduct);
       }
 
-      // Keep removeStockAdjustment counter in sync
       const prevRemoveAdj = Number(existingReport.removeStockAdjustment || 0);
       const newRemoveAdj = prevRemoveAdj + totalQty;
 
-      // Recalculate ALL derived fields
       const realBatches = batches.filter(
         (b) => !b.adjustmentType || b.adjustmentType === "batch",
       );
@@ -699,10 +1018,7 @@ const removeSaleDeductionsFromStock = async (saleData) => {
         0,
         totalBoxesFromBatches + addAdj - newRemoveAdj,
       );
-      const averagePrice =
-        totalBoxes > 0
-          ? Math.round((totalAmount / totalBoxes) * 1000) / 1000
-          : 0;
+      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
 
       let status = "In Stock";
       if (totalBoxes <= 0) status = "Out of Stock";
@@ -714,22 +1030,15 @@ const removeSaleDeductionsFromStock = async (saleData) => {
         {
           $set: {
             batches,
-            totalBoxesFromBatches,
-            totalBoxes,
-            totalAmount,
-            averagePrice,
-            removeStockAdjustment: newRemoveAdj,
+            totalBoxesFromBatches: fixPrecision(totalBoxesFromBatches),
+            totalBoxes: fixPrecision(totalBoxes),
+            totalAmount: fixPrecision(totalAmount),
+            averagePrice: fixPrecision(averagePrice),
+            removeStockAdjustment: fixPrecision(newRemoveAdj),
             status,
             updatedAt: new Date(),
           },
         },
-      );
-
-      console.log(
-        `✅ removeSaleDeductionsFromStock: "${productName}" ` +
-          `-${totalQty} boxes removed, ` +
-          `totalAmount: ${existingReport.totalAmount?.toFixed(2)} → ${totalAmount.toFixed(2)}, ` +
-          `totalBoxes: ${existingReport.totalBoxes} → ${totalBoxes}`,
       );
     }
   } catch (err) {
@@ -943,7 +1252,7 @@ router.get("/stats/summary", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /:id/revert (all four action types) - FIXED for sales and purchase
+// POST /:id/revert - FIXED for stock adjustments
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/:id/revert", protect, async (req, res) => {
   try {
@@ -1027,13 +1336,19 @@ router.post("/:id/revert", protect, async (req, res) => {
 
       if (restoredDocs.length > 0) {
         if (log.tableName === "purchase") {
-          for (const doc of restoredDocs) {
+          for (const doc of restoredDocs)
             await restorePurchaseInvoiceBatchesToStock(doc);
-          }
         } else if (log.tableName === "sales") {
-          // Restoring a deleted sale means re-applying its stock deductions
-          for (const doc of restoredDocs) {
+          for (const doc of restoredDocs)
             await removeSaleDeductionsFromStock(doc);
+        } else if (
+          log.tableName === "StockAdjustment" ||
+          log.tableName === "stockadjustments"
+        ) {
+          // When restoring a deleted adjustment, we need to RE-APPLY its effect
+          // Because the adjustment was deleted, its effect was removed from stock
+          for (const doc of restoredDocs) {
+            await applyStockAdjustmentToReport(doc, false);
           }
         }
         await recalculateAllReportInHandTotals();
@@ -1059,22 +1374,31 @@ router.post("/:id/revert", protect, async (req, res) => {
         });
       }
 
-      // For sales UPDATE revert, we need to undo the stock changes caused by
-      // the edit and re-apply the original state's stock footprint.
+      // For stock adjustment UPDATE revert
+      if (
+        log.tableName === "StockAdjustment" ||
+        log.tableName === "stockadjustments"
+      ) {
+        const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+        if (newDoc && prevDoc) {
+          // First, revert the effect of the NEW adjustment (undo what it did)
+          await applyStockAdjustmentToReport(newDoc, true);
+          // Then, apply the effect of the OLD adjustment (re-apply the original)
+          await applyStockAdjustmentToReport(prevDoc, false);
+        }
+      }
+
+      // For sales UPDATE revert
       if (log.tableName === "sales") {
         const newDoc = log.newSnapshots?.[0]?.data || log.newData;
         if (newDoc) {
-          // Remove the stock effect of the NEW (post-edit) state
           await restoreSaleDeductionsToStock(newDoc);
-          // Re-apply the stock effect of the OLD (pre-edit) state
           await removeSaleDeductionsFromStock(prevDoc);
         }
       } else if (log.tableName === "purchase") {
         const newDoc = log.newSnapshots?.[0]?.data || log.newData;
         if (newDoc) {
-          // Remove the stock effect of the NEW (post-edit) purchase
           await removePurchaseInvoiceBatchesFromStock(newDoc);
-          // Re-apply the stock effect of the OLD (pre-edit) purchase
           await restorePurchaseInvoiceBatchesToStock(prevDoc);
         }
       }
@@ -1088,7 +1412,10 @@ router.post("/:id/revert", protect, async (req, res) => {
 
       if (
         updated &&
-        (log.tableName === "purchase" || log.tableName === "sales")
+        (log.tableName === "purchase" ||
+          log.tableName === "sales" ||
+          log.tableName === "StockAdjustment" ||
+          log.tableName === "stockadjustments")
       ) {
         await recalculateAllReportInHandTotals();
       }
@@ -1123,13 +1450,23 @@ router.post("/:id/revert", protect, async (req, res) => {
       if (log.tableName === "purchase") {
         await removePurchaseInvoiceBatchesFromStock(newDoc);
       } else if (log.tableName === "sales") {
-        // Reverting a CREATE = restoring the stock that was deducted
         await restoreSaleDeductionsToStock(newDoc);
+      } else if (
+        log.tableName === "StockAdjustment" ||
+        log.tableName === "stockadjustments"
+      ) {
+        // When deleting a created adjustment, we need to REVERSE its effect
+        await applyStockAdjustmentToReport(newDoc, true);
       }
 
       await Model.findByIdAndDelete(targetId);
 
-      if (log.tableName === "purchase" || log.tableName === "sales") {
+      if (
+        log.tableName === "purchase" ||
+        log.tableName === "sales" ||
+        log.tableName === "StockAdjustment" ||
+        log.tableName === "stockadjustments"
+      ) {
         await recalculateAllReportInHandTotals();
       }
 
@@ -1204,6 +1541,15 @@ router.post("/:id/revert", protect, async (req, res) => {
               await restoreSaleDeductionsToStock(
                 existing.toObject ? existing.toObject() : existing,
               );
+            } else if (
+              log.tableName === "StockAdjustment" ||
+              log.tableName === "stockadjustments"
+            ) {
+              // For each imported adjustment, reverse its effect
+              await applyStockAdjustmentToReport(
+                existing.toObject ? existing.toObject() : existing,
+                true,
+              );
             }
             await Model.findByIdAndDelete(recordId);
             deletedCount++;
@@ -1224,7 +1570,10 @@ router.post("/:id/revert", protect, async (req, res) => {
 
       if (
         deletedCount > 0 &&
-        (log.tableName === "purchase" || log.tableName === "sales")
+        (log.tableName === "purchase" ||
+          log.tableName === "sales" ||
+          log.tableName === "StockAdjustment" ||
+          log.tableName === "stockadjustments")
       ) {
         await recalculateAllReportInHandTotals();
       }
@@ -1349,9 +1698,20 @@ router.post("/:id/revert-single", protect, async (req, res) => {
         await restorePurchaseInvoiceBatchesToStock(docData);
       } else if (log.tableName === "sales") {
         await removeSaleDeductionsFromStock(docData);
+      } else if (
+        log.tableName === "StockAdjustment" ||
+        log.tableName === "stockadjustments"
+      ) {
+        // When restoring a single deleted adjustment, apply its effect
+        await applyStockAdjustmentToReport(docData, false);
       }
 
-      if (log.tableName === "purchase" || log.tableName === "sales") {
+      if (
+        log.tableName === "purchase" ||
+        log.tableName === "sales" ||
+        log.tableName === "StockAdjustment" ||
+        log.tableName === "stockadjustments"
+      ) {
         await recalculateAllReportInHandTotals();
       }
 
@@ -1492,7 +1852,6 @@ router.get("/export", async (req, res) => {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
-
     ws["!cols"] = [
       { wch: 22 },
       { wch: 18 },

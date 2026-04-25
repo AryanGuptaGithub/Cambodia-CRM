@@ -17,15 +17,27 @@ const stockAdjustmentSchema = new mongoose.Schema(
     },
     adjustmentType: {
       type: String,
-      enum: ["add", "remove", "deduct"],
+      enum: ["add", "remove"],
       required: true,
+    },
+    amount: {
+      type: Number,
+      default: 0,
+    },
+    unitCost: {
+      type: Number,
+      default: 0,
     },
     remarks: {
       type: String,
       default: "",
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export default mongoose.model("StockAdjustment", stockAdjustmentSchema);

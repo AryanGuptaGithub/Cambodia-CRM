@@ -137,6 +137,261 @@ const humanKey = (key, tableName) => {
 const getFieldLabel = (field, tableName) => humanKey(field, tableName);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stock Adjustment Snapshot Table
+// ─────────────────────────────────────────────────────────────────────────────
+const StockAdjustmentSnapshotTable = ({ doc, title }) => {
+  if (!doc)
+    return <p className="text-gray-500 italic text-sm">No data available.</p>;
+
+  const fields = [
+    { label: "Product Name", value: doc.productName },
+    {
+      label: "Adjustment Type",
+      value: doc.adjustmentType === "add" ? "➕ Add Stock" : "➖ Remove Stock",
+    },
+    { label: "Box Quantity", value: doc.boxQuantity },
+    {
+      label: "Unit Cost (LC)",
+      value: doc.unitCost ? `$${Number(doc.unitCost).toFixed(2)}` : "—",
+    },
+    {
+      label: "Total Amount",
+      value: doc.amount ? `$${Number(doc.amount).toFixed(2)}` : "—",
+    },
+    { label: "Remarks", value: doc.remarks || "—" },
+    {
+      label: "Created At",
+      value: doc.createdAt ? formatDateTime(doc.createdAt) : "—",
+    },
+  ];
+
+  return (
+    <div className="space-y-2">
+      {title && <p className="text-sm font-semibold text-blue-700">{title}</p>}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <tbody>
+            {fields.map(({ label, value }) => (
+              <tr
+                key={label}
+                className="border-t border-gray-100 hover:bg-gray-50"
+              >
+                <td className="px-4 py-2 font-medium text-gray-700 w-1/3">
+                  {label}
+                </td>
+                <td
+                  className={`px-4 py-2 ${doc.adjustmentType === "add" ? "text-green-700" : "text-red-700"} font-medium`}
+                >
+                  {value || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stock Adjustment Delete Table - shows deleted stock adjustments
+// ─────────────────────────────────────────────────────────────────────────────
+const StockAdjustmentDeleteTable = ({
+  rows,
+  onRevertSingleRecord,
+  isSuperAdmin,
+  log,
+}) => {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm font-semibold text-red-700">
+        🗑 {rows.length} Deleted Stock Adjustment{rows.length > 1 ? "s" : ""}
+      </p>
+      {rows.map((row, idx) => {
+        const doc = row.data || row;
+        const recordId = doc._id || doc.id || `record-${idx}`;
+        const isAdd = doc.adjustmentType === "add";
+
+        return (
+          <div
+            key={idx}
+            className="border border-red-200 rounded-lg overflow-hidden"
+          >
+            <div className="bg-red-50 px-4 py-2 flex items-center justify-between">
+              <span className="text-xs font-bold text-red-700 uppercase tracking-wide">
+                Adjustment #{idx + 1} — {doc.productName || "Unknown Product"}
+              </span>
+              {isSuperAdmin && !log?.isReverted && (
+                <button
+                  onClick={() => onRevertSingleRecord(log, recordId, idx)}
+                  className="flex items-center gap-1 px-2 py-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded transition-colors"
+                >
+                  <RotateCcw size={12} /> Revert This Record
+                </button>
+              )}
+            </div>
+            <div className="p-3">
+              <div className="grid grid-cols-2 gap-3 text-sm bg-gray-50 rounded-lg p-3 border border-gray-200 mb-3">
+                <div>
+                  <span className="text-xs text-gray-400 uppercase tracking-wide block">
+                    Product
+                  </span>
+                  <span className="font-medium text-gray-700">
+                    {doc.productName || "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 uppercase tracking-wide block">
+                    Adjustment Type
+                  </span>
+                  <span
+                    className={`font-medium ${isAdd ? "text-green-700" : "text-red-700"}`}
+                  >
+                    {isAdd ? "➕ Add Stock" : "➖ Remove Stock"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 uppercase tracking-wide block">
+                    Box Quantity
+                  </span>
+                  <span className="font-medium text-gray-700">
+                    {doc.boxQuantity || 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 uppercase tracking-wide block">
+                    Unit Cost
+                  </span>
+                  <span className="font-medium text-gray-700">
+                    {doc.unitCost ? `$${Number(doc.unitCost).toFixed(2)}` : "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 uppercase tracking-wide block">
+                    Total Amount
+                  </span>
+                  <span className="font-medium text-gray-700">
+                    {doc.amount ? `$${Number(doc.amount).toFixed(2)}` : "—"}
+                  </span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-xs text-gray-400 uppercase tracking-wide block">
+                    Remarks
+                  </span>
+                  <span className="font-medium text-gray-700">
+                    {doc.remarks || "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stock Adjustment Update Diff Table
+// ─────────────────────────────────────────────────────────────────────────────
+const StockAdjustmentUpdateDiffTable = ({ log }) => {
+  const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
+  const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+
+  if (!prevDoc && !newDoc) {
+    return (
+      <p className="text-gray-500 italic text-sm">
+        No snapshot data available.
+      </p>
+    );
+  }
+
+  const compareFields = [
+    { key: "productName", label: "Product Name" },
+    {
+      key: "adjustmentType",
+      label: "Adjustment Type",
+      format: (v) => (v === "add" ? "Add Stock" : "Remove Stock"),
+    },
+    { key: "boxQuantity", label: "Box Quantity" },
+    {
+      key: "unitCost",
+      label: "Unit Cost",
+      format: (v) => (v ? `$${Number(v).toFixed(2)}` : "—"),
+    },
+    {
+      key: "amount",
+      label: "Total Amount",
+      format: (v) => (v ? `$${Number(v).toFixed(2)}` : "—"),
+    },
+    { key: "remarks", label: "Remarks" },
+  ];
+
+  const changedFields = compareFields.filter(({ key }) => {
+    const prevVal = prevDoc?.[key];
+    const newVal = newDoc?.[key];
+    return JSON.stringify(prevVal) !== JSON.stringify(newVal);
+  });
+
+  if (changedFields.length === 0) {
+    return (
+      <p className="text-gray-500 italic text-sm">
+        No field differences detected.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm font-semibold text-blue-700 mb-2">
+        ✏️ {changedFields.length} Changed Field
+        {changedFields.length > 1 ? "s" : ""}
+      </p>
+      <div className="border border-blue-200 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-blue-50">
+              <th className="px-4 py-2 text-left font-semibold text-blue-800 w-1/4">
+                Field
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-red-700 w-[37.5%]">
+                Before
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-green-700 w-[37.5%]">
+                After
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {changedFields.map(({ key, label, format }) => {
+              let prevVal = prevDoc?.[key];
+              let newVal = newDoc?.[key];
+              if (format) {
+                prevVal = format(prevVal);
+                newVal = format(newVal);
+              }
+              return (
+                <tr key={key} className="border-t border-blue-100">
+                  <td className="px-4 py-2 font-medium text-gray-700">
+                    {label}
+                  </td>
+                  <td className="px-4 py-2 bg-red-50 text-red-700 break-all">
+                    {prevVal ?? "—"}
+                  </td>
+                  <td className="px-4 py-2 bg-green-50 text-green-700 break-all">
+                    {newVal ?? "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PurchaseProductTable – clean product table for purchase CREATE / DELETE
 // ─────────────────────────────────────────────────────────────────────────────
 const PurchaseProductTable = ({
@@ -183,9 +438,7 @@ const PurchaseProductTable = ({
             {products.map((p, idx) => (
               <tr
                 key={idx}
-                className={`border-t border-gray-100 ${
-                  idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"
-                }`}
+                className={`border-t border-gray-100 ${idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}`}
               >
                 <td className="px-4 py-2 text-gray-500">{idx + 1}</td>
                 <td className="px-4 py-2 font-medium text-gray-800 capitalize">
@@ -256,7 +509,6 @@ const PurchaseUpdateDiffTable = ({ log }) => {
   const prevProducts = prevDoc?.products || [];
   const newProducts = newDoc?.products || [];
 
-  // Invoice-level fields to diff (excluding products array)
   const invoiceFields = [
     "invoiceNumber",
     "supplierName",
@@ -273,7 +525,6 @@ const PurchaseUpdateDiffTable = ({ log }) => {
     return pv !== nv;
   });
 
-  // All unique product names across prev and new
   const allNames = [
     ...new Set([
       ...prevProducts.map((p) => p.productName),
@@ -299,7 +550,6 @@ const PurchaseUpdateDiffTable = ({ log }) => {
 
   return (
     <div className="space-y-4">
-      {/* Invoice-level changes */}
       {changedInvoiceFields.length > 0 && (
         <div>
           <p className="text-sm font-semibold text-blue-700 mb-2">
@@ -343,7 +593,6 @@ const PurchaseUpdateDiffTable = ({ log }) => {
         </div>
       )}
 
-      {/* Products diff */}
       <div>
         <p className="text-sm font-semibold text-blue-700 mb-2">
           📦 Product Changes
@@ -371,7 +620,6 @@ const PurchaseUpdateDiffTable = ({ log }) => {
                 const prev = prevProducts.find((p) => p.productName === name);
                 const next = newProducts.find((p) => p.productName === name);
 
-                // Newly added product
                 if (!prev) {
                   return (
                     <tr
@@ -392,7 +640,6 @@ const PurchaseUpdateDiffTable = ({ log }) => {
                   );
                 }
 
-                // Removed product
                 if (!next) {
                   return (
                     <tr
@@ -413,19 +660,15 @@ const PurchaseUpdateDiffTable = ({ log }) => {
                   );
                 }
 
-                // Changed fields for this product
-                const rowsToShow = productCompareFields.filter(({ key }) => {
-                  return getVal(prev, key) !== getVal(next, key);
-                });
+                const rowsToShow = productCompareFields.filter(
+                  ({ key }) => getVal(prev, key) !== getVal(next, key),
+                );
 
-                // No changes
                 if (rowsToShow.length === 0) {
                   return (
                     <tr
                       key={name}
-                      className={`border-t border-gray-100 ${
-                        ni % 2 === 0 ? "bg-white" : "bg-gray-50/40"
-                      }`}
+                      className={`border-t border-gray-100 ${ni % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}
                     >
                       <td
                         className="px-3 py-2 font-medium text-gray-500 capitalize"
@@ -440,13 +683,10 @@ const PurchaseUpdateDiffTable = ({ log }) => {
                   );
                 }
 
-                // Show each changed field as a row, merging product name cell
                 return rowsToShow.map(({ key, label }, fi) => (
                   <tr
                     key={`${name}-${key}`}
-                    className={`border-t border-gray-100 ${
-                      ni % 2 === 0 ? "bg-white" : "bg-gray-50/40"
-                    }`}
+                    className={`border-t border-gray-100 ${ni % 2 === 0 ? "bg-white" : "bg-gray-50/40"}`}
                   >
                     {fi === 0 && (
                       <td
@@ -496,6 +736,19 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
     );
 
   const isPurchase = log.tableName === "purchase";
+  const isStockAdjustment =
+    log.tableName === "StockAdjustment" || log.tableName === "stockadjustments";
+
+  if (isStockAdjustment) {
+    return (
+      <StockAdjustmentDeleteTable
+        rows={rows}
+        onRevertSingleRecord={onRevertSingleRecord}
+        isSuperAdmin={isSuperAdmin}
+        log={log}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -513,7 +766,6 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
             key={idx}
             className="border border-red-200 rounded-lg overflow-hidden"
           >
-            {/* Row header */}
             <div className="bg-red-50 px-4 py-2 flex items-center justify-between">
               <span className="text-xs font-bold text-red-700 uppercase tracking-wide">
                 Record {rows.length > 1 ? `#${idx + 1}` : ""}{" "}
@@ -529,7 +781,6 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
               )}
             </div>
 
-            {/* Purchase: show clean product table */}
             {isPurchase && doc.products ? (
               <div className="p-3 space-y-3">
                 <PurchaseInvoiceHeader doc={doc} />
@@ -539,7 +790,6 @@ const DeleteSnapshotTable = ({ log, onRevertSingleRecord, isSuperAdmin }) => {
                 />
               </div>
             ) : (
-              /* Other tables: show generic key-value rows */
               <table className="w-full text-sm">
                 <tbody>
                   {entries.map(([k, v]) => (
@@ -633,8 +883,7 @@ const UpdateDiffTable = ({ log }) => {
       {unchanged.length > 0 && (
         <details className="text-sm">
           <summary className="cursor-pointer text-gray-500 hover:text-gray-700 select-none">
-            {unchanged.length} unchanged field
-            {unchanged.length > 1 ? "s" : ""}
+            {unchanged.length} unchanged field{unchanged.length > 1 ? "s" : ""}
           </summary>
           <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
             <table className="w-full text-sm">
@@ -705,7 +954,7 @@ const GenericSnapshotTable = ({ log }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Detail Modal
+// Detail Modal - Shows revert button at the bottom
 // ─────────────────────────────────────────────────────────────────────────────
 const DetailModal = ({
   log,
@@ -717,10 +966,11 @@ const DetailModal = ({
   if (!log) return null;
 
   const isPurchase = log.tableName === "purchase";
+  const isStockAdjustment =
+    log.tableName === "StockAdjustment" || log.tableName === "stockadjustments";
 
   const renderContent = () => {
     switch (log.action) {
-      // ── DELETE ──────────────────────────────────────────────────────────
       case "DELETE":
         return (
           <DeleteSnapshotTable
@@ -730,12 +980,12 @@ const DetailModal = ({
           />
         );
 
-      // ── UPDATE ──────────────────────────────────────────────────────────
       case "UPDATE":
         if (isPurchase) return <PurchaseUpdateDiffTable log={log} />;
+        if (isStockAdjustment)
+          return <StockAdjustmentUpdateDiffTable log={log} />;
         return <UpdateDiffTable log={log} />;
 
-      // ── CREATE ──────────────────────────────────────────────────────────
       case "CREATE": {
         if (isPurchase) {
           const doc = log.newSnapshots?.[0]?.data || log.newData;
@@ -750,13 +1000,20 @@ const DetailModal = ({
             </div>
           );
         }
+        if (isStockAdjustment) {
+          const doc = log.newSnapshots?.[0]?.data || log.newData;
+          return (
+            <StockAdjustmentSnapshotTable
+              doc={doc}
+              title="📦 Stock Adjustment Details"
+            />
+          );
+        }
         return <GenericSnapshotTable log={log} />;
       }
 
-      // ── IMPORT ──────────────────────────────────────────────────────────
       case "IMPORT": {
         if (isPurchase) {
-          // newData might be a summary object with an invoices array
           const raw = log.newSnapshots?.[0]?.data || log.newData;
           const invoices = raw?.invoices || [];
           if (invoices.length > 0) {
@@ -791,9 +1048,7 @@ const DetailModal = ({
                       {invoices.map((inv, i) => (
                         <tr
                           key={i}
-                          className={`border-t border-yellow-100 ${
-                            i % 2 === 0 ? "bg-white" : "bg-yellow-50/30"
-                          }`}
+                          className={`border-t border-yellow-100 ${i % 2 === 0 ? "bg-white" : "bg-yellow-50/30"}`}
                         >
                           <td className="px-4 py-2 text-gray-500">{i + 1}</td>
                           <td className="px-4 py-2 font-medium text-gray-800">
@@ -819,10 +1074,31 @@ const DetailModal = ({
             );
           }
         }
+        if (isStockAdjustment) {
+          const docs = log.newSnapshots?.length
+            ? log.newSnapshots.map((s) => s.data)
+            : log.newData || [];
+          if (docs.length > 0) {
+            return (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-yellow-700">
+                  📥 {docs.length} Stock Adjustment
+                  {docs.length !== 1 ? "s" : ""} Imported
+                </p>
+                {docs.map((doc, idx) => (
+                  <StockAdjustmentSnapshotTable
+                    key={idx}
+                    doc={doc}
+                    title={`Adjustment #${idx + 1}`}
+                  />
+                ))}
+              </div>
+            );
+          }
+        }
         return <GenericSnapshotTable log={log} />;
       }
 
-      // ── Default ─────────────────────────────────────────────────────────
       default:
         return <GenericSnapshotTable log={log} />;
     }
@@ -842,9 +1118,7 @@ const DetailModal = ({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span
-                className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
-                  ACTION_STYLE[log.action] || "bg-gray-100 text-gray-700"
-                }`}
+                className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${ACTION_STYLE[log.action] || "bg-gray-100 text-gray-700"}`}
               >
                 {log.action}
               </span>
@@ -912,7 +1186,7 @@ const DetailModal = ({
           {renderContent()}
         </div>
 
-        {/* Footer */}
+        {/* Footer with Revert All button */}
         <div className="flex items-center justify-end gap-3 px-5 py-4 border-t bg-gray-50 rounded-b-2xl">
           {isSuperAdmin &&
             !log.isReverted &&
@@ -1278,18 +1552,14 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
 
     return (
       <div
-        className={`bg-white ${
-          isMobileView ? "p-3" : "p-4"
-        } rounded-xl shadow-md mb-4 border border-gray-200`}
+        className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}
       >
         <div className="flex flex-wrap gap-2">
           {tabs.map(({ key, label, color }) => (
             <button
               key={key}
               onClick={() => setActivityTypeTab(key)}
-              className={`${
-                isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"
-              } rounded-lg cursor-pointer transition-colors flex items-center gap-1 ${
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors flex items-center gap-1 ${
                 activityTypeTab === key
                   ? color === "orange"
                     ? "bg-orange-600 text-white"
@@ -1303,9 +1573,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
           ))}
         </div>
         <div
-          className={`flex items-center gap-2 mt-2 ${
-            isMobileView ? "text-xs" : "text-sm"
-          } text-gray-500`}
+          className={`flex items-center gap-2 mt-2 ${isMobileView ? "text-xs" : "text-sm"} text-gray-500`}
         >
           <span>
             {activityTypeTab === "all" &&
@@ -1467,9 +1735,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
 
       {/* Filter box */}
       <div
-        className={`bg-white rounded-xl shadow-sm ${
-          isMobileView ? "p-3" : "p-4"
-        } space-y-3 mb-4 border border-gray-200`}
+        className={`bg-white rounded-xl shadow-sm ${isMobileView ? "p-3" : "p-4"} space-y-3 mb-4 border border-gray-200`}
       >
         <div className="flex flex-wrap gap-2">
           {[
@@ -1482,9 +1748,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             <button
               key={key}
               onClick={() => setSelectedTab(key)}
-              className={`${
-                isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"
-              } rounded-lg transition-all duration-200 ${
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg transition-all duration-200 ${
                 selectedTab === key
                   ? "bg-indigo-600 text-white shadow-md"
                   : "bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -1558,9 +1822,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
             <>
               <span>•</span>
               <span
-                className={`font-medium ${
-                  activityTypeTab === "revert" ? "text-orange-600" : ""
-                }`}
+                className={`font-medium ${activityTypeTab === "revert" ? "text-orange-600" : ""}`}
               >
                 {activityTypeTab === "revert" ? "Reverted Only" : "Normal Only"}
               </span>
@@ -1583,9 +1845,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
 
       {/* Stats cards */}
       <div
-        className={`grid gap-3 mb-4 ${
-          isMobileView ? "grid-cols-2" : "grid-cols-4"
-        }`}
+        className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-4"}`}
       >
         {[
           {
@@ -1625,9 +1885,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
               {label}
             </p>
             <h2
-              className={`font-bold text-gray-800 mt-1 ${
-                small ? "text-sm truncate" : "text-2xl"
-              }`}
+              className={`font-bold text-gray-800 mt-1 ${small ? "text-sm truncate" : "text-2xl"}`}
             >
               {value}
             </h2>
@@ -1636,12 +1894,10 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
         ))}
       </div>
 
-      {/* Table */}
+      {/* Table with Revert buttons in each row */}
       <div className="bg-white rounded-xl shadow-sm overflow-x-auto border border-gray-200">
         <table
-          className={`w-full text-center ${
-            isMobileView ? "min-w-[640px] text-xs" : "text-sm"
-          }`}
+          className={`w-full text-center ${isMobileView ? "min-w-[640px] text-xs" : "text-sm"}`}
         >
           <thead className="bg-gradient-to-r from-gray-50 to-gray-100 text-gray-700 border-b">
             <tr>
@@ -1649,9 +1905,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                 (col) => (
                   <th
                     key={col}
-                    className={`${
-                      isMobileView ? "p-3" : "p-4"
-                    } font-semibold text-left`}
+                    className={`${isMobileView ? "p-3" : "p-4"} font-semibold text-left`}
                   >
                     {col}
                   </th>
@@ -1696,9 +1950,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                   }`}
                 >
                   <td
-                    className={`${
-                      isMobileView ? "p-3" : "p-4"
-                    } text-left whitespace-nowrap text-gray-600 font-mono text-xs`}
+                    className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap text-gray-600 font-mono text-xs`}
                   >
                     {formatDateTime(r.createdAt)}
                   </td>
@@ -1714,17 +1966,13 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                   </td>
                   <td className={`${isMobileView ? "p-3" : "p-4"} text-left`}>
                     <span
-                      className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        ACTION_STYLE[r.action] || "bg-gray-100 text-gray-700"
-                      }`}
+                      className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${ACTION_STYLE[r.action] || "bg-gray-100 text-gray-700"}`}
                     >
                       {r.action}
                     </span>
                   </td>
                   <td
-                    className={`${
-                      isMobileView ? "p-3" : "p-4"
-                    } text-left text-gray-600 max-w-xs truncate`}
+                    className={`${isMobileView ? "p-3" : "p-4"} text-left text-gray-600 max-w-xs truncate`}
                     title={r.actionLabel || r.description}
                   >
                     {r.actionLabel || r.description || "—"}
@@ -1741,9 +1989,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                     )}
                   </td>
                   <td
-                    className={`${
-                      isMobileView ? "p-3" : "p-4"
-                    } text-left whitespace-nowrap`}
+                    className={`${isMobileView ? "p-3" : "p-4"} text-left whitespace-nowrap`}
                   >
                     <div className="flex items-center gap-2">
                       <button

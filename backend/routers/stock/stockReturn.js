@@ -9,6 +9,8 @@ import { logActivity } from "../activity/activityLog.js";
 
 const router = express.Router();
 
+// ==================== Utility ====================
+
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -26,42 +28,27 @@ const toTitleCase = (str) => {
     .join(" ");
 };
 
-// ==================== Helper: get best available LC from a ReportInHand ====================
-/**
- * Priority order for cost-per-box fallback when no unitCost provided:
- *   1. currentAvgPrice (computed from recalculateTotals)
- *   2. lc from the most recent "batch" type entry with lc > 0
- *   3. lc from the most recent "add" type entry with lc > 0
- *   4. lc from ANY batch entry with lc > 0 (latest first)
- *   5. 0 if nothing found (caller decides whether to throw)
- */
+// ==================== Helper: get best available LC ====================
 const getBestLcFallback = (reportItem) => {
   const batches = reportItem.batches || [];
 
-  // Sort descending by date so we get most recent first
   const sorted = [...batches].sort(
     (a, b) => new Date(b.date || 0) - new Date(a.date || 0),
   );
 
-  // 1. Use currentAvgPrice if it's valid
-  if ((reportItem.averagePrice || 0) > 0) {
-    return reportItem.averagePrice;
-  }
+  if ((reportItem.averagePrice || 0) > 0) return reportItem.averagePrice;
 
-  // 2. Last real purchase batch with lc > 0
   const lastRealBatch = sorted.find(
     (b) =>
       (b.adjustmentType === "batch" || !b.adjustmentType) && (b.lc || 0) > 0,
   );
   if (lastRealBatch) return lastRealBatch.lc;
 
-  // 3. Last "add" adjustment with lc > 0
   const lastAddBatch = sorted.find(
     (b) => b.adjustmentType === "add" && (b.lc || 0) > 0,
   );
   if (lastAddBatch) return lastAddBatch.lc;
 
-  // 4. Any batch with lc > 0
   const anyBatch = sorted.find((b) => (b.lc || 0) > 0);
   if (anyBatch) return anyBatch.lc;
 
@@ -95,12 +82,18 @@ const getWarehouseInventorySummary = async (overrideMap = null) => {
 };
 
 // ==================== Core: recalculate totals ====================
+// Batch types:
+//   'batch'  — normal purchase batch  → adds boxes + amount
+//   'add'    — manual stock add       → adds boxes + amount
+//   'remove' — manual stock remove    → subtracts boxes + amount
+//   'return' — sale return            → adds boxes BACK + amount BACK into warehouse
 const recalculateTotals = (reportItem) => {
   const batches = reportItem.batches || [];
 
   let totalBoxesFromBatches = 0;
   let addStockAdjustment = 0;
   let removeStockAdjustment = 0;
+  let returnStockAdjustment = 0;
   let totalAmount = 0;
 
   for (const b of batches) {
@@ -117,11 +110,19 @@ const recalculateTotals = (reportItem) => {
     } else if (type === "remove") {
       removeStockAdjustment += boxes;
       totalAmount -= amount;
+    } else if (type === "return") {
+      // Sale return: goods come BACK into warehouse, so boxes and amount go UP
+      returnStockAdjustment += boxes;
+      totalAmount += amount;
     }
   }
 
+  // returnStockAdjustment is ADDED — returned goods are back in stock
   const totalBoxes = fixPrecision(
-    totalBoxesFromBatches + addStockAdjustment - removeStockAdjustment,
+    totalBoxesFromBatches +
+      addStockAdjustment -
+      removeStockAdjustment +
+      returnStockAdjustment,
   );
   const fixedAmount = fixPrecision(totalAmount);
   const averagePrice =
@@ -130,6 +131,7 @@ const recalculateTotals = (reportItem) => {
   reportItem.totalBoxesFromBatches = fixPrecision(totalBoxesFromBatches);
   reportItem.addStockAdjustment = fixPrecision(addStockAdjustment);
   reportItem.removeStockAdjustment = fixPrecision(removeStockAdjustment);
+  reportItem.returnStockAdjustment = fixPrecision(returnStockAdjustment);
   reportItem.totalBoxes = totalBoxes;
   reportItem.totalAmount = fixedAmount;
   reportItem.averagePrice = averagePrice;
@@ -140,6 +142,104 @@ const recalculateTotals = (reportItem) => {
         ? "Low Stock"
         : "In Stock";
   reportItem.updatedAt = new Date();
+};
+
+// ==================== EXPORTED: apply sale return to warehouse ====================
+// Import and call this from your sale return router when creating a sale return.
+//
+//   import { applyReturnToWarehouse } from "./stockAdjustment.js";
+//
+//   // Inside your sale return create route, for each returned product:
+//   const updatedReport = await applyReturnToWarehouse(
+//     { productName, boxes, lc, amount, saleReturnId, invoiceNumber },
+//     session
+//   );
+export const applyReturnToWarehouse = async (
+  { productName, boxes, lc, amount, saleReturnId, invoiceNumber },
+  session,
+) => {
+  const reportItem = await ReportInHand.findOne({
+    productName: {
+      $regex: new RegExp(`^${escapeRegex(productName)}$`, "i"),
+    },
+  }).session(session);
+
+  if (!reportItem) {
+    throw new Error(
+      `Product "${productName}" not found in warehouse. Cannot process return.`,
+    );
+  }
+
+  const returnBatch = {
+    _id: new mongoose.Types.ObjectId(),
+    boxes: fixPrecision(Number(boxes)),
+    lc: fixPrecision(Number(lc)),
+    sellingPrice: 0,
+    fob: 0,
+    cif: 0,
+    amount: fixPrecision(Number(amount)),
+    date: new Date(),
+    adjustmentType: "return",
+    saleReturnId,
+    invoiceNumber,
+  };
+
+  reportItem.batches.push(returnBatch);
+
+  // CRITICAL: recalculate AFTER pushing, BEFORE saving — this updates totalBoxes
+  recalculateTotals(reportItem);
+
+  await reportItem.save({ session });
+
+  return reportItem;
+};
+
+// ==================== EXPORTED: revert sale return from warehouse ====================
+// Import and call this from your sale return router when deleting a sale return.
+//
+//   import { revertReturnFromWarehouse } from "./stockAdjustment.js";
+//
+//   // Inside your sale return delete route, for each returned product:
+//   await revertReturnFromWarehouse({ productName, saleReturnId }, session);
+export const revertReturnFromWarehouse = async (
+  { productName, saleReturnId },
+  session,
+) => {
+  const reportItem = await ReportInHand.findOne({
+    productName: {
+      $regex: new RegExp(`^${escapeRegex(productName)}$`, "i"),
+    },
+  }).session(session);
+
+  if (!reportItem) return null;
+
+  const beforeCount = reportItem.batches.length;
+
+  // Remove all return batches that match this saleReturnId
+  reportItem.batches = reportItem.batches.filter(
+    (b) =>
+      !(
+        b.adjustmentType === "return" &&
+        b.saleReturnId?.toString() === saleReturnId.toString()
+      ),
+  );
+
+  if (reportItem.batches.length === beforeCount) {
+    // No matching batch found — nothing to revert
+    return reportItem;
+  }
+
+  recalculateTotals(reportItem);
+
+  if (reportItem.totalBoxes < 0) {
+    throw new Error(
+      `Cannot cancel return: warehouse stock would go negative (${reportItem.totalBoxes}). ` +
+        `The returned goods may have already been sold again.`,
+    );
+  }
+
+  await reportItem.save({ session });
+  return reportItem;
 };
 
 // ==================== GET /in-stock ====================
@@ -267,6 +367,12 @@ router.post("/", protect, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(productId))
       throw new Error("Invalid product ID");
 
+    // 'return' is only ever created by the sale return flow via applyReturnToWarehouse()
+    if (adjustmentType === "return")
+      throw new Error(
+        "Sale returns must be processed through the Sale Return flow, not stock adjustments.",
+      );
+
     const product = await Product.findById(productId).session(session);
     if (!product) throw new Error("Product not found");
 
@@ -291,7 +397,6 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
-    // Compute current state BEFORE adding new batch
     recalculateTotals(reportItem);
 
     const adjustmentQty = fixPrecision(Number(boxQuantity));
@@ -307,10 +412,8 @@ router.post("/", protect, async (req, res) => {
 
     if (adjustmentType === "add") {
       if (unitCost && Number(unitCost) > 0) {
-        // ✅ User explicitly provided a cost — use it
         costPerBox = Number(unitCost);
       } else {
-        // ✅ Fallback: averagePrice → last real batch lc → last add lc → any lc
         costPerBox = getBestLcFallback(reportItem);
         if (costPerBox === 0)
           throw new Error(
@@ -319,7 +422,6 @@ router.post("/", protect, async (req, res) => {
       }
       adjustmentAmount = fixPrecision(adjustmentQty * costPerBox);
     } else if (adjustmentType === "remove") {
-      // For remove, always use current averagePrice (or best LC fallback)
       costPerBox =
         (reportItem.averagePrice || 0) > 0
           ? reportItem.averagePrice
@@ -327,7 +429,6 @@ router.post("/", protect, async (req, res) => {
       adjustmentAmount = fixPrecision(adjustmentQty * costPerBox);
     }
 
-    // Push new batch — amount always stored as positive
     const newBatch = {
       _id: new mongoose.Types.ObjectId(),
       boxes: adjustmentQty,
@@ -336,12 +437,11 @@ router.post("/", protect, async (req, res) => {
       cif: 0,
       amount: adjustmentAmount,
       date: new Date(),
-      adjustmentType: adjustmentType,
+      adjustmentType,
       batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
     };
 
     reportItem.batches.push(newBatch);
-
     recalculateTotals(reportItem);
     await reportItem.save({ session });
 
@@ -355,14 +455,13 @@ router.post("/", protect, async (req, res) => {
       adjustmentType,
       remarks,
       createdBy: req.user._id,
-      costPerBox: costPerBox,
+      costPerBox,
       amount: adjustmentAmount,
     });
     await adjustment.save({ session });
     await session.commitTransaction();
     session.endSession();
 
-    // Log activity
     await logActivity(req, {
       action: "CREATE",
       actionLabel: `${adjustmentType === "add" ? "Added" : "Removed"} Stock: ${toTitleCase(product.productName)}`,
@@ -372,9 +471,9 @@ router.post("/", protect, async (req, res) => {
       referenceNumber: adjustment._id.toString(),
       newData: {
         productName: toTitleCase(product.productName),
-        adjustmentType: adjustmentType,
+        adjustmentType,
         boxQuantity: adjustmentQty,
-        costPerBox: costPerBox,
+        costPerBox,
         amount: adjustmentAmount,
         remarks: remarks || "",
       },
@@ -442,11 +541,23 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     const existing = await StockAdjustment.findById(id).session(session);
     if (!existing) throw new Error("Adjustment not found");
 
-    // Get previous record for logging
+    // Block editing sale return adjustments via this route
+    if (existing.adjustmentType === "return")
+      throw new Error(
+        "Sale return adjustments cannot be edited here. Please use the Sale Return flow.",
+      );
+
     const previousRecord = existing.toObject();
 
     const { productId, boxQuantity, adjustmentType, remarks, unitCost } =
       req.body;
+
+    // Block changing TO 'return' type manually
+    if (adjustmentType === "return")
+      throw new Error(
+        "Cannot set adjustment type to 'return'. Use the Sale Return flow.",
+      );
+
     if (!productId || !boxQuantity || !adjustmentType)
       throw new Error("Missing required fields");
     if (Number(boxQuantity) <= 0)
@@ -467,10 +578,11 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         `Product "${product.productName}" not found in warehouse.`,
       );
 
-    // Remove old batch
+    // Remove old batch — never touch 'return' batches here
     const oldBatchIndex = reportItem.batches.findIndex(
       (b) =>
         b.adjustmentType === existing.adjustmentType &&
+        b.adjustmentType !== "return" &&
         Number(b.boxes) === existing.boxQuantity &&
         b.batchNumber?.startsWith(
           `ADJ-${existing.adjustmentType.toUpperCase()}`,
@@ -481,7 +593,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     recalculateTotals(reportItem);
 
     const newQty = fixPrecision(Number(boxQuantity));
-
     let costPerBox = 0;
     let adjustmentAmount = 0;
 
@@ -489,7 +600,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       if (unitCost && Number(unitCost) > 0) {
         costPerBox = Number(unitCost);
       } else {
-        // ✅ Fallback to best available LC
         costPerBox = getBestLcFallback(reportItem);
         if (costPerBox === 0)
           throw new Error(
@@ -513,12 +623,11 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       cif: 0,
       amount: adjustmentAmount,
       date: new Date(),
-      adjustmentType: adjustmentType,
+      adjustmentType,
       batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
     };
 
     reportItem.batches.push(newBatch);
-
     recalculateTotals(reportItem);
 
     if (reportItem.totalBoxes < 0)
@@ -544,7 +653,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Log activity
     await logActivity(req, {
       action: "UPDATE",
       actionLabel: `Updated Stock Adjustment: ${toTitleCase(product.productName)}`,
@@ -555,9 +663,9 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       previousData: previousRecord,
       newData: {
         productName: toTitleCase(product.productName),
-        adjustmentType: adjustmentType,
+        adjustmentType,
         boxQuantity: newQty,
-        costPerBox: costPerBox,
+        costPerBox,
         amount: adjustmentAmount,
         remarks: remarks || "",
       },
@@ -623,7 +731,12 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       .session(session);
     if (!adjustment) throw new Error("Adjustment not found");
 
-    // Get product info for logging
+    // Block deleting sale return adjustments via this route
+    if (adjustment.adjustmentType === "return")
+      throw new Error(
+        "Sale return adjustments cannot be deleted here. Please reverse through the Sale Return flow.",
+      );
+
     const product = adjustment.productId;
     const previousRecord = adjustment.toObject();
 
@@ -634,9 +747,11 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     }).session(session);
 
     if (reportItem) {
+      // Never accidentally remove a 'return' batch here
       const batchIndex = reportItem.batches.findIndex(
         (b) =>
           b.adjustmentType === adjustment.adjustmentType &&
+          b.adjustmentType !== "return" &&
           Number(b.boxes) === adjustment.boxQuantity &&
           b.batchNumber?.startsWith(
             `ADJ-${adjustment.adjustmentType.toUpperCase()}`,
@@ -658,7 +773,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Log activity
     await logActivity(req, {
       action: "DELETE",
       actionLabel: `Deleted Stock Adjustment: ${toTitleCase(product.productName)}`,
@@ -709,13 +823,17 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
     const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
     if (validIds.length === 0) throw new Error("No valid adjustment IDs");
 
-    const adjustments = await StockAdjustment.find({
-      _id: { $in: validIds },
-    })
+    const adjustments = await StockAdjustment.find({ _id: { $in: validIds } })
       .populate("productId", "productName qtyPerCarton")
       .session(session);
 
-    // Store for logging
+    // Block bulk delete if any selected is a 'return' type
+    const returnAdj = adjustments.find((a) => a.adjustmentType === "return");
+    if (returnAdj)
+      throw new Error(
+        "Selection contains sale return adjustments which cannot be deleted here. Please deselect them and use the Sale Return flow.",
+      );
+
     const deletedRecords = adjustments.map((adj) => adj.toObject());
 
     const byProduct = new Map();
@@ -738,9 +856,11 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
       if (!reportItem) continue;
 
       for (const adj of adjs) {
+        // Never remove a 'return' batch here
         const batchIndex = reportItem.batches.findIndex(
           (b) =>
             b.adjustmentType === adj.adjustmentType &&
+            b.adjustmentType !== "return" &&
             Number(b.boxes) === adj.boxQuantity &&
             b.batchNumber?.startsWith(
               `ADJ-${adj.adjustmentType.toUpperCase()}`,
@@ -763,7 +883,6 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Log bulk delete activity
     await logActivity(req, {
       action: "DELETE",
       actionLabel: `Bulk Deleted ${result.deletedCount} Stock Adjustment(s)`,
@@ -806,6 +925,9 @@ router.get("/summary/warehouse", async (req, res) => {
 });
 
 // ==================== REPAIR: recalc all products ====================
+// Hit POST /repair/recalc-only once after deploying this fix.
+// It will correct all existing documents where return batches were
+// stored but not counted into totalBoxes (e.g. ecozin 5: 9899 → 9939).
 router.post(
   "/repair/recalc-only",
   protect,
@@ -845,7 +967,6 @@ router.post(
         }
       }
 
-      // Log repair activity
       await logActivity(req, {
         action: "REPAIR",
         actionLabel: `Recalculated Stock Totals (${updatedCount} products changed)`,

@@ -83,13 +83,11 @@ const StockAdjustment = () => {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // ── Warehouse summary now tracks totalAmount correctly ────────────────────
   const [warehouseSummary, setWarehouseSummary] = useState({
     totalAmount: 0,
     totalProducts: 0,
   });
 
-  // ── Last adjustment result (shown in success banner) ─────────────────────
   const [lastAdjustment, setLastAdjustment] = useState(null);
 
   const inputRef = useRef(null);
@@ -99,7 +97,7 @@ const StockAdjustment = () => {
     boxQuantity: "",
     adjustmentType: "add",
     remarks: "",
-    unitCost: "", // optional cost override for "add"
+    unitCost: "",
   });
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -132,7 +130,6 @@ const StockAdjustment = () => {
     }
   };
 
-  // Update warehouse summary from any API response that returns warehouseSummary
   const updateWarehouseSummaryFromResponse = (responseData) => {
     if (responseData?.warehouseSummary) {
       setWarehouseSummary(responseData.warehouseSummary);
@@ -178,9 +175,7 @@ const StockAdjustment = () => {
       const token = localStorage.getItem("token");
       const response = await axios.get(
         `${backendUrl}/api/stock-adjustment/in-stock`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (response.data?.success) {
@@ -237,7 +232,6 @@ const StockAdjustment = () => {
     });
   }, [adjustments, searchTerm]);
 
-  // Check if table has entries
   const hasTableEntries = filteredAdjustments.length > 0;
 
   const paginatedAdjustments = useMemo(() => {
@@ -362,9 +356,7 @@ const StockAdjustment = () => {
         const token = localStorage.getItem("token");
         const response = await axios.delete(
           `${backendUrl}/api/stock-adjustment/${id}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          },
+          { headers: { Authorization: `Bearer ${token}` } },
         );
 
         if (response.data.success) {
@@ -440,6 +432,34 @@ const StockAdjustment = () => {
       return;
     }
 
+    // ✅ CLIENT-SIDE stock validation for remove
+    if (formData.adjustmentType === "remove") {
+      const currentStock = getCurrentStock(formData.product);
+      const availableBoxes = currentStock.boxes || 0;
+
+      if (availableBoxes <= 0) {
+        const productLabel =
+          products.find((p) => p._id === formData.product)?.productName ||
+          "this product";
+        showToast(
+          "error",
+          `Cannot remove stock: "${capitalizeFirstLetter(productLabel)}" is out of stock.`,
+        );
+        return;
+      }
+
+      if (boxQty > availableBoxes) {
+        const productLabel =
+          products.find((p) => p._id === formData.product)?.productName ||
+          "this product";
+        showToast(
+          "error",
+          `Cannot remove ${boxQty} boxes. Only ${availableBoxes} box${availableBoxes !== 1 ? "es" : ""} available for "${capitalizeFirstLetter(productLabel)}".`,
+        );
+        return;
+      }
+    }
+
     try {
       const product = products.find((p) => p._id === formData.product);
       const qtyPerCarton = product?.qtyPerCarton || 1;
@@ -505,11 +525,30 @@ const StockAdjustment = () => {
       maximumFractionDigits: 2,
     }).format(amount || 0);
 
-  // Clear search
   const clearSearch = () => {
     setSearchTerm("");
     setCurrentPage(1);
   };
+
+  // ── Derived: current available stock for selected product ─────────────────
+  const selectedProductStock = useMemo(() => {
+    if (!formData.product) return null;
+    return getCurrentStock(formData.product);
+  }, [formData.product, getCurrentStock]);
+
+  // ── Derived: is remove qty exceeding stock (for inline warning) ───────────
+  const removeExceedsStock = useMemo(() => {
+    if (formData.adjustmentType !== "remove") return false;
+    if (!formData.product) return false;
+    const qty = parseInt(formData.boxQuantity) || 0;
+    const available = selectedProductStock?.boxes || 0;
+    return qty > available;
+  }, [
+    formData.adjustmentType,
+    formData.product,
+    formData.boxQuantity,
+    selectedProductStock,
+  ]);
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -548,6 +587,7 @@ const StockAdjustment = () => {
         <div
           className={`${isMobileView ? "mb-2" : "mb-6"} grid grid-cols-1 md:grid-cols-2 gap-4`}
         >
+          {/* Total Inventory Value */}
           <div
             className={`bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg shadow-lg text-white ${isMobileView ? "p-2" : "p-4"}`}
           >
@@ -584,7 +624,7 @@ const StockAdjustment = () => {
 
           {/* Products in Stock */}
           <div
-            className={`bg-gradient-to-r from-green-500 to-green-600 rounded-lg shadow-lg  ${isMobileView ? "p-2" : "p-4"} text-white`}
+            className={`bg-gradient-to-r from-green-500 to-green-600 rounded-lg shadow-lg ${isMobileView ? "p-2" : "p-4"} text-white`}
           >
             <div className="flex items-center justify-between">
               <div>
@@ -768,7 +808,6 @@ const StockAdjustment = () => {
 
         {/* ── Toolbar ── */}
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-          {/* Desktop: Show Add New Adjustment button */}
           {!isMobileView && (
             <div className="flex gap-3 flex-wrap">
               <button
@@ -794,7 +833,6 @@ const StockAdjustment = () => {
             </div>
           )}
 
-          {/* Desktop Search - Only show when table has entries */}
           {!isMobileView && hasTableEntries && (
             <div className="flex items-center gap-4 flex-wrap">
               <p className="text-base font-semibold text-gray-700">
@@ -960,7 +998,6 @@ const StockAdjustment = () => {
                       <td
                         className={`p-3 ${isMobileView ? "text-xs" : "text-sm"}`}
                       >
-                        {/* Desktop: Show Edit and Delete buttons, Mobile: Only show View */}
                         {!isMobileView && (
                           <div className="flex items-center justify-center gap-3">
                             <button
@@ -1180,11 +1217,48 @@ const StockAdjustment = () => {
                       }
                       disabled={isProductsEmpty}
                       className={`w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                        isProductsEmpty ? "bg-gray-100 cursor-not-allowed" : ""
+                        isProductsEmpty
+                          ? "bg-gray-100 cursor-not-allowed"
+                          : removeExceedsStock
+                            ? "border-red-400 bg-red-50"
+                            : ""
                       }`}
                       placeholder="Enter box quantity"
                       required
                     />
+                    {/* ✅ Inline warning when remove qty exceeds available stock */}
+                    {removeExceedsStock && (
+                      <p className="mt-1 text-xs text-red-600 font-medium flex items-center gap-1">
+                        <span>⚠</span>
+                        <span>
+                          Only {selectedProductStock?.boxes || 0} box
+                          {(selectedProductStock?.boxes || 0) !== 1
+                            ? "es"
+                            : ""}{" "}
+                          available. Cannot remove {formData.boxQuantity} boxes.
+                        </span>
+                      </p>
+                    )}
+                    {/* Show max removable hint when type is remove and product selected */}
+                    {formData.adjustmentType === "remove" &&
+                      formData.product &&
+                      !removeExceedsStock &&
+                      (selectedProductStock?.boxes || 0) > 0 && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          Max removable:{" "}
+                          <span className="font-semibold text-gray-700">
+                            {selectedProductStock.boxes} box
+                            {selectedProductStock.boxes !== 1 ? "es" : ""}
+                          </span>
+                        </p>
+                      )}
+                    {formData.adjustmentType === "remove" &&
+                      formData.product &&
+                      (selectedProductStock?.boxes || 0) <= 0 && (
+                        <p className="mt-1 text-xs text-red-600 font-medium">
+                          ⚠ This product is out of stock.
+                        </p>
+                      )}
                   </div>
                 </div>
 
@@ -1253,9 +1327,9 @@ const StockAdjustment = () => {
                 <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200">
                   <button
                     type="submit"
-                    disabled={isProductsEmpty}
+                    disabled={isProductsEmpty || removeExceedsStock}
                     className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors duration-200 flex-1 justify-center ${
-                      isProductsEmpty
+                      isProductsEmpty || removeExceedsStock
                         ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
                         : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
                     }`}
@@ -1278,7 +1352,7 @@ const StockAdjustment = () => {
           </div>
         )}
 
-        {/* ── View Remarks Modal with proper sizing ── */}
+        {/* ── View Remarks Modal ── */}
         {remarksModalVisible && (
           <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50 p-4">
             <div
