@@ -104,7 +104,6 @@ export const logActivity = async (req, options = {}) => {
   }
 };
 
-// Helper function for precision
 const fixPrecision = (num) => {
   if (typeof num !== "number") return num;
   return Math.round(num * 100) / 100;
@@ -112,7 +111,6 @@ const fixPrecision = (num) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CORE: Recalculate totals from batches array and save to ReportInHand
-// This is the single source of truth for all recalculations.
 // ─────────────────────────────────────────────────────────────────────────────
 const recalculateAndSaveReport = async (ReportInHand, reportId, batches) => {
   let totalBoxesFromBatches = 0;
@@ -131,14 +129,12 @@ const recalculateAndSaveReport = async (ReportInHand, reportId, batches) => {
       totalAmount += batchAmount;
     } else if (type === "return") {
       returnStockAdjustment += batchBoxes;
-      // return stock adds back to available inventory
       totalAmount += batchAmount;
     } else if (type === "add") {
       addStockAdjustment += batchBoxes;
       totalAmount += batchAmount;
     } else if (type === "remove") {
       removeStockAdjustment += batchBoxes;
-      // remove batches reduce totalAmount
       totalAmount -= batchAmount;
     }
   }
@@ -199,87 +195,148 @@ const recalculateAndSaveReport = async (ReportInHand, reportId, batches) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HELPER: Resolve productName from a StockAdjustment snapshot doc
+// ─────────────────────────────────────────────────────────────────────────────
+const resolveProductNameFromAdjustmentDoc = async (doc) => {
+  // 1. Direct productName on the snapshot
+  if (doc.productName && typeof doc.productName === "string") {
+    return doc.productName.trim();
+  }
+
+  // 2. Populate from Product collection using productId
+  if (doc.productId) {
+    try {
+      const Product = (await import("../../models/projectManger/product.js"))
+        .default;
+      const idToQuery = mongoose.Types.ObjectId.isValid(String(doc.productId))
+        ? doc.productId
+        : null;
+      if (idToQuery) {
+        const product = await Product.findById(idToQuery).lean();
+        if (product?.productName) return product.productName.trim();
+      }
+    } catch (e) {
+      console.error("❌ resolveProductName: Product lookup failed:", e.message);
+    }
+  }
+
+  console.warn(
+    "⚠️ resolveProductName: Could not resolve productName from doc:",
+    doc,
+  );
+  return null;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // STOCK ADJUSTMENT: Apply or Revert a stock adjustment to ReportInHand
-//
-// When isRevert=false (normal apply):
-//   - "add" => push a new batch with adjustmentType="add", adjustmentId=adjustment._id
-//   - "remove" => push a new batch with adjustmentType="remove", adjustmentId=adjustment._id
-//     (physical boxes are NOT reduced from existing batches — only tracked via removeStockAdjustment counter)
-//
-// When isRevert=true (undo a previously applied adjustment):
-//   - "add" => find the batch whose adjustmentId matches adjustment._id, remove it
-//   - "remove" => find the batch whose adjustmentId matches adjustment._id, remove it
-//
-// After mutation, recalculate totals from scratch via recalculateAndSaveReport.
 // ─────────────────────────────────────────────────────────────────────────────
 const applyStockAdjustmentToReport = async (
   adjustmentData,
   isRevert = false,
 ) => {
+  console.log("🚀 applyStockAdjustmentToReport called", {
+    isRevert,
+    adjustmentData,
+  });
   try {
+    console.log("📦 Importing ReportInHand model...");
     const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
       .default;
+    console.log("ReportInHand model imported successfully");
 
-    // ── Extract fields from different possible shapes ──────────────────────
-    let adjustmentType, boxes, lc, adjustmentId, productName;
-    let fob = 0,
-      cif = 0,
-      sellingPrice = 0,
-      expiryDate = null,
-      date = null;
-
+    console.log("Extracting src from adjustmentData...");
     const src = adjustmentData.data || adjustmentData;
+    console.log("📄 Source object:", src);
 
-    adjustmentType = src.adjustmentType;
-    boxes = Number(src.boxQuantity || src.boxes || 0);
-    lc = Number(src.unitCost || src.lc || 0);
-    fob = Number(src.fob || 0);
-    cif = Number(src.cif || 0);
-    sellingPrice = Number(src.sellingPrice || 0);
-    expiryDate = src.expiryDate ? new Date(src.expiryDate) : null;
-    date = src.date ? new Date(src.date) : new Date();
+    console.log("Getting adjustmentType from src...");
+    const adjustmentType = src.adjustmentType;
+    console.log("🔧 adjustmentType:", adjustmentType);
 
-    // adjustmentId is the _id of the StockAdjustment document itself
-    // stored inside each batch as batch.adjustmentId
-    adjustmentId = src._id;
+    console.log("Getting boxQuantity from src...");
+    const boxes = Number(src.boxQuantity || src.boxes || 0);
+    console.log("📦 boxes:", boxes);
 
-    productName = src.productName;
+    console.log("Getting unitCost/costPerBox/lc from src...");
+    const lc = Number(src.unitCost || src.costPerBox || src.lc || 0);
+    console.log("💰 lc (cost per box):", lc);
 
+    console.log("Getting fob from src...");
+    const fob = Number(src.fob || 0);
+    console.log("fob:", fob);
+
+    console.log("Getting cif from src...");
+    const cif = Number(src.cif || 0);
+    console.log("cif:", cif);
+
+    console.log("Getting sellingPrice from src...");
+    const sellingPrice = Number(src.sellingPrice || 0);
+    console.log("sellingPrice:", sellingPrice);
+
+    console.log("Getting expiryDate from src...");
+    const expiryDate = src.expiryDate ? new Date(src.expiryDate) : null;
+    console.log("expiryDate:", expiryDate);
+
+    console.log("Getting date from src...");
+    const date = src.date ? new Date(src.date) : new Date();
+    console.log("date:", date);
+
+    console.log("Getting _id from src...");
+    const adjustmentId = src._id || null;
+    console.log("🆔 adjustmentId:", adjustmentId);
+
+    console.log("🔍 Resolving productName from adjustment doc...");
+    const productName = await resolveProductNameFromAdjustmentDoc(src);
+    console.log("🏷️ productName resolved:", productName);
+
+    console.log("Checking if productName exists...");
     if (!productName) {
-      console.warn("⚠️ applyStockAdjustmentToReport: No productName found");
-      return;
-    }
-
-    if (boxes <= 0) {
       console.warn(
-        `⚠️ applyStockAdjustmentToReport: boxes=${boxes} for "${productName}"`,
+        "⚠️ applyStockAdjustmentToReport: No productName resolved — skipping",
       );
       return;
     }
+    console.log("productName validation passed");
 
+    console.log("Checking boxes value for non-revert mode...");
+    if (!isRevert && boxes <= 0) {
+      console.warn(
+        `⚠️ applyStockAdjustmentToReport: boxes=${boxes} for "${productName}" — skipping`,
+      );
+      return;
+    }
+    console.log("boxes validation passed");
+
+    console.log(
+      `🔎 Looking for ReportInHand with productName: "${productName}"`,
+    );
     const existingReport = await ReportInHand.findOne({
       productName: { $regex: new RegExp(`^${productName.trim()}$`, "i") },
     });
+    console.log("Database query completed for ReportInHand");
 
+    console.log("Checking if existingReport was found...");
     if (!existingReport) {
       console.warn(
         `⚠️ applyStockAdjustmentToReport: No ReportInHand for "${productName}"`,
       );
       return;
     }
+    console.log("✅ Found existingReport:", existingReport._id);
 
-    // Work on plain objects so we can mutate freely
+    console.log("Processing batches from existingReport...");
     let batches = (existingReport.batches || []).map((b) =>
       b.toObject ? b.toObject() : { ...b },
     );
+    console.log(`📋 Current batches count: ${batches.length}`);
 
+    console.log("Converting adjustmentId to string...");
     const adjIdStr = adjustmentId ? String(adjustmentId) : null;
+    console.log("🔑 adjustmentId as string:", adjIdStr);
 
+    console.log("Checking if isRevert mode...");
     if (!isRevert) {
-      // ── NORMAL: push a tracking batch for "add" or "remove" ─────────────
-      // Do NOT physically deduct from existing batches here.
-      // The totalBoxes formula handles everything:
-      //   totalBoxes = fromBatches + addAdj + returnAdj - removeAdj
+      console.log("➕ APPLY mode: creating new tracking batch");
+      console.log("Creating new mongoose ObjectId...");
       const newBatch = {
         _id: new mongoose.Types.ObjectId(),
         boxes,
@@ -290,77 +347,120 @@ const applyStockAdjustmentToReport = async (
         amount: fixPrecision(boxes * lc),
         expiryDate,
         date,
-        adjustmentType, // "add" or "remove"
-        adjustmentId,
+        adjustmentType,
+        adjustmentId: adjustmentId || undefined,
         batchNumber:
           adjustmentType === "add"
             ? `ADJ-ADD-${Date.now()}`
             : `ADJ-REMOVE-${Date.now()}`,
         isReversal: false,
       };
+      console.log("🆕 New batch object:", newBatch);
+      console.log("Pushing new batch to batches array...");
       batches.push(newBatch);
       console.log(
-        `✅ APPLY ${adjustmentType.toUpperCase()} "${productName}": ${boxes} boxes (adjustmentId=${adjIdStr})`,
+        `✅ APPLY ${adjustmentType?.toUpperCase()} "${productName}": ${boxes} boxes (adjustmentId=${adjIdStr})`,
       );
     } else {
-      // ── REVERT: remove the tracking batch whose adjustmentId matches ─────
+      console.log("⏪ REVERT mode: removing matching batch(es)");
       const before = batches.length;
-      batches = batches.filter((b) => {
-        if (!b.adjustmentId) return true;
-        const bId = String(b.adjustmentId);
-        // Remove the batch that was created when this adjustment was applied
-        return bId !== adjIdStr;
-      });
-      const after = batches.length;
+      console.log("Batches before removal:", before);
 
+      console.log("Checking if adjIdStr exists...");
+      if (adjIdStr) {
+        console.log(`🔍 Removing batches with adjustmentId === ${adjIdStr}`);
+        batches = batches.filter((b) => {
+          if (!b.adjustmentId) return true;
+          const match = String(b.adjustmentId) !== adjIdStr;
+          if (!match)
+            console.log(
+              `🗑️ Removing batch with adjustmentId ${b.adjustmentId}`,
+            );
+          return match;
+        });
+        console.log("Filter operation completed with adjIdStr");
+      } else {
+        console.log(
+          "⚠️ No adjustmentId string, fallback to type + boxes matching",
+        );
+        let removed = false;
+        batches = batches.filter((b) => {
+          if (removed) return true;
+          if (
+            b.adjustmentType === adjustmentType &&
+            Math.abs(Number(b.boxes) - boxes) < 0.01
+          ) {
+            removed = true;
+            console.log(
+              `🗑️ Fallback removal of batch with type ${adjustmentType}, boxes ${boxes}`,
+            );
+            return false;
+          }
+          return true;
+        });
+        console.log("Filter operation completed with fallback method");
+      }
+
+      const after = batches.length;
+      console.log(`📊 After removal, batches count: ${after}`);
+      console.log(`Number of batches removed: ${before - after}`);
+
+      console.log("Checking if any batches were removed...");
       if (before === after) {
         console.warn(
-          `⚠️ REVERT ${adjustmentType?.toUpperCase()} "${productName}": ` +
-            `No batch found with adjustmentId=${adjIdStr}. Nothing removed.`,
+          `⚠️ REVERT ${adjustmentType?.toUpperCase()} "${productName}": No batch found with adjustmentId=${adjIdStr}. Nothing removed.`,
         );
       } else {
         console.log(
-          `✅ REVERT ${adjustmentType?.toUpperCase()} "${productName}": ` +
-            `Removed ${before - after} batch(es) with adjustmentId=${adjIdStr}`,
+          `✅ REVERT ${adjustmentType?.toUpperCase()} "${productName}": Removed ${before - after} batch(es) with adjustmentId=${adjIdStr}`,
         );
       }
     }
 
-    // Recalculate and persist
+    console.log("🔄 Recalculating and saving report...");
     const result = await recalculateAndSaveReport(
       ReportInHand,
       existingReport._id,
       batches,
     );
+    console.log("💾 recalculateAndSaveReport result:", result);
 
+    console.log("Preparing final log message...");
     const verb = isRevert ? "Reverted" : "Applied";
     console.log(
-      `✅ ${verb} ${adjustmentType?.toUpperCase()} for "${productName}": ` +
-        `totalBoxes=${result.totalBoxes}, totalAmount=${result.totalAmount}`,
+      `✅ ${verb} ${adjustmentType?.toUpperCase()} for "${productName}": totalBoxes=${result.totalBoxes}, totalAmount=${result.totalAmount}`,
     );
+    console.log("Function completed successfully");
   } catch (err) {
     console.error("❌ applyStockAdjustmentToReport failed:", err.message);
+    console.error("Error details:", err);
     throw err;
   }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GLOBAL RECALCULATE: re-derive all counters from batches for every product.
-// Called after any revert to ensure consistency.
+// GLOBAL RECALCULATE
 // ─────────────────────────────────────────────────────────────────────────────
 const recalculateAllReportInHandTotals = async () => {
+  console.log("🔄 recalculateAllReportInHandTotals started");
   try {
     const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
       .default;
+    console.log("📦 Fetching all reports...");
     const allReports = await ReportInHand.find({}).lean();
+    console.log(`📊 Found ${allReports.length} reports`);
 
     for (const report of allReports) {
+      console.log(
+        `🔄 Processing report: "${report.productName}" (${report._id})`,
+      );
       try {
         await recalculateAndSaveReport(
           ReportInHand,
           report._id,
           report.batches || [],
         );
+        console.log(`✅ Recalculated "${report.productName}"`);
       } catch (err) {
         console.error(
           `❌ recalculate failed for "${report.productName}":`,
@@ -375,335 +475,240 @@ const recalculateAllReportInHandTotals = async () => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PURCHASE helpers
+// Helper to get qtyPerCarton for totalQuantity calculation
 // ─────────────────────────────────────────────────────────────────────────────
-const removePurchaseInvoiceBatchesFromStock = async (invoiceData) => {
+const getQtyPerCartonForProduct = async (productId) => {
   try {
-    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
+    if (!productId) return 1;
+    const Product = (await import("../../models/projectManger/product.js"))
       .default;
+    const product = await Product.findById(productId).lean();
+    return product?.qtyPerCarton || 1;
+  } catch (err) {
+    console.error("❌ getQtyPerCartonForProduct failed:", err.message);
+    return 1;
+  }
+};
 
-    const products = invoiceData.products || [];
+// ─────────────────────────────────────────────────────────────────────────────
+// STOCK ADJUSTMENT REVERT HELPERS - FIXED
+// ─────────────────────────────────────────────────────────────────────────────
 
-    for (const product of products) {
-      const productName = (product.productName || "").toLowerCase().trim();
-      if (!productName) continue;
+/**
+ * Revert a CREATE action for a StockAdjustment
+ */
+const revertStockAdjustmentCreate = async (log, Model) => {
+  const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+  if (!newDoc) {
+    throw new Error("No snapshot data available for the created record.");
+  }
 
-      const qty = Number(product.quantityPerBoxStrip || 0);
-      if (qty <= 0) continue;
+  const targetId = log.recordId || (newDoc._id ? String(newDoc._id) : null);
+  if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
+    throw new Error("Cannot revert: invalid recordId.");
+  }
 
-      const lcValue = Number(product.lc || 0);
-      const fobValue = Number(product.fob || 0);
-      const cifValue = Number(product.cif || 0);
-      const expiryTime = product.expiryDate
-        ? new Date(product.expiryDate).getTime()
-        : null;
+  const existingRecord = await Model.findById(targetId);
+  if (!existingRecord) {
+    throw new Error("Record no longer exists in the database.");
+  }
 
-      const existingReport = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${productName}$`, "i") },
-      });
+  await applyStockAdjustmentToReport(newDoc, true /* isRevert */);
+  await Model.findByIdAndDelete(targetId);
 
-      if (!existingReport) {
-        console.warn(`⚠️ No ReportInHand for "${productName}" — skipping`);
+  return { deleted: 1 };
+};
+
+/**
+ * Revert an UPDATE action for a StockAdjustment
+ */
+const revertStockAdjustmentUpdate = async (log, Model) => {
+  const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
+  const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+
+  if (!prevDoc) {
+    throw new Error("No previous snapshot to roll back to.");
+  }
+
+  const targetId = log.recordId || (prevDoc._id ? String(prevDoc._id) : null);
+  if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
+    throw new Error("Cannot revert: invalid recordId.");
+  }
+
+  if (newDoc) {
+    await applyStockAdjustmentToReport(newDoc, true /* isRevert */);
+  }
+
+  await applyStockAdjustmentToReport(prevDoc, false /* apply */);
+
+  const { _id, __v, createdAt, updatedAt, ...prevFields } = prevDoc;
+  const updated = await Model.findByIdAndUpdate(
+    targetId,
+    { $set: prevFields },
+    { new: true, runValidators: false },
+  );
+
+  return { rolledBack: updated ? 1 : 0 };
+};
+
+/**
+ * ✅ FIXED: Revert a DELETE action for StockAdjustment(s)
+ * Properly restores totalQuantity field using qtyPerCarton from product
+ */
+const revertStockAdjustmentDelete = async (log, Model) => {
+  const rows = log.previousSnapshots?.length
+    ? log.previousSnapshots
+    : log.previousData
+      ? (Array.isArray(log.previousData)
+          ? log.previousData
+          : [log.previousData]
+        ).map((d) => ({ data: d }))
+      : [];
+
+  if (!rows.length) {
+    throw new Error("No snapshot data available to restore.");
+  }
+
+  let restored = 0;
+  let failed = 0;
+  const restoredDocs = [];
+
+  for (const row of rows) {
+    const docData = row.data || row;
+
+    // Fall back to log.recordId when _id is missing from old snapshot
+    const docId = docData._id || (rows.length === 1 ? log.recordId : null);
+
+    if (!docId || !mongoose.Types.ObjectId.isValid(String(docId))) {
+      console.error(
+        "❌ revertStockAdjustmentDelete: cannot restore — no valid _id.",
+        "docData._id:",
+        docData._id,
+        "log.recordId:",
+        log.recordId,
+      );
+      failed++;
+      continue;
+    }
+
+    const { _id, __v, createdAt, updatedAt, ...rest } = docData;
+
+    try {
+      const existing = await Model.findById(docId);
+      if (existing) {
+        console.warn(`⚠️ Record ${docId} already exists — skipping restore`);
+        failed++;
         continue;
       }
 
-      let batches = (existingReport.batches || []).map((b) =>
-        b.toObject ? b.toObject() : { ...b },
-      );
-      let removed = false;
-      const updatedBatches = [];
-
-      for (const batch of batches) {
-        if (removed) {
-          updatedBatches.push(batch);
-          continue;
-        }
-        if (batch.adjustmentType && batch.adjustmentType !== "batch") {
-          updatedBatches.push(batch);
-          continue;
-        }
-
-        const batchExpiry = batch.expiryDate
-          ? new Date(batch.expiryDate).getTime()
-          : null;
-        const lcMatch = Math.abs(Number(batch.lc || 0) - lcValue) < 0.0001;
-        const fobMatch = Math.abs(Number(batch.fob || 0) - fobValue) < 0.0001;
-        const cifMatch = Math.abs(Number(batch.cif || 0) - cifValue) < 0.0001;
-        const expiryMatch = batchExpiry === expiryTime;
-        const qtyMatch = Number(batch.boxes || 0) === qty;
-
-        if (lcMatch && fobMatch && cifMatch && expiryMatch && qtyMatch) {
-          removed = true;
-          continue;
-        }
-        if (
-          lcMatch &&
-          fobMatch &&
-          cifMatch &&
-          expiryMatch &&
-          Number(batch.boxes || 0) > qty
-        ) {
-          const newBoxes = Number(batch.boxes) - qty;
-          updatedBatches.push({
-            ...batch,
-            boxes: newBoxes,
-            amount: fixPrecision(newBoxes * lcValue),
-          });
-          removed = true;
-          continue;
-        }
-        updatedBatches.push(batch);
-      }
-
-      let finalBatches = updatedBatches;
-
-      if (!removed) {
-        // FIFO fallback
-        let remaining = qty;
-        const fifoResult = [];
-        const sortable = updatedBatches
-          .slice()
-          .sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0));
-
-        for (const batch of sortable) {
-          if (remaining <= 0) {
-            fifoResult.push(batch);
-            continue;
-          }
-          if (batch.adjustmentType && batch.adjustmentType !== "batch") {
-            fifoResult.push(batch);
-            continue;
-          }
-          const available = Number(batch.boxes || 0);
-          if (available <= remaining) {
-            remaining -= available;
-          } else {
-            const newBoxes = available - remaining;
-            fifoResult.push({
-              ...batch,
-              boxes: newBoxes,
-              amount: fixPrecision(newBoxes * Number(batch.lc || 0)),
-            });
-            remaining = 0;
-          }
-        }
-        finalBatches = fifoResult;
-      }
-
-      await recalculateAndSaveReport(
-        ReportInHand,
-        existingReport._id,
-        finalBatches,
-      );
-    }
-  } catch (err) {
-    console.error(
-      "❌ removePurchaseInvoiceBatchesFromStock failed:",
-      err.message,
-    );
-  }
-};
-
-const restorePurchaseInvoiceBatchesToStock = async (invoiceData) => {
-  try {
-    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
-      .default;
-
-    const products = invoiceData.products || [];
-
-    for (const product of products) {
-      const productName = (product.productName || "").toLowerCase().trim();
-      if (!productName) continue;
-
-      const qty = Number(product.quantityPerBoxStrip || 0);
-      if (qty <= 0) continue;
-
-      const lcValue = Number(product.lc || 0);
-      const fobValue = Number(product.fob || 0);
-      const cifValue = Number(product.cif || 0);
-      const amount = fixPrecision(qty * lcValue);
-      const expiryDate = product.expiryDate
-        ? new Date(product.expiryDate)
-        : null;
-
-      const newBatch = {
-        boxes: qty,
-        lc: lcValue,
-        fob: fobValue,
-        cif: cifValue,
-        amount,
-        expiryDate,
-        date: product.date ? new Date(product.date) : new Date(),
-        _id: new mongoose.Types.ObjectId(),
-        adjustmentType: "batch",
-        sellingPrice: Number(product.sellingPrice || 0),
-      };
-
-      const existingReport = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${productName}$`, "i") },
-      });
-
-      if (existingReport) {
-        const updatedBatches = [
-          ...(existingReport.batches || []).map((b) =>
-            b.toObject ? b.toObject() : { ...b },
-          ),
-          newBatch,
-        ];
-        await recalculateAndSaveReport(
-          ReportInHand,
-          existingReport._id,
-          updatedBatches,
+      // ✅ FIX: Calculate totalQuantity if missing
+      let totalQuantity = rest.totalQuantity;
+      if (!totalQuantity && totalQuantity !== 0) {
+        const qtyPerCarton = await getQtyPerCartonForProduct(rest.productId);
+        const boxQuantity = rest.boxQuantity || 0;
+        totalQuantity =
+          rest.adjustmentType === "add"
+            ? boxQuantity * qtyPerCarton
+            : -boxQuantity * qtyPerCarton;
+        console.log(
+          `🔧 Recalculated totalQuantity for ${docId}: ${totalQuantity} (boxQuantity=${boxQuantity}, qtyPerCarton=${qtyPerCarton})`,
         );
-      } else {
-        await ReportInHand.create({
-          productName,
-          supplierName: invoiceData.supplierName || "Unknown",
-          type: product.type || "",
-          sellingPrice: Number(product.sellingPrice || 0),
-          batches: [newBatch],
-          totalBoxesFromBatches: qty,
-          totalBoxes: qty,
-          totalAmount: amount,
-          averagePrice: lcValue,
-          addStockAdjustment: 0,
-          removeStockAdjustment: 0,
-          returnStockAdjustment: 0,
-          status: qty > 0 ? "In Stock" : "Out of Stock",
-          minStockLevel: 10,
-        });
       }
-    }
-  } catch (err) {
-    console.error(
-      "❌ restorePurchaseInvoiceBatchesToStock failed:",
-      err.message,
-    );
-  }
-};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SALE helpers
-// ─────────────────────────────────────────────────────────────────────────────
-const restoreSaleDeductionsToStock = async (saleData) => {
-  try {
-    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
-      .default;
-    const products = saleData.products || [];
-
-    for (const product of products) {
-      const productName = (product.productName || "").toLowerCase().trim();
-      if (!productName) continue;
-
-      const salesQty = Number(product.salesQty || 0);
-      const bonusQty = Number(product.bonusQty || 0);
-      const totalQty = salesQty + bonusQty;
-      if (totalQty <= 0) continue;
-
-      if (saleData.saleType === "MR Sale") continue;
-
-      const existingReport = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      const doc = new Model({
+        _id: new mongoose.Types.ObjectId(String(docId)),
+        ...rest,
+        totalQuantity, // ✅ Ensure totalQuantity is set
       });
 
-      if (!existingReport) {
-        console.warn(`⚠️ ReportInHand not found for "${productName}" — skip`);
+      // Validate before save
+      const validationError = doc.validateSync();
+      if (validationError) {
+        console.error(
+          `❌ Validation failed for ${docId}:`,
+          validationError.message,
+        );
+        failed++;
         continue;
       }
 
-      const lcValue = Number(product.lc || 0);
-      let remainingToRestore = totalQty;
+      await doc.save();
 
-      const batches = (existingReport.batches || []).map((b) =>
-        b.toObject ? b.toObject() : { ...b },
-      );
-
-      const realBatchIndicesByNewest = batches
-        .map((b, idx) => ({ idx, b }))
-        .filter(({ b }) => !b.adjustmentType || b.adjustmentType === "batch")
-        .sort((a, b_) => new Date(b_.b.date || 0) - new Date(a.b.date || 0));
-
-      for (const { idx } of realBatchIndicesByNewest) {
-        if (remainingToRestore <= 0) break;
-        const batchLC = Number(batches[idx].lc ?? lcValue);
-        const newBoxes = fixPrecision(
-          Number(batches[idx].boxes || 0) + remainingToRestore,
-        );
-        batches[idx].boxes = newBoxes;
-        batches[idx].amount = fixPrecision(newBoxes * batchLC);
-        remainingToRestore = 0;
-      }
-
-      if (remainingToRestore > 0) {
-        batches.push({
-          batchNumber: `RESTORE-${Date.now()}`,
-          boxes: remainingToRestore,
-          lc: lcValue,
-          fob: Number(product.fob || 0),
-          cif: Number(product.cif || 0),
-          amount: fixPrecision(remainingToRestore * lcValue),
-          expiryDate: null,
-          date: new Date(),
-          adjustmentType: "batch",
-        });
-      }
-
-      await recalculateAndSaveReport(ReportInHand, existingReport._id, batches);
+      // Re-attach _id so applyStockAdjustmentToReport can match the batch
+      restoredDocs.push({ ...docData, _id: docId, totalQuantity });
+      restored++;
+    } catch (e) {
+      console.error(`Restore failed for ${docId}:`, e.message);
+      failed++;
     }
-  } catch (err) {
-    console.error("❌ restoreSaleDeductionsToStock failed:", err.message);
   }
+
+  // Re-apply effect on ReportInHand for each restored document
+  for (const doc of restoredDocs) {
+    await applyStockAdjustmentToReport(doc, false /* apply */);
+  }
+
+  return { restored, failed };
 };
 
-const removeSaleDeductionsFromStock = async (saleData) => {
-  try {
-    const ReportInHand = (await import("../../models/reports/reportsInHand.js"))
-      .default;
-    const products = saleData.products || [];
+/**
+ * ✅ FIXED: Revert a single deleted StockAdjustment record
+ */
+const revertSingleStockAdjustmentRecord = async (
+  docData,
+  Model,
+  fallbackId = null,
+) => {
+  // Use fallbackId (from log.recordId) when _id is missing from snapshot
+  const docId = docData._id || fallbackId;
 
-    for (const product of products) {
-      const productName = (product.productName || "").toLowerCase().trim();
-      if (!productName) continue;
-
-      const salesQty = Number(product.salesQty || 0);
-      const bonusQty = Number(product.bonusQty || 0);
-      const totalQty = salesQty + bonusQty;
-      if (totalQty <= 0) continue;
-
-      if (saleData.saleType === "MR Sale") continue;
-
-      const existingReport = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${productName}$`, "i") },
-      });
-
-      if (!existingReport) continue;
-
-      const batches = (existingReport.batches || []).map((b) =>
-        b.toObject ? b.toObject() : { ...b },
-      );
-
-      const realBatchIndicesByOldest = batches
-        .map((b, idx) => ({ idx, b }))
-        .filter(({ b }) => !b.adjustmentType || b.adjustmentType === "batch")
-        .sort((a, b_) => new Date(a.b.date || 0) - new Date(b_.b.date || 0));
-
-      let remaining = totalQty;
-      for (const { idx } of realBatchIndicesByOldest) {
-        if (remaining <= 0) break;
-        const batchBoxes = Number(batches[idx].boxes || 0);
-        const batchLC = Number(batches[idx].lc || 0);
-        const deduct = Math.min(batchBoxes, remaining);
-        const newBoxes = fixPrecision(batchBoxes - deduct);
-        batches[idx].boxes = newBoxes;
-        batches[idx].amount = fixPrecision(newBoxes * batchLC);
-        remaining = fixPrecision(remaining - deduct);
-      }
-
-      await recalculateAndSaveReport(ReportInHand, existingReport._id, batches);
-    }
-  } catch (err) {
-    console.error("❌ removeSaleDeductionsFromStock failed:", err.message);
+  if (!docId || !mongoose.Types.ObjectId.isValid(String(docId))) {
+    throw new Error(
+      "Cannot restore: no valid _id found in snapshot. docData._id: " +
+        docData._id +
+        ", fallbackId: " +
+        fallbackId,
+    );
   }
+
+  const { _id, __v, createdAt, updatedAt, ...rest } = docData;
+
+  const existing = await Model.findById(docId);
+  if (existing) {
+    throw new Error("Record already exists in the database");
+  }
+
+  // ✅ FIX: Calculate totalQuantity if missing
+  let totalQuantity = rest.totalQuantity;
+  if (!totalQuantity && totalQuantity !== 0) {
+    const qtyPerCarton = await getQtyPerCartonForProduct(rest.productId);
+    const boxQuantity = rest.boxQuantity || 0;
+    totalQuantity =
+      rest.adjustmentType === "add"
+        ? boxQuantity * qtyPerCarton
+        : -boxQuantity * qtyPerCarton;
+    console.log(`🔧 Recalculated totalQuantity for ${docId}: ${totalQuantity}`);
+  }
+
+  const doc = new Model({
+    _id: new mongoose.Types.ObjectId(String(docId)),
+    ...rest,
+    totalQuantity, // ✅ Ensure totalQuantity is set
+  });
+
+  // Validate before save
+  const validationError = doc.validateSync();
+  if (validationError) {
+    throw new Error(`Validation failed: ${validationError.message}`);
+  }
+
+  await doc.save();
+
+  // Re-apply effect on ReportInHand with _id attached
+  await applyStockAdjustmentToReport(
+    { ...docData, _id: docId, totalQuantity },
+    false /* apply */,
+  );
 };
 
 // Helper: Flatten nested objects for Excel export
@@ -912,7 +917,7 @@ router.get("/stats/summary", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /:id/revert
+// POST /:id/revert - FIXED
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/:id/revert", protect, async (req, res) => {
   try {
@@ -948,186 +953,171 @@ router.post("/:id/revert", protect, async (req, res) => {
     const mod = await importer();
     const Model = mod.default;
 
+    const isStockAdjustment =
+      log.tableName === "StockAdjustment" ||
+      log.tableName === "stockadjustments";
+
     let revertSummary = {};
 
     // ── DELETE revert ─────────────────────────────────────────────────────────
     if (log.action === "DELETE") {
-      const rows = log.previousSnapshots?.length
-        ? log.previousSnapshots
-        : log.previousData
-          ? (Array.isArray(log.previousData)
-              ? log.previousData
-              : [log.previousData]
-            ).map((d) => ({ data: d }))
-          : [];
-
-      if (!rows.length) {
-        return res.status(400).json({
-          success: false,
-          message: "No snapshot data available to restore.",
-        });
-      }
-
-      let restored = 0,
-        failed = 0;
-      const restoredDocs = [];
-
-      for (const row of rows) {
-        const docData = row.data || row;
-        const { _id, __v, createdAt, updatedAt, ...rest } = docData;
-        try {
-          const existing = await Model.findById(_id);
-          if (existing) {
-            failed++;
-            continue;
-          }
-          const doc = new Model({
-            _id: new mongoose.Types.ObjectId(String(_id)),
-            ...rest,
-          });
-          await doc.save();
-          restoredDocs.push(docData);
-          restored++;
-        } catch (e) {
-          console.error("Restore failed for", _id, e.message);
-          failed++;
-        }
-      }
-
-      if (restoredDocs.length > 0) {
-        if (log.tableName === "purchase") {
-          for (const doc of restoredDocs)
-            await restorePurchaseInvoiceBatchesToStock(doc);
-        } else if (log.tableName === "sales") {
-          for (const doc of restoredDocs)
-            await removeSaleDeductionsFromStock(doc);
-        } else if (
-          log.tableName === "StockAdjustment" ||
-          log.tableName === "stockadjustments"
-        ) {
-          // Restoring a deleted adjustment => RE-APPLY its effect
-          for (const doc of restoredDocs) {
-            await applyStockAdjustmentToReport(doc, false);
-          }
-        }
+      if (isStockAdjustment) {
+        revertSummary = await revertStockAdjustmentDelete(log, Model);
         await recalculateAllReportInHandTotals();
-      }
+      } else {
+        const rows = log.previousSnapshots?.length
+          ? log.previousSnapshots
+          : log.previousData
+            ? (Array.isArray(log.previousData)
+                ? log.previousData
+                : [log.previousData]
+              ).map((d) => ({ data: d }))
+            : [];
 
-      revertSummary = { restored, failed };
+        if (!rows.length) {
+          return res.status(400).json({
+            success: false,
+            message: "No snapshot data available to restore.",
+          });
+        }
+
+        let restored = 0,
+          failed = 0;
+        const restoredDocs = [];
+
+        for (const row of rows) {
+          const docData = row.data || row;
+          const { _id, __v, createdAt, updatedAt, ...rest } = docData;
+          try {
+            const existing = await Model.findById(_id);
+            if (existing) {
+              failed++;
+              continue;
+            }
+            const doc = new Model({
+              _id: new mongoose.Types.ObjectId(String(_id)),
+              ...rest,
+            });
+            await doc.save();
+            restoredDocs.push(docData);
+            restored++;
+          } catch (e) {
+            console.error("Restore failed for", _id, e.message);
+            failed++;
+          }
+        }
+
+        if (restoredDocs.length > 0) {
+          if (log.tableName === "purchase") {
+            for (const doc of restoredDocs)
+              await restorePurchaseInvoiceBatchesToStock(doc);
+          } else if (log.tableName === "sales") {
+            for (const doc of restoredDocs)
+              await removeSaleDeductionsFromStock(doc);
+          }
+          await recalculateAllReportInHandTotals();
+        }
+
+        revertSummary = { restored, failed };
+      }
 
       // ── UPDATE revert ─────────────────────────────────────────────────────────
     } else if (log.action === "UPDATE") {
-      const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
-      if (!prevDoc) {
-        return res.status(400).json({
-          success: false,
-          message: "No previous snapshot to roll back to.",
-        });
-      }
-      const targetId =
-        log.recordId || (prevDoc._id ? String(prevDoc._id) : null);
-      if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
-        return res.status(400).json({
-          success: false,
-          message: "Cannot revert: invalid recordId.",
-        });
-      }
-
-      if (
-        log.tableName === "StockAdjustment" ||
-        log.tableName === "stockadjustments"
-      ) {
-        const newDoc = log.newSnapshots?.[0]?.data || log.newData;
-        if (newDoc && prevDoc) {
-          // 1. Undo the effect of the NEW (current) adjustment
-          await applyStockAdjustmentToReport(newDoc, true);
-          // 2. Re-apply the effect of the OLD (previous) adjustment
-          await applyStockAdjustmentToReport(prevDoc, false);
-        }
-      }
-
-      if (log.tableName === "sales") {
-        const newDoc = log.newSnapshots?.[0]?.data || log.newData;
-        if (newDoc) {
-          await restoreSaleDeductionsToStock(newDoc);
-          await removeSaleDeductionsFromStock(prevDoc);
-        }
-      } else if (log.tableName === "purchase") {
-        const newDoc = log.newSnapshots?.[0]?.data || log.newData;
-        if (newDoc) {
-          await removePurchaseInvoiceBatchesFromStock(newDoc);
-          await restorePurchaseInvoiceBatchesToStock(prevDoc);
-        }
-      }
-
-      const { _id, __v, createdAt, updatedAt, ...prevFields } = prevDoc;
-      const updated = await Model.findByIdAndUpdate(
-        targetId,
-        { $set: prevFields },
-        { new: true, runValidators: false },
-      );
-
-      if (
-        updated &&
-        (log.tableName === "purchase" ||
-          log.tableName === "sales" ||
-          log.tableName === "StockAdjustment" ||
-          log.tableName === "stockadjustments")
-      ) {
+      if (isStockAdjustment) {
+        revertSummary = await revertStockAdjustmentUpdate(log, Model);
         await recalculateAllReportInHandTotals();
-      }
+      } else {
+        const prevDoc = log.previousSnapshots?.[0]?.data || log.previousData;
+        if (!prevDoc) {
+          return res.status(400).json({
+            success: false,
+            message: "No previous snapshot to roll back to.",
+          });
+        }
+        const targetId =
+          log.recordId || (prevDoc._id ? String(prevDoc._id) : null);
+        if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
+          return res.status(400).json({
+            success: false,
+            message: "Cannot revert: invalid recordId.",
+          });
+        }
 
-      revertSummary = { rolledBack: updated ? 1 : 0 };
+        if (log.tableName === "sales") {
+          const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+          if (newDoc) {
+            await restoreSaleDeductionsToStock(newDoc);
+            await removeSaleDeductionsFromStock(prevDoc);
+          }
+        } else if (log.tableName === "purchase") {
+          const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+          if (newDoc) {
+            await removePurchaseInvoiceBatchesFromStock(newDoc);
+            await restorePurchaseInvoiceBatchesToStock(prevDoc);
+          }
+        }
+
+        const { _id, __v, createdAt, updatedAt, ...prevFields } = prevDoc;
+        const updated = await Model.findByIdAndUpdate(
+          targetId,
+          { $set: prevFields },
+          { new: true, runValidators: false },
+        );
+
+        if (
+          updated &&
+          (log.tableName === "purchase" || log.tableName === "sales")
+        ) {
+          await recalculateAllReportInHandTotals();
+        }
+
+        revertSummary = { rolledBack: updated ? 1 : 0 };
+      }
 
       // ── CREATE revert ─────────────────────────────────────────────────────────
     } else if (log.action === "CREATE") {
-      const newDoc = log.newSnapshots?.[0]?.data || log.newData;
-      if (!newDoc) {
-        return res.status(400).json({
-          success: false,
-          message: "No snapshot data available for the created record.",
-        });
-      }
-      const targetId = log.recordId || (newDoc._id ? String(newDoc._id) : null);
-      if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
-        return res.status(400).json({
-          success: false,
-          message: "Cannot revert: invalid recordId.",
-        });
-      }
-
-      const existingRecord = await Model.findById(targetId);
-      if (!existingRecord) {
-        return res.status(400).json({
-          success: false,
-          message: "Record no longer exists in the database.",
-        });
-      }
-
-      if (log.tableName === "purchase") {
-        await removePurchaseInvoiceBatchesFromStock(newDoc);
-      } else if (log.tableName === "sales") {
-        await restoreSaleDeductionsToStock(newDoc);
-      } else if (
-        log.tableName === "StockAdjustment" ||
-        log.tableName === "stockadjustments"
-      ) {
-        // Deleting a created adjustment => REVERSE its effect
-        await applyStockAdjustmentToReport(newDoc, true);
-      }
-
-      await Model.findByIdAndDelete(targetId);
-
-      if (
-        log.tableName === "purchase" ||
-        log.tableName === "sales" ||
-        log.tableName === "StockAdjustment" ||
-        log.tableName === "stockadjustments"
-      ) {
+      if (isStockAdjustment) {
+        revertSummary = await revertStockAdjustmentCreate(log, Model);
         await recalculateAllReportInHandTotals();
-      }
+      } else {
+        const newDoc = log.newSnapshots?.[0]?.data || log.newData;
+        if (!newDoc) {
+          return res.status(400).json({
+            success: false,
+            message: "No snapshot data available for the created record.",
+          });
+        }
+        const targetId =
+          log.recordId || (newDoc._id ? String(newDoc._id) : null);
+        if (!targetId || !mongoose.Types.ObjectId.isValid(targetId)) {
+          return res.status(400).json({
+            success: false,
+            message: "Cannot revert: invalid recordId.",
+          });
+        }
 
-      revertSummary = { deleted: 1 };
+        const existingRecord = await Model.findById(targetId);
+        if (!existingRecord) {
+          return res.status(400).json({
+            success: false,
+            message: "Record no longer exists in the database.",
+          });
+        }
+
+        if (log.tableName === "purchase") {
+          await removePurchaseInvoiceBatchesFromStock(newDoc);
+        } else if (log.tableName === "sales") {
+          await restoreSaleDeductionsToStock(newDoc);
+        }
+
+        await Model.findByIdAndDelete(targetId);
+
+        if (log.tableName === "purchase" || log.tableName === "sales") {
+          await recalculateAllReportInHandTotals();
+        }
+
+        revertSummary = { deleted: 1 };
+      }
 
       // ── IMPORT revert ─────────────────────────────────────────────────────────
     } else if (log.action === "IMPORT") {
@@ -1198,10 +1188,7 @@ router.post("/:id/revert", protect, async (req, res) => {
               await restoreSaleDeductionsToStock(
                 existing.toObject ? existing.toObject() : existing,
               );
-            } else if (
-              log.tableName === "StockAdjustment" ||
-              log.tableName === "stockadjustments"
-            ) {
+            } else if (isStockAdjustment) {
               await applyStockAdjustmentToReport(
                 existing.toObject ? existing.toObject() : existing,
                 true,
@@ -1228,8 +1215,7 @@ router.post("/:id/revert", protect, async (req, res) => {
         deletedCount > 0 &&
         (log.tableName === "purchase" ||
           log.tableName === "sales" ||
-          log.tableName === "StockAdjustment" ||
-          log.tableName === "stockadjustments")
+          isStockAdjustment)
       ) {
         await recalculateAllReportInHandTotals();
       }
@@ -1333,39 +1319,41 @@ router.post("/:id/revert-single", protect, async (req, res) => {
     const mod = await importer();
     const Model = mod.default;
 
-    const { _id, __v, createdAt, updatedAt, ...rest } = docData;
+    const isStockAdjustment =
+      log.tableName === "StockAdjustment" ||
+      log.tableName === "stockadjustments";
 
     try {
-      const existing = await Model.findById(_id);
-      if (existing) {
-        return res.status(400).json({
-          success: false,
-          message: "Record already exists in the database",
+      if (isStockAdjustment) {
+        await revertSingleStockAdjustmentRecord(docData, Model, log.recordId);
+      } else {
+        const { _id, __v, createdAt, updatedAt, ...rest } = docData;
+
+        const existing = await Model.findById(_id);
+        if (existing) {
+          return res.status(400).json({
+            success: false,
+            message: "Record already exists in the database",
+          });
+        }
+
+        const doc = new Model({
+          _id: new mongoose.Types.ObjectId(String(_id)),
+          ...rest,
         });
-      }
+        await doc.save();
 
-      const doc = new Model({
-        _id: new mongoose.Types.ObjectId(String(_id)),
-        ...rest,
-      });
-      await doc.save();
-
-      if (log.tableName === "purchase") {
-        await restorePurchaseInvoiceBatchesToStock(docData);
-      } else if (log.tableName === "sales") {
-        await removeSaleDeductionsFromStock(docData);
-      } else if (
-        log.tableName === "StockAdjustment" ||
-        log.tableName === "stockadjustments"
-      ) {
-        await applyStockAdjustmentToReport(docData, false);
+        if (log.tableName === "purchase") {
+          await restorePurchaseInvoiceBatchesToStock(docData);
+        } else if (log.tableName === "sales") {
+          await removeSaleDeductionsFromStock(docData);
+        }
       }
 
       if (
         log.tableName === "purchase" ||
         log.tableName === "sales" ||
-        log.tableName === "StockAdjustment" ||
-        log.tableName === "stockadjustments"
+        isStockAdjustment
       ) {
         await recalculateAllReportInHandTotals();
       }

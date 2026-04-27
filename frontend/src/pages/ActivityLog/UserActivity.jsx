@@ -1999,7 +1999,7 @@ const UserActivity = ({ currentUser: propCurrentUser }) => {
                         <Eye size={12} /> View
                       </button>
                       {isSuperAdmin &&
-                        !r.isReverted &&
+                       
                         ["DELETE", "UPDATE", "IMPORT", "CREATE"].includes(
                           r.action,
                         ) && (
