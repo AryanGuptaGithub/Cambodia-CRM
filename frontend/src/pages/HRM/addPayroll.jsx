@@ -156,7 +156,7 @@ const AllowanceBreakdownModal = ({
   if (!isOpen) return null;
   const handleNumeric = (e, type) => {
     const { value } = e.target;
-    if (value === "" || /^\d*\.?\d{0,2}$/.test(value))
+    if (value === "" || /^\d*\.?\d{0,15}$/.test(value))
       onAmountChange(type, value);
   };
   return (
@@ -224,27 +224,35 @@ const AllowanceBreakdownModal = ({
 };
 
 // ─────────────────────────────────────────────
-// Salary Details Modal
-// FIXED: Show totalSalary as "Basic Salary ($)" — the key value users need
+// Salary Details Modal - Shows exact values for transparency
 // ─────────────────────────────────────────────
 const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
   if (!isOpen || !calculation) return null;
-  const fmt = (v) => {
+
+  const fmtExact = (v) => {
+    if (v == null) return "0";
+    const n = typeof v === "number" ? v : parseFloat(v);
+    return isNaN(n) ? "0" : n.toString();
+  };
+
+  const fmtDisplay = (v) => {
     if (v == null) return "0.00";
     const n = typeof v === "number" ? v : parseFloat(v);
     return isNaN(n) ? "0.00" : n.toFixed(2);
   };
-  const fmtN = (v) => {
-    if (v == null) return 0;
-    const n = typeof v === "number" ? v : parseFloat(v);
-    return isNaN(n) ? 0 : n;
-  };
+
   const adv = calculation.advanceDeduction || 0;
   const isFull = calculation.isFull;
+  const perDaySalaryExact =
+    calculation.perDaySalaryExact || calculation.perDaySalary || 0;
+  const leaveDeductionExact =
+    calculation.leaveDeductionExact || calculation.leaveDeduction || 0;
+  const totalSalaryExact =
+    calculation.totalSalaryExact || calculation.totalSalary || 0;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-800">
             Salary Calculation Details
@@ -260,20 +268,22 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
           {[
             [
               "Full Monthly Basic Salary",
-              `$${fmt(calculation.basicSalary)}`,
+              `$${fmtDisplay(calculation.basicSalary)}`,
               "gray",
             ],
-            ["Per Day Salary", `$${fmt(calculation.perDaySalary)}`, "gray"],
+            ["Per Day Salary (Exact)", fmtExact(perDaySalaryExact), "blue"],
             [
-              "Working Days (excl. Sundays + Holidays)",
-              fmtN(calculation.workingDaysInMonth),
+              "Per Day Salary (Display)",
+              `$${fmtDisplay(perDaySalaryExact)}`,
               "gray",
             ],
-            ["Present Days", fmtN(calculation.presentDays), "gray"],
-            ["Total Leaves", fmtN(calculation.totalLeaves), "gray"],
-            ["Paid Leaves", fmtN(calculation.paidLeaves), "green"],
-            ["Unpaid Leaves", fmtN(calculation.unpaidLeaves), "red"],
-            ["Swap Leaves", fmtN(calculation.swapLeaves), "gray"],
+            ["Total Days in Month", calculation.totalDaysInMonth, "gray"],
+            ["Present Days", calculation.presentDays, "gray"],
+            ["Total Leaves", calculation.totalLeaves, "gray"],
+            ["Paid Leaves", calculation.paidLeaves, "green"],
+            ["Unpaid Leaves", calculation.unpaidLeaves, "red"],
+            ["Swap Leaves", calculation.swapLeaves, "gray"],
+            ["Effective Days", calculation.effectiveDays, "blue"],
           ].map(([label, val, color]) => (
             <div
               key={label}
@@ -281,59 +291,59 @@ const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
             >
               <span className="text-sm text-gray-500">{label}</span>
               <span
-                className={`text-sm font-semibold ${color === "red" ? "text-red-600" : color === "green" ? "text-green-600" : "text-gray-800"}`}
+                className={`text-sm font-mono font-semibold ${color === "red" ? "text-red-600" : color === "green" ? "text-green-600" : color === "blue" ? "text-blue-600" : "text-gray-800"}`}
               >
                 {val}
               </span>
             </div>
           ))}
 
-          {/* Salary rule explanation */}
           {isFull ? (
             <div className="py-2 px-3 bg-green-50 border border-green-200 rounded-lg my-2">
               <p className="text-sm text-green-700 font-medium">
-                ✅ Present days ≥ Working days → Full basic salary applied
+                ✅ Full salary applied (no unpaid leaves)
               </p>
             </div>
           ) : (
             <div className="py-2 px-3 bg-yellow-50 border border-yellow-200 rounded-lg my-2">
               <p className="text-sm text-yellow-700 font-medium">
-                ⚠️ Present days &lt; Working days → Unpaid leave deduction
-                applied
+                ⚠️ Unpaid leave deduction applied
               </p>
             </div>
           )}
 
-          {/* Leave Deduction */}
           <div className="flex justify-between items-center py-1.5 border-b border-gray-50">
             <span className="text-sm text-gray-500">
-              Leave Deduction (unpaid only)
+              Leave Deduction (Exact)
             </span>
-            <span
-              className={`text-sm font-semibold ${calculation.leaveDeduction > 0 ? "text-red-600" : "text-gray-400"}`}
-            >
-              {calculation.leaveDeduction > 0
-                ? `-$${fmt(calculation.leaveDeduction)}`
-                : "$0.00"}
+            <span className="text-sm font-mono font-semibold text-red-600">
+              ${fmtExact(leaveDeductionExact)}
+            </span>
+          </div>
+          <div className="flex justify-between items-center py-1.5 border-b border-gray-50">
+            <span className="text-sm text-gray-500">
+              Leave Deduction (Display)
+            </span>
+            <span className="text-sm font-mono font-semibold text-red-600">
+              ${fmtDisplay(leaveDeductionExact)}
             </span>
           </div>
 
           {adv > 0 && (
             <div className="flex justify-between items-center py-1.5 border-b border-gray-50">
               <span className="text-sm text-gray-500">Advance Deduction</span>
-              <span className="text-sm font-semibold text-red-600">
-                -${fmt(adv)}
+              <span className="text-sm font-mono font-semibold text-red-600">
+                -${fmtDisplay(adv)}
               </span>
             </div>
           )}
 
-          {/* ── FIXED: Show totalSalary as "Basic Salary ($)" ── */}
-          <div className="flex justify-between items-center pt-3 border-t-2 border-gray-200 mt-2">
+          <div className="flex justify-between items-center pt-3 border-t-2 border-gray-200 mt-3">
             <span className="text-base font-bold text-gray-800">
-              Basic Salary ($)
+              Basic Salary After Deductions
             </span>
-            <span className="text-base font-bold text-green-700">
-              ${fmt(calculation.totalSalary)}
+            <span className="text-base font-bold text-green-700 font-mono">
+              ${fmtExact(totalSalaryExact)}
             </span>
           </div>
         </div>
@@ -387,7 +397,7 @@ const SalarySplitModal = ({
   const diff = totalFromSources - net;
 
   const handleAmount = (accountId, value) => {
-    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+    if (value === "" || /^\d*\.?\d{0,15}$/.test(value)) {
       onAmountChange(accountId, value);
     }
   };
@@ -397,7 +407,7 @@ const SalarySplitModal = ({
       .filter((s) => s.accountId !== accountId)
       .reduce((s, src) => s + (parseFloat(src.amount) || 0), 0);
     const remaining = Math.max(0, net - otherTotal);
-    onAmountChange(accountId, remaining.toFixed(2));
+    onAmountChange(accountId, remaining.toFixed(6));
   };
 
   const getRemainingBalance = (account) => {
@@ -426,7 +436,6 @@ const SalarySplitModal = ({
             ✕
           </button>
         </div>
-
         <div className="px-6 py-4 space-y-4">
           {selectedAccounts.length === 0 ? (
             <p className="text-gray-500 text-center py-6 text-sm">
@@ -490,7 +499,6 @@ const SalarySplitModal = ({
               );
             })
           )}
-
           {selectedAccounts.length > 0 && (
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
               <div className="flex justify-between items-center mb-2">
@@ -527,7 +535,6 @@ const SalarySplitModal = ({
             </div>
           )}
         </div>
-
         <div className="px-6 pb-5 flex justify-end">
           <button
             onClick={onClose}
@@ -577,8 +584,6 @@ const useAllMRList = () => {
 
 // ─────────────────────────────────────────────
 // Hook: payroll form
-// FIXED: net salary = totalSalary (from calculation) + totalAllowance
-//        totalSalary already has leave/advance deductions applied by backend
 // ─────────────────────────────────────────────
 const usePayrollForm = () => {
   const navigate = useNavigate();
@@ -679,10 +684,9 @@ const usePayrollForm = () => {
       if (res.data.success && res.data.data) {
         const sc = res.data.data.salaryCalculation;
         setSalaryCalculation(sc);
-        // Store leave deduction for display only — net is computed from totalSalary
         setForm((p) => ({
           ...p,
-          deductions: sc?.leaveDeduction?.toFixed(2) || "0.00",
+          deductions: sc?.leaveDeductionDisplay?.toFixed(2) || "0.00",
         }));
         setErrors((p) => ({ ...p, deductions: "" }));
         showToast("success", "Salary calculated from attendance & leaves");
@@ -761,7 +765,7 @@ const usePayrollForm = () => {
 
   const handleNumeric = useCallback((e) => {
     const { name, value } = e.target;
-    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+    if (value === "" || /^\d*\.?\d{0,15}$/.test(value)) {
       setForm((p) => ({ ...p, [name]: value }));
       setErrors((p) => ({ ...p, [name]: "" }));
     }
@@ -795,7 +799,6 @@ const usePayrollForm = () => {
       })),
     [],
   );
-
   const removeAllowance = useCallback(
     (type) =>
       setForm((p) => ({
@@ -834,12 +837,14 @@ const usePayrollForm = () => {
     [form.allowances],
   );
 
-  // ── FIXED: Net salary = totalSalary (basic after leave/advance deductions) + totalAllowance ──
-  // totalSalary from backend already = basicSalary - leaveDeduction - advanceDeduction
+  // Net salary = totalSalaryDisplay (already floored to 2 decimals) + totalAllowance
   const netSalary = useMemo(() => {
-    const basicAfterDeductions = salaryCalculation?.totalSalary ?? 0;
+    const basicAfterDeductions =
+      salaryCalculation?.totalSalaryDisplay ??
+      salaryCalculation?.totalSalary ??
+      0;
     const result = basicAfterDeductions + totalAllowance;
-    return Math.max(0, result).toFixed(2);
+    return result.toFixed(2);
   }, [salaryCalculation, totalAllowance]);
 
   useEffect(() => setForm((p) => ({ ...p, netSalary })), [netSalary]);
@@ -864,14 +869,12 @@ const usePayrollForm = () => {
       const processedAllowances = (form.allowances || [])
         .filter((a) => a.type && a.amount && parseFloat(a.amount) > 0)
         .map((a) => ({ type: a.type, amount: parseFloat(a.amount) || 0 }));
-
       const processedSources = (form.sources || [])
         .filter((s) => s.accountId && s.amount && parseFloat(s.amount) > 0)
         .map((s) => ({
           accountId: s.accountId,
           amount: parseFloat(s.amount) || 0,
         }));
-
       const payload = {
         employeeId: form.employeeId,
         period: form.period,
@@ -881,11 +884,9 @@ const usePayrollForm = () => {
         status: form.status,
         sources: processedSources,
       };
-
       const res = await axios.post(`${backendUrl}/api/hrm/payroll`, payload, {
         headers: { "Content-Type": "application/json" },
       });
-
       if (res.status === 201 || res.status === 200) {
         showToast("success", res.data.message || "Payroll added successfully");
         setTimeout(() => navigate("/hrmlayout/payroll"), 1000);
@@ -949,10 +950,7 @@ const usePayrollForm = () => {
 };
 
 // ─────────────────────────────────────────────
-// Current Month Tab Component
-// FIXED: Removed "Adjusted Basic" input
-//        Basic Salary ($) shown using totalSalary from calculation
-//        Net Salary = Basic Salary ($) + Allowances
+// Current Month Tab Component - CORRECTED DISPLAY
 // ─────────────────────────────────────────────
 const CurrentMonthTab = () => {
   const {
@@ -1031,16 +1029,13 @@ const CurrentMonthTab = () => {
     () => (form.allowances || []).map((a) => a.type),
     [form.allowances],
   );
-
   const hasAdvance = (salaryCalculation?.advanceDeduction || 0) > 0;
   const net = parseFloat(form.netSalary) || 0;
   const sourceDiff = totalFromSources - net;
 
-  // ── FIXED: Basic Salary ($) = totalSalary from calculation
-  // (already has leave deduction and advance deduction applied by backend)
-  const displayBasicSalary = salaryCalculation
-    ? (salaryCalculation.totalSalary || 0).toFixed(2)
-    : "0.00";
+  // ✅ CORRECTED: Use totalSalaryDisplay which is already floored to 2 decimals (225.80)
+  const displayBasicSalary =
+    salaryCalculation?.totalSalaryDisplay?.toFixed(2) || "0.00";
 
   const isFormValid =
     form.employeeId &&
@@ -1138,7 +1133,7 @@ const CurrentMonthTab = () => {
                 Salary Calculated Automatically
               </h4>
               <p className="text-sm text-blue-600">
-                Based on attendance, leaves &amp; extra time
+                Based on attendance & leaves (unpaid only)
               </p>
             </div>
             <button
@@ -1157,13 +1152,11 @@ const CurrentMonthTab = () => {
           </div>
         )}
 
-        {/* ── FIXED Row 2: Basic Salary ($), Deductions, Advance, Net Salary ── */}
-        {/* Removed "Adjusted Basic" input entirely */}
+        {/* Row 2: Basic Salary, Leave Deduction, Advance, Net Salary */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          {/* Basic Salary ($) = totalSalary from calculation */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Basic Salary ($)
+              Basic Salary Deductions ($)
             </label>
             <input
               type="text"
@@ -1172,11 +1165,9 @@ const CurrentMonthTab = () => {
               className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-100 font-semibold text-gray-700 cursor-not-allowed"
             />
             <p className="text-xs text-gray-400 mt-1">
-              After leave &amp; advance deductions
+              After leave &amp; advance deductions (floored)
             </p>
           </div>
-
-          {/* Deductions (unpaid leave only, read-only) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Leave Deduction ($)
@@ -1188,11 +1179,9 @@ const CurrentMonthTab = () => {
               className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-gray-100 cursor-not-allowed"
             />
             <p className="text-xs text-gray-400 mt-1">
-              Based on unpaid leaves only
+              Based on unpaid leaves only (rounded)
             </p>
           </div>
-
-          {/* Advance Deduction */}
           <div>
             <label
               className={`block text-sm font-medium mb-1 ${hasAdvance ? "text-red-700" : "text-gray-700"}`}
@@ -1203,15 +1192,9 @@ const CurrentMonthTab = () => {
               type="text"
               value={salaryCalculation?.advanceDeduction?.toFixed(2) || "0.00"}
               readOnly
-              className={`w-full px-4 py-3 border rounded-xl cursor-not-allowed font-semibold ${
-                hasAdvance
-                  ? "border-red-300 bg-red-100 text-red-700"
-                  : "border-gray-300 bg-gray-100 text-gray-500"
-              }`}
+              className={`w-full px-4 py-3 border rounded-xl cursor-not-allowed font-semibold ${hasAdvance ? "border-red-300 bg-red-100 text-red-700" : "border-gray-300 bg-gray-100 text-gray-500"}`}
             />
           </div>
-
-          {/* Net Salary = Basic Salary ($) + Allowances */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Net Salary ($)
@@ -1223,11 +1206,8 @@ const CurrentMonthTab = () => {
               className="w-full px-4 py-3 border border-gray-300 rounded-xl bg-blue-50 font-bold text-blue-700 cursor-not-allowed text-lg"
             />
             <p className="text-xs text-gray-400 mt-1">
-              Basic Salary ($) + Allowances
+              Basic Salary + Allowances
             </p>
-            {errors.netSalary && (
-              <p className="text-red-500 text-xs mt-1">{errors.netSalary}</p>
-            )}
           </div>
         </div>
 
@@ -1286,15 +1266,7 @@ const CurrentMonthTab = () => {
                 type="text"
                 value={totalFromSources.toFixed(2)}
                 readOnly
-                className={`flex-1 px-4 py-3 border rounded-xl font-semibold cursor-not-allowed transition-colors ${
-                  selectedAccountIds.length > 0 && Math.abs(sourceDiff) > 0.01
-                    ? "border-red-300 bg-red-50 text-red-700"
-                    : selectedAccountIds.length > 0 &&
-                        Math.abs(sourceDiff) <= 0.01 &&
-                        totalFromSources > 0
-                      ? "border-green-300 bg-green-50 text-green-700"
-                      : "border-gray-300 bg-gray-100 text-gray-500"
-                }`}
+                className={`flex-1 px-4 py-3 border rounded-xl font-semibold cursor-not-allowed transition-colors ${selectedAccountIds.length > 0 && Math.abs(sourceDiff) > 0.01 ? "border-red-300 bg-red-50 text-red-700" : selectedAccountIds.length > 0 && Math.abs(sourceDiff) <= 0.01 && totalFromSources > 0 ? "border-green-300 bg-green-50 text-green-700" : "border-gray-300 bg-gray-100 text-gray-500"}`}
               />
               <button
                 type="button"
@@ -1324,8 +1296,7 @@ const CurrentMonthTab = () => {
           </div>
         </div>
 
-        {/* ── FIXED Salary Summary Table ── */}
-        {/* Shows: Basic Salary ($) | + Allowances | = Net Salary */}
+        {/* Salary Summary Table */}
         <div className="mt-8 p-5 bg-white rounded-2xl shadow">
           <h3 className="text-lg font-semibold mb-4 text-center">
             Salary Summary
@@ -1340,7 +1311,6 @@ const CurrentMonthTab = () => {
             </thead>
             <tbody>
               <tr className="bg-white hover:bg-gray-50">
-                {/* Basic Salary ($) = totalSalary (already deducted leave+advance) */}
                 <td className="p-4 font-semibold">{displayBasicSalary}</td>
                 <td className="p-4 font-semibold text-blue-600">
                   +{totalAllowance.toFixed(2)}
@@ -1351,8 +1321,6 @@ const CurrentMonthTab = () => {
               </tr>
             </tbody>
           </table>
-
-          {/* Working day info */}
           {salaryCalculation && (
             <div className="mt-3 flex flex-wrap gap-3 justify-center text-xs text-gray-500">
               <span className="bg-gray-100 px-3 py-1 rounded-full">
@@ -1399,15 +1367,7 @@ const CurrentMonthTab = () => {
               calculatingSalary ||
               sourceOptions.length === 0
             }
-            className={`px-10 py-3 rounded-2xl font-semibold transition-colors ${
-              loading ||
-              !isFormValid ||
-              isMrListEmpty ||
-              calculatingSalary ||
-              sourceOptions.length === 0
-                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
-            }`}
+            className={`px-10 py-3 rounded-2xl font-semibold transition-colors ${loading || !isFormValid || isMrListEmpty || calculatingSalary || sourceOptions.length === 0 ? "bg-gray-400 text-gray-200 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"}`}
           >
             {loading
               ? "Saving..."
@@ -1516,12 +1476,11 @@ const MrAdvanceTab = () => {
 
   const handleNumeric = (e) => {
     const { name, value } = e.target;
-    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+    if (value === "" || /^\d*\.?\d{0,15}$/.test(value)) {
       setForm((p) => ({ ...p, [name]: value }));
       setErrors((p) => ({ ...p, [name]: "" }));
     }
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -1676,7 +1635,6 @@ const PREV_INITIAL_ROW = {
   tourExpense: "",
   otherExpense: "",
 };
-
 const computeTotal = (row) =>
   (
     (parseFloat(row.salary) || 0) +
@@ -1685,7 +1643,6 @@ const computeTotal = (row) =>
     (parseFloat(row.tourExpense) || 0) +
     (parseFloat(row.otherExpense) || 0)
   ).toFixed(2);
-
 const buildAllowances = (row) => [
   ...(parseFloat(row.incentive) > 0
     ? [{ type: "Incentive", amount: parseFloat(row.incentive) }]
@@ -1700,7 +1657,6 @@ const buildAllowances = (row) => [
     ? [{ type: "Other", amount: parseFloat(row.otherExpense) }]
     : []),
 ];
-
 const buildTotalAllowance = (row) =>
   (
     (parseFloat(row.incentive) || 0) +
@@ -1708,7 +1664,6 @@ const buildTotalAllowance = (row) =>
     (parseFloat(row.tourExpense) || 0) +
     (parseFloat(row.otherExpense) || 0)
   ).toFixed(2);
-
 const EXCEL_HEADERS = [
   "MR Name",
   "Pay Period (YYYY-MM)",
@@ -1767,10 +1722,9 @@ const PreviousMonthTab = () => {
     });
   };
   const handleNumericRow = (i, field, value) => {
-    if (value === "" || /^\d*\.?\d{0,2}$/.test(value))
+    if (value === "" || /^\d*\.?\d{0,15}$/.test(value))
       updateRow(i, field, value);
   };
-
   const validateRows = () => {
     let valid = true;
     const newErrors = rows.map((row) => {
@@ -1786,7 +1740,6 @@ const PreviousMonthTab = () => {
     setRowErrors(newErrors);
     return valid;
   };
-
   const handleManualSubmit = async (e) => {
     e.preventDefault();
     if (!validateRows()) {
@@ -1812,7 +1765,6 @@ const PreviousMonthTab = () => {
           payrollType: "previous",
         };
       });
-
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
@@ -1832,7 +1784,6 @@ const PreviousMonthTab = () => {
       setSubmitting(false);
     }
   };
-
   const downloadTemplate = async () => {
     try {
       const workbook = new ExcelJS.Workbook();
@@ -1865,7 +1816,6 @@ const PreviousMonthTab = () => {
       showToast("error", "Failed to generate template");
     }
   };
-
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1922,7 +1872,6 @@ const PreviousMonthTab = () => {
     reader.readAsArrayBuffer(file);
     e.target.value = "";
   };
-
   const handleExcelSubmit = async (e) => {
     e.preventDefault();
     if (excelRows.length === 0) {
@@ -1957,7 +1906,6 @@ const PreviousMonthTab = () => {
           payrollType: "previous",
         };
       });
-
       const missing = payload
         .filter((p) => !p.employeeId)
         .map((p) => p.employeeName);
@@ -1966,7 +1914,6 @@ const PreviousMonthTab = () => {
         setUploading(false);
         return;
       }
-
       const res = await axios.post(
         `${backendUrl}/api/hrm/payroll/bulk`,
         payload,
@@ -1986,7 +1933,6 @@ const PreviousMonthTab = () => {
       setUploading(false);
     }
   };
-
   const totalExpenseSum = useMemo(
     () =>
       rows
@@ -2022,21 +1968,17 @@ const PreviousMonthTab = () => {
         </p>
       </div>
       <div className="flex gap-3 mb-6">
-        {[
-          ["manual", "✏️ Manual Entry"],
-          ["excel", "📊 Upload Excel"],
-        ].map(([mode, label]) => (
+        {["manual", "excel"].map((mode) => (
           <button
             key={mode}
             type="button"
             onClick={() => setEntryMode(mode)}
             className={`px-5 py-2 rounded-full text-sm font-medium transition-all ${entryMode === mode ? (mode === "manual" ? "bg-blue-600 text-white shadow" : "bg-green-600 text-white shadow") : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
           >
-            {label}
+            {mode === "manual" ? "✏️ Manual Entry" : "📊 Upload Excel"}
           </button>
         ))}
       </div>
-
       {entryMode === "manual" && (
         <form onSubmit={handleManualSubmit}>
           <div className="space-y-6">
@@ -2175,7 +2117,6 @@ const PreviousMonthTab = () => {
           </div>
         </form>
       )}
-
       {entryMode === "excel" && (
         <form onSubmit={handleExcelSubmit}>
           <div className="border-2 border-dashed border-gray-300 rounded-2xl p-8 text-center mb-6 bg-gray-50">

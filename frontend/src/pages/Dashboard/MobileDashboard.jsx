@@ -1694,7 +1694,6 @@ const MobileDashboard = () => {
             </div>
           </div>
 
-          {/* ✅ RIGHT — User Activity for super admin, 👋 for others */}
           <div className="flex items-center gap-2">
             <span className="text-xl">👋</span>
           </div>

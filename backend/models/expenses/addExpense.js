@@ -12,6 +12,10 @@ const expenseSchema = new mongoose.Schema(
       ref: "ExpenseCategory",
       required: true,
     },
+    categoryType: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ExpenseCategory",
+    },
     remarks: {
       type: String,
       trim: true,
@@ -20,18 +24,34 @@ const expenseSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: 0, // Changed from 0.01 to 0 to allow zero amounts
+      min: 0,
       validate: {
         validator: function (v) {
-          return v >= 0; // Changed from > 0 to >= 0 to allow zero
+          return v >= 0;
         },
         message: "Amount must be greater than or equal to 0",
       },
+    },
+    finalAmount: {
+      type: Number,
+      default: 0,
+    },
+    exchangeLoss: {
+      type: Number,
+      default: 0,
     },
     sourceAccount: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Destination",
       required: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+    },
+    reference: {
+      type: String,
+      trim: true,
     },
     // ── MR linkage (only for tour-related expense categories) ──────────────
     mrId: {
@@ -68,6 +88,63 @@ const expenseSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    // ─────────────────────────────────────────────────────────────────
+    // NEW: Payroll linking fields
+    // ─────────────────────────────────────────────────────────────────
+    payrollId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payroll",
+      default: null,
+      index: true,
+    },
+    payrollCode: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    employeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Staff",
+      default: null,
+    },
+    supplier: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Staff",
+      default: null,
+    },
+    period: {
+      type: String,
+      default: null,
+    },
+    transactionType: {
+      type: String,
+      default: "payment outward",
+    },
+    accountType: {
+      type: String,
+      default: "Company Account",
+    },
+    importStatus: {
+      type: String,
+      default: "imported",
+    },
+    importErrors: {
+      type: Array,
+      default: [],
+    },
+    invoiceNo: {
+      type: String,
+      default: "NA",
+    },
+    isConversionLoss: {
+      type: Boolean,
+      default: false,
+    },
+    sources: {
+      type: Array,
+      default: [],
+    },
+    // ─────────────────────────────────────────────────────────────────
   },
   {
     timestamps: true,
@@ -79,8 +156,9 @@ expenseSchema.index({ category: 1 });
 expenseSchema.index({ sourceAccount: 1 });
 expenseSchema.index({ createdAt: -1 });
 expenseSchema.index({ mrId: 1 });
+expenseSchema.index({ payrollId: 1 });
+expenseSchema.index({ payrollCode: 1 });
 
-// Updated pre-save hook to allow zero amounts but prevent negative amounts
 expenseSchema.pre("save", function (next) {
   if (this.amount < 0) {
     next(new Error("Amount cannot be negative"));

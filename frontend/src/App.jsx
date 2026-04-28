@@ -237,7 +237,6 @@ function App() {
           <Route path="dashboard" element={<SmartDashboard />} />
           <Route path="mobile-dashboard" element={<MobileDashboard />} />
 
-          {/* User Activity */}
           <Route
             path="user-activity"
             element={<UserActivity currentUser={currentUser} />}

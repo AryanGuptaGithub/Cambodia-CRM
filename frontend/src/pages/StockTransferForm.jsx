@@ -133,6 +133,204 @@ const parseExcelFile = (file) => {
   });
 };
 
+// =============================================================================
+// FIX: SendProductTable is defined OUTSIDE the parent component.
+// Previously it was defined inside CreateStockTransfer, so every render
+// created a brand-new function reference → React treated it as a completely
+// new component type → unmounted + remounted the DOM → input lost focus after
+// every keystroke → only one digit could be typed at a time.
+//
+// By moving it outside and passing all dependencies as props, the component
+// identity is stable across renders and inputs keep focus normally.
+// =============================================================================
+const SendProductTable = React.memo(
+  ({
+    sendMrTableData,
+    sendQtyDisplayMap,
+    onQtyChange,
+    onQtyBlur,
+    onRemove,
+    // restore-row props
+    showAddRow,
+    setShowAddRow,
+    addRowProductId,
+    setAddRowProductId,
+    addRowQty,
+    setAddRowQty,
+    deletedSendProductOptions,
+    hasDeletedSendRows,
+    onConfirmAddRow,
+  }) => (
+    <>
+      <div className="overflow-x-auto border rounded-xl">
+        <table className="w-full text-sm">
+          <thead className="bg-indigo-50 text-indigo-800">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold">
+                Product Name
+              </th>
+              <th className="px-4 py-3 text-center font-semibold">
+                Available Stock
+              </th>
+              <th className="px-4 py-3 text-center font-semibold">
+                Send Quantity
+              </th>
+              <th className="px-4 py-3 text-center font-semibold">Del</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sendMrTableData.map((p, idx) => (
+              <tr
+                key={p.productId || idx}
+                className={`border-t transition-colors ${
+                  (p.sendQuantity || 0) > 0
+                    ? "bg-indigo-50/50"
+                    : idx % 2 === 0
+                      ? "bg-white"
+                      : "bg-gray-50"
+                }`}
+              >
+                <td className="px-4 py-3 font-medium text-gray-800">
+                  {p.productName}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <span
+                    className={`inline-flex items-center justify-center text-xs font-semibold px-2 py-1 rounded-full ${
+                      p.totalBoxes > 0
+                        ? "bg-green-100 text-green-700"
+                        : "bg-red-100 text-red-600"
+                    }`}
+                  >
+                    {p.totalBoxes}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={sendQtyDisplayMap[p.productId] ?? ""}
+                    onChange={(e) => onQtyChange(p.productId, e.target.value)}
+                    onBlur={() => onQtyBlur(p.productId, p.totalBoxes)}
+                    onFocus={(e) => e.target.select()}
+                    className={`w-24 text-center border rounded-lg px-2 py-1.5 text-sm
+                    focus:ring-2 focus:ring-indigo-400 outline-none mx-auto block
+                    transition-colors ${
+                      (p.sendQuantity || 0) > 0
+                        ? "border-indigo-400 bg-white font-semibold text-indigo-700"
+                        : "border-gray-300 bg-white text-gray-500"
+                    }`}
+                    placeholder="0"
+                  />
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <button
+                    type="button"
+                    onClick={() => onRemove(p.productId)}
+                    className="w-8 h-8 inline-flex items-center justify-center bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 rounded-lg transition-colors cursor-pointer"
+                    title="Remove (can restore via Add Product below)"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Inline restore-row */}
+      {showAddRow && (
+        <div className="mt-3 grid grid-cols-12 gap-2 items-center px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+          <div className="col-span-6">
+            <SearchableDropdown
+              value={addRowProductId}
+              onChange={(val) => {
+                setAddRowProductId(val);
+                const sel = deletedSendProductOptions.find(
+                  (o) => o.value === val,
+                );
+                if (sel) setAddRowQty(String(sel.totalBoxes > 0 ? 1 : ""));
+              }}
+              options={deletedSendProductOptions}
+              placeholder="Select product to restore…"
+            />
+          </div>
+          <div className="col-span-3 text-xs text-gray-400 italic text-center">
+            {addRowProductId
+              ? (() => {
+                  const sel = deletedSendProductOptions.find(
+                    (o) => o.value === addRowProductId,
+                  );
+                  return sel ? `Stock: ${sel.totalBoxes}` : "";
+                })()
+              : "Select a product"}
+          </div>
+          <div className="col-span-2">
+            <input
+              type="number"
+              min="1"
+              max={
+                deletedSendProductOptions.find(
+                  (o) => o.value === addRowProductId,
+                )?.totalBoxes || 9999
+              }
+              value={addRowQty}
+              onChange={(e) => setAddRowQty(e.target.value)}
+              placeholder="Qty"
+              disabled={!addRowProductId}
+              className="w-full text-center border border-indigo-400 focus:ring-indigo-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 outline-none bg-white"
+            />
+          </div>
+          <div className="col-span-1 flex justify-center gap-1">
+            <button
+              type="button"
+              onClick={onConfirmAddRow}
+              title="Confirm"
+              className="w-8 h-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer"
+            >
+              <Plus size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddRow(false);
+                setAddRowProductId("");
+                setAddRowQty("");
+              }}
+              title="Cancel"
+              className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-lg cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Footer: Add Product button */}
+      <div className="mt-3 flex items-center justify-between px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+        {hasDeletedSendRows && !showAddRow && (
+          <button
+            type="button"
+            onClick={() => {
+              setShowAddRow(true);
+              setAddRowProductId("");
+              setAddRowQty("");
+            }}
+            className="flex items-center gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
+          >
+            <Plus size={13} /> Add Product
+          </button>
+        )}
+      </div>
+    </>
+  ),
+);
+
+SendProductTable.displayName = "SendProductTable";
+
+// =============================================================================
+// Main component
+// =============================================================================
 const CreateStockTransfer = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -159,12 +357,9 @@ const CreateStockTransfer = () => {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewProductData, setViewProductData] = useState(null);
 
-  // ── SEND table rows — ALL in-stock products auto-loaded when MR selected ──
   const [sendMrTableData, setSendMrTableData] = useState([]);
-  // Master list — all products loaded (for re-add after delete)
   const [allSendProducts, setAllSendProducts] = useState([]);
 
-  // ── Inline add-row state (for re-adding deleted products) ────────────────
   const [showAddRow, setShowAddRow] = useState(false);
   const [addRowProductId, setAddRowProductId] = useState("");
   const [addRowQty, setAddRowQty] = useState("");
@@ -180,18 +375,17 @@ const CreateStockTransfer = () => {
 
   const [submitting, setSubmitting] = useState(false);
 
-  // ── Excel upload state ──────────────────────────────────────────────────
   const [excelMode, setExcelMode] = useState(false);
   const [excelFile, setExcelFile] = useState(null);
   const [excelParsing, setExcelParsing] = useState(false);
   const [excelErrors, setExcelErrors] = useState([]);
   const [excelImported, setExcelImported] = useState(false);
 
-  // ── Fetch invoice number ────────────────────────────────────────────────
+  // Separate display state from numeric state — key to multi-digit input
+  const [sendQtyDisplayMap, setSendQtyDisplayMap] = useState({});
+
   useEffect(() => {
-    if (!form.invoiceNo) {
-      fetchNextInvoiceNo();
-    }
+    if (!form.invoiceNo) fetchNextInvoiceNo();
   }, []);
 
   const fetchNextInvoiceNo = async () => {
@@ -209,7 +403,6 @@ const CreateStockTransfer = () => {
     }
   };
 
-  // ── Fetch Send MR list ──────────────────────────────────────────────────
   useEffect(() => {
     const fetchSendMRList = async () => {
       try {
@@ -217,7 +410,17 @@ const CreateStockTransfer = () => {
         const res = await axios.get(
           `${backendUrl}/api/stock-transfer-to-mr/mrs-list`,
         );
-        setSendMrList(res.data || []);
+        const allMrs = res.data || [];
+        const activeMrs = allMrs.filter(
+          (mr) =>
+            mr.status === "active" ||
+            mr.isActive === true ||
+            mr.employeeStatus === "active" ||
+            (mr.status === undefined &&
+              mr.isActive === undefined &&
+              mr.employeeStatus === undefined),
+        );
+        setSendMrList(activeMrs);
       } catch {
         setSendMrList([]);
       } finally {
@@ -227,7 +430,6 @@ const CreateStockTransfer = () => {
     fetchSendMRList();
   }, []);
 
-  // ── Fetch Receive MR list ───────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== "toMR") return;
     const fetchReceiveMRList = async () => {
@@ -236,7 +438,17 @@ const CreateStockTransfer = () => {
         const res = await axios.get(
           `${backendUrl}/api/stock-transfer-to-mr/mrs`,
         );
-        setReceiveMrList(res.data?.data || []);
+        const allMrs = res.data?.data || [];
+        const activeMrs = allMrs.filter(
+          (mr) =>
+            mr.status === "active" ||
+            mr.isActive === true ||
+            mr.employeeStatus === "active" ||
+            (mr.status === undefined &&
+              mr.isActive === undefined &&
+              mr.employeeStatus === undefined),
+        );
+        setReceiveMrList(activeMrs);
       } catch {
         setReceiveMrList([]);
       } finally {
@@ -268,7 +480,6 @@ const CreateStockTransfer = () => {
     ? receiveMrListLoading
     : sendMrListLoading;
 
-  // ── Fetch products ──────────────────────────────────────────────────────
   useEffect(() => {
     const fetchProducts = async () => {
       try {
@@ -289,7 +500,6 @@ const CreateStockTransfer = () => {
     fetchProducts();
   }, []);
 
-  // ── Fetch MR Stock (receive) ────────────────────────────────────────────
   const fetchMRStock = useCallback(async (mrId, mrName) => {
     if (!mrId) {
       setMrStockData([]);
@@ -325,7 +535,6 @@ const CreateStockTransfer = () => {
     }
   }, []);
 
-  // ── Build send table from ALL in-stock warehouse products ────────────────
   const buildSendTableFromProducts = useCallback((productList) => {
     return productList
       .filter((p) => (p.totalBoxes || 0) > 0)
@@ -335,11 +544,9 @@ const CreateStockTransfer = () => {
         totalBoxes: p.totalBoxes || 0,
         lc: p.lc || 0,
         sendQuantity: 0,
-        sendQuantityDisplay: "0",
       }));
   }, []);
 
-  // ── Handle MR selection ─────────────────────────────────────────────────
   const handleMRSelect = async (selectedValue) => {
     const sel = mrOptions.find((m) => m.value === selectedValue);
     const mrName = sel?.mrName || sel?.label || "";
@@ -360,6 +567,7 @@ const CreateStockTransfer = () => {
     setShowAddRow(false);
     setAddRowProductId("");
     setAddRowQty("");
+    setSendQtyDisplayMap({});
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (isReceiveType(form.transferType) && actualMrId) {
@@ -369,8 +577,6 @@ const CreateStockTransfer = () => {
     } else if (!isReceiveType(form.transferType) && actualMrId) {
       setMrStockData([]);
       setMrInfo(null);
-      // Only load table immediately in manual mode
-      // In excel mode, table stays empty until file is uploaded
       if (!excelMode) {
         const rows = buildSendTableFromProducts(products);
         setSendMrTableData(rows);
@@ -387,7 +593,6 @@ const CreateStockTransfer = () => {
     }
   };
 
-  // ── Handle Transfer Type change ─────────────────────────────────────────
   const handleTransferTypeChange = (e) => {
     const newType = e.target.value;
     setForm((prev) => ({
@@ -406,49 +611,54 @@ const CreateStockTransfer = () => {
     setShowAddRow(false);
     setAddRowProductId("");
     setAddRowQty("");
+    setSendQtyDisplayMap({});
     setExcelFile(null);
     setExcelErrors([]);
     setExcelImported(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // ── Send qty change ─────────────────────────────────────────────────────
-  // ── Send qty change ─────────────────────────────────────────────────────
-  // ✅ Updated Handler - Controls value internally
-  const handleSendQtyChange = useCallback(
-    (productId, rawValue, isBlur = false) => {
-      const numericStr = rawValue.replace(/[^0-9]/g, "");
+  // Stable qty change — updates display map AND numeric state in one pass
+  const handleSendQtyChange = useCallback((productId, rawValue) => {
+    const numericStr = rawValue.replace(/[^0-9]/g, "");
 
-      setSendMrTableData((prev) =>
-        prev.map((p) => {
-          if (p.productId !== productId) return p;
+    // Update display immediately so typing "12" shows "12" not "1"
+    setSendQtyDisplayMap((prev) => ({ ...prev, [productId]: numericStr }));
 
-          let newQty = 0;
+    // Update numeric state for submission
+    setSendMrTableData((prev) =>
+      prev.map((p) => {
+        if (p.productId !== productId) return p;
+        const parsed = numericStr === "" ? 0 : parseInt(numericStr, 10);
+        const clamped = isNaN(parsed)
+          ? 0
+          : Math.min(Math.max(0, parsed), p.totalBoxes || 0);
+        return { ...p, sendQuantity: clamped };
+      }),
+    );
+  }, []);
 
-          if (numericStr !== "") {
-            const parsed = parseInt(numericStr, 10);
-            newQty = Math.min(Math.max(0, parsed), p.totalBoxes || 0);
-          }
+  // On blur: clamp display to valid range
+  const handleSendQtyBlur = useCallback((productId, totalBoxes) => {
+    setSendQtyDisplayMap((prev) => {
+      const raw = prev[productId] ?? "";
+      const parsed = raw === "" ? 0 : parseInt(raw, 10);
+      const clamped = isNaN(parsed)
+        ? 0
+        : Math.min(Math.max(0, parsed), totalBoxes || 0);
+      return { ...prev, [productId]: clamped === 0 ? "" : String(clamped) };
+    });
+  }, []);
 
-          // If user is still typing (not blur), we allow temporary display value
-          // But we still clamp on blur or when value is final
-          return {
-            ...p,
-            sendQuantity: newQty,
-            // Optional: You can keep a separate display field if needed
-          };
-        }),
-      );
-    },
-    [],
-  );
-
-  // ── Remove a row from the send table ────────────────────────────────────
-  const handleRemoveSendItem = (productId) => {
+  const handleRemoveSendItem = useCallback((productId) => {
     setSendMrTableData((prev) => prev.filter((p) => p.productId !== productId));
-  };
+    setSendQtyDisplayMap((prev) => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+  }, []);
 
-  // ── Deleted products (only products removed from visible table) ──────────
   const deletedSendProductOptions = useMemo(() => {
     const visibleIds = new Set(sendMrTableData.map((p) => p.productId));
     return [
@@ -470,8 +680,7 @@ const CreateStockTransfer = () => {
     [deletedSendProductOptions],
   );
 
-  // ── Confirm re-add of a deleted row ────────────────────────────────────
-  const handleConfirmAddRow = () => {
+  const handleConfirmAddRow = useCallback(() => {
     if (!addRowProductId) {
       showToast("error", "Please select a product");
       return;
@@ -500,16 +709,18 @@ const CreateStockTransfer = () => {
         totalBoxes: sel.totalBoxes,
         lc: sel.lc || 0,
         sendQuantity: qty,
-        sendQuantityDisplay: String(qty),
       },
     ]);
+    setSendQtyDisplayMap((prev) => ({
+      ...prev,
+      [addRowProductId]: String(qty),
+    }));
     setAddRowProductId("");
     setAddRowQty("");
     setShowAddRow(false);
     showToast("success", "Product restored");
-  };
+  }, [addRowProductId, addRowQty, deletedSendProductOptions]);
 
-  // ── Return qty change (receive) ─────────────────────────────────────────
   const handleReturnQtyChange = (productId, rawValue) => {
     const numeric = rawValue.replace(/[^0-9]/g, "");
     setMrStockData((prev) =>
@@ -539,14 +750,12 @@ const CreateStockTransfer = () => {
     [sendMrTableData],
   );
 
-  // ── Form change ─────────────────────────────────────────────────────────
   const handleChange = (e) => {
     const { name, value } = e.target;
     if (name === "invoiceNo") return;
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  // ── General tab product handling ────────────────────────────────────────
   const [selectedProductId, setSelectedProductId] = useState("");
 
   const generalProductOptions = useMemo(() => {
@@ -619,7 +828,6 @@ const CreateStockTransfer = () => {
     }));
   };
 
-  // ── Excel Upload Handlers ───────────────────────────────────────────────
   const handleExcelModeToggle = (enabled) => {
     setExcelMode(enabled);
     setExcelFile(null);
@@ -628,14 +836,13 @@ const CreateStockTransfer = () => {
     setShowAddRow(false);
     setAddRowProductId("");
     setAddRowQty("");
+    setSendQtyDisplayMap({});
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (enabled) {
-      // Switching to Excel mode — clear the manual table
       setSendMrTableData([]);
       setAllSendProducts([]);
     } else {
-      // Switching back to Manual mode — reload all products
       if (form.mrId) {
         const rows = buildSendTableFromProducts(products);
         setSendMrTableData(rows);
@@ -725,7 +932,6 @@ const CreateStockTransfer = () => {
             totalBoxes: warehouseProd.totalBoxes,
             lc: warehouseProd.lc || 0,
             sendQuantity: clamped,
-            sendQuantityDisplay: String(clamped),
           });
         }
       }
@@ -740,8 +946,14 @@ const CreateStockTransfer = () => {
         return;
       }
 
+      const newDisplayMap = {};
+      matched.forEach((m) => {
+        newDisplayMap[m.productId] = String(m.sendQuantity);
+      });
+
       setSendMrTableData(matched);
       setAllSendProducts(matched.map((r) => ({ ...r })));
+      setSendQtyDisplayMap(newDisplayMap);
       setExcelErrors(errors);
       setExcelImported(true);
       showToast(
@@ -759,7 +971,6 @@ const CreateStockTransfer = () => {
     }
   };
 
-  // ── Submit ──────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     const token = localStorage.getItem("token");
@@ -795,7 +1006,6 @@ const CreateStockTransfer = () => {
 
     setSubmitting(true);
     try {
-      // ── Excel mode: send as multipart/form-data ───────────────────────
       if (excelMode && excelFile && isSendToMR) {
         const formData = new FormData();
         formData.append("file", excelFile);
@@ -832,7 +1042,6 @@ const CreateStockTransfer = () => {
         return;
       }
 
-      // ── Manual / Receive mode: send as JSON ───────────────────────────
       let payload;
       let url;
 
@@ -907,184 +1116,21 @@ const CreateStockTransfer = () => {
   const isMRReceive = activeTab === "toMR" && isReceiveType(form.transferType);
   const isMRSend = activeTab === "toMR" && !isReceiveType(form.transferType);
 
-  // ── Shared product table (used in both manual and excel mode after data loads) ──
-  const SendProductTable = () => (
-    <>
-      <div className="overflow-x-auto border rounded-xl">
-        <table className="w-full text-sm">
-          <thead className="bg-indigo-50 text-indigo-800">
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold">
-                Product Name
-              </th>
-              <th className="px-4 py-3 text-center font-semibold">
-                Available Stock
-              </th>
-              <th className="px-4 py-3 text-center font-semibold">
-                Send Quantity
-              </th>
-              <th className="px-4 py-3 text-center font-semibold">Del</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sendMrTableData.map((p, idx) => (
-              <tr
-                key={p.productId || idx}
-                className={`border-t transition-colors ${
-                  (p.sendQuantity || 0) > 0
-                    ? "bg-indigo-50/50"
-                    : idx % 2 === 0
-                      ? "bg-white"
-                      : "bg-gray-50"
-                }`}
-              >
-                <td className="px-4 py-3 font-medium text-gray-800">
-                  {p.productName}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span
-                    className={`inline-flex items-center justify-center text-xs font-semibold px-2 py-1 rounded-full ${
-                      p.totalBoxes > 0
-                        ? "bg-green-100 text-green-700"
-                        : "bg-red-100 text-red-600"
-                    }`}
-                  >
-                    {p.totalBoxes}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={p.sendQuantity || ""} // still needed for controlled input
-                    onChange={(e) =>
-                      handleSendQtyChange(p.productId, e.target.value)
-                    }
-                    onFocus={(e) => e.target.select()}
-                    className="w-24 text-center border rounded-lg px-2 py-1.5 text-sm 
-             focus:ring-2 focus:ring-indigo-400 outline-none mx-auto block 
-             transition-colors"
-                    placeholder="0"
-                  />
-                  {/* <input
-                    type="text"
-                    inputMode="numeric"
-                    //value={p.sendQuantityDisplay ?? String(p.sendQuantity)}
-                    onChange={(e) =>
-                      handleSendQtyChange(p.productId, e.target.value, false)
-                    }
-                    onBlur={(e) =>
-                      handleSendQtyChange(p.productId, e.target.value, true)
-                    }
-                    className={`w-24 text-center border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400 outline-none mx-auto block transition-colors ${
-                      (p.sendQuantity || 0) > 0
-                        ? "border-indigo-400 bg-white font-semibold text-indigo-700"
-                        : "border-gray-300 bg-white text-gray-500"
-                    }`}
-                  /> */}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveSendItem(p.productId)}
-                    className="w-8 h-8 inline-flex items-center justify-center bg-red-50 hover:bg-red-100 text-red-500 hover:text-red-700 rounded-lg transition-colors cursor-pointer"
-                    title="Remove (can restore via Add Product below)"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Inline restore-row */}
-      {showAddRow && (
-        <div className="mt-3 grid grid-cols-12 gap-2 items-center px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
-          <div className="col-span-6">
-            <SearchableDropdown
-              value={addRowProductId}
-              onChange={(val) => {
-                setAddRowProductId(val);
-                const sel = deletedSendProductOptions.find(
-                  (o) => o.value === val,
-                );
-                if (sel) setAddRowQty(String(sel.totalBoxes > 0 ? 1 : ""));
-              }}
-              options={deletedSendProductOptions}
-              placeholder="Select product to restore…"
-            />
-          </div>
-          <div className="col-span-3 text-xs text-gray-400 italic text-center">
-            {addRowProductId
-              ? (() => {
-                  const sel = deletedSendProductOptions.find(
-                    (o) => o.value === addRowProductId,
-                  );
-                  return sel ? `Stock: ${sel.totalBoxes}` : "";
-                })()
-              : "Select a product"}
-          </div>
-          <div className="col-span-2">
-            <input
-              type="number"
-              min="1"
-              max={
-                deletedSendProductOptions.find(
-                  (o) => o.value === addRowProductId,
-                )?.totalBoxes || 9999
-              }
-              value={addRowQty}
-              onChange={(e) => setAddRowQty(e.target.value)}
-              placeholder="Qty"
-              disabled={!addRowProductId}
-              className="w-full text-center border border-indigo-400 focus:ring-indigo-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 outline-none bg-white"
-            />
-          </div>
-          <div className="col-span-1 flex justify-center gap-1">
-            <button
-              type="button"
-              onClick={handleConfirmAddRow}
-              title="Confirm"
-              className="w-8 h-8 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer"
-            >
-              <Plus size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowAddRow(false);
-                setAddRowProductId("");
-                setAddRowQty("");
-              }}
-              title="Cancel"
-              className="w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-lg cursor-pointer"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Footer summary + Add Product */}
-      <div className="mt-3 flex items-center justify-between px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-        {hasDeletedSendRows && !showAddRow && (
-          <button
-            type="button"
-            onClick={() => {
-              setShowAddRow(true);
-              setAddRowProductId("");
-              setAddRowQty("");
-            }}
-            className="flex items-center gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg cursor-pointer transition-colors"
-          >
-            <Plus size={13} /> Add Product
-          </button>
-        )}
-      </div>
-    </>
-  );
+  const resetTabState = () => {
+    setMrStockData([]);
+    setMrInfo(null);
+    setSendMrTableData([]);
+    setAllSendProducts([]);
+    setShowAddRow(false);
+    setAddRowProductId("");
+    setAddRowQty("");
+    setSendQtyDisplayMap({});
+    setExcelFile(null);
+    setExcelErrors([]);
+    setExcelImported(false);
+    setExcelMode(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -1113,17 +1159,7 @@ const CreateStockTransfer = () => {
                 mrId: "",
                 mrName: "",
               }));
-              setMrStockData([]);
-              setMrInfo(null);
-              setSendMrTableData([]);
-              setAllSendProducts([]);
-              setShowAddRow(false);
-              setAddRowProductId("");
-              setAddRowQty("");
-              setExcelFile(null);
-              setExcelErrors([]);
-              setExcelImported(false);
-              setExcelMode(false);
+              resetTabState();
             }}
             className={`flex items-center gap-2 px-6 py-4 font-medium text-sm transition-colors cursor-pointer ${
               activeTab === "toMR"
@@ -1143,17 +1179,7 @@ const CreateStockTransfer = () => {
                 mrName: "",
                 items: [],
               }));
-              setMrStockData([]);
-              setMrInfo(null);
-              setSendMrTableData([]);
-              setAllSendProducts([]);
-              setShowAddRow(false);
-              setAddRowProductId("");
-              setAddRowQty("");
-              setExcelFile(null);
-              setExcelErrors([]);
-              setExcelImported(false);
-              setExcelMode(false);
+              resetTabState();
             }}
             className={`flex items-center gap-2 px-6 py-4 font-medium text-sm transition-colors cursor-pointer ${
               activeTab === "general"
@@ -1197,7 +1223,7 @@ const CreateStockTransfer = () => {
             </div>
           </div>
 
-          {/* Row 2: Date + MR Name / Source/Dest */}
+          {/* Row 2: Date + MR / Source+Dest */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1216,9 +1242,13 @@ const CreateStockTransfer = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   MR Name <span className="text-red-500">*</span>
-                  {isReceiveType(form.transferType) && (
+                  {isReceiveType(form.transferType) ? (
                     <span className="ml-2 text-xs text-blue-500 font-normal">
                       (MRs with stock only)
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-xs text-green-600 font-normal">
+                      (Active MRs only)
                     </span>
                   )}
                 </label>
@@ -1231,7 +1261,7 @@ const CreateStockTransfer = () => {
                       ? "Loading MRs..."
                       : isReceiveType(form.transferType)
                         ? "Select MR with stock..."
-                        : "Select MR"
+                        : "Select active MR"
                   }
                   required
                   loading={mrListLoading}
@@ -1242,6 +1272,13 @@ const CreateStockTransfer = () => {
                   mrOptions.length === 0 && (
                     <p className="text-xs text-red-500 mt-1">
                       No MRs with stock found
+                    </p>
+                  )}
+                {!isReceiveType(form.transferType) &&
+                  !mrListLoading &&
+                  mrOptions.length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      No active MRs found
                     </p>
                   )}
               </div>
@@ -1270,7 +1307,7 @@ const CreateStockTransfer = () => {
             )}
           </div>
 
-          {/* ── MR RECEIVE ──────────────────────────────────────────────── */}
+          {/* ── MR RECEIVE ───────────────────────────────────────────────── */}
           {isMRReceive && (
             <div>
               {mrInfo && (
@@ -1420,10 +1457,9 @@ const CreateStockTransfer = () => {
             </div>
           )}
 
-          {/* ── MR SEND ─────────────────────────────────────────────────── */}
+          {/* ── MR SEND ──────────────────────────────────────────────────── */}
           {isMRSend && (
             <div>
-              {/* MR Info Banner */}
               {form.mrId && (
                 <div className="mb-4 flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
                   <div className="w-10 h-10 rounded-full bg-indigo-600 text-white flex items-center justify-center flex-shrink-0">
@@ -1443,7 +1479,6 @@ const CreateStockTransfer = () => {
                 </div>
               )}
 
-              {/* Section header + mode toggle */}
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
                   <ArrowUpCircle size={18} className="text-indigo-600" />
@@ -1462,8 +1497,7 @@ const CreateStockTransfer = () => {
                       onClick={handleTemplateDownload}
                       className="flex items-center gap-1.5 text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                     >
-                      <Download size={13} />
-                      Download Template
+                      <Download size={13} /> Download Template
                     </button>
 
                     <div className="flex items-center bg-gray-100 rounded-lg p-0.5 border border-gray-200">
@@ -1487,15 +1521,13 @@ const CreateStockTransfer = () => {
                             : "text-gray-500 hover:text-gray-700"
                         }`}
                       >
-                        <FileSpreadsheet size={12} />
-                        Excel Upload
+                        <FileSpreadsheet size={12} /> Excel Upload
                       </button>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* ── No MR selected ───────────────────────────────────────── */}
               {!form.mrId ? (
                 <div className="text-center py-10 border-2 border-dashed border-gray-300 rounded-lg text-gray-500">
                   <User size={36} className="mx-auto mb-2 text-gray-300" />
@@ -1505,7 +1537,6 @@ const CreateStockTransfer = () => {
                 </div>
               ) : (
                 <>
-                  {/* ── MANUAL MODE ─────────────────────────────────────── */}
                   {!excelMode && (
                     <>
                       {sendMrTableData.length === 0 ? (
@@ -1519,15 +1550,28 @@ const CreateStockTransfer = () => {
                           </p>
                         </div>
                       ) : (
-                        <SendProductTable />
+                        <SendProductTable
+                          sendMrTableData={sendMrTableData}
+                          sendQtyDisplayMap={sendQtyDisplayMap}
+                          onQtyChange={handleSendQtyChange}
+                          onQtyBlur={handleSendQtyBlur}
+                          onRemove={handleRemoveSendItem}
+                          showAddRow={showAddRow}
+                          setShowAddRow={setShowAddRow}
+                          addRowProductId={addRowProductId}
+                          setAddRowProductId={setAddRowProductId}
+                          addRowQty={addRowQty}
+                          setAddRowQty={setAddRowQty}
+                          deletedSendProductOptions={deletedSendProductOptions}
+                          hasDeletedSendRows={hasDeletedSendRows}
+                          onConfirmAddRow={handleConfirmAddRow}
+                        />
                       )}
                     </>
                   )}
 
-                  {/* ── EXCEL MODE ──────────────────────────────────────── */}
                   {excelMode && (
                     <>
-                      {/* Upload panel */}
                       <div className="mb-5">
                         <div className="border-2 border-dashed border-indigo-300 rounded-xl bg-indigo-50 p-5">
                           <div className="flex flex-col items-center gap-3 text-center">
@@ -1578,6 +1622,7 @@ const CreateStockTransfer = () => {
                                     setExcelImported(false);
                                     setSendMrTableData([]);
                                     setAllSendProducts([]);
+                                    setSendQtyDisplayMap({});
                                     if (fileInputRef.current)
                                       fileInputRef.current.value = "";
                                   }}
@@ -1644,8 +1689,24 @@ const CreateStockTransfer = () => {
                         )}
                       </div>
 
-                      {/* Table only shown after successful Excel import */}
-                      {sendMrTableData.length > 0 && <SendProductTable />}
+                      {sendMrTableData.length > 0 && (
+                        <SendProductTable
+                          sendMrTableData={sendMrTableData}
+                          sendQtyDisplayMap={sendQtyDisplayMap}
+                          onQtyChange={handleSendQtyChange}
+                          onQtyBlur={handleSendQtyBlur}
+                          onRemove={handleRemoveSendItem}
+                          showAddRow={showAddRow}
+                          setShowAddRow={setShowAddRow}
+                          addRowProductId={addRowProductId}
+                          setAddRowProductId={setAddRowProductId}
+                          addRowQty={addRowQty}
+                          setAddRowQty={setAddRowQty}
+                          deletedSendProductOptions={deletedSendProductOptions}
+                          hasDeletedSendRows={hasDeletedSendRows}
+                          onConfirmAddRow={handleConfirmAddRow}
+                        />
+                      )}
                     </>
                   )}
                 </>
@@ -1653,7 +1714,7 @@ const CreateStockTransfer = () => {
             </div>
           )}
 
-          {/* ── GENERAL TAB ─────────────────────────────────────────────── */}
+          {/* ── GENERAL TAB ──────────────────────────────────────────────── */}
           {activeTab === "general" && (
             <div>
               <h3 className="text-base font-semibold text-gray-800 mb-3">
@@ -1817,7 +1878,7 @@ const CreateStockTransfer = () => {
         </form>
       </div>
 
-      {/* ── View Product Modal ──────────────────────────────────────────── */}
+      {/* View Product Modal */}
       {viewModalOpen && viewProductData && (
         <div className="fixed inset-0 flex items-center justify-center z-50">
           <div

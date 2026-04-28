@@ -8,11 +8,7 @@ const transactionSchema = new mongoose.Schema(
     customerName: { type: String },
     customerAddress: { type: String },
 
-    // -------------------------------------------------------------------------
-    // FIX: categoryType now stores the actual category label string from the
-    // CategoryType master (e.g. "Credit Collection", "Cash Sale", "Deposit").
-    // Removed the restrictive enum so any label saved in the master is accepted.
-    // -------------------------------------------------------------------------
+    // Category type (stores the actual category label string from CategoryType master)
     categoryType: {
       type: String,
       required: true,
@@ -22,6 +18,13 @@ const transactionSchema = new mongoose.Schema(
     // Source account (stores the account name as a string)
     sourceAccount: { type: String, default: "--" },
 
+    // Source account ID (reference to Destination collection)
+    source: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Destination",
+      default: null,
+    },
+
     // Destination (string, default "--")
     destination: { type: String, default: "--" },
 
@@ -30,7 +33,7 @@ const transactionSchema = new mongoose.Schema(
 
     // Monetary fields
     amount: { type: Number, required: true },
-   // exchangeLoss: { type: Number, default: 0 },
+    exchangeLoss: { type: Number, default: 0 },
     finalAmount: { type: Number, required: true },
 
     // Dates
@@ -40,11 +43,7 @@ const transactionSchema = new mongoose.Schema(
     description: { type: String, default: "" },
     remarks: { type: String, default: "" },
 
-    // -------------------------------------------------------------------------
-    // FIX: transactionType enum expanded to cover all types used by the app.
-    // Values are lowercase and match what the frontend/backend derives from
-    // the category label.
-    // -------------------------------------------------------------------------
+    // Transaction type
     transactionType: {
       type: String,
       enum: [
@@ -55,7 +54,7 @@ const transactionSchema = new mongoose.Schema(
         "payment inward",
         "payment outward",
         "cash sale",
-        "credit collection", // FIX: was "credit collections" — now singular
+        "credit collection",
         "tour collection",
         "collection",
         "sale",
@@ -66,13 +65,30 @@ const transactionSchema = new mongoose.Schema(
 
     // Account type (tab name: "Cash Balance", "Personal Account", "Company Account")
     accountType: { type: String, required: true },
-     isConversionLoss: { type: Boolean, default: false },
+
+    isConversionLoss: { type: Boolean, default: false },
 
     // Reference to expense (for expense transactions)
     referenceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Expense",
     },
+
+    // ─────────────────────────────────────────────────────────────────
+    // NEW: Payroll linking fields
+    // ─────────────────────────────────────────────────────────────────
+    payrollId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payroll",
+      default: null,
+      index: true,
+    },
+    payrollCode: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    // ─────────────────────────────────────────────────────────────────
 
     // Import metadata (for bulk imports)
     importBatchId: { type: String },
@@ -95,5 +111,7 @@ transactionSchema.index({ sourceAccount: 1 });
 transactionSchema.index({ destination: 1 });
 transactionSchema.index({ accountType: 1 });
 transactionSchema.index({ transactionType: 1 });
+transactionSchema.index({ payrollId: 1 });
+transactionSchema.index({ payrollCode: 1 });
 
 export default mongoose.model("Transaction", transactionSchema);

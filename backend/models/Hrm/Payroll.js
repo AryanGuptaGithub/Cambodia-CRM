@@ -110,6 +110,10 @@ const payrollSchema = new mongoose.Schema(
       extraTimeAmount: { type: Number, default: 0 },
       calculationDate: { type: String, default: null },
     },
+    netSalaryExact: {
+      type: Number,
+      default: 0,
+    },
     enabled: {
       type: Boolean,
       default: true,
@@ -175,7 +179,7 @@ payrollSchema.pre("save", function (next) {
   // ONLY calculate netSalary if it hasn't been set or is being auto-calculated
   // For current month payrolls, use adjustedBasicSalary (prorated)
   // For previous month payrolls, use basicSalary (full)
-  
+
   if (this.payrollType === "current") {
     // Current month: use adjustedBasicSalary (prorated based on actual days)
     const basic = this.adjustedBasicSalary || 0;
@@ -183,7 +187,11 @@ payrollSchema.pre("save", function (next) {
     const deductions = this.deductions || 0;
     // Only set if not already set with a valid value (check if it's zero or not)
     // But preserve the value if it was explicitly set
-    if (this.netSalary === undefined || this.netSalary === null || this.netSalary === 0) {
+    if (
+      this.netSalary === undefined ||
+      this.netSalary === null ||
+      this.netSalary === 0
+    ) {
       this.netSalary = basic + allowances - deductions;
     }
   } else {
@@ -191,14 +199,18 @@ payrollSchema.pre("save", function (next) {
     const basic = this.basicSalary || 0;
     const allowances = this.totalAllowance || 0;
     const deductions = this.deductions || 0;
-    if (this.netSalary === undefined || this.netSalary === null || this.netSalary === 0) {
+    if (
+      this.netSalary === undefined ||
+      this.netSalary === null ||
+      this.netSalary === 0
+    ) {
       this.netSalary = basic + allowances - deductions;
     }
   }
-  
+
   // Ensure netSalary is not negative
   if (this.netSalary < 0) this.netSalary = 0;
-  
+
   next();
 });
 

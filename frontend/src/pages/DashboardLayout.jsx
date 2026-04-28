@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
-import { Menu, LogOut, Bell } from "lucide-react";
+import { Menu, LogOut } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { useNavigate } from "react-router-dom";
+import RevertNotifications from "./ActivityLog/RevertNotifications";
 
 function DashboardLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [dateTime, setDateTime] = useState(new Date());
   const navigate = useNavigate();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
   useEffect(() => {
     const check = () => {
@@ -88,10 +90,10 @@ function DashboardLayout() {
                 </button>
               )}
 
-              <button className="relative w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/60">
-                <Bell className="w-5 h-5 text-gray-600" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white" />
-              </button>
+              {/* Revert Notifications Component */}
+              <div className="relative w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/60">
+                <RevertNotifications apiBase={`${backendUrl}/api`} />
+              </div>
 
               <button
                 onClick={toggleSidebar}
@@ -116,7 +118,6 @@ function DashboardLayout() {
           </h1>
 
           <div className="flex items-center gap-4">
-            {/* 🔥 FIXED GAP HERE */}
             <div className="flex items-center gap-3 text-sm text-gray-700">
               {isSuperAdmin && (
                 <button
@@ -126,6 +127,9 @@ function DashboardLayout() {
                   User Activity
                 </button>
               )}
+
+              {/* Revert Notifications Component for Desktop */}
+              <RevertNotifications apiBase={`${backendUrl}/api`} />
 
               <span>
                 {dateTime.toLocaleDateString()} {dateTime.toLocaleTimeString()}
