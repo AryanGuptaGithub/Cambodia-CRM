@@ -32,12 +32,10 @@ router.get("/", async (req, res) => {
     res.json({ success: true, holidays });
   } catch (error) {
     console.error("Error fetching holidays:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Server error while fetching holidays",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching holidays",
+    });
   }
 });
 
@@ -87,6 +85,14 @@ router.post(
         });
       }
 
+      // Generate year codes for all years between start and end date
+      const startYear = new Date(startDate).getFullYear();
+      const endYear = new Date(finalEndDate).getFullYear();
+      const yearCodes = [];
+      for (let year = startYear; year <= endYear; year++) {
+        yearCodes.push(year.toString());
+      }
+
       // Prevent duplicate holidays on same start date with same name
       const existing = await Holiday.findOne({
         name,
@@ -106,6 +112,7 @@ router.post(
         type: type || "General",
         description: description || "",
         enabled,
+        yearCode: yearCodes,
       });
 
       await holiday.save();
@@ -130,12 +137,10 @@ router.post(
       });
     } catch (error) {
       console.error("Error creating holiday:", error);
-      res
-        .status(500)
-        .json({
-          success: false,
-          message: "Server error while creating holiday",
-        });
+      res.status(500).json({
+        success: false,
+        message: "Server error while creating holiday",
+      });
     }
   },
 );
@@ -184,6 +189,14 @@ router.put(
         });
       }
 
+      // Generate year codes for all years between start and end date
+      const startYear = new Date(startDate).getFullYear();
+      const endYear = new Date(finalEndDate).getFullYear();
+      const yearCodes = [];
+      for (let year = startYear; year <= endYear; year++) {
+        yearCodes.push(year.toString());
+      }
+
       const updated = await Holiday.findByIdAndUpdate(
         id,
         {
@@ -193,6 +206,7 @@ router.put(
           description,
           type,
           enabled,
+          yearCode: yearCodes,
         },
         { new: true },
       );
@@ -224,12 +238,10 @@ router.put(
       });
     } catch (error) {
       console.error("Error updating holiday:", error);
-      res
-        .status(500)
-        .json({
-          success: false,
-          message: "Server error while updating holiday",
-        });
+      res.status(500).json({
+        success: false,
+        message: "Server error while updating holiday",
+      });
     }
   },
 );
@@ -307,12 +319,10 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     console.error("Error bulk deleting holidays:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Server error while deleting holidays",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Server error while deleting holidays",
+    });
   }
 });
 
@@ -379,8 +389,13 @@ router.post("/import", protect, allowAdminOnly, async (req, res) => {
           continue;
         }
 
-        // Extract year from start date for yearCode
-        const year = start.getFullYear();
+        // Extract all years between start and end date for yearCode
+        const startYear = start.getFullYear();
+        const endYear = end.getFullYear();
+        const yearCodes = [];
+        for (let year = startYear; year <= endYear; year++) {
+          yearCodes.push(year.toString());
+        }
 
         // Check for duplicate holidays
         const existing = await Holiday.findOne({
@@ -401,7 +416,7 @@ router.post("/import", protect, allowAdminOnly, async (req, res) => {
           startDate: start,
           endDate: end,
           description: description ? description.trim() : "",
-          yearCode: [year.toString()],
+          yearCode: yearCodes,
           enabled: true,
         });
 

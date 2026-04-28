@@ -16,6 +16,11 @@ function relTime(dateStr) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+// Helper to get auth token
+const getAuthToken = () => {
+  return localStorage.getItem("token");
+};
+
 export default function RevertNotifications({ apiBase = "/api" }) {
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -28,72 +33,175 @@ export default function RevertNotifications({ apiBase = "/api" }) {
   });
   const [readIds, setReadIds] = useState(() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem("rn_read") || "[]"));
+      const stored = localStorage.getItem("rn_read");
+      if (stored) {
+        return new Set(JSON.parse(stored));
+      }
+      return new Set();
     } catch {
       return new Set();
     }
   });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const fetchNotifications = useCallback(async () => {
-    try {
-      const res = await fetch(
-        `${apiBase}/activity/revert-notifications?limit=20`,
-        {
-          credentials: "include",
-        },
-      );
+    const token = getAuthToken();
 
-      // Check if response is OK before parsing JSON
+    if (!token) {
+      console.warn("No auth token found, skipping fetch");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const url = `${apiBase}/activity-logs/revert-notifications?limit=20`;
+      console.log("Fetching notifications from:", url);
+
+      const res = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      console.log('value sof res', res);
+      if (res.status === 401) {
+        console.warn("Authentication failed - token may be expired");
+        setError("Authentication failed. Please refresh the page.");
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
 
       const data = await res.json();
+      console.log('values of data----->data', data);
       if (data.success) {
-        setNotifications(data.notifications);
-        setStats(data.stats);
+        setNotifications(data.notifications || []);
+        setStats(
+          data.stats || {
+            total: 0,
+            delete: 0,
+            update: 0,
+            create: 0,
+            import: 0,
+          },
+        );
+      } else {
+        throw new Error(data.message || "Failed to fetch notifications");
       }
     } catch (err) {
       console.error("Failed to fetch revert notifications:", err);
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
     }
   }, [apiBase]);
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 60_000); // poll every 60s
+    const interval = setInterval(fetchNotifications, 60000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
 
+  // Calculate unread count
   const unreadCount = notifications.filter(
-    (n) => !readIds.has(String(n._id)),
+    (n) => n._id && !readIds.has(String(n._id)),
   ).length;
 
   const markRead = (id) => {
-    const next = new Set(readIds).add(String(id));
+    if (!id) return;
+    const next = new Set(readIds);
+    next.add(String(id));
     setReadIds(next);
     localStorage.setItem("rn_read", JSON.stringify([...next]));
   };
 
   const markAllRead = () => {
-    const next = new Set(notifications.map((n) => String(n._id)));
+    const next = new Set();
+    notifications.forEach((n) => {
+      if (n._id) next.add(String(n._id));
+    });
     setReadIds(next);
     localStorage.setItem("rn_read", JSON.stringify([...next]));
   };
 
+  // Clean up stale read IDs
+  useEffect(() => {
+    const validIds = new Set(notifications.map((n) => String(n._id)));
+    const cleanedReadIds = new Set();
+    readIds.forEach((id) => {
+      if (validIds.has(id)) {
+        cleanedReadIds.add(id);
+      }
+    });
+
+    if (cleanedReadIds.size !== readIds.size) {
+      setReadIds(cleanedReadIds);
+      localStorage.setItem("rn_read", JSON.stringify([...cleanedReadIds]));
+    }
+  }, [notifications]);
+
   return (
     <div style={{ position: "relative", display: "inline-block" }}>
-      {/* ── Bell button ── */}
+      <style>
+        {`
+          @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+          
+          @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+          }
+          
+          @media (min-width: 768px) {
+            .responsive-panel {
+              position: absolute !important;
+              top: calc(100% + 8px) !important;
+              bottom: auto !important;
+              left: auto !important;
+              right: 0 !important;
+              width: 400px !important;
+              max-height: 500px !important;
+              border-radius: 12px !important;
+              box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
+              animation: fadeIn 0.2s ease-out !important;
+            }
+            
+            .responsive-panel .handle-bar {
+              display: none !important;
+            }
+          }
+        `}
+      </style>
+
+      {/* Bell button */}
       <div
         onClick={() => setOpen((o) => !o)}
         style={{
           position: "relative",
           cursor: "pointer",
-          padding: "6px",
+          padding: "8px",
           borderRadius: "8px",
-          color: "var(--color-text-primary)",
+          color: "var(--color-text-primary, #333)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          transition: "background 0.2s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(0,0,0,0.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "transparent";
         }}
         title="Revert notifications"
       >
@@ -115,20 +223,21 @@ export default function RevertNotifications({ apiBase = "/api" }) {
           <span
             style={{
               position: "absolute",
-              top: 2,
-              right: 2,
-              minWidth: 16,
-              height: 16,
-              padding: "0 4px",
-              borderRadius: 8,
+              top: "-2px",
+              right: "-2px",
+              minWidth: "18px",
+              height: "18px",
+              padding: "0 5px",
+              borderRadius: "9px",
               background: "#E24B4A",
-              color: "#FCEBEB",
-              fontSize: 10,
-              fontWeight: 500,
+              color: "#FFFFFF",
+              fontSize: "10px",
+              fontWeight: 600,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              border: "2px solid var(--color-background-primary)",
+              border: "2px solid var(--color-background-primary, #fff)",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
             }}
           >
             {unreadCount > 99 ? "99+" : unreadCount}
@@ -136,60 +245,95 @@ export default function RevertNotifications({ apiBase = "/api" }) {
         )}
       </div>
 
-      {/* ── Dropdown panel ── */}
+      {/* Dropdown Panel */}
       {open && (
         <>
           {/* Backdrop */}
           <div
             onClick={() => setOpen(false)}
-            style={{ position: "fixed", inset: 0, zIndex: 999 }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              backgroundColor: "rgba(0, 0, 0, 0.4)",
+              animation: "fadeIn 0.2s ease-out",
+            }}
           />
 
           {/* Panel */}
           <div
             style={{
-              position: "absolute",
-              top: "calc(100% + 8px)",
+              position: "fixed",
+              top: "auto",
+              bottom: 0,
+              left: 0,
               right: 0,
-              width: 360,
-              zIndex: 1000,
-              background: "var(--color-background-primary)",
-              border: "0.5px solid var(--color-border-tertiary)",
-              borderRadius: "var(--border-radius-lg)",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
+              width: "100%",
+              maxHeight: "85vh",
+              zIndex: 10000,
+              background: "#E5E7EB",
+              borderRadius: "16px 16px 0 0",
+              boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
               overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              animation: "slideUp 0.3s ease-out",
             }}
+            className="responsive-panel"
           >
+            {/* Handle bar for mobile */}
+            <div
+              className="handle-bar"
+              style={{
+                width: "40px",
+                height: "4px",
+                background: "#9CA3AF",
+                borderRadius: "2px",
+                margin: "12px auto 8px",
+                cursor: "pointer",
+              }}
+              onClick={() => setOpen(false)}
+            />
+
             {/* Header */}
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                padding: "10px 14px",
-                borderBottom: "0.5px solid var(--color-border-tertiary)",
-                background: "var(--color-background-secondary)",
+                padding: "12px 16px",
+                borderBottom: "1px solid rgba(0,0,0,0.08)",
+                background: "#E5E7EB",
               }}
             >
               <span
                 style={{
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: "var(--color-text-secondary)",
+                  fontSize: "16px",
+                  fontWeight: 600,
+                  color: "#111827",
                 }}
               >
-                Revert activity
+                Revert activity {unreadCount > 0 && `(${unreadCount} new)`}
               </span>
               {unreadCount > 0 && (
                 <button
                   onClick={markAllRead}
                   style={{
-                    fontSize: 12,
-                    color: "var(--color-text-info)",
+                    fontSize: "12px",
+                    color: "#3B82F6",
                     background: "none",
                     border: "none",
                     cursor: "pointer",
-                    padding: 0,
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    fontWeight: 500,
+                    transition: "background 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(59,130,246,0.1)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "none";
                   }}
                 >
                   Mark all read
@@ -203,7 +347,9 @@ export default function RevertNotifications({ apiBase = "/api" }) {
                 display: "grid",
                 gridTemplateColumns: "repeat(4, 1fr)",
                 gap: 0,
-                borderBottom: "0.5px solid var(--color-border-tertiary)",
+                borderBottom: "1px solid rgba(0,0,0,0.08)",
+                background: "#E5E7EB",
+                padding: "8px 0",
               }}
             >
               {[
@@ -215,24 +361,26 @@ export default function RevertNotifications({ apiBase = "/api" }) {
                 <div
                   key={s.key}
                   style={{
-                    padding: "8px 10px",
+                    padding: "8px 0",
                     textAlign: "center",
-                    borderRight:
-                      i < 3
-                        ? "0.5px solid var(--color-border-tertiary)"
-                        : "none",
+                    borderRight: i < 3 ? "1px solid rgba(0,0,0,0.08)" : "none",
                   }}
                 >
                   <div
-                    style={{ fontSize: 18, fontWeight: 500, color: s.color }}
+                    style={{
+                      fontSize: "clamp(18px, 5vw, 22px)",
+                      fontWeight: 700,
+                      color: s.color,
+                    }}
                   >
-                    {stats[s.key]}
+                    {stats[s.key] || 0}
                   </div>
                   <div
                     style={{
-                      fontSize: 10,
-                      color: "var(--color-text-tertiary)",
-                      marginTop: 1,
+                      fontSize: "clamp(10px, 3vw, 11px)",
+                      color: "#6B7280",
+                      marginTop: "4px",
+                      fontWeight: 500,
                     }}
                   >
                     {s.label}
@@ -242,21 +390,75 @@ export default function RevertNotifications({ apiBase = "/api" }) {
             </div>
 
             {/* Notification list */}
-            <div style={{ maxHeight: 320, overflowY: "auto" }}>
-              {notifications.length === 0 ? (
+            <div
+              style={{
+                flex: 1,
+                overflowY: "auto",
+                minHeight: 0,
+                WebkitOverflowScrolling: "touch",
+              }}
+            >
+              {isLoading && notifications.length === 0 ? (
                 <div
                   style={{
-                    padding: "2rem",
+                    padding: "48px 20px",
                     textAlign: "center",
-                    fontSize: 13,
-                    color: "var(--color-text-tertiary)",
+                    fontSize: "13px",
+                    color: "#6B7280",
+                    background: "#E5E7EB",
                   }}
                 >
-                  No revert activity yet
+                  <div
+                    style={{
+                      display: "inline-block",
+                      animation: "pulse 1.5s ease-in-out infinite",
+                    }}
+                  >
+                    Loading...
+                  </div>
+                </div>
+              ) : error && notifications.length === 0 ? (
+                <div
+                  style={{
+                    padding: "48px 20px",
+                    textAlign: "center",
+                    fontSize: "13px",
+                    color: "#DC2626",
+                    background: "#E5E7EB",
+                  }}
+                >
+                  <div>⚠️ Failed to load notifications</div>
+                  <button
+                    onClick={fetchNotifications}
+                    style={{
+                      marginTop: "12px",
+                      padding: "6px 12px",
+                      background: "#3B82F6",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                    }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : notifications.length === 0 ? (
+                <div
+                  style={{
+                    padding: "48px 20px",
+                    textAlign: "center",
+                    fontSize: "13px",
+                    color: "#6B7280",
+                    background: "#E5E7EB",
+                  }}
+                >
+                  🔔 No revert activity yet
                 </div>
               ) : (
                 notifications.map((n) => {
-                  const isUnread = !readIds.has(String(n._id));
+                  const isUnread = n._id && !readIds.has(String(n._id));
                   const ac =
                     ACTION_COLORS[n.originalAction] || ACTION_COLORS.UNKNOWN;
                   return (
@@ -266,41 +468,49 @@ export default function RevertNotifications({ apiBase = "/api" }) {
                       style={{
                         display: "flex",
                         alignItems: "flex-start",
-                        gap: 10,
-                        padding: "10px 14px",
-                        borderBottom:
-                          "0.5px solid var(--color-border-tertiary)",
-                        background: isUnread
-                          ? "#E6F1FB"
-                          : "var(--color-background-primary)",
+                        gap: "10px",
+                        padding: "12px 16px",
+                        borderBottom: "1px solid rgba(0,0,0,0.06)",
+                        background: isUnread ? "#DBEAFE" : "#E5E7EB",
                         cursor: "pointer",
+                        transition: "background 0.2s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isUnread) {
+                          e.currentTarget.style.background = "#D1D5DB";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isUnread) {
+                          e.currentTarget.style.background = "#E5E7EB";
+                        }
                       }}
                     >
                       {/* Unread dot */}
                       <div
                         style={{
-                          width: 6,
-                          height: 6,
+                          width: "8px",
+                          height: "8px",
                           borderRadius: "50%",
-                          background: isUnread ? "#378ADD" : "transparent",
+                          background: isUnread ? "#3B82F6" : "transparent",
                           flexShrink: 0,
-                          marginTop: 7,
+                          marginTop: "8px",
                         }}
                       />
 
                       {/* Action icon */}
                       <div
                         style={{
-                          width: 28,
-                          height: 28,
+                          width: "clamp(28px, 6vw, 32px)",
+                          height: "clamp(28px, 6vw, 32px)",
                           borderRadius: "50%",
                           background: ac.bg,
                           color: ac.text,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          fontSize: 13,
-                          fontWeight: 500,
+                          fontSize: "clamp(12px, 3vw, 14px)",
+                          fontWeight: 600,
                           flexShrink: 0,
                         }}
                       >
@@ -313,48 +523,59 @@ export default function RevertNotifications({ apiBase = "/api" }) {
                           style={{
                             display: "flex",
                             alignItems: "center",
-                            gap: 6,
-                            marginBottom: 2,
+                            gap: "8px",
+                            marginBottom: "6px",
+                            flexWrap: "wrap",
                           }}
                         >
                           <span
                             style={{
-                              fontSize: 11,
-                              fontWeight: 500,
-                              padding: "2px 6px",
-                              borderRadius: 4,
+                              fontSize: "clamp(9px, 3vw, 10px)",
+                              fontWeight: 600,
+                              padding: "3px 8px",
+                              borderRadius: "4px",
                               background: ac.bg,
                               color: ac.text,
                               flexShrink: 0,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.3px",
                             }}
                           >
-                            {n.originalAction} reverted
+                            {n.originalAction}
                           </span>
                           <span
                             style={{
-                              fontSize: 12,
-                              color: "var(--color-text-primary)",
-                              whiteSpace: "nowrap",
+                              fontSize: "clamp(12px, 3.5vw, 13px)",
+                              fontWeight: isUnread ? 600 : 500,
+                              color: "#111827",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              flex: 1,
                             }}
                           >
-                            {n.label}
+                            {n.label || `${n.originalAction} reverted`}
                           </span>
                         </div>
                         <div
                           style={{
-                            fontSize: 11,
-                            color: "var(--color-text-tertiary)",
+                            fontSize: "clamp(10px, 3vw, 11px)",
+                            color: "#6B7280",
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "4px",
+                            alignItems: "center",
                           }}
                         >
-                          <span
-                            style={{ color: "var(--color-text-secondary)" }}
-                          >
-                            {n.revertedBy}
+                          <span style={{ color: "#4B5563", fontWeight: 500 }}>
+                            {n.revertedBy || "System"}
                           </span>
-                          &nbsp;·&nbsp;{n.tableLabel || n.tableName}
-                          &nbsp;·&nbsp;{relTime(n.revertedAt)}
+                          <span style={{ color: "#9CA3AF" }}>•</span>
+                          <span>
+                            {n.tableLabel || n.tableName || "Unknown"}
+                          </span>
+                          <span style={{ color: "#9CA3AF" }}>•</span>
+                          <span>{relTime(n.revertedAt)}</span>
                         </div>
                       </div>
                     </div>
@@ -367,10 +588,11 @@ export default function RevertNotifications({ apiBase = "/api" }) {
             {notifications.length > 0 && (
               <div
                 style={{
-                  padding: "8px 14px",
+                  padding: "12px 16px",
                   textAlign: "center",
-                  borderTop: "0.5px solid var(--color-border-tertiary)",
-                  background: "var(--color-background-secondary)",
+                  borderTop: "1px solid rgba(0,0,0,0.08)",
+                  background: "#E5E7EB",
+                  flexShrink: 0,
                 }}
               >
                 <span
@@ -379,9 +601,20 @@ export default function RevertNotifications({ apiBase = "/api" }) {
                     window.location.href = "/activity-log?activityType=revert";
                   }}
                   style={{
-                    fontSize: 12,
-                    color: "var(--color-text-info)",
+                    fontSize: "13px",
+                    color: "#3B82F6",
                     cursor: "pointer",
+                    fontWeight: 600,
+                    display: "inline-block",
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    transition: "background 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(59,130,246,0.1)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
                   }}
                 >
                   View all revert logs →

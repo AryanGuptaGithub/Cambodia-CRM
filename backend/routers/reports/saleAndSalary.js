@@ -62,10 +62,28 @@ const normalizeNameInJS = (name) => {
   return n;
 };
 
-const calculateSalarySaleRatio = (sale, totalExpense) =>
-  totalExpense === 0 ? 0 : (sale / totalExpense) * 100;
+// ── FIX 2: Salary/Sale (%) = (salary / sale) * 100
+// The old formula was (sale / totalExpense) * 100 which is wrong.
+const calculateSalarySaleRatio = (salary, sale) =>
+  sale === 0 ? 0 : (salary / sale) * 100;
+
 const calculatePerformance = (profit, sale) =>
   sale === 0 ? 0 : (profit / sale) * 100;
+
+// ── FIX 1: Make endDate inclusive by setting it to end-of-day (23:59:59.999)
+// Without this, "2026-03-31" parsed as midnight UTC is LESS than records
+// recorded on that day in local time, causing the last day to be excluded.
+const toEndOfDay = (dateStr) => {
+  const d = new Date(dateStr);
+  d.setHours(23, 59, 59, 999);
+  return d;
+};
+
+const toStartOfDay = (dateStr) => {
+  const d = new Date(dateStr);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
 
 // ─── Get tour-related expense category IDs ────────────────────────────────────
 const getTourExpenseCategoryIds = async () => {
@@ -73,8 +91,8 @@ const getTourExpenseCategoryIds = async () => {
     const allCategories = await ExpenseCategory.find({ isActive: true }).select(
       "_id category",
     );
-    const tourExpenseCategoryIds = []; // Rent Expense-Vans, Tour Petrol Expense, Province Marketing
-    const tourAllowanceCategoryIds = []; // Tour Allowance
+    const tourExpenseCategoryIds = [];
+    const tourAllowanceCategoryIds = [];
 
     for (const cat of allCategories) {
       const name = (cat.category || "").toLowerCase().trim();
@@ -114,12 +132,13 @@ const fetchSalesSalaryData = async (params) => {
   const limitNum = isExport ? 10000 : parseInt(limit);
   const skip = isExport ? 0 : (pageNum - 1) * limitNum;
 
-  // ── sales date filter ──────────────────────────────────────────────────────
+  // ── FIX 1: Build date conditions using start-of-day / end-of-day
+  // so that the full selected day is always included regardless of timezone.
   const salesDateConditions = {};
   if (startDate && endDate) {
     salesDateConditions.recordingDate = {
-      $gte: new Date(startDate),
-      $lte: new Date(endDate),
+      $gte: toStartOfDay(startDate),
+      $lte: toEndOfDay(endDate), // ← inclusive end-of-day
     };
   } else {
     const now = new Date();
@@ -136,22 +155,28 @@ const fetchSalesSalaryData = async (params) => {
       }
       case "currentMonth":
         salesDateConditions.recordingDate = {
-          $gte: new Date(y, m, 1),
-          $lte: new Date(y, m + 1, 0),
+          $gte: new Date(y, m, 1, 0, 0, 0, 0),
+          $lte: new Date(y, m + 1, 0, 23, 59, 59, 999),
         };
         break;
       case "janToPreviousMonth":
         salesDateConditions.recordingDate =
           m === 0
-            ? { $gte: new Date(y - 1, 0, 1), $lte: new Date(y - 1, 11, 31) }
-            : { $gte: new Date(y, 0, 1), $lte: new Date(y, m, 0) };
+            ? {
+                $gte: new Date(y - 1, 0, 1, 0, 0, 0, 0),
+                $lte: new Date(y - 1, 11, 31, 23, 59, 59, 999),
+              }
+            : {
+                $gte: new Date(y, 0, 1, 0, 0, 0, 0),
+                $lte: new Date(y, m, 0, 23, 59, 59, 999),
+              };
         break;
       case "all":
         break;
       default:
         salesDateConditions.recordingDate = {
-          $gte: new Date(y, m, 1),
-          $lte: new Date(y, m + 1, 0),
+          $gte: new Date(y, m, 1, 0, 0, 0, 0),
+          $lte: new Date(y, m + 1, 0, 23, 59, 59, 999),
         };
     }
   }
@@ -160,8 +185,8 @@ const fetchSalesSalaryData = async (params) => {
   const expenseDateConditions = {};
   if (startDate && endDate) {
     expenseDateConditions.date = {
-      $gte: new Date(startDate),
-      $lte: new Date(endDate),
+      $gte: toStartOfDay(startDate),
+      $lte: toEndOfDay(endDate), // ← inclusive end-of-day
     };
   } else {
     const now = new Date();
@@ -178,22 +203,28 @@ const fetchSalesSalaryData = async (params) => {
       }
       case "currentMonth":
         expenseDateConditions.date = {
-          $gte: new Date(y, m, 1),
-          $lte: new Date(y, m + 1, 0),
+          $gte: new Date(y, m, 1, 0, 0, 0, 0),
+          $lte: new Date(y, m + 1, 0, 23, 59, 59, 999),
         };
         break;
       case "janToPreviousMonth":
         expenseDateConditions.date =
           m === 0
-            ? { $gte: new Date(y - 1, 0, 1), $lte: new Date(y - 1, 11, 31) }
-            : { $gte: new Date(y, 0, 1), $lte: new Date(y, m, 0) };
+            ? {
+                $gte: new Date(y - 1, 0, 1, 0, 0, 0, 0),
+                $lte: new Date(y - 1, 11, 31, 23, 59, 59, 999),
+              }
+            : {
+                $gte: new Date(y, 0, 1, 0, 0, 0, 0),
+                $lte: new Date(y, m, 0, 23, 59, 59, 999),
+              };
         break;
       case "all":
         break;
       default:
         expenseDateConditions.date = {
-          $gte: new Date(y, m, 1),
-          $lte: new Date(y, m + 1, 0),
+          $gte: new Date(y, m, 1, 0, 0, 0, 0),
+          $lte: new Date(y, m + 1, 0, 23, 59, 59, 999),
         };
     }
   }
@@ -317,9 +348,7 @@ const fetchSalesSalaryData = async (params) => {
   const { tourExpenseCategoryIds, tourAllowanceCategoryIds } =
     await getTourExpenseCategoryIds();
 
-  // ── Tour expenses from Expense collection, grouped by mrId ───────────────
-  // tourExpense: Tour Petrol Expense, Province Marketing Expense, Rent Expense - Vans
-  // tourAllowance: Tour Allowance category
+  // ── Tour expenses grouped by mrId ─────────────────────────────────────────
   const tourExpenseByMR = {};
   const tourAllowanceByMR = {};
 
@@ -373,7 +402,7 @@ const fetchSalesSalaryData = async (params) => {
     });
   }
 
-  // ── Also get expenses NOT linked to any MR (no mrId) for summary totals ──
+  // ── Summary tour totals (all expenses, not just per-MR) ──────────────────
   const summaryTourExpMatchConditions = { ...expenseDateConditions };
   const tourOrConditions = [];
   if (tourExpenseCategoryIds.length > 0)
@@ -460,8 +489,6 @@ const fetchSalesSalaryData = async (params) => {
               else: "$basicSalary",
             },
           },
-          // Payroll allowance buckets — tour allowances are EXCLUDED here
-          // because they now come from the Expense collection
           allowanceBuckets: {
             $reduce: {
               input: { $ifNull: ["$allowances", []] },
@@ -566,7 +593,6 @@ const fetchSalesSalaryData = async (params) => {
     { totalSalary: 0, totalIncentive: 0, totalAllowance: 0 },
   );
 
-  // totalExpense = salary + incentive + allowance + tour expenses from Expense collection
   const totalExpenseFromAllRecords =
     totalPayrollSummary.totalSalary +
     totalPayrollSummary.totalIncentive +
@@ -592,7 +618,7 @@ const fetchSalesSalaryData = async (params) => {
     ratio,
   };
 
-  // ── join sales + payroll + expenses ──────────────────────────────────────
+  // ── join sales + payroll + tour expenses per MR ────────────────────────────
   const payrollByStaffId = {};
   payrollAggregate.forEach((p) => {
     payrollByStaffId[p._id.toString()] = p;
@@ -621,8 +647,6 @@ const fetchSalesSalaryData = async (params) => {
     const incentive = parseFloat(payroll.incentive) || 0;
     const allowance = parseFloat(payroll.allowance) || 0;
 
-    // ── Tour data comes from Expense collection (matched by mrId) ──────────
-    // Try to match by staffId first, then by mrId from the sale record
     const mrIdFromSale = record.records?.[0]?.mrId;
     const tourExpKey =
       staffId || (mrIdFromSale ? mrIdFromSale.toString() : null);
@@ -650,8 +674,9 @@ const fetchSalesSalaryData = async (params) => {
       tourExpense,
       tourAllowance,
       totalExpense,
+      // FIX 2: (salary / sale) * 100 — was (sale / totalExpense) * 100
       salarySaleRatio: parseFloat(
-        calculateSalarySaleRatio(sale, totalExpense).toFixed(2),
+        calculateSalarySaleRatio(salary, sale).toFixed(2),
       ),
       performance: parseFloat(calculatePerformance(profit, sale).toFixed(2)),
       saleCount: parseInt(record.saleCount) || 0,
@@ -722,13 +747,11 @@ router.get("/", async (req, res) => {
     res.status(200).json(await fetchSalesSalaryData(req.query));
   } catch (error) {
     console.error("Error in sales salary ratio:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch sales salary ratio data",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch sales salary ratio data",
+      error: error.message,
+    });
   }
 });
 
@@ -765,7 +788,12 @@ router.get("/export", async (req, res) => {
         width: 22,
       },
       { header: "Total Expense ($)", key: "totalExpense", width: 15 },
-      { header: "Salary/Sale (%)", key: "salarySaleRatio", width: 15 },
+      // Updated header to reflect correct formula: salary / sale * 100
+      {
+        header: "Salary/Sale (%)\n(Salary ÷ Sale × 100)",
+        key: "salarySaleRatio",
+        width: 22,
+      },
       { header: "Performance (%)", key: "performance", width: 15 },
       { header: "Sale Count", key: "saleCount", width: 12 },
       { header: "Customer Count", key: "customerCount", width: 12 },
@@ -819,9 +847,9 @@ router.get("/export", async (req, res) => {
       src.font = {
         color: {
           argb:
-            (parseFloat(rec.salarySaleRatio) || 0) >= 0
-              ? "FF16A34A"
-              : "FFDC2626",
+            (parseFloat(rec.salarySaleRatio) || 0) > 100
+              ? "FFDC2626"
+              : "FF16A34A",
         },
       };
       const pfc = row.getCell("performance");
@@ -845,7 +873,7 @@ router.get("/export", async (req, res) => {
       totalExpense: summary.totalExpense,
       salarySaleRatio:
         summary.totalSales > 0
-          ? (summary.totalSales / summary.totalExpense) * 100
+          ? (summary.totalSalary / summary.totalSales) * 100 // FIX 2 applied in export too
           : 0,
     });
     sumRow.font = { bold: true };
@@ -883,13 +911,11 @@ router.get("/export", async (req, res) => {
     await workbook.xlsx.write(res);
   } catch (error) {
     console.error("Error in export:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to export data",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to export data",
+      error: error.message,
+    });
   }
 });
 
@@ -918,13 +944,11 @@ router.get("/mrs", async (req, res) => {
     ]);
     res.status(200).json({ success: true, data: mrList, count: mrList.length });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to fetch MR list",
-        error: error.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch MR list",
+      error: error.message,
+    });
   }
 });
 

@@ -24,9 +24,23 @@ const TOUR_MR_CATEGORY_KEYWORDS = [
   "rent expense - vans",
 ];
 
+// ✅ Salary-type category keywords — expenses in these categories
+// can ONLY be deleted by deleting the linked Payroll record.
+const SALARY_CATEGORY_KEYWORDS = [
+  "salary expenses",
+  "salary expense",
+  "salary",
+];
+
 const isMrRequiredCategory = (categoryName = "") => {
   const lower = categoryName.toLowerCase().trim();
   return TOUR_MR_CATEGORY_KEYWORDS.some((kw) => lower.includes(kw));
+};
+
+// ✅ Returns true when an expense belongs to a salary-type category
+const isSalaryExpenseCategory = (categoryName = "") => {
+  const lower = categoryName.toLowerCase().trim();
+  return SALARY_CATEGORY_KEYWORDS.some((kw) => lower.includes(kw));
 };
 
 const expensesAPI = {
@@ -68,7 +82,6 @@ const Expenses = () => {
     description: "",
     amount: "",
     date: "",
-    // mrId and mrName come from the expense itself — read-only, passed through as-is
     mrId: "",
     mrName: "",
   });
@@ -138,7 +151,20 @@ const Expenses = () => {
     [expenseCategories],
   );
 
-  // Whether the currently selected edit category needs an MR
+  // Derive the category name for a given expense object
+  const getExpenseCategoryName = useCallback(
+    (exp) => {
+      return (
+        exp.category?.category ||
+        (typeof exp.category === "string"
+          ? getCategoryName(exp.category)
+          : "") ||
+        ""
+      );
+    },
+    [getCategoryName],
+  );
+
   const editCategoryName = useMemo(() => {
     if (!editForm.category) return "";
     const cat = expenseCategories.find((c) => c._id === editForm.category);
@@ -150,15 +176,9 @@ const Expenses = () => {
     [editCategoryName],
   );
 
-  // Whether a given expense row needs MR (for display in table/card)
   const expenseNeedsMr = useCallback(
-    (exp) => {
-      const catName =
-        exp.category?.category ||
-        (typeof exp.category === "string" ? getCategoryName(exp.category) : "");
-      return isMrRequiredCategory(catName);
-    },
-    [getCategoryName],
+    (exp) => isMrRequiredCategory(getExpenseCategoryName(exp)),
+    [getExpenseCategoryName],
   );
 
   const filteredExpenses = useMemo(() => {
@@ -233,18 +253,31 @@ const Expenses = () => {
         showToast("error", "SuperAdmin cannot delete expenses");
         return;
       }
+
       const exp = expenses.find((e) => e._id === id);
       if (!exp) return;
+
+      // ✅ Block deletion of salary-type expenses
+      const catName = getExpenseCategoryName(exp);
+      if (isSalaryExpenseCategory(catName)) {
+        showToast(
+          "error",
+          `<b>${catName}</b> expenses cannot be deleted directly. Please delete the linked <b>Payroll</b> record instead — that will automatically remove this expense.`,
+        );
+        return;
+      }
+
       const sourceName = exp.sourceAccount?.name || "Unknown Account";
       const result = await confirmDialog({
         title: "Delete Expense",
         text: `Are you sure you want to delete this expense <b>${
-          exp.category?.category || "Unknown"
+          catName || "Unknown"
         }</b> for <b>$${exp.amount}</b> from <b>${sourceName}</b>?`,
         icon: "warning",
         confirmButtonText: "Yes, delete",
         cancelButtonText: "Cancel",
       });
+
       if (result.isConfirmed) {
         try {
           setLoading(true);
@@ -252,9 +285,7 @@ const Expenses = () => {
           if (delRes.success) {
             showToast(
               "success",
-              `Deleted expense <b>${
-                exp.category?.category || "Unknown"
-              }</b> of <b>$${exp.amount}</b> from <b>${sourceName}</b> successfully`,
+              `Deleted expense <b>${catName || "Unknown"}</b> of <b>$${exp.amount}</b> from <b>${sourceName}</b> successfully`,
             );
             setExpenses((prev) => prev.filter((e) => e._id !== id));
             const catId = exp.category?._id || exp.category;
@@ -273,7 +304,7 @@ const Expenses = () => {
         }
       }
     },
-    [expenses, isSuperAdmin],
+    [expenses, isSuperAdmin, getExpenseCategoryName],
   );
 
   const handleSelectRow = useCallback((id) => {
@@ -296,6 +327,17 @@ const Expenses = () => {
         showToast("error", "SuperAdmin cannot edit expenses");
         return;
       }
+
+      // ✅ Block editing of salary-type expenses
+      const catName = getExpenseCategoryName(exp);
+      if (isSalaryExpenseCategory(catName)) {
+        showToast(
+          "error",
+          `<b>${catName}</b> expenses cannot be edited directly. Please edit the linked <b>Payroll</b> record instead.`,
+        );
+        return;
+      }
+
       setEditingExpense(exp);
       setEditForm({
         sourceAccount: exp.sourceAccount?._id || exp.sourceAccount || "",
@@ -303,13 +345,12 @@ const Expenses = () => {
         description: exp.description || exp.remarks || "",
         amount: exp.amount?.toString() || "",
         date: exp.date ? new Date(exp.date).toISOString().split("T")[0] : "",
-        // Read mrId and mrName directly from the expense — no external lookup needed
         mrId: exp.mrId?._id || exp.mrId || "",
         mrName: exp.mrName || "",
       });
       setIsEditModalOpen(true);
     },
-    [isSuperAdmin],
+    [isSuperAdmin, getExpenseCategoryName],
   );
 
   const handleUpdateExpense = async (e) => {
@@ -333,7 +374,6 @@ const Expenses = () => {
       return;
     }
 
-    // Validate MR is present when category requires it
     if (editNeedsMr && !editForm.mrId) {
       showToast(
         "error",
@@ -350,7 +390,6 @@ const Expenses = () => {
         description: editForm.description?.trim() || "",
         amount: newAmt,
         date: editForm.date,
-        // Pass mrId and mrName through as-is from the original expense
         ...(editNeedsMr && editForm.mrId
           ? { mrId: editForm.mrId, mrName: editForm.mrName }
           : {}),
@@ -404,6 +443,9 @@ const Expenses = () => {
   // Mobile card
   const MobileExpenseCard = ({ exp, onEdit, onDelete }) => {
     const needsMr = expenseNeedsMr(exp);
+    const catName = getExpenseCategoryName(exp);
+    const isSalary = isSalaryExpenseCategory(catName);
+
     return (
       <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
         <div className="flex justify-between items-start mb-3">
@@ -416,13 +458,14 @@ const Expenses = () => {
                   : getSafeValue(exp, "sourceAccount.name", "Unknown"))}
             </p>
             <p className="text-sm text-gray-500 mt-1">
-              Category:{" "}
-              {exp.category?.category ||
-                (typeof exp.category === "string"
-                  ? getCategoryName(exp.category)
-                  : getSafeValue(exp, "category.category", "Unknown"))}
+              Category: {catName || "Unknown"}
+              {/* ✅ Salary badge on mobile */}
+              {isSalary && (
+                <span className="ml-2 text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">
+                  Payroll
+                </span>
+              )}
             </p>
-            {/* Show MR in mobile card if category requires it */}
             {needsMr && (
               <p className="text-sm text-indigo-600 mt-1 font-medium">
                 MR:{" "}
@@ -460,6 +503,13 @@ const Expenses = () => {
           <div className="mt-3 pt-2 border-t border-gray-100 text-center">
             <span className="text-xs bg-gray-100 text-gray-500 px-3 py-1 rounded-full italic">
               👁️ View Only
+            </span>
+          </div>
+        ) : isSalary ? (
+          /* ✅ Salary expenses: show info label instead of edit/delete buttons */
+          <div className="mt-3 pt-2 border-t border-gray-100 text-center">
+            <span className="text-xs bg-orange-50 text-orange-600 px-3 py-1 rounded-full italic">
+              🔒 Manage via Payroll
             </span>
           </div>
         ) : (
@@ -637,6 +687,9 @@ const Expenses = () => {
             ) : (
               currentExpenses.map((exp, idx) => {
                 const needsMr = expenseNeedsMr(exp);
+                const catName = getExpenseCategoryName(exp);
+                const isSalary = isSalaryExpenseCategory(catName);
+
                 return (
                   <tr
                     key={exp._id}
@@ -666,12 +719,14 @@ const Expenses = () => {
                           : getSafeValue(exp, "sourceAccount.name", ""))}
                     </td>
                     <td className="p-3">
-                      {exp.category?.category ||
-                        (typeof exp.category === "string"
-                          ? getCategoryName(exp.category)
-                          : getSafeValue(exp, "category.category", ""))}
+                      <span>{catName}</span>
+                      {/* ✅ Payroll badge in table for salary expenses */}
+                      {isSalary && (
+                        <span className="ml-2 text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">
+                          Payroll
+                        </span>
+                      )}
                     </td>
-                    {/* MR column — read directly from exp.mrName */}
                     <td className="p-3">
                       {needsMr ? (
                         exp.mrName ? (
@@ -894,7 +949,6 @@ const Expenses = () => {
                   </select>
                 </div>
 
-                {/* MR display — read-only, shown only when category needs it */}
                 {editNeedsMr && (
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">

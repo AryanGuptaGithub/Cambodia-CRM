@@ -22,6 +22,16 @@ import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// ── FIX 1: Local date formatter — avoids UTC timezone shift from toISOString()
+// e.g. new Date("2026-03-31") in UTC+7 would give "2026-03-30" via toISOString()
+const toLocalDateStr = (d) => {
+  if (!d) return "";
+  const yr = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const dy = String(d.getDate()).padStart(2, "0");
+  return `${yr}-${mo}-${dy}`;
+};
+
 const SalesSalaryRatio = () => {
   const [data, setData] = useState({
     summary: {
@@ -103,8 +113,8 @@ const SalesSalaryRatio = () => {
         const f = new Date(y, m, 1);
         const l = new Date(y, m + 1, 0);
         return {
-          startDate: f.toISOString().split("T")[0],
-          endDate: l.toISOString().split("T")[0],
+          startDate: toLocalDateStr(f), // ← FIX: use local formatter
+          endDate: toLocalDateStr(l), // ← FIX: use local formatter
           period: `${y}-${(m + 1).toString().padStart(2, "0")}`,
           displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`,
         };
@@ -113,26 +123,25 @@ const SalesSalaryRatio = () => {
         const j = new Date(y, 0, 1);
         const lm = new Date(y, m, 0);
         return {
-          startDate: j.toISOString().split("T")[0],
-          endDate: lm.toISOString().split("T")[0],
+          startDate: toLocalDateStr(j), // ← FIX
+          endDate: toLocalDateStr(lm), // ← FIX
           period: null,
           displayDate: getJanToPreviousMonthDisplay(),
         };
       }
       case "custom": {
-        const ss = customDateRange.startDate
-          ? customDateRange.startDate.toISOString().split("T")[0]
-          : "";
-        const es = customDateRange.endDate
-          ? customDateRange.endDate.toISOString().split("T")[0]
-          : "";
+        // ── FIX 1: Use toLocalDateStr instead of toISOString().split("T")[0]
+        // toISOString() converts to UTC which in UTC+5:30/+7 shifts the date
+        // backward by one day — e.g. Mar 31 selected → "Mar 30" sent to backend
+        const ss = toLocalDateStr(customDateRange.startDate);
+        const es = toLocalDateStr(customDateRange.endDate);
         return {
           startDate: ss,
           endDate: es,
           period: customDateRange.startDate
             ? getYearMonthFromDate(customDateRange.startDate)
             : null,
-          displayDate: ss && es ? `${ss} - ${es}` : "Select custom dates",
+          displayDate: ss && es ? `${ss} – ${es}` : "Select custom dates",
         };
       }
       case "all":
@@ -356,8 +365,8 @@ const SalesSalaryRatio = () => {
       let filename = "sales-salary-ratio-report.xlsx";
       const cd = response.headers["content-disposition"];
       if (cd) {
-        const m = cd.match(/filename="(.+)"/);
-        if (m?.[1]) filename = m[1];
+        const match = cd.match(/filename="(.+)"/);
+        if (match?.[1]) filename = match[1];
       }
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const a = document.createElement("a");
@@ -392,15 +401,18 @@ const SalesSalaryRatio = () => {
   const fmtPct = (v) => {
     const n = parseFloat(v);
     if (isNaN(n)) return "0.00%";
-    return `${n > 0 ? "+" : ""}${n.toFixed(2)}%`;
+    return `${n.toFixed(2)}%`;
   };
   const fmtRatio = (v) => {
     const n = parseFloat(v);
     return isNaN(n) ? "0.0000" : n.toFixed(4);
   };
 
-  const calcSalarySaleRatio = (sale, totalExpense) =>
-    totalExpense === 0 ? 0 : (sale / totalExpense) * 100;
+  // ── FIX 2: Salary/Sale (%) = (salary / sale) * 100
+  // Original code: calcSalarySaleRatio(sale, totalExpense) = (sale / totalExpense) * 100  ← WRONG
+  // Correct formula: salary ÷ sale × 100
+  const calcSalarySaleRatio = (salary, sale) =>
+    sale === 0 ? 0 : (salary / sale) * 100;
 
   const getPerformanceInfo = (ratio) => {
     if (ratio <= 25)
@@ -428,7 +440,7 @@ const SalesSalaryRatio = () => {
     };
   };
 
-  // ── Pagination (like DailyReports) ─────────────────────────────────────────
+  // ── Pagination ─────────────────────────────────────────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
@@ -488,7 +500,9 @@ const SalesSalaryRatio = () => {
     const totalExpense =
       parseFloat(record.totalExpense) ||
       salary + incentive + allowance + tourExpense + tourAllowance;
-    const salarySaleRatio = calcSalarySaleRatio(sale, totalExpense);
+
+    // FIX 2 applied: (salary / sale) * 100
+    const salarySaleRatio = calcSalarySaleRatio(salary, sale);
     const {
       label: perfLabel,
       textColor: perfText,
@@ -550,7 +564,7 @@ const SalesSalaryRatio = () => {
           <div className="bg-white px-4 py-3">
             <div className="text-xs text-gray-500 mb-0.5">Salary/Sale (%)</div>
             <div
-              className={`font-semibold text-sm ${salarySaleRatio >= 0 ? "text-green-600" : "text-red-600"}`}
+              className={`font-semibold text-sm ${salarySaleRatio > 100 ? "text-red-600" : "text-green-600"}`}
             >
               {fmtPct(salarySaleRatio)}
             </div>
@@ -721,10 +735,7 @@ const SalesSalaryRatio = () => {
       >
         <div className="flex flex-wrap gap-2 mb-3">
           {[
-            {
-              id: "currentMonth",
-              label: isMobileView ? "Current Month" : "Current Month",
-            },
+            { id: "currentMonth", label: "Current Month" },
             {
               id: "janToPreviousMonth",
               label: isMobileView ? "Jan - Prev" : "Jan - Previous Month",
@@ -752,7 +763,7 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {/* ── Summary cards (responsive grid) ── */}
+      {/* ── Summary cards ── */}
       <div
         className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-4 gap-6 mb-6"}`}
       >
@@ -825,7 +836,7 @@ const SalesSalaryRatio = () => {
         ))}
       </div>
 
-      {/* ── Expense Breakdown Cards (responsive) ── */}
+      {/* ── Expense Breakdown Cards ── */}
       <div
         className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-1" : "grid-cols-1 md:grid-cols-3 gap-4 mb-6"}`}
       >
@@ -868,7 +879,7 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {/* Performance legend (only on desktop) */}
+      {/* Performance legend (desktop only) */}
       {!isMobileView && (
         <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
           <span className="font-semibold text-gray-600">
@@ -960,6 +971,7 @@ const SalesSalaryRatio = () => {
                 <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
                 <th className="p-3 text-sm font-medium">Tour Allowance ($)</th>
                 <th className="p-3 text-sm font-medium">Total Expense ($)</th>
+                {/* Column header clarified: salary ÷ sale × 100 */}
                 <th className="p-3 text-sm font-medium">Salary/Sale (%)</th>
                 <th className="p-3 text-sm font-medium">Performance</th>
               </tr>
@@ -990,10 +1002,9 @@ const SalesSalaryRatio = () => {
                       allowance +
                       tourExpense +
                       tourAllowance;
-                  const salarySaleRatio = calcSalarySaleRatio(
-                    sale,
-                    totalExpense,
-                  );
+
+                  // FIX 2: (salary / sale) * 100
+                  const salarySaleRatio = calcSalarySaleRatio(salary, sale);
                   const {
                     label: perfLabel,
                     textColor: perfText,
@@ -1036,7 +1047,7 @@ const SalesSalaryRatio = () => {
                         {fmt$(totalExpense)}
                       </td>
                       <td
-                        className={`p-3 text-sm font-semibold ${salarySaleRatio >= 0 ? "text-green-600" : "text-red-600"}`}
+                        className={`p-3 text-sm font-semibold ${salarySaleRatio > 100 ? "text-red-600" : "text-green-600"}`}
                       >
                         {fmtPct(salarySaleRatio)}
                       </td>

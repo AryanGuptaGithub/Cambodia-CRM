@@ -326,24 +326,33 @@ const createPayrollFinancialRecords = async ({
         importStatus: "imported",
         importErrors: [],
         payrollCode: payrollCode,
-        payrollId: payrollId, // Store the payroll _id
+        payrollId: payrollId,
       });
       await txn.save({ session });
       console.log(`      Transaction saved with ID: ${txn._id}`);
     }
   }
 
-  // Create expense record with payrollId
+  // ✅ Create ONE expense record PER source account (mirrors transaction logic)
   const resolvedCategoryId = salaryCategory._id || withdrawCategory._id;
-  if (resolvedCategoryId && payrollNetSalary > 0) {
-    const resolvedSourceAccountId = sourceAccounts[0]?.account?._id || null;
-    console.log(`   Creating expense with category ID: ${resolvedCategoryId}`);
+
+  for (const { account, amount } of sourceAccounts) {
+    if (!resolvedCategoryId || amount <= 0) {
+      console.log(
+        `   ⚠️ Skipping expense for account "${account.name}" — invalid category or zero amount`,
+      );
+      continue;
+    }
+
+    console.log(
+      `   Creating expense for account "${account.name}": $${amount}`,
+    );
 
     const expense = new Expense({
       category: resolvedCategoryId,
       categoryType: resolvedCategoryId,
-      amount: toFixedAmount(payrollNetSalary),
-      finalAmount: toFixedAmount(payrollNetSalary),
+      amount: toFixedAmount(amount), // ✅ Per-account amount (e.g. 150 or 75.8)
+      finalAmount: toFixedAmount(amount), // ✅ Per-account amount
       exchangeLoss: 0,
       description: remarks,
       remarks: remarks,
@@ -352,7 +361,7 @@ const createPayrollFinancialRecords = async ({
       payrollCode: payrollCode,
       employeeId: employeeId,
       supplier: employeeId,
-      payrollId: payrollId, // Store the payroll _id
+      payrollId: payrollId,
       period: period,
       transactionType: "payment outward",
       accountType: "Company Account",
@@ -361,14 +370,18 @@ const createPayrollFinancialRecords = async ({
       invoiceNo: "NA",
       isConversionLoss: false,
       createdBy: createdBy || null,
-      sourceAccount: resolvedSourceAccountId,
-      sources: sourceAccounts.map(({ account, amount }) => ({
-        accountId: account._id,
-        accountName: account.name || account.code || "Unknown Account",
-        amount: toFixedAmount(amount),
-        finalAmount: toFixedAmount(amount),
-      })),
+      sourceAccount: account._id, // ✅ This account's ID
+      sources: [
+        // ✅ Single source entry for this account
+        {
+          accountId: account._id,
+          accountName: account.name || account.code || "Unknown Account",
+          amount: toFixedAmount(amount),
+          finalAmount: toFixedAmount(amount),
+        },
+      ],
     });
+
     await expense.save({ session });
     console.log(`      Expense saved with ID: ${expense._id}`);
   }

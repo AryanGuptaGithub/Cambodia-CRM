@@ -1,16 +1,5 @@
-import {
-  Search,
-  Download,
-  X,
-  Plus,
-  Trash2,
-  Edit,
-  Settings,
-  Upload,
-  FileSpreadsheet,
-  Menu,
-  Eye,
-} from "lucide-react";
+
+import { Search, Download, X, Plus, Trash2, Edit, Settings, Upload, FileSpreadsheet, Menu, Eye } from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
@@ -46,18 +35,8 @@ const parseDateFromInput = (dateString) => {
     const parts = dateString.split(" ");
     if (parts.length === 3) {
       const monthNames = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
       ];
       const monthIndex = monthNames.findIndex(
         (m) => m.toLowerCase() === parts[1].toLowerCase(),
@@ -2359,7 +2338,14 @@ const CashAndBank = () => {
     setEditingTransaction(transaction);
     setIsEditModalOpen(true);
   };
+
   const handleDelete = async (transaction) => {
+    // Check if transaction contains "Salary payment" in remarks
+    if (transaction.remarks && transaction.remarks.toLowerCase().includes("salary payment")) {
+      showToast("error", "Salary Expenses expenses cannot be deleted directly. Please delete the linked Payroll record instead — that will automatically remove this expense.");
+      return;
+    }
+
     const confirm = await confirmDialog({
       title: "Delete Transaction",
       text: `Are you sure you want to delete <b>${transaction.title || "This transaction"}</b>?`,
@@ -2384,6 +2370,22 @@ const CashAndBank = () => {
 
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
+
+    // Check if any selected transaction contains "Salary payment" in remarks
+    const selectedTransactions = allTransactions.filter(tx => selected.includes(tx._id));
+    const salaryPaymentTransactions = selectedTransactions.filter(
+      tx => tx.remarks && tx.remarks.toLowerCase().includes("salary payment")
+    );
+
+    if (salaryPaymentTransactions.length > 0) {
+      const salaryInvoiceNumbers = salaryPaymentTransactions.map(tx => tx.invoiceNumber).join(", ");
+      showToast(
+        "error", 
+        `Cannot delete ${salaryPaymentTransactions.length} transaction(s) containing 'Salary payment' in remarks: ${salaryInvoiceNumbers}`
+      );
+      return;
+    }
+
     const confirm = await confirmDialog({
       title: "Delete Selected Transactions",
       text: `Are you sure you want to delete <b>${selected.length}</b> selected transaction(s)?`,
@@ -2604,6 +2606,9 @@ const CashAndBank = () => {
           ? "text-green-700"
           : "text-red-600";
 
+    // Check if transaction has Salary payment in remarks
+    const hasSalaryPayment = item.remarks && item.remarks.toLowerCase().includes("salary payment");
+
     return (
       <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
         <div className="flex justify-between items-start mb-3">
@@ -2633,6 +2638,11 @@ const CashAndBank = () => {
               ${(item.finalAmount || item.amount || 0).toFixed(2)}
             </span>
           </div>
+          {hasSalaryPayment && (
+            <div className="flex justify-between">
+              <span className="text-red-600 font-semibold">⚠️ Salary Payment</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-gray-600">Source:</span>
             <span className="text-gray-800 font-medium">
@@ -2655,6 +2665,14 @@ const CashAndBank = () => {
               {item.date ? formatDateToReadable(item.date) : "--"}
             </span>
           </div>
+          {item.remarks && (
+            <div className="flex justify-between">
+              <span className="text-gray-600">Remarks:</span>
+              <span className="text-gray-800 truncate max-w-[200px]" title={item.remarks}>
+                {item.remarks}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -2696,6 +2714,9 @@ const CashAndBank = () => {
           ? "text-green-700"
           : "text-red-600";
 
+    // Check if transaction has Salary payment in remarks
+    const hasSalaryPayment = tx.remarks && tx.remarks.toLowerCase().includes("salary payment");
+
     return ReactDOM.createPortal(
       <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
         <div className="bg-white w-full max-w-md rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
@@ -2715,6 +2736,14 @@ const CashAndBank = () => {
           </div>
 
           <div className="p-4 space-y-4">
+            {hasSalaryPayment && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-2">
+                <p className="text-red-700 text-sm font-semibold">
+                  ⚠️ This transaction contains cannot be deleted
+                </p>
+              </div>
+            )}
+
             <div className="border-b pb-3">
               <label className="block text-xs font-medium text-gray-500 mb-1">
                 Invoice Number
@@ -2836,7 +2865,8 @@ const CashAndBank = () => {
             )}
           </div>
 
-          <div className="sticky bottom-0 bg-gray-50 border-t px-4 py-3 flex justify-end">
+          <div className="sticky bottom-0 bg-gray-50 border-t px-4 py-3 flex justify-end gap-2">
+        
             <button
               onClick={() => {
                 setIsViewModalOpen(false);
@@ -3109,40 +3139,45 @@ const CashAndBank = () => {
                   </td>
                 </tr>
               ) : (
-                currentData.map((item, index) => (
-                  <tr
-                    key={`row-${item._id || index}`}
-                    className={`hover:bg-gray-50 ${index < currentData.length - 1 ? "border-b" : ""}`}
-                  >
-                    {allFields
-                      .filter((f) => tableColumns.includes(f.id))
-                      .map((field) => (
-                        <td
-                          key={`cell-${item._id}-${field.id}`}
-                          className="p-3 whitespace-nowrap min-w-[120px]"
-                        >
-                          {field.id === "invoiceNumber" ? (
-                            <div className="flex items-center gap-4">
-                              <input
-                                type="checkbox"
-                                checked={selected.includes(item._id)}
-                                onChange={() => toggleSelect(item)}
-                              />
-                              <span className="capitalize">
-                                {item.invoiceNumber || "NA"}
-                              </span>
-                            </div>
-                          ) : (
-                            renderCellContent(item, field)
-                          )}
-                        </td>
-                      ))}
-                  </tr>
-                ))
+                currentData.map((item, index) => {
+                  const hasSalaryPayment = item.remarks && item.remarks.toLowerCase().includes("salary payment");
+                  return (
+                    <tr
+                      key={`row-${item._id || index}`}
+                      className={`hover:bg-gray-50 ${index < currentData.length - 1 ? "border-b" : ""} ${hasSalaryPayment ? "bg-red-50" : ""}`}
+                    >
+                      {allFields
+                        .filter((f) => tableColumns.includes(f.id))
+                        .map((field) => (
+                          <td
+                            key={`cell-${item._id}-${field.id}`}
+                            className="p-3 whitespace-nowrap min-w-[120px]"
+                          >
+                            {field.id === "invoiceNumber" ? (
+                              <div className="flex items-center gap-4">
+                                <input
+                                  type="checkbox"
+                                  checked={selected.includes(item._id)}
+                                  onChange={() => toggleSelect(item)}
+                                  disabled={hasSalaryPayment}
+                                  className={hasSalaryPayment ? "opacity-50 cursor-not-allowed" : ""}
+                                />
+                                <span className="capitalize">
+                                  {item.invoiceNumber || "NA"}
+                                </span>
+                       
+                              </div>
+                            ) : (
+                              renderCellContent(item, field)
+                            )}
+                          </td>
+                        ))}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
-
           {totalPages > 1 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
               <button

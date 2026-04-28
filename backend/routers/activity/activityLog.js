@@ -1894,59 +1894,261 @@ router.delete("/cleanup/:days", protect, async (req, res) => {
 // Query params:
 //   unreadOnly=true  → only entries not yet acknowledged
 //   limit=20         → max results (default 20)
+// ─── GET /revert-notifications ───────────────────────────────────────────────
+// Returns revert activity for the dashboard notification badge.
+// Query params:
+//   unreadOnly=true  → only entries not yet acknowledged
+//   limit=20         → max results (default 20)
 router.get("/revert-notifications", protect, async (req, res) => {
-  try {
-    const { unreadOnly, limit = 20 } = req.query;
+  console.log("🔔 GET /revert-notifications - Start");
 
+  try {
+    console.log("🔍 Parsing query parameters...");
+    const { unreadOnly, limit = 20 } = req.query;
+    console.log(`📊 unreadOnly: ${unreadOnly}, limit: ${limit}`);
+
+    // Initialize filter for REVERT actions
     const filter = { action: "REVERT" };
+    console.log(
+      "📋 Initial filter (looking for REVERT actions):",
+      JSON.stringify(filter),
+    );
+
+    // Log total counts for debugging
+    const totalCreateLogs = await ActivityLog.countDocuments({
+      action: "CREATE",
+    });
+    const totalUpdateLogs = await ActivityLog.countDocuments({
+      action: "UPDATE",
+    });
+    const totalDeleteLogs = await ActivityLog.countDocuments({
+      action: "DELETE",
+    });
+    const totalImportLogs = await ActivityLog.countDocuments({
+      action: "IMPORT",
+    });
+    const totalRevertLogs = await ActivityLog.countDocuments({
+      action: "REVERT",
+    });
+
+    console.log(
+      `📊 Database stats - CREATE: ${totalCreateLogs}, UPDATE: ${totalUpdateLogs}, DELETE: ${totalDeleteLogs}, IMPORT: ${totalImportLogs}, REVERT: ${totalRevertLogs}`,
+    );
 
     // If the user is not super-admin, only show reverts they triggered
     const role = req.user?.role;
+    console.log(`👤 User role from token: "${role}"`);
+
     const isSuperAdmin =
-      role === "super admin" || role === "super" || role === "superadmin";
+      role === "super admin" ||
+      role === "super" ||
+      role === "admin" ||
+      role === "superadmin";
+    console.log(`✅ Is super admin? ${isSuperAdmin} (role: ${role})`);
+
     if (!isSuperAdmin) {
-      filter.userId = String(req.user._id || req.user.id);
+      const userId = String(req.user._id || req.user.id);
+      filter.userId = userId;
+      console.log(`🔒 Non-super admin user, filtering by userId: ${userId}`);
+      console.log("📋 Updated filter with userId:", JSON.stringify(filter));
+    } else {
+      console.log("👑 Super admin user, no userId filter applied");
     }
+
+    console.log("🔄 Executing database query for REVERT logs...");
+    console.log(`📊 Query: ActivityLog.find(${JSON.stringify(filter)})`);
+    console.log(`📊 Sort: createdAt: -1`);
+    console.log(`📊 Limit: ${parseInt(limit)}`);
 
     const revertLogs = await ActivityLog.find(filter)
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
       .lean();
 
-    // Attach the original log's isReverted status so the UI knows which
-    // original actions have been reverted
-    const revertNotifications = revertLogs.map((log) => ({
-      _id:            log._id,
-      revertedBy:     log.userName,
-      revertedAt:     log.createdAt,
-      originalAction: log.previousData?.action
-                        || log.description?.match(/Reverted (\w+) action/)?.[1]
-                        || "UNKNOWN",
-      label:          log.actionLabel || log.description || "",
-      tableName:      log.tableName,
-      tableLabel:     log.tableLabel,
-      recordId:       log.recordId,
-      referenceNumber: log.referenceNumber,
-      originalLogId:  log.description?.match(/Original log ID: ([a-f0-9]{24})/)?.[1] || null,
-      revertSummary:  log.description?.match(/Summary: ({.+})$/)?.[1]
-                        ? JSON.parse(log.description.match(/Summary: ({.+})$/)[1])
-                        : null,
-    }));
+    console.log(`✅ Found ${revertLogs.length} revert logs`);
 
-    // Stats breakdown by original action type
+    if (revertLogs.length === 0) {
+      console.log("ℹ️ No REVERT actions found in the database yet.");
+      console.log(
+        "💡 Tip: You need to revert some actions first to see notifications here.",
+      );
+      console.log(
+        "💡 To create a revert, go to Activity Log and click 'Revert' on a CREATE/UPDATE/DELETE/IMPORT action.",
+      );
+
+      // Return empty array with explanation
+      return res.json({
+        success: true,
+        notifications: [],
+        stats: {
+          total: 0,
+          delete: 0,
+          update: 0,
+          create: 0,
+          import: 0,
+        },
+        message:
+          "No revert actions found. Revert some actions to see notifications.",
+      });
+    }
+
+    if (revertLogs.length > 0) {
+      console.log(
+        "📝 Sample revert log (first one):",
+        JSON.stringify(
+          {
+            _id: revertLogs[0]._id,
+            action: revertLogs[0].action,
+            userName: revertLogs[0].userName,
+            createdAt: revertLogs[0].createdAt,
+            actionLabel: revertLogs[0].actionLabel,
+          },
+          null,
+          2,
+        ),
+      );
+    }
+
+    // Process revert notifications
+    console.log("🔄 Processing revert notifications...");
+    const revertNotifications = revertLogs.map((log, index) => {
+      console.log(
+        `📦 Processing revert log ${index + 1}/${revertLogs.length}, ID: ${log._id}`,
+      );
+
+      // Extract original action from various sources
+      let originalAction = "UNKNOWN";
+
+      // Check previousData (which contains the original action's data)
+      if (log.previousData?.action) {
+        originalAction = log.previousData.action;
+        console.log(
+          `  ✓ Found originalAction from previousData.action: ${originalAction}`,
+        );
+      }
+      // Check newData (which might contain the original action)
+      else if (log.newData?.action) {
+        originalAction = log.newData.action;
+        console.log(
+          `  ✓ Found originalAction from newData.action: ${originalAction}`,
+        );
+      }
+      // Check description for pattern like "Reverted DELETE action"
+      else if (log.description) {
+        const match = log.description.match(/Reverted (\w+) action/);
+        if (match) {
+          originalAction = match[1];
+          console.log(
+            `  ✓ Found originalAction from description regex: ${originalAction}`,
+          );
+        } else if (log.description.includes("DELETE")) {
+          originalAction = "DELETE";
+          console.log(`  ✓ Found DELETE in description`);
+        } else if (log.description.includes("UPDATE")) {
+          originalAction = "UPDATE";
+          console.log(`  ✓ Found UPDATE in description`);
+        } else if (log.description.includes("CREATE")) {
+          originalAction = "CREATE";
+          console.log(`  ✓ Found CREATE in description`);
+        } else if (log.description.includes("IMPORT")) {
+          originalAction = "IMPORT";
+          console.log(`  ✓ Found IMPORT in description`);
+        }
+      }
+      // Check actionLabel
+      else if (log.actionLabel) {
+        if (log.actionLabel.includes("DELETE")) originalAction = "DELETE";
+        else if (log.actionLabel.includes("UPDATE")) originalAction = "UPDATE";
+        else if (log.actionLabel.includes("CREATE")) originalAction = "CREATE";
+        else if (log.actionLabel.includes("IMPORT")) originalAction = "IMPORT";
+        console.log(
+          `  ✓ Found originalAction from actionLabel: ${originalAction}`,
+        );
+      }
+
+      if (originalAction === "UNKNOWN") {
+        console.log(
+          `  ⚠️ Could not determine originalAction for revert log ${log._id}`,
+        );
+      }
+
+      // Extract original log ID from description
+      let originalLogId = null;
+      if (log.description) {
+        const match = log.description.match(/Original log ID: ([a-f0-9]{24})/);
+        if (match) {
+          originalLogId = match[1];
+          console.log(`  ✓ Found originalLogId: ${originalLogId}`);
+        }
+      }
+
+      // Extract revert summary from description
+      let revertSummary = null;
+      if (log.description) {
+        const summaryMatch = log.description.match(/Summary: ({.+})/);
+        if (summaryMatch) {
+          try {
+            revertSummary = JSON.parse(summaryMatch[1]);
+            console.log(`  ✓ Found revertSummary:`, revertSummary);
+          } catch (e) {
+            console.log(`  ⚠️ Failed to parse revertSummary:`, e.message);
+          }
+        }
+      }
+
+      const notification = {
+        _id: log._id,
+        revertedBy: log.userName || "System",
+        revertedAt: log.createdAt,
+        originalAction: originalAction,
+        label:
+          log.actionLabel || log.description || `${originalAction} reverted`,
+        tableName: log.tableName,
+        tableLabel: log.tableLabel,
+        recordId: log.recordId,
+        referenceNumber: log.referenceNumber,
+        originalLogId: originalLogId,
+        revertSummary: revertSummary,
+      };
+
+      console.log(
+        `  ✅ Created notification: ${notification._id} - ${notification.originalAction} by ${notification.revertedBy}`,
+      );
+      return notification;
+    });
+
+    console.log("📊 Calculating statistics...");
     const stats = {
-      total:  revertNotifications.length,
-      delete: revertNotifications.filter(n => n.originalAction === "DELETE").length,
-      update: revertNotifications.filter(n => n.originalAction === "UPDATE").length,
-      create: revertNotifications.filter(n => n.originalAction === "CREATE").length,
-      import: revertNotifications.filter(n => n.originalAction === "IMPORT").length,
+      total: revertNotifications.length,
+      delete: revertNotifications.filter((n) => n.originalAction === "DELETE")
+        .length,
+      update: revertNotifications.filter((n) => n.originalAction === "UPDATE")
+        .length,
+      create: revertNotifications.filter((n) => n.originalAction === "CREATE")
+        .length,
+      import: revertNotifications.filter((n) => n.originalAction === "IMPORT")
+        .length,
     };
 
-    res.json({ success: true, notifications: revertNotifications, stats });
+    console.log("📈 Stats:", JSON.stringify(stats));
+    console.log("✅ Sending successful response...");
+
+    res.json({
+      success: true,
+      notifications: revertNotifications,
+      stats,
+    });
+
+    console.log("✅ Response sent successfully");
   } catch (err) {
-    console.error("Revert notifications error:", err);
+    console.error("❌ Revert notifications error:", err);
+    console.error("❌ Error stack:", err.stack);
+    console.error("❌ Error message:", err.message);
+    console.log("⚠️ Sending error response...");
     res.status(500).json({ success: false, message: err.message });
   }
+
+  console.log("🔔 GET /revert-notifications - End");
 });
 
 export default router;

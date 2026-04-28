@@ -16,7 +16,11 @@ function DashboardLayout() {
     const check = () => {
       const mobile = window.innerWidth < 1024;
       setIsMobile(mobile);
-      setIsSidebarOpen(!mobile);
+      if (!mobile) {
+        setIsSidebarOpen(true);
+      } else {
+        setIsSidebarOpen(false);
+      }
     };
     check();
     window.addEventListener("resize", check);
@@ -31,13 +35,16 @@ function DashboardLayout() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
+    localStorage.removeItem("username");
+    localStorage.removeItem("rn_read");
     navigate("/login", { replace: true });
   };
 
   const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
 
   const role = (localStorage.getItem("role") || "").toLowerCase().trim();
-  const isSuperAdmin = role === "super admin";
+  const isSuperAdmin =
+    role === "super admin" || role === "super" || role === "superadmin";
 
   const userName = localStorage.getItem("username") || "User";
   const userInitials = userName.slice(0, 2).toUpperCase();
@@ -77,27 +84,30 @@ function DashboardLayout() {
                 src="/mainlogo.png"
                 alt="Logo"
                 className="h-8 w-auto object-contain"
+                onError={(e) => {
+                  e.target.style.display = "none";
+                }}
               />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {isSuperAdmin && (
                 <button
                   onClick={() => navigate("/user-activity")}
-                  className="px-3 py-1 text-xs font-semibold bg-blue-600 text-white rounded-lg"
+                  className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  User Activity
+                  Activity
                 </button>
               )}
 
               {/* Revert Notifications Component */}
-              <div className="relative w-9 h-9 flex items-center justify-center rounded-full hover:bg-white/60">
-                <RevertNotifications apiBase={`${backendUrl}/api`} />
-              </div>
+              <RevertNotifications
+                apiBase={backendUrl ? `${backendUrl}/api` : "/api"}
+              />
 
               <button
                 onClick={toggleSidebar}
-                className="w-9 h-9 rounded-full bg-gray-300 flex items-center justify-center"
+                className="w-9 h-9 rounded-full bg-gray-300 flex items-center justify-center hover:bg-gray-400 transition-colors"
               >
                 <span className="text-sm font-semibold text-gray-700">
                   {userInitials}
@@ -108,9 +118,12 @@ function DashboardLayout() {
         )}
 
         {/* ================= DESKTOP HEADER ================= */}
-        <header className="hidden lg:flex items-center justify-between bg-white px-4 py-2 border-b border-gray-200 shadow-sm shadow-gray-200">
-          <button onClick={toggleSidebar}>
-            <Menu className="w-6 h-6 text-gray-700" />
+        <header className="hidden lg:flex items-center justify-between bg-white px-4 py-2 border-b border-gray-200 shadow-sm min-h-[64px]">
+          <button
+            onClick={toggleSidebar}
+            className="hover:bg-gray-100 p-2 rounded-lg transition-colors"
+          >
+            <Menu className="w-5 h-5 text-gray-700" />
           </button>
 
           <h1 className="font-bold text-lg text-gray-800">
@@ -122,33 +135,40 @@ function DashboardLayout() {
               {isSuperAdmin && (
                 <button
                   onClick={() => navigate("/user-activity")}
-                  className="px-3 py-1 text-lg font-semibold bg-blue-600 text-white rounded-lg cursor-pointer"
+                  className="px-3 py-1.5 text-sm font-semibold bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors"
                 >
                   User Activity
                 </button>
               )}
 
               {/* Revert Notifications Component for Desktop */}
-              <RevertNotifications apiBase={`${backendUrl}/api`} />
+              <RevertNotifications
+                apiBase={backendUrl ? `${backendUrl}/api` : "/api"}
+              />
 
-              <span>
+              <span className="text-gray-600 hidden xl:inline">
                 {dateTime.toLocaleDateString()} {dateTime.toLocaleTimeString()}
               </span>
             </div>
 
-            <div className="flex items-center gap-2 bg-gray-50 px-2 py-1 rounded-lg">
-              <div className="w-7 h-7 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-xs font-semibold">
+            <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg">
+              <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-xs font-semibold">
                 {userInitials}
               </div>
 
               <div className="hidden md:block">
-                <div className="text-xs font-medium">{userName}</div>
-                <div className="text-[10px] text-gray-500">{userRole}</div>
+                <div className="text-sm font-medium text-gray-800">
+                  {userName}
+                </div>
+                <div className="text-xs text-gray-500">{userRole}</div>
               </div>
             </div>
 
-            <button onClick={handleLogout}>
-              <LogOut className="w-5 h-5 text-gray-600 hover:text-red-500 cursor-pointer" />
+            <button
+              onClick={handleLogout}
+              className="hover:bg-gray-100 p-2 rounded-lg transition-colors"
+            >
+              <LogOut className="w-5 h-5 text-gray-600 hover:text-red-500 cursor-pointer transition-colors" />
             </button>
           </div>
         </header>

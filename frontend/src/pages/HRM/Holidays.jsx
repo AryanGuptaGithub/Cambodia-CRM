@@ -115,9 +115,9 @@ const Holidays = () => {
   const formatDateToShort = (dateString) => {
     if (!dateString) return "";
     const date = new Date(dateString);
-    const day = String(date.getDate()).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
     const month = date.toLocaleString("default", { month: "short" });
-    const year = date.getFullYear();
+    const year = date.getUTCFullYear();
     return `${day} ${month} ${year}`;
   };
 
@@ -134,10 +134,35 @@ const Holidays = () => {
     );
   }, [holidays, currentYearString]);
 
-  // For calendar, use ALL holidays
-  const allHolidaysForCalendar = useMemo(() => {
-    return holidays;
-  }, [holidays]);
+  // For calendar, filter holidays by the selected year
+  const currentYearCalendarHolidays = useMemo(() => {
+    const startOfYear = new Date(Date.UTC(currentYear, 0, 1));
+    const endOfYear = new Date(Date.UTC(currentYear, 11, 31, 23, 59, 59, 999));
+
+    return holidays
+      .filter((holiday) => {
+        if (!holiday.startDate) return false;
+
+        const holidayStart = new Date(holiday.startDate);
+        const holidayEnd = new Date(holiday.endDate || holiday.startDate);
+
+        // Reset to UTC for comparison
+        const holidayStartUTC = new Date(Date.UTC(
+          holidayStart.getUTCFullYear(),
+          holidayStart.getUTCMonth(),
+          holidayStart.getUTCDate()
+        ));
+        const holidayEndUTC = new Date(Date.UTC(
+          holidayEnd.getUTCFullYear(),
+          holidayEnd.getUTCMonth(),
+          holidayEnd.getUTCDate()
+        ));
+
+        // Check if holiday overlaps with the selected year
+        return holidayStartUTC <= endOfYear && holidayEndUTC >= startOfYear;
+      })
+      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+  }, [holidays, currentYear]);
 
   const filteredHolidays = currentYearHolidays.filter(
     (r) =>
@@ -147,73 +172,71 @@ const Holidays = () => {
         r.startDate.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
-  // Get holidays for the entire current year - FOR CALENDAR
-  const currentYearFilteredHolidays = useMemo(() => {
-    const startOfYear = new Date(currentYear, 0, 1);
-    const endOfYear = new Date(currentYear, 11, 31);
-    endOfYear.setHours(23, 59, 59, 999);
-
-    return allHolidaysForCalendar
-      .filter((holiday) => {
-        if (!holiday.startDate) return false;
-
-        const holidayStart = new Date(holiday.startDate);
-        const holidayEnd = new Date(holiday.endDate || holiday.startDate);
-
-        holidayStart.setHours(0, 0, 0, 0);
-        holidayEnd.setHours(0, 0, 0, 0);
-
-        return holidayStart <= endOfYear && holidayEnd >= startOfYear;
-      })
-      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-  }, [allHolidaysForCalendar, currentYear]);
-
-  // Calendar view functions
+  // Calendar view functions - FIXED with UTC
   const isSunday = (date) => {
-    return date.getDay() === 0;
+    return date.getUTCDay() === 0;
   };
 
   const isHoliday = (date) => {
-    const dateString = date.toISOString().split("T")[0];
-    return allHolidaysForCalendar.some((holiday) => {
+    if (!date) return false;
+    
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    const dateString = `${year}-${month}-${day}`;
+    
+    return currentYearCalendarHolidays.some((holiday) => {
       if (!holiday.startDate) return false;
       const holidayStart = new Date(holiday.startDate);
       const holidayEnd = new Date(holiday.endDate || holiday.startDate);
-
-      const holidayStartString = holidayStart.toISOString().split("T")[0];
-      const holidayEndString = holidayEnd.toISOString().split("T")[0];
-
+      
+      const holidayStartString = `${holidayStart.getUTCFullYear()}-${String(holidayStart.getUTCMonth() + 1).padStart(2, "0")}-${String(holidayStart.getUTCDate()).padStart(2, "0")}`;
+      const holidayEndString = `${holidayEnd.getUTCFullYear()}-${String(holidayEnd.getUTCMonth() + 1).padStart(2, "0")}-${String(holidayEnd.getUTCDate()).padStart(2, "0")}`;
+      
       return dateString >= holidayStartString && dateString <= holidayEndString;
     });
   };
 
-  const getHolidayName = (dateString) => {
-    const holiday = allHolidaysForCalendar.find((h) => {
+  const getHolidayName = (dateParam) => {
+    let searchDateString;
+    
+    if (dateParam instanceof Date) {
+      const year = dateParam.getUTCFullYear();
+      const month = String(dateParam.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(dateParam.getUTCDate()).padStart(2, "0");
+      searchDateString = `${year}-${month}-${day}`;
+    } else {
+      searchDateString = dateParam;
+    }
+    
+    const holiday = currentYearCalendarHolidays.find((h) => {
       if (!h.startDate) return false;
       const holidayStart = new Date(h.startDate);
       const holidayEnd = new Date(h.endDate || h.startDate);
-
-      const holidayStartString = holidayStart.toISOString().split("T")[0];
-      const holidayEndString = holidayEnd.toISOString().split("T")[0];
-
-      return dateString >= holidayStartString && dateString <= holidayEndString;
+      
+      const holidayStartString = `${holidayStart.getUTCFullYear()}-${String(holidayStart.getUTCMonth() + 1).padStart(2, "0")}-${String(holidayStart.getUTCDate()).padStart(2, "0")}`;
+      const holidayEndString = `${holidayEnd.getUTCFullYear()}-${String(holidayEnd.getUTCMonth() + 1).padStart(2, "0")}-${String(holidayEnd.getUTCDate()).padStart(2, "0")}`;
+      
+      return searchDateString >= holidayStartString && searchDateString <= holidayEndString;
     });
     return holiday ? holiday.name : "";
   };
 
   const getDaysInMonth = (year = currentYear, month = currentMonth) => {
     const days = [];
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-
-    for (let i = 0; i < firstDay.getDay(); i++) {
+    const firstDay = new Date(Date.UTC(year, month, 1));
+    const lastDay = new Date(Date.UTC(year, month + 1, 0));
+    
+    const firstDayOfWeek = firstDay.getUTCDay();
+    
+    for (let i = 0; i < firstDayOfWeek; i++) {
       days.push(null);
     }
-
-    for (let i = 1; i <= lastDay.getDate(); i++) {
-      days.push(new Date(year, month, i));
+    
+    for (let i = 1; i <= lastDay.getUTCDate(); i++) {
+      days.push(new Date(Date.UTC(year, month, i)));
     }
-
+    
     return days;
   };
 
@@ -243,18 +266,24 @@ const Holidays = () => {
     setCurrentYear(currentYear + 1);
   };
 
-  // Calendar date click
+  // Calendar date click - FIXED with UTC
   const handleCalendarDateClick = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
+    if (!date) return;
+    
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(date.getUTCDate()).padStart(2, "0");
     const dateString = `${year}-${month}-${day}`;
 
-    const existingHoliday = allHolidaysForCalendar.find((h) => {
+    const existingHoliday = currentYearCalendarHolidays.find((h) => {
       if (!h.startDate) return false;
-      const holidayDate = new Date(h.startDate);
-      const holidayDateString = holidayDate.toISOString().split("T")[0];
-      return holidayDateString === dateString;
+      const holidayStart = new Date(h.startDate);
+      const holidayEnd = new Date(h.endDate || h.startDate);
+      
+      const holidayStartString = `${holidayStart.getUTCFullYear()}-${String(holidayStart.getUTCMonth() + 1).padStart(2, "0")}-${String(holidayStart.getUTCDate()).padStart(2, "0")}`;
+      const holidayEndString = `${holidayEnd.getUTCFullYear()}-${String(holidayEnd.getUTCMonth() + 1).padStart(2, "0")}-${String(holidayEnd.getUTCDate()).padStart(2, "0")}`;
+      
+      return dateString >= holidayStartString && dateString <= holidayEndString;
     });
 
     if (existingHoliday) {
@@ -549,17 +578,37 @@ const Holidays = () => {
   };
 
   const handleStartDateChange = (date) => {
-    setForm((prev) => ({
-      ...prev,
-      startDate: date ? date.toISOString().split("T")[0] : "",
-    }));
+    if (date) {
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(date.getUTCDate()).padStart(2, "0");
+      setForm((prev) => ({
+        ...prev,
+        startDate: `${year}-${month}-${day}`,
+      }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        startDate: "",
+      }));
+    }
   };
 
   const handleEndDateChange = (date) => {
-    setForm((prev) => ({
-      ...prev,
-      endDate: date ? date.toISOString().split("T")[0] : "",
-    }));
+    if (date) {
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(date.getUTCDate()).padStart(2, "0");
+      setForm((prev) => ({
+        ...prev,
+        endDate: `${year}-${month}-${day}`,
+      }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        endDate: "",
+      }));
+    }
   };
 
   const handleAddHoliday = async (e) => {
@@ -640,40 +689,33 @@ const Holidays = () => {
   };
 
   const getHolidaysForMonth = (monthIndex) => {
-    return currentYearFilteredHolidays.filter((holiday) => {
+    return currentYearCalendarHolidays.filter((holiday) => {
       if (!holiday.startDate) return false;
 
       const holidayStart = new Date(holiday.startDate);
       const holidayEnd = new Date(holiday.endDate || holiday.startDate);
 
-      const startOfMonth = new Date(currentYear, monthIndex, 1);
-      const endOfMonth = new Date(currentYear, monthIndex + 1, 0);
-      endOfMonth.setHours(23, 59, 59, 999);
+      const startOfMonth = new Date(Date.UTC(currentYear, monthIndex, 1));
+      const endOfMonth = new Date(Date.UTC(currentYear, monthIndex + 1, 0, 23, 59, 59, 999));
 
       return holidayStart <= endOfMonth && holidayEnd >= startOfMonth;
     });
   };
 
-  // Monthly Calendar Component
+  // Monthly Calendar Component - FIXED with UTC
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
     ];
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayUTC = new Date(Date.UTC(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    ));
 
     return (
       <div className="bg-white rounded-2xl shadow border border-gray-200 p-3 md:p-6">
@@ -712,12 +754,11 @@ const Holidays = () => {
               return <div key={`empty-${index}`} className="p-1 md:p-2" />;
             }
 
-            const isCurrentMonth = date.getMonth() === currentMonth;
-            const isToday = date.toDateString() === today.toDateString();
-            const dateString = date.toISOString().split("T")[0];
+            const isCurrentMonth = date.getUTCMonth() === currentMonth;
+            const isToday = date.getTime() === todayUTC.getTime();
             const isHolidayDate = isHoliday(date);
             const isSundayDate = isSunday(date);
-            const holidayName = getHolidayName(dateString);
+            const holidayName = getHolidayName(date);
 
             let bgColor = "bg-white";
             let borderColor = "border-gray-200";
@@ -741,7 +782,7 @@ const Holidays = () => {
 
             return (
               <div
-                key={dateString}
+                key={`${currentYear}-${currentMonth}-${date.getUTCDate()}`}
                 onClick={() => handleCalendarDateClick(date)}
                 className={`min-h-[25px] md:min-h-[50px] p-1 md:p-2 border rounded-lg cursor-pointer transition-all hover:shadow-md ${bgColor} ${borderColor} ${textColor} ${
                   !isCurrentMonth ? "opacity-50" : ""
@@ -751,7 +792,7 @@ const Holidays = () => {
                   <span
                     className={`text-xs md:text-sm font-medium ${isSundayDate || isHolidayDate ? "text-white" : "text-gray-900"}`}
                   >
-                    {date.getDate()}
+                    {date.getUTCDate()}
                   </span>
                 </div>
                 {isHolidayDate && holidayName && !isMobileView && (
@@ -767,6 +808,7 @@ const Holidays = () => {
             );
           })}
         </div>
+        
         <div className="mt-4 md:mt-6 flex flex-wrap gap-2 md:gap-4 items-center justify-center text-[10px] md:text-sm bg-gray-50 rounded-lg p-2 md:p-4">
           <div className="flex items-center gap-1 md:gap-2">
             <div className="w-2 h-2 md:w-4 md:h-4 bg-red-500 rounded"></div>
@@ -789,21 +831,11 @@ const Holidays = () => {
     );
   };
 
-  // Annual Calendar Component
+  // Annual Calendar Component - FIXED with UTC
   const renderAnnualCalendar = () => {
     const monthNames = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     ];
     const today = new Date();
     const currentYearToday = today.getFullYear();
@@ -886,9 +918,10 @@ const Holidays = () => {
                     const isSundayDay = isSunday(date);
                     const isHolidayDate = isHoliday(date);
                     const isToday =
-                      date.toDateString() === today.toDateString();
-                    const dateString = date.toISOString().split("T")[0];
-                    const holidayName = getHolidayName(dateString);
+                      date.getUTCFullYear() === today.getFullYear() &&
+                      date.getUTCMonth() === today.getMonth() &&
+                      date.getUTCDate() === today.getDate();
+                    const holidayName = getHolidayName(date);
 
                     let cellStyle =
                       "h-4 md:h-6 flex items-center justify-center rounded text-[8px] md:text-xs cursor-pointer ";
@@ -905,7 +938,7 @@ const Holidays = () => {
 
                     return (
                       <div
-                        key={dateString}
+                        key={`${currentYear}-${monthIndex}-${date.getUTCDate()}`}
                         className={cellStyle.trim()}
                         onClick={() => handleCalendarDateClick(date)}
                         title={
@@ -916,7 +949,7 @@ const Holidays = () => {
                               : "Normal day"
                         }
                       >
-                        {date.getDate()}
+                        {date.getUTCDate()}
                       </div>
                     );
                   })}
@@ -1389,7 +1422,6 @@ const Holidays = () => {
                               >
                                 <Eye size={isMobileView ? 16 : 18} />
                               </button>
-                              {/* Only show Edit button on desktop */}
                               {!isMobileView && (
                                 <button
                                   onClick={() => editHoliday(holiday)}
@@ -1399,7 +1431,6 @@ const Holidays = () => {
                                   <Edit size={18} />
                                 </button>
                               )}
-                              {/* Only show Delete button on desktop */}
                               {!isMobileView && (
                                 <button
                                   onClick={() => deleteHoliday(holiday)}
@@ -1784,6 +1815,7 @@ const Holidays = () => {
           document.body,
         )}
     </div>
+  
   );
 };
 
