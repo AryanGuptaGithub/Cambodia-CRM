@@ -2,11 +2,6 @@ import mongoose from "mongoose";
 
 const expenseSchema = new mongoose.Schema(
   {
-    date: {
-      type: Date,
-      required: true,
-      default: Date.now,
-    },
     category: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ExpenseCategory",
@@ -16,120 +11,48 @@ const expenseSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "ExpenseCategory",
     },
-    remarks: {
-      type: String,
-      trim: true,
-      required: true,
-    },
     amount: {
       type: Number,
       required: true,
-      min: 0,
-      validate: {
-        validator: function (v) {
-          return v >= 0;
-        },
-        message: "Amount must be greater than or equal to 0",
-      },
     },
     finalAmount: {
       type: Number,
-      default: 0,
+      required: true,
     },
     exchangeLoss: {
       type: Number,
       default: 0,
     },
-    sourceAccount: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Destination",
-      required: true,
-    },
     description: {
       type: String,
-      trim: true,
+    },
+    remarks: {
+      type: String,
+    },
+    date: {
+      type: Date,
+      required: true,
     },
     reference: {
       type: String,
-      trim: true,
-    },
-    // ── MR linkage (only for tour-related expense categories) ──────────────
-    mrId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "MedicalRepresentative",
-      default: null,
-    },
-    mrName: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    // ───────────────────────────────────────────────────────────────────────
-    paymentMethod: {
-      type: String,
-      enum: ["cash", "card", "bank transfer", "digital wallet", "other"],
-      default: "cash",
-    },
-    notes: {
-      type: String,
-      trim: true,
-    },
-    isRecurring: {
-      type: Boolean,
-      default: false,
-    },
-    receipt: {
-      filename: String,
-      originalName: String,
-      mimetype: String,
-      size: Number,
-    },
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
-    // ─────────────────────────────────────────────────────────────────
-    // NEW: Payroll linking fields
-    // ─────────────────────────────────────────────────────────────────
-    payrollId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Payroll",
-      default: null,
-      index: true,
-    },
-    payrollCode: {
-      type: String,
-      default: null,
-      index: true,
-    },
-    employeeId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Staff",
-      default: null,
-    },
-    supplier: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Staff",
-      default: null,
-    },
-    period: {
-      type: String,
-      default: null,
     },
     transactionType: {
       type: String,
-      default: "payment outward",
+      enum: ["payment outward", "deposit", "withdraw", "expense"],
+      default: "expense",
     },
     accountType: {
       type: String,
+      enum: ["Cash Balance", "Personal Account", "Company Account"],
       default: "Company Account",
     },
     importStatus: {
       type: String,
-      default: "imported",
+      enum: ["pending", "imported", "failed"],
+      default: "pending",
     },
     importErrors: {
-      type: Array,
+      type: [String],
       default: [],
     },
     invoiceNo: {
@@ -140,31 +63,71 @@ const expenseSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    sources: {
-      type: Array,
-      default: [],
+    // For MR-related expenses
+    mrId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Staff",
     },
-    // ─────────────────────────────────────────────────────────────────
+    mrName: {
+      type: String,
+    },
+    // For payroll linking
+    employeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Staff",
+    },
+    supplier: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Supplier",
+    },
+    sourceAccount: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Destination",
+    },
+    sources: [
+      {
+        accountId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Destination",
+        },
+        accountName: String,
+        amount: Number,
+        finalAmount: Number,
+      },
+    ],
+    // ✅ New flag to identify payroll-related expenses
+    isPayroll: {
+      type: Boolean,
+      default: false,
+    },
+    payrollCode: {
+      type: String,
+      default: null,
+    },
+    payrollId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payroll",
+      default: null,
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    period: {
+      type: String,
+    },
   },
   {
     timestamps: true,
   },
 );
 
-expenseSchema.index({ date: -1 });
-expenseSchema.index({ category: 1 });
-expenseSchema.index({ sourceAccount: 1 });
-expenseSchema.index({ createdAt: -1 });
-expenseSchema.index({ mrId: 1 });
-expenseSchema.index({ payrollId: 1 });
+// Indexes
+expenseSchema.index({ isPayroll: 1 });
 expenseSchema.index({ payrollCode: 1 });
+expenseSchema.index({ payrollId: 1 });
+expenseSchema.index({ employeeId: 1 });
+expenseSchema.index({ date: 1 });
 
-expenseSchema.pre("save", function (next) {
-  if (this.amount < 0) {
-    next(new Error("Amount cannot be negative"));
-  } else {
-    next();
-  }
-});
-
-export default mongoose.model("Expense", expenseSchema);
+const Expense = mongoose.model("Expense", expenseSchema);
+export default Expense;

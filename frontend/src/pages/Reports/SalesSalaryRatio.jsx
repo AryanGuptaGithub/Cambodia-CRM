@@ -22,8 +22,6 @@ import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// ── FIX 1: Local date formatter — avoids UTC timezone shift from toISOString()
-// e.g. new Date("2026-03-31") in UTC+7 would give "2026-03-30" via toISOString()
 const toLocalDateStr = (d) => {
   if (!d) return "";
   const yr = d.getFullYear();
@@ -41,8 +39,9 @@ const SalesSalaryRatio = () => {
       totalProfit: 0,
       ratio: 0,
       totalTourExpense: 0,
-      totalTourAllowance: 0,
+      totalAllowance: 0,
       totalIncentive: 0,
+      expenseSaleRatio: 0,
     },
     records: [],
   });
@@ -63,8 +62,6 @@ const SalesSalaryRatio = () => {
     hasPrev: false,
   });
   const [expandedMr, setExpandedMr] = useState(null);
-
-  // ── Mobile detection ──────────────────────────────────────────────────────
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -84,7 +81,6 @@ const SalesSalaryRatio = () => {
   const getSerialNumber = (index) =>
     (pagination.currentPage - 1) * itemsPerPage + index + 1;
 
-  // ── date helpers ────────────────────────────────────────────────────────────
   const getCurrentMonthName = () =>
     new Date().toLocaleString("default", { month: "long" });
   const getCurrentYear = () => new Date().getFullYear();
@@ -106,33 +102,30 @@ const SalesSalaryRatio = () => {
 
   const getDateRange = () => {
     const today = new Date();
-    const y = today.getFullYear();
-    const m = today.getMonth();
+    const y = today.getFullYear(),
+      m = today.getMonth();
     switch (selectedTab) {
       case "currentMonth": {
-        const f = new Date(y, m, 1);
-        const l = new Date(y, m + 1, 0);
+        const f = new Date(y, m, 1),
+          l = new Date(y, m + 1, 0);
         return {
-          startDate: toLocalDateStr(f), // ← FIX: use local formatter
-          endDate: toLocalDateStr(l), // ← FIX: use local formatter
+          startDate: toLocalDateStr(f),
+          endDate: toLocalDateStr(l),
           period: `${y}-${(m + 1).toString().padStart(2, "0")}`,
           displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`,
         };
       }
       case "janToPreviousMonth": {
-        const j = new Date(y, 0, 1);
-        const lm = new Date(y, m, 0);
+        const j = new Date(y, 0, 1),
+          lm = new Date(y, m, 0);
         return {
-          startDate: toLocalDateStr(j), // ← FIX
-          endDate: toLocalDateStr(lm), // ← FIX
+          startDate: toLocalDateStr(j),
+          endDate: toLocalDateStr(lm),
           period: null,
           displayDate: getJanToPreviousMonthDisplay(),
         };
       }
       case "custom": {
-        // ── FIX 1: Use toLocalDateStr instead of toISOString().split("T")[0]
-        // toISOString() converts to UTC which in UTC+5:30/+7 shifts the date
-        // backward by one day — e.g. Mar 31 selected → "Mar 30" sent to backend
         const ss = toLocalDateStr(customDateRange.startDate);
         const es = toLocalDateStr(customDateRange.endDate);
         return {
@@ -161,13 +154,26 @@ const SalesSalaryRatio = () => {
     }
   };
 
-  // ── fetch ───────────────────────────────────────────────────────────────────
+  const emptyData = () => ({
+    summary: {
+      totalSales: 0,
+      totalSalary: 0,
+      totalExpense: 0,
+      totalProfit: 0,
+      ratio: 0,
+      totalTourExpense: 0,
+      totalAllowance: 0,
+      totalIncentive: 0,
+      expenseSaleRatio: 0,
+    },
+    records: [],
+  });
+
   const fetchData = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
       const params = { page, limit: itemsPerPage, dateFilter: selectedTab };
-
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -200,8 +206,10 @@ const SalesSalaryRatio = () => {
             totalProfit: parseFloat(s.totalProfit) || 0,
             ratio: parseFloat(s.ratio) || 0,
             totalTourExpense: parseFloat(s.totalTourExpense) || 0,
-            totalTourAllowance: parseFloat(s.totalTourAllowance) || 0,
+            // ✅ CHANGE: use merged totalAllowance
+            totalAllowance: parseFloat(s.totalAllowance) || 0,
             totalIncentive: parseFloat(s.totalIncentive) || 0,
+            expenseSaleRatio: parseFloat(s.expenseSaleRatio) || 0,
           },
           records: response.data.data?.records || [],
         });
@@ -223,19 +231,7 @@ const SalesSalaryRatio = () => {
         error.response?.data?.message ||
           "Failed to fetch sales salary ratio data",
       );
-      setData({
-        summary: {
-          totalSales: 0,
-          totalSalary: 0,
-          totalExpense: 0,
-          totalProfit: 0,
-          ratio: 0,
-          totalTourExpense: 0,
-          totalTourAllowance: 0,
-          totalIncentive: 0,
-        },
-        records: [],
-      });
+      setData(emptyData());
       setPagination({
         currentPage: 1,
         totalPages: 1,
@@ -252,19 +248,7 @@ const SalesSalaryRatio = () => {
     if (selectedTab === "custom") {
       if (customDateRange.startDate && customDateRange.endDate) fetchData(1);
       else {
-        setData({
-          summary: {
-            totalSales: 0,
-            totalSalary: 0,
-            totalExpense: 0,
-            totalProfit: 0,
-            ratio: 0,
-            totalTourExpense: 0,
-            totalTourAllowance: 0,
-            totalIncentive: 0,
-          },
-          records: [],
-        });
+        setData(emptyData());
         setPagination({
           currentPage: 1,
           totalPages: 1,
@@ -304,7 +288,6 @@ const SalesSalaryRatio = () => {
   };
   const handleCustomDateChange = (name, date) =>
     setCustomDateRange((p) => ({ ...p, [name]: date }));
-
   const handleApplyCustomFilter = () => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
       showToast("warning", "Please select both start and end dates");
@@ -318,7 +301,6 @@ const SalesSalaryRatio = () => {
     setShowCustomFilter(false);
     fetchData(1);
   };
-
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
     if (tab === "custom") setShowCustomFilter(true);
@@ -327,19 +309,15 @@ const SalesSalaryRatio = () => {
       setShowCustomFilter(false);
     }
   };
-
   const handleClearFilters = () => {
     setCustomDateRange({ startDate: null, endDate: null });
     setSearchTerm("");
     setSelectedTab("currentMonth");
     setShowCustomFilter(false);
   };
-
-  const toggleMrExpand = (mrId) => {
+  const toggleMrExpand = (mrId) =>
     setExpandedMr(expandedMr === mrId ? null : mrId);
-  };
 
-  // ── export ──────────────────────────────────────────────────────────────────
   const exportToExcel = async () => {
     if (!data.records.length) {
       showToast("warning", "No data found to export");
@@ -389,7 +367,6 @@ const SalesSalaryRatio = () => {
     }
   };
 
-  // ── formatting ──────────────────────────────────────────────────────────────
   const getActiveFilterDisplay = () =>
     getDateRange().displayDate || "Current Month";
   const fmt$ = (v) => {
@@ -408,11 +385,11 @@ const SalesSalaryRatio = () => {
     return isNaN(n) ? "0.0000" : n.toFixed(4);
   };
 
-  // ── FIX 2: Salary/Sale (%) = (salary / sale) * 100
-  // Original code: calcSalarySaleRatio(sale, totalExpense) = (sale / totalExpense) * 100  ← WRONG
-  // Correct formula: salary ÷ sale × 100
   const calcSalarySaleRatio = (salary, sale) =>
     sale === 0 ? 0 : (salary / sale) * 100;
+  // ✅ NEW helper
+  const calcExpenseSaleRatio = (totalExpense, sale) =>
+    sale === 0 ? 0 : (totalExpense / sale) * 100;
 
   const getPerformanceInfo = (ratio) => {
     if (ratio <= 25)
@@ -440,7 +417,6 @@ const SalesSalaryRatio = () => {
     };
   };
 
-  // ── Pagination ─────────────────────────────────────────────────────────────
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
     return (
@@ -460,13 +436,7 @@ const SalesSalaryRatio = () => {
               key={idx}
               onClick={() => typeof page === "number" && handlePageChange(page)}
               disabled={page === "..."}
-              className={`px-4 py-2 rounded text-sm ${
-                page === "..."
-                  ? "bg-gray-200 cursor-not-allowed"
-                  : pagination.currentPage === page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
-              }`}
+              className={`px-4 py-2 rounded text-sm ${page === "..." ? "bg-gray-200 cursor-not-allowed" : pagination.currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300 cursor-pointer"}`}
             >
               {page}
             </button>
@@ -492,17 +462,20 @@ const SalesSalaryRatio = () => {
     const isExpanded = expandedMr === record.mrId;
     const salary = parseFloat(record.salary) || 0;
     const incentive = parseFloat(record.incentive) || 0;
+    // ✅ CHANGE: allowance already includes tour allowance from backend
     const allowance = parseFloat(record.allowance) || 0;
     const tourExpense = parseFloat(record.tourExpense) || 0;
-    const tourAllowance = parseFloat(record.tourAllowance) || 0;
     const profit = parseFloat(record.profit) || 0;
     const sale = parseFloat(record.sale) || 0;
     const totalExpense =
       parseFloat(record.totalExpense) ||
-      salary + incentive + allowance + tourExpense + tourAllowance;
+      salary + incentive + allowance + tourExpense;
 
-    // FIX 2 applied: (salary / sale) * 100
     const salarySaleRatio = calcSalarySaleRatio(salary, sale);
+    // ✅ NEW
+    const expenseSaleRatio =
+      parseFloat(record.expenseSaleRatio) ||
+      calcExpenseSaleRatio(totalExpense, sale);
     const {
       label: perfLabel,
       textColor: perfText,
@@ -511,7 +484,6 @@ const SalesSalaryRatio = () => {
 
     return (
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        {/* Card Header */}
         <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-400 font-medium">
@@ -528,8 +500,6 @@ const SalesSalaryRatio = () => {
             {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
         </div>
-
-        {/* Card Stats Grid */}
         <div className="grid grid-cols-2 gap-px bg-gray-100">
           <div className="bg-white px-4 py-3">
             <div className="text-xs text-gray-500 mb-0.5">Sale ($)</div>
@@ -569,7 +539,18 @@ const SalesSalaryRatio = () => {
               {fmtPct(salarySaleRatio)}
             </div>
           </div>
-          <div className="bg-white px-4 py-3 col-span-2">
+          {/* ✅ NEW */}
+          <div className="bg-white px-4 py-3">
+            <div className="text-xs text-gray-500 mb-0.5">
+              Expense/Sales (%)
+            </div>
+            <div
+              className={`font-semibold text-sm ${expenseSaleRatio > 100 ? "text-red-600" : "text-orange-600"}`}
+            >
+              {fmtPct(expenseSaleRatio)}
+            </div>
+          </div>
+          <div className="bg-white px-4 py-3">
             <div className="text-xs text-gray-500 mb-0.5">Performance</div>
             <span
               className={`px-2 py-0.5 rounded-full text-xs font-bold ${perfBg} ${perfText}`}
@@ -578,32 +559,25 @@ const SalesSalaryRatio = () => {
             </span>
           </div>
         </div>
-
-        {/* Expanded Details */}
         {isExpanded && (
           <div className="px-4 py-4 bg-blue-50 border-t border-blue-100">
             <h4 className="font-semibold text-gray-800 mb-3 text-sm">
               Expense Breakdown — {record.mrName}
             </h4>
             <div className="space-y-2">
+              {/* ✅ CHANGE: Show merged Allowance label */}
               <div className="flex justify-between items-center py-1 border-b border-blue-200">
-                <span className="text-xs text-gray-600">Allowance ($)</span>
+                <span className="text-xs text-gray-600">
+                  Allowance ($)
+                </span>
                 <span className="font-semibold text-yellow-600 text-sm">
                   {fmt$(allowance)}
                 </span>
               </div>
-              <div className="flex justify-between items-center py-1 border-b border-blue-200">
+              <div className="flex justify-between items-center py-1">
                 <span className="text-xs text-gray-600">Tour Expense ($)</span>
                 <span className="font-semibold text-red-600 text-sm">
                   {fmt$(tourExpense)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1">
-                <span className="text-xs text-gray-600">
-                  Tour Allowance ($)
-                </span>
-                <span className="font-semibold text-amber-600 text-sm">
-                  {fmt$(tourAllowance)}
                 </span>
               </div>
             </div>
@@ -613,10 +587,8 @@ const SalesSalaryRatio = () => {
     );
   };
 
-  // ── render ──────────────────────────────────────────────────────────────────
   return (
     <div className={`${isMobileView ? "p-3 pb-20" : "p-6"} relative`}>
-      {/* ── Sidebar (mobile only) ── */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -625,7 +597,7 @@ const SalesSalaryRatio = () => {
         />
       )}
 
-      {/* ── MOBILE Header ── */}
+      {/* MOBILE Header */}
       {isMobileView && (
         <div className="flex justify-between items-center mb-3 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
@@ -641,12 +613,12 @@ const SalesSalaryRatio = () => {
             </h1>
           </div>
           <div className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-medium">
-            Total Records: {pagination.totalRecords}
+            Total: {pagination.totalRecords}
           </div>
         </div>
       )}
 
-      {/* ── DESKTOP Header ── */}
+      {/* DESKTOP Header */}
       {!isMobileView && (
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div className="flex items-center gap-3">
@@ -704,7 +676,7 @@ const SalesSalaryRatio = () => {
         </div>
       )}
 
-      {/* ── MOBILE Search ── */}
+      {/* MOBILE Search */}
       {isMobileView && (
         <div className="relative mb-3">
           <input
@@ -729,7 +701,7 @@ const SalesSalaryRatio = () => {
         </div>
       )}
 
-      {/* ── Date tabs ── */}
+      {/* Date tabs */}
       <div
         className={`bg-white ${isMobileView ? "p-3" : "p-4"} rounded-xl shadow-md mb-4 border border-gray-200`}
       >
@@ -746,11 +718,7 @@ const SalesSalaryRatio = () => {
             <button
               key={id}
               onClick={() => handleTabChange(id)}
-              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors ${
-                selectedTab === id
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
+              className={`${isMobileView ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm"} rounded-lg cursor-pointer transition-colors ${selectedTab === id ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"}`}
             >
               {label}
             </button>
@@ -763,7 +731,7 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {/* ── Summary cards ── */}
+      {/* Summary cards */}
       <div
         className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-4 gap-6 mb-6"}`}
       >
@@ -836,7 +804,7 @@ const SalesSalaryRatio = () => {
         ))}
       </div>
 
-      {/* ── Expense Breakdown Cards ── */}
+      {/* ✅ CHANGE: Expense breakdown — 3 cards, Tour Allowance removed (merged into Allowance) */}
       <div
         className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-1" : "grid-cols-1 md:grid-cols-3 gap-4 mb-6"}`}
       >
@@ -853,14 +821,15 @@ const SalesSalaryRatio = () => {
             <BarChart3 className="w-6 h-6 text-purple-400" />
           </div>
         </div>
+        {/* ✅ CHANGE: Label updated — now shows merged allowance */}
         <div className="bg-white p-3 rounded-lg shadow-md border-l-4 border-amber-400 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-xs font-semibold text-gray-600">
-                Tour Allowance
+                Allowance
               </p>
               <p className="text-base font-bold text-amber-600">
-                {fmt$(data.summary.totalTourAllowance)}
+                {fmt$(data.summary.totalAllowance)}
               </p>
             </div>
             <DollarSign className="w-6 h-6 text-amber-400" />
@@ -879,7 +848,7 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {/* Performance legend (desktop only) */}
+      {/* Performance legend (desktop) */}
       {!isMobileView && (
         <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
           <span className="font-semibold text-gray-600">
@@ -923,7 +892,7 @@ const SalesSalaryRatio = () => {
         </div>
       )}
 
-      {/* ── Mobile: Card List ── */}
+      {/* Mobile: Card List */}
       {isMobileView ? (
         <div className="space-y-3">
           {loading ? (
@@ -956,7 +925,7 @@ const SalesSalaryRatio = () => {
           )}
         </div>
       ) : (
-        /* ── Desktop: Table ── */
+        /* Desktop: Table */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -967,12 +936,16 @@ const SalesSalaryRatio = () => {
                 <th className="p-3 text-sm font-medium">Profit ($)</th>
                 <th className="p-3 text-sm font-medium">Salary ($)</th>
                 <th className="p-3 text-sm font-medium">Incentive ($)</th>
-                <th className="p-3 text-sm font-medium">Allowance ($)</th>
+                {/* ✅ CHANGE: merged column header */}
+                <th className="p-3 text-sm font-medium">
+                  Allowance ($)
+                  <br />
+                </th>
                 <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
-                <th className="p-3 text-sm font-medium">Tour Allowance ($)</th>
                 <th className="p-3 text-sm font-medium">Total Expense ($)</th>
-                {/* Column header clarified: salary ÷ sale × 100 */}
                 <th className="p-3 text-sm font-medium">Salary/Sale (%)</th>
+                {/* ✅ NEW column */}
+                <th className="p-3 text-sm font-medium">Expense/Sales (%)</th>
                 <th className="p-3 text-sm font-medium">Performance</th>
               </tr>
             </thead>
@@ -990,21 +963,20 @@ const SalesSalaryRatio = () => {
                 data.records.map((record, index) => {
                   const salary = parseFloat(record.salary) || 0;
                   const incentive = parseFloat(record.incentive) || 0;
+                  // ✅ CHANGE: allowance = merged (payroll + tour allowance)
                   const allowance = parseFloat(record.allowance) || 0;
                   const tourExpense = parseFloat(record.tourExpense) || 0;
-                  const tourAllowance = parseFloat(record.tourAllowance) || 0;
                   const profit = parseFloat(record.profit) || 0;
                   const sale = parseFloat(record.sale) || 0;
                   const totalExpense =
                     parseFloat(record.totalExpense) ||
-                    salary +
-                      incentive +
-                      allowance +
-                      tourExpense +
-                      tourAllowance;
+                    salary + incentive + allowance + tourExpense;
 
-                  // FIX 2: (salary / sale) * 100
                   const salarySaleRatio = calcSalarySaleRatio(salary, sale);
+                  // ✅ NEW: use value from backend, fallback to local calc
+                  const expenseSaleRatio =
+                    parseFloat(record.expenseSaleRatio) ||
+                    calcExpenseSaleRatio(totalExpense, sale);
                   const {
                     label: perfLabel,
                     textColor: perfText,
@@ -1034,14 +1006,12 @@ const SalesSalaryRatio = () => {
                       <td className="p-3 text-sm font-semibold text-green-600">
                         {fmt$(incentive)}
                       </td>
+                      {/* ✅ CHANGE: merged allowance */}
                       <td className="p-3 text-sm font-semibold text-yellow-600">
                         {fmt$(allowance)}
                       </td>
                       <td className="p-3 text-sm font-semibold text-red-600">
                         {fmt$(tourExpense)}
-                      </td>
-                      <td className="p-3 text-sm font-semibold text-amber-600">
-                        {fmt$(tourAllowance)}
                       </td>
                       <td className="p-3 text-sm font-bold text-gray-900">
                         {fmt$(totalExpense)}
@@ -1050,6 +1020,12 @@ const SalesSalaryRatio = () => {
                         className={`p-3 text-sm font-semibold ${salarySaleRatio > 100 ? "text-red-600" : "text-green-600"}`}
                       >
                         {fmtPct(salarySaleRatio)}
+                      </td>
+                      {/* ✅ NEW column */}
+                      <td
+                        className={`p-3 text-sm font-semibold ${expenseSaleRatio > 100 ? "text-red-600" : "text-orange-600"}`}
+                      >
+                        {fmtPct(expenseSaleRatio)}
                       </td>
                       <td className="p-3 text-sm font-semibold">
                         <span
@@ -1086,7 +1062,7 @@ const SalesSalaryRatio = () => {
 
       {renderPagination()}
 
-      {/* ── Custom Filter Modal ── */}
+      {/* Custom Filter Modal */}
       {showCustomFilter && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
           <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg mx-4">

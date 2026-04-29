@@ -133,16 +133,7 @@ const parseExcelFile = (file) => {
   });
 };
 
-// =============================================================================
-// FIX: SendProductTable is defined OUTSIDE the parent component.
-// Previously it was defined inside CreateStockTransfer, so every render
-// created a brand-new function reference → React treated it as a completely
-// new component type → unmounted + remounted the DOM → input lost focus after
-// every keystroke → only one digit could be typed at a time.
-//
-// By moving it outside and passing all dependencies as props, the component
-// identity is stable across renders and inputs keep focus normally.
-// =============================================================================
+// SendProductTable component
 const SendProductTable = React.memo(
   ({
     sendMrTableData,
@@ -150,7 +141,6 @@ const SendProductTable = React.memo(
     onQtyChange,
     onQtyBlur,
     onRemove,
-    // restore-row props
     showAddRow,
     setShowAddRow,
     addRowProductId,
@@ -238,7 +228,6 @@ const SendProductTable = React.memo(
         </table>
       </div>
 
-      {/* Inline restore-row */}
       {showAddRow && (
         <div className="mt-3 grid grid-cols-12 gap-2 items-center px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
           <div className="col-span-6">
@@ -306,7 +295,6 @@ const SendProductTable = React.memo(
         </div>
       )}
 
-      {/* Footer: Add Product button */}
       <div className="mt-3 flex items-center justify-between px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
         {hasDeletedSendRows && !showAddRow && (
           <button
@@ -328,9 +316,7 @@ const SendProductTable = React.memo(
 
 SendProductTable.displayName = "SendProductTable";
 
-// =============================================================================
 // Main component
-// =============================================================================
 const CreateStockTransfer = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -381,7 +367,6 @@ const CreateStockTransfer = () => {
   const [excelErrors, setExcelErrors] = useState([]);
   const [excelImported, setExcelImported] = useState(false);
 
-  // Separate display state from numeric state — key to multi-digit input
   const [sendQtyDisplayMap, setSendQtyDisplayMap] = useState({});
 
   useEffect(() => {
@@ -500,6 +485,7 @@ const CreateStockTransfer = () => {
     fetchProducts();
   }, []);
 
+  // FIXED: fetchMRStock - shows In Hand = Assigned - Daily Samples
   const fetchMRStock = useCallback(async (mrId, mrName) => {
     if (!mrId) {
       setMrStockData([]);
@@ -511,22 +497,25 @@ const CreateStockTransfer = () => {
       const res = await axios.get(
         `${backendUrl}/api/stock-transfer-to-mr/mr-stock-by-mr-id/${mrId}`,
       );
-      const allProducts = res.data?.products || [];
+      const products = res.data?.products || [];
       setMrInfo(res.data?.data || { mrId, mrName });
 
-      const filtered = allProducts.filter((p) => (p.quantity || 0) > 0);
-      setMrStockData(
-        filtered.map((p) => ({
-          productId: p.productId,
-          productName: p.productName,
-          assignedQuantity: p.assignedQuantity || 0,
-          quantity: p.quantity || 0,
-          lc: p.lc || 0,
-          returnQuantity: p.quantity || 0,
-          returnQuantityDisplay: String(p.quantity || 0),
-        })),
-      );
-    } catch {
+      // Map products with in-hand quantity already calculated by backend
+      const mappedProducts = products.map((p) => ({
+        productId: p.productId,
+        productName: p.productName,
+        assignedQuantity: p.assignedQuantity,
+        quantity: p.quantity,
+        inHandQuantity: p.inHandQuantity || 0,
+        samplesUsed: p.samplesUsed || 0,
+        lc: p.lc || 0,
+        returnQuantity: p.inHandQuantity || 0,
+        returnQuantityDisplay: String(p.inHandQuantity || 0),
+      }));
+
+      setMrStockData(mappedProducts);
+    } catch (error) {
+      console.error("Error fetching MR stock:", error);
       showToast("error", "Could not load MR stock");
       setMrStockData([]);
       setMrInfo(null);
@@ -618,14 +607,11 @@ const CreateStockTransfer = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // Stable qty change — updates display map AND numeric state in one pass
   const handleSendQtyChange = useCallback((productId, rawValue) => {
     const numericStr = rawValue.replace(/[^0-9]/g, "");
 
-    // Update display immediately so typing "12" shows "12" not "1"
     setSendQtyDisplayMap((prev) => ({ ...prev, [productId]: numericStr }));
 
-    // Update numeric state for submission
     setSendMrTableData((prev) =>
       prev.map((p) => {
         if (p.productId !== productId) return p;
@@ -638,7 +624,6 @@ const CreateStockTransfer = () => {
     );
   }, []);
 
-  // On blur: clamp display to valid range
   const handleSendQtyBlur = useCallback((productId, totalBoxes) => {
     setSendQtyDisplayMap((prev) => {
       const raw = prev[productId] ?? "";
@@ -730,7 +715,8 @@ const CreateStockTransfer = () => {
           return { ...p, returnQuantity: 0, returnQuantityDisplay: "" };
         }
         const parsed = parseInt(numeric, 10);
-        const clamped = Math.min(Math.max(0, parsed), p.quantity);
+        // Can't exceed inHandQuantity
+        const clamped = Math.min(Math.max(0, parsed), p.inHandQuantity || 0);
         return {
           ...p,
           returnQuantity: clamped,
@@ -1320,7 +1306,7 @@ const CreateStockTransfer = () => {
                       {mrInfo.mrName || form.mrName}
                     </p>
                     <p className="text-xs text-blue-500">
-                      Receiving all stock back from MR to warehouse
+                      Receiving stock back from MR to warehouse
                     </p>
                   </div>
                   <span className="ml-auto text-xs bg-blue-600 text-white px-2 py-1 rounded-full">
@@ -1334,7 +1320,7 @@ const CreateStockTransfer = () => {
                 Stock Being Returned to Warehouse
                 {mrStockData.length > 0 && (
                   <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full ml-1">
-                    {mrStockData.length} product(s) — all will be returned
+                    {mrStockData.length} product(s) available for return
                   </span>
                 )}
               </h3>
@@ -1355,7 +1341,7 @@ const CreateStockTransfer = () => {
                 <div className="text-center py-10 border-2 border-dashed border-gray-300 rounded-lg text-gray-500">
                   <Package size={36} className="mx-auto mb-2 text-gray-300" />
                   <p className="text-sm">
-                    No products with stock found for this MR
+                    No products with in-hand stock found for this MR
                   </p>
                 </div>
               ) : (
@@ -1366,8 +1352,8 @@ const CreateStockTransfer = () => {
                       className="flex-shrink-0 text-amber-500"
                     />
                     <span>
-                      All products below will be returned to the warehouse. You
-                      can adjust individual return quantities if needed.
+                      <strong>In Hand</strong> = Assigned Quantity - Daily Samples Used.
+                      You can return any quantity up to the In Hand amount.
                     </span>
                   </div>
 
@@ -1380,6 +1366,9 @@ const CreateStockTransfer = () => {
                           </th>
                           <th className="px-4 py-3 text-center font-semibold">
                             Assigned Qty
+                          </th>
+                          <th className="px-4 py-3 text-center font-semibold">
+                            Samples Used
                           </th>
                           <th className="px-4 py-3 text-center font-semibold">
                             In Hand
@@ -1410,8 +1399,13 @@ const CreateStockTransfer = () => {
                               </span>
                             </td>
                             <td className="px-4 py-3 text-center">
+                              <span className="inline-flex items-center justify-center bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-1 rounded-full">
+                                {p.samplesUsed || 0}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-center">
                               <span className="inline-flex items-center justify-center bg-green-100 text-green-700 text-xs font-semibold px-2 py-1 rounded-full">
-                                {p.quantity}
+                                {p.inHandQuantity}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-center">
@@ -1433,6 +1427,7 @@ const CreateStockTransfer = () => {
                                     ? "border-blue-400 bg-white font-semibold text-blue-700"
                                     : "border-gray-300"
                                 }`}
+                                placeholder="0"
                               />
                             </td>
                           </tr>
@@ -1446,7 +1441,7 @@ const CreateStockTransfer = () => {
                     product(s) with total{" "}
                     <strong>
                       {selectedReturnItems.reduce(
-                        (s, p) => s + p.returnQuantity,
+                        (s, p) => s + (p.returnQuantity || 0),
                         0,
                       )}
                     </strong>{" "}

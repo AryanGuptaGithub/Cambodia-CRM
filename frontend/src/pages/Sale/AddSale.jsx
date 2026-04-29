@@ -1717,18 +1717,11 @@ const AddSale = () => {
         lc = latestBatch.lc || product.lc || 0;
         fob = latestBatch.fob || product.fob || 0;
         cif = latestBatch.cif || product.cif || 0;
-
-        console.log(
-          `📊 [getProductDetails] ${productName} - Using LC from batch: ${lc}`,
-        );
       } else {
         // Fallback to product's own lc field
         lc = product.lc || 0;
         fob = product.fob || 0;
         cif = product.cif || 0;
-        console.log(
-          `📊 [getProductDetails] ${productName} - Using LC from product: ${lc}`,
-        );
       }
 
       return {
@@ -1838,7 +1831,6 @@ const AddSale = () => {
 
         if (shouldUpdateLc) {
           updateProduct(index, "lc", productDetails.lc);
-          console.log(`✅ Setting LC for ${value} to: ${productDetails.lc}`);
         }
 
         updateProduct(index, "fob", productDetails.fob);

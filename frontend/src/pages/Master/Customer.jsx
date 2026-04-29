@@ -228,7 +228,6 @@ const ImportModal = ({ isOpen, onClose, isSampleFile, mrList }) => {
 
   // Excel serial-date conversion
   const excelSerialToDateStr = (serial) => {
-    console.log(`📅 Converting Excel serial: ${serial}`);
     if (serial === null || serial === undefined) {
       console.log(`❌ Serial is null or undefined`);
       return null;

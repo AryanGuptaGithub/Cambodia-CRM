@@ -111,13 +111,12 @@ const recalculateTotals = (reportItem) => {
       removeStockAdjustment += boxes;
       totalAmount -= amount;
     } else if (type === "return") {
-      // Sale return: goods come BACK into warehouse, so boxes and amount go UP
+      // Sale return: goods come BACK into warehouse
       returnStockAdjustment += boxes;
       totalAmount += amount;
     }
   }
 
-  // returnStockAdjustment is ADDED — returned goods are back in stock
   const totalBoxes = fixPrecision(
     totalBoxesFromBatches +
       addStockAdjustment -
@@ -145,19 +144,12 @@ const recalculateTotals = (reportItem) => {
 };
 
 // ==================== EXPORTED: apply sale return to warehouse ====================
-// Import and call this from your sale return router when creating a sale return.
-//
-//   import { applyReturnToWarehouse } from "./stockAdjustment.js";
-//
-//   // Inside your sale return create route, for each returned product:
-//   const updatedReport = await applyReturnToWarehouse(
-//     { productName, boxes, lc, amount, saleReturnId, invoiceNumber },
-//     session
-//   );
 export const applyReturnToWarehouse = async (
-  { productName, boxes, lc, amount, saleReturnId, invoiceNumber },
+  { productName, boxes, lc, saleReturnId, invoiceNumber, sellingPrice = 0 },
   session,
 ) => {
+  const amount = fixPrecision(Number(boxes) * Number(lc));
+
   const reportItem = await ReportInHand.findOne({
     productName: {
       $regex: new RegExp(`^${escapeRegex(productName)}$`, "i"),
@@ -174,10 +166,10 @@ export const applyReturnToWarehouse = async (
     _id: new mongoose.Types.ObjectId(),
     boxes: fixPrecision(Number(boxes)),
     lc: fixPrecision(Number(lc)),
-    sellingPrice: 0,
+    sellingPrice: fixPrecision(Number(sellingPrice)),
     fob: 0,
     cif: 0,
-    amount: fixPrecision(Number(amount)),
+    amount: amount,
     date: new Date(),
     adjustmentType: "return",
     saleReturnId,
@@ -185,22 +177,12 @@ export const applyReturnToWarehouse = async (
   };
 
   reportItem.batches.push(returnBatch);
-
-  // CRITICAL: recalculate AFTER pushing, BEFORE saving — this updates totalBoxes
   recalculateTotals(reportItem);
-
   await reportItem.save({ session });
-
   return reportItem;
 };
 
 // ==================== EXPORTED: revert sale return from warehouse ====================
-// Import and call this from your sale return router when deleting a sale return.
-//
-//   import { revertReturnFromWarehouse } from "./stockAdjustment.js";
-//
-//   // Inside your sale return delete route, for each returned product:
-//   await revertReturnFromWarehouse({ productName, saleReturnId }, session);
 export const revertReturnFromWarehouse = async (
   { productName, saleReturnId },
   session,
@@ -215,7 +197,6 @@ export const revertReturnFromWarehouse = async (
 
   const beforeCount = reportItem.batches.length;
 
-  // Remove all return batches that match this saleReturnId
   reportItem.batches = reportItem.batches.filter(
     (b) =>
       !(
@@ -225,7 +206,6 @@ export const revertReturnFromWarehouse = async (
   );
 
   if (reportItem.batches.length === beforeCount) {
-    // No matching batch found — nothing to revert
     return reportItem;
   }
 
@@ -367,7 +347,6 @@ router.post("/", protect, async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(productId))
       throw new Error("Invalid product ID");
 
-    // 'return' is only ever created by the sale return flow via applyReturnToWarehouse()
     if (adjustmentType === "return")
       throw new Error(
         "Sale returns must be processed through the Sale Return flow, not stock adjustments.",
@@ -429,22 +408,7 @@ router.post("/", protect, async (req, res) => {
       adjustmentAmount = fixPrecision(adjustmentQty * costPerBox);
     }
 
-    const newBatch = {
-      _id: new mongoose.Types.ObjectId(),
-      boxes: adjustmentQty,
-      lc: costPerBox,
-      fob: 0,
-      cif: 0,
-      amount: adjustmentAmount,
-      date: new Date(),
-      adjustmentType,
-      batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
-    };
-
-    reportItem.batches.push(newBatch);
-    recalculateTotals(reportItem);
-    await reportItem.save({ session });
-
+    // Create the adjustment document first to get its _id
     const adjustment = new StockAdjustment({
       productId,
       boxQuantity: adjustmentQty,
@@ -459,6 +423,25 @@ router.post("/", protect, async (req, res) => {
       amount: adjustmentAmount,
     });
     await adjustment.save({ session });
+
+    // Store adjustmentId inside the batch for precise linking
+    const newBatch = {
+      _id: new mongoose.Types.ObjectId(),
+      boxes: adjustmentQty,
+      lc: costPerBox,
+      fob: 0,
+      cif: 0,
+      amount: adjustmentAmount,
+      date: new Date(),
+      adjustmentType,
+      adjustmentId: adjustment._id, // <-- LINK
+      batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
+    };
+
+    reportItem.batches.push(newBatch);
+    recalculateTotals(reportItem);
+    await reportItem.save({ session });
+
     await session.commitTransaction();
     session.endSession();
 
@@ -541,7 +524,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     const existing = await StockAdjustment.findById(id).session(session);
     if (!existing) throw new Error("Adjustment not found");
 
-    // Block editing sale return adjustments via this route
     if (existing.adjustmentType === "return")
       throw new Error(
         "Sale return adjustments cannot be edited here. Please use the Sale Return flow.",
@@ -552,7 +534,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     const { productId, boxQuantity, adjustmentType, remarks, unitCost } =
       req.body;
 
-    // Block changing TO 'return' type manually
     if (adjustmentType === "return")
       throw new Error(
         "Cannot set adjustment type to 'return'. Use the Sale Return flow.",
@@ -578,15 +559,9 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         `Product "${product.productName}" not found in warehouse.`,
       );
 
-    // Remove old batch — never touch 'return' batches here
+    // Remove the old batch using the stored adjustmentId
     const oldBatchIndex = reportItem.batches.findIndex(
-      (b) =>
-        b.adjustmentType === existing.adjustmentType &&
-        b.adjustmentType !== "return" &&
-        Number(b.boxes) === existing.boxQuantity &&
-        b.batchNumber?.startsWith(
-          `ADJ-${existing.adjustmentType.toUpperCase()}`,
-        ),
+      (b) => b.adjustmentId && b.adjustmentId.toString() === existing._id.toString(),
     );
     if (oldBatchIndex !== -1) reportItem.batches.splice(oldBatchIndex, 1);
 
@@ -624,6 +599,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       amount: adjustmentAmount,
       date: new Date(),
       adjustmentType,
+      adjustmentId: existing._id, // Keep the same ID reference
       batchNumber: `ADJ-${adjustmentType.toUpperCase()}-${Date.now()}`,
     };
 
@@ -731,7 +707,6 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       .session(session);
     if (!adjustment) throw new Error("Adjustment not found");
 
-    // Block deleting sale return adjustments via this route
     if (adjustment.adjustmentType === "return")
       throw new Error(
         "Sale return adjustments cannot be deleted here. Please reverse through the Sale Return flow.",
@@ -747,15 +722,8 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     }).session(session);
 
     if (reportItem) {
-      // Never accidentally remove a 'return' batch here
       const batchIndex = reportItem.batches.findIndex(
-        (b) =>
-          b.adjustmentType === adjustment.adjustmentType &&
-          b.adjustmentType !== "return" &&
-          Number(b.boxes) === adjustment.boxQuantity &&
-          b.batchNumber?.startsWith(
-            `ADJ-${adjustment.adjustmentType.toUpperCase()}`,
-          ),
+        (b) => b.adjustmentId && b.adjustmentId.toString() === adjustment._id.toString(),
       );
       if (batchIndex !== -1) reportItem.batches.splice(batchIndex, 1);
 
@@ -827,7 +795,6 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
       .populate("productId", "productName qtyPerCarton")
       .session(session);
 
-    // Block bulk delete if any selected is a 'return' type
     const returnAdj = adjustments.find((a) => a.adjustmentType === "return");
     if (returnAdj)
       throw new Error(
@@ -856,15 +823,8 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
       if (!reportItem) continue;
 
       for (const adj of adjs) {
-        // Never remove a 'return' batch here
         const batchIndex = reportItem.batches.findIndex(
-          (b) =>
-            b.adjustmentType === adj.adjustmentType &&
-            b.adjustmentType !== "return" &&
-            Number(b.boxes) === adj.boxQuantity &&
-            b.batchNumber?.startsWith(
-              `ADJ-${adj.adjustmentType.toUpperCase()}`,
-            ),
+          (b) => b.adjustmentId && b.adjustmentId.toString() === adj._id.toString(),
         );
         if (batchIndex !== -1) reportItem.batches.splice(batchIndex, 1);
       }
@@ -925,9 +885,6 @@ router.get("/summary/warehouse", async (req, res) => {
 });
 
 // ==================== REPAIR: recalc all products ====================
-// Hit POST /repair/recalc-only once after deploying this fix.
-// It will correct all existing documents where return batches were
-// stored but not counted into totalBoxes (e.g. ecozin 5: 9899 → 9939).
 router.post(
   "/repair/recalc-only",
   protect,

@@ -122,7 +122,12 @@ const Expenses = () => {
         throw new Error(categoriesResp.message || "Failed to fetch categories");
 
       const accountsArray = accountsResp?.data || [];
-      setExpenses(expensesResp.data);
+      // ✅ Add isPayroll flag to expenses
+      const expensesWithFlag = (expensesResp.data || []).map((exp) => ({
+        ...exp,
+        isPayroll: exp.isPayroll || false,
+      }));
+      setExpenses(expensesWithFlag);
       setExpenseCategories(categoriesResp.data);
       setSourceAccounts(Array.isArray(accountsArray) ? accountsArray : []);
 
@@ -257,7 +262,16 @@ const Expenses = () => {
       const exp = expenses.find((e) => e._id === id);
       if (!exp) return;
 
-      // ✅ Block deletion of salary-type expenses
+      // ✅ Block deletion of payroll expenses (using isPayroll flag)
+      if (exp.isPayroll === true) {
+        showToast(
+          "error",
+          "Salary Expenses cannot be deleted directly. Please delete the linked Payroll record instead — that will automatically remove this expense.",
+        );
+        return;
+      }
+
+      // ✅ Block deletion of salary-type expenses by category name (fallback)
       const catName = getExpenseCategoryName(exp);
       if (isSalaryExpenseCategory(catName)) {
         showToast(
@@ -328,7 +342,16 @@ const Expenses = () => {
         return;
       }
 
-      // ✅ Block editing of salary-type expenses
+      // ✅ Block editing of payroll expenses (using isPayroll flag)
+      if (exp.isPayroll === true) {
+        showToast(
+          "error",
+          "Salary Expenses cannot be edited directly. Please edit the linked Payroll record instead.",
+        );
+        return;
+      }
+
+      // ✅ Block editing of salary-type expenses by category name (fallback)
       const catName = getExpenseCategoryName(exp);
       if (isSalaryExpenseCategory(catName)) {
         showToast(
@@ -445,9 +468,12 @@ const Expenses = () => {
     const needsMr = expenseNeedsMr(exp);
     const catName = getExpenseCategoryName(exp);
     const isSalary = isSalaryExpenseCategory(catName);
+    const isPayrollExpense = exp.isPayroll === true;
 
     return (
-      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
+      <div
+        className={`bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3 ${isPayrollExpense ? "bg-orange-50 border-orange-200" : ""}`}
+      >
         <div className="flex justify-between items-start mb-3">
           <div className="flex-1">
             <p className="text-sm text-gray-500">
@@ -459,8 +485,8 @@ const Expenses = () => {
             </p>
             <p className="text-sm text-gray-500 mt-1">
               Category: {catName || "Unknown"}
-              {/* ✅ Salary badge on mobile */}
-              {isSalary && (
+              {/* ✅ Payroll badge on mobile */}
+              {(isSalary || isPayrollExpense) && (
                 <span className="ml-2 text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">
                   Payroll
                 </span>
@@ -505,7 +531,7 @@ const Expenses = () => {
               👁️ View Only
             </span>
           </div>
-        ) : isSalary ? (
+        ) : isSalary || isPayrollExpense ? (
           /* ✅ Salary expenses: show info label instead of edit/delete buttons */
           <div className="mt-3 pt-2 border-t border-gray-100 text-center">
             <span className="text-xs bg-orange-50 text-orange-600 px-3 py-1 rounded-full italic">
@@ -650,8 +676,9 @@ const Expenses = () => {
                     <input
                       type="checkbox"
                       checked={
-                        selectedRows.length === currentExpenses.length &&
-                        currentExpenses.length > 0
+                        selectedRows.length ===
+                          currentExpenses.filter((e) => !e.isPayroll).length &&
+                        currentExpenses.filter((e) => !e.isPayroll).length > 0
                       }
                       onChange={handleSelectAll}
                     />
@@ -689,6 +716,7 @@ const Expenses = () => {
                 const needsMr = expenseNeedsMr(exp);
                 const catName = getExpenseCategoryName(exp);
                 const isSalary = isSalaryExpenseCategory(catName);
+                const isPayrollExpense = exp.isPayroll === true;
 
                 return (
                   <tr
@@ -698,14 +726,29 @@ const Expenses = () => {
                       idx + 1 === currentExpenses.length
                         ? ""
                         : "border-b"
-                    }`}
+                    } ${isPayrollExpense ? "bg-orange-50" : ""}`}
                   >
                     <td className="p-3">
                       <div className="flex items-center gap-4">
                         <input
                           type="checkbox"
                           checked={selectedRows.includes(exp._id)}
-                          onChange={() => handleSelectRow(exp._id)}
+                          onChange={() => {
+                            if (!isPayrollExpense) {
+                              handleSelectRow(exp._id);
+                            } else {
+                              showToast(
+                                "warning",
+                                "Salary expenses cannot be selected for deletion",
+                              );
+                            }
+                          }}
+                          disabled={isPayrollExpense}
+                          className={
+                            isPayrollExpense
+                              ? "opacity-50 cursor-not-allowed"
+                              : ""
+                          }
                         />
                         <span>
                           {(currentPage - 1) * expensesPerPage + idx + 1}
@@ -721,7 +764,7 @@ const Expenses = () => {
                     <td className="p-3">
                       <span>{catName}</span>
                       {/* ✅ Payroll badge in table for salary expenses */}
-                      {isSalary && (
+                      {(isSalary || isPayrollExpense) && (
                         <span className="ml-2 text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">
                           Payroll
                         </span>
@@ -755,14 +798,25 @@ const Expenses = () => {
                       <td className="p-3">
                         <div className="flex items-center justify-center gap-3">
                           <button
-                            className="text-green-600 hover:text-green-800"
+                            className={`${isPayrollExpense ? "text-gray-400 cursor-not-allowed" : "text-green-600 hover:text-green-800 cursor-pointer"}`}
                             onClick={() => handleEdit(exp)}
+                            disabled={isPayrollExpense}
+                            title={
+                              isPayrollExpense
+                                ? "Cannot edit - Linked to Payroll"
+                                : "Edit"
+                            }
                           >
                             <Edit size={18} />
                           </button>
                           <button
-                            className="text-red-600 hover:text-red-800"
+                            className="text-red-600 hover:text-red-800 cursor-pointer"
                             onClick={() => handleDelete(exp._id)}
+                            title={
+                              isPayrollExpense
+                                ? "Cannot delete - Delete Payroll instead"
+                                : "Delete"
+                            }
                           >
                             <Trash2 size={18} />
                           </button>

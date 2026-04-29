@@ -257,7 +257,6 @@ const getSalaryCategory = async (session = null) => {
       return _salaryCategory;
     }
     console.warn("⚠️ 'Salary Expenses' category not found, creating one...");
-
     const newCategory = new ExpenseCategory({
       category: "Salary Expenses",
       description: "Monthly salary expenses for employees",
@@ -271,8 +270,9 @@ const getSalaryCategory = async (session = null) => {
     return await getWithdrawCategory(session);
   }
 };
+
 // ─────────────────────────────────────────────
-// CREATE FINANCIAL RECORDS WITH PAYROLL ID
+// CREATE FINANCIAL RECORDS WITH PAYROLL ID AND isPayroll FLAG
 // ─────────────────────────────────────────────
 const createPayrollFinancialRecords = async ({
   payrollNetSalary,
@@ -303,7 +303,7 @@ const createPayrollFinancialRecords = async ({
   console.log(`   Net Salary: ${payrollNetSalary}`);
   console.log(`   Source Accounts: ${sourceAccounts.length}`);
 
-  // Create transactions for each source account with payrollId
+  // Create one transaction per source account with isPayroll = true
   for (const { account, amount } of sourceAccounts) {
     if (amount > 0) {
       console.log(`   Creating transaction for ${account.name}: $${amount}`);
@@ -327,13 +327,14 @@ const createPayrollFinancialRecords = async ({
         importErrors: [],
         payrollCode: payrollCode,
         payrollId: payrollId,
+        isPayroll: true, // ✅ Mark as payroll transaction
       });
       await txn.save({ session });
       console.log(`      Transaction saved with ID: ${txn._id}`);
     }
   }
 
-  // ✅ Create ONE expense record PER source account (mirrors transaction logic)
+  // Create one expense record per source account with isPayroll = true
   const resolvedCategoryId = salaryCategory._id || withdrawCategory._id;
 
   for (const { account, amount } of sourceAccounts) {
@@ -351,8 +352,8 @@ const createPayrollFinancialRecords = async ({
     const expense = new Expense({
       category: resolvedCategoryId,
       categoryType: resolvedCategoryId,
-      amount: toFixedAmount(amount), // ✅ Per-account amount (e.g. 150 or 75.8)
-      finalAmount: toFixedAmount(amount), // ✅ Per-account amount
+      amount: toFixedAmount(amount),
+      finalAmount: toFixedAmount(amount),
       exchangeLoss: 0,
       description: remarks,
       remarks: remarks,
@@ -370,9 +371,9 @@ const createPayrollFinancialRecords = async ({
       invoiceNo: "NA",
       isConversionLoss: false,
       createdBy: createdBy || null,
-      sourceAccount: account._id, // ✅ This account's ID
+      sourceAccount: account._id,
+      isPayroll: true, // ✅ Mark as payroll expense
       sources: [
-        // ✅ Single source entry for this account
         {
           accountId: account._id,
           accountName: account.name || account.code || "Unknown Account",
@@ -388,25 +389,63 @@ const createPayrollFinancialRecords = async ({
 };
 
 // ─────────────────────────────────────────────
-// RESTORE ACCOUNT BALANCES USING PAYROLL ID
+// RESTORE ACCOUNT BALANCES DIRECTLY FROM PAYROLL SOURCES
 // ─────────────────────────────────────────────
-const restoreAccountBalancesForPayroll = async (
-  payrollId,
-  payrollCode,
-  session,
-) => {
-  console.log(`   🔍 Finding transactions for payrollId: ${payrollId}`);
+const restoreAccountBalancesFromSources = async (payroll, session) => {
+  const payrollId = payroll._id;
+  const payrollCode = payroll.payrollCode;
+  const restoredDetails = [];
+  let totalRestored = 0;
 
-  // Find transactions using payrollId (primary key)
+  // ── PRIMARY: use the sources array stored on the payroll document ──
+  if (payroll.sources && payroll.sources.length > 0) {
+    console.log(
+      `   ✅ Restoring from payroll.sources (${payroll.sources.length} entr${payroll.sources.length === 1 ? "y" : "ies"})`,
+    );
+
+    for (const src of payroll.sources) {
+      const amount = toExactAmount(src.amount);
+      if (!src.accountId || amount <= 0) continue;
+
+      const account = await Account.findById(src.accountId).session(session);
+      if (account) {
+        const oldBalance = toExactAmount(account.totalAmount || 0);
+        account.totalAmount = toExactAmount(oldBalance + amount);
+        await account.save({ session });
+        totalRestored += amount;
+        restoredDetails.push({
+          accountId: account._id,
+          accountName: account.name,
+          amount,
+          oldBalance,
+          newBalance: account.totalAmount,
+        });
+        console.log(
+          `   ✅ Restored $${amount} to "${account.name}" (${oldBalance} → ${account.totalAmount})`,
+        );
+      } else {
+        console.warn(
+          `   ⚠️ Account ${src.accountId} (${src.accountName || "unknown"}) not found`,
+        );
+      }
+    }
+
+    return { totalRestored, restoredDetails };
+  }
+
+  // ── FALLBACK: older payrolls without sources array — use transactions ──
+  console.log(
+    `   ⚠️ payroll.sources empty — falling back to transaction lookup`,
+  );
+
   let transactions = await Transaction.find({
     payrollId: payrollId,
     transactionType: "payment outward",
   }).session(session);
 
-  // If not found by payrollId, try by payrollCode
   if (transactions.length === 0) {
     console.log(
-      `   No transactions found by payrollId, trying payrollCode: ${payrollCode}`,
+      `   No transactions by payrollId, trying payrollCode: ${payrollCode}`,
     );
     transactions = await Transaction.find({
       payrollCode: payrollCode,
@@ -414,31 +453,22 @@ const restoreAccountBalancesForPayroll = async (
     }).session(session);
   }
 
-  console.log(`   Found ${transactions.length} transaction(s) to reverse`);
-
-  let totalRestored = 0;
-  const restoredDetails = [];
+  console.log(
+    `   Found ${transactions.length} transaction(s) to reverse (fallback)`,
+  );
 
   for (const tx of transactions) {
     const accountName = tx.sourceAccount;
     const amountToRestore = toExactAmount(tx.amount || tx.finalAmount || 0);
 
-    console.log(
-      `   💰 Restoring $${amountToRestore} to account: "${accountName}"`,
-    );
+    if (!accountName || accountName === "--" || amountToRestore <= 0) continue;
 
-    if (!accountName || accountName === "--" || amountToRestore <= 0) {
-      console.log(`   ⚠️ Skipping — no valid sourceAccount or zero amount`);
-      continue;
-    }
-
-    // Look up account by name
     const account = await Account.findOne({ name: accountName }).session(
       session,
     );
 
     if (account) {
-      const oldBalance = account.totalAmount || 0;
+      const oldBalance = toExactAmount(account.totalAmount || 0);
       account.totalAmount = toExactAmount(oldBalance + amountToRestore);
       await account.save({ session });
       totalRestored += amountToRestore;
@@ -450,43 +480,44 @@ const restoreAccountBalancesForPayroll = async (
         newBalance: account.totalAmount,
       });
       console.log(
-        `   ✅ Restored $${amountToRestore} to "${accountName}" (${oldBalance} → ${account.totalAmount})`,
+        `   ✅ Restored $${amountToRestore} to "${accountName}" (fallback)`,
       );
-    } else {
-      // Fallback: try by source ObjectId
-      if (tx.source && mongoose.Types.ObjectId.isValid(String(tx.source))) {
-        const accountById = await Account.findById(tx.source).session(session);
-        if (accountById) {
-          const oldBalance = accountById.totalAmount || 0;
-          accountById.totalAmount = toExactAmount(oldBalance + amountToRestore);
-          await accountById.save({ session });
-          totalRestored += amountToRestore;
-          restoredDetails.push({
-            accountId: accountById._id,
-            accountName: accountById.name,
-            amount: amountToRestore,
-            oldBalance,
-            newBalance: accountById.totalAmount,
-          });
-          console.log(
-            `   ✅ Restored $${amountToRestore} to "${accountById.name}" via ID fallback`,
-          );
-        } else {
-          console.warn(
-            `   ⚠️ Account not found by name or ID for tx: ${tx._id}`,
-          );
-        }
-      } else {
-        console.warn(
-          `   ⚠️ Account "${accountName}" not found and no valid source ID`,
+    } else if (
+      tx.source &&
+      mongoose.Types.ObjectId.isValid(String(tx.source))
+    ) {
+      const accountById = await Account.findById(tx.source).session(session);
+      if (accountById) {
+        const oldBalance = toExactAmount(accountById.totalAmount || 0);
+        accountById.totalAmount = toExactAmount(oldBalance + amountToRestore);
+        await accountById.save({ session });
+        totalRestored += amountToRestore;
+        restoredDetails.push({
+          accountId: accountById._id,
+          accountName: accountById.name,
+          amount: amountToRestore,
+          oldBalance,
+          newBalance: accountById.totalAmount,
+        });
+        console.log(
+          `   ✅ Restored $${amountToRestore} to "${accountById.name}" via ID fallback`,
         );
+      } else {
+        console.warn(`   ⚠️ Account not found by name or ID for tx: ${tx._id}`);
       }
+    } else {
+      console.warn(
+        `   ⚠️ Account "${accountName}" not found and no valid source ID`,
+      );
     }
   }
 
-  return { transactions, totalRestored, restoredDetails };
+  return { totalRestored, restoredDetails };
 };
 
+// ─────────────────────────────────────────────
+// GET /mrs/all
+// ─────────────────────────────────────────────
 router.get("/mrs/all", async (req, res) => {
   try {
     const staffList = await Staff.find({ enabled: { $ne: false } })
@@ -510,6 +541,9 @@ router.get("/mrs/all", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /basic-payroll/employee/:employeeId
+// ─────────────────────────────────────────────
 router.get("/basic-payroll/employee/:employeeId", async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -541,20 +575,28 @@ router.get("/basic-payroll/employee/:employeeId", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET / — List payrolls
+// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// GET / — List payrolls (with optional pagination)
+// ─────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const {
       page = 1,
-      limit = 10,
+      limit,
       search = "",
       status = "",
       period = "",
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
-    const pageNum = parseInt(page),
-      limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
+    
+    const pageNum = parseInt(page);
+    // If limit is not provided, get ALL records (no pagination)
+    let limitNum = limit ? parseInt(limit) : null;
+    let skip = limitNum ? (pageNum - 1) * limitNum : 0;
 
     const matchConditions = { enabled: true };
     if (status && status !== "all") matchConditions.status = status;
@@ -595,15 +637,20 @@ router.get("/", async (req, res) => {
     };
     const sort = { [sortBy]: sortOrder === "desc" ? -1 : 1 };
 
-    const payrolls = await Payroll.find(finalConditions)
+    // Build the query
+    let query = Payroll.find(finalConditions)
       .populate(
         "employeeId",
         "medicalRepName teamName contactNo email date enabled MRId",
       )
-      .sort(sort)
-      .skip(skip)
-      .limit(limitNum)
-      .lean();
+      .sort(sort);
+
+    // Apply pagination only if limit is provided
+    if (limitNum) {
+      query = query.skip(skip).limit(limitNum);
+    }
+
+    const payrolls = await query.lean();
 
     const employeeIds = payrolls.map((p) => p.employeeId?._id).filter(Boolean);
     const basicPayrolls = await MrBasicPayroll.find({
@@ -648,17 +695,30 @@ router.get("/", async (req, res) => {
 
     const total = await Payroll.countDocuments(finalConditions);
     const nextPayrollCode = await generateNextPayrollCode();
-    res.status(200).json({
+
+    // Prepare response
+    const responseData = {
       success: true,
       data: transformedPayrolls,
-      pagination: {
+      nextPayrollCode,
+    };
+
+    // Add pagination info only if pagination was applied
+    if (limitNum) {
+      responseData.pagination = {
         currentPage: pageNum,
         totalPages: Math.ceil(total / limitNum),
         totalItems: total,
         itemsPerPage: limitNum,
-      },
-      nextPayrollCode,
-    });
+      };
+    } else {
+      responseData.pagination = {
+        totalItems: total,
+        itemsPerPage: total,
+      };
+    }
+
+    res.status(200).json(responseData);
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -668,6 +728,9 @@ router.get("/", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /export/csv
+// ─────────────────────────────────────────────
 router.get("/export/csv", async (req, res) => {
   try {
     const { search = "", status = "", period = "" } = req.query;
@@ -790,6 +853,9 @@ router.get("/export/csv", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /mrs/from-basic-payroll
+// ─────────────────────────────────────────────
 router.get("/mrs/from-basic-payroll", async (req, res) => {
   try {
     const mrBasicPayrolls = await MrBasicPayroll.find({})
@@ -826,6 +892,9 @@ router.get("/mrs/from-basic-payroll", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /calculate/:employeeId/:period
+// ─────────────────────────────────────────────
 router.get("/calculate/:employeeId/:period", async (req, res) => {
   try {
     const { employeeId, period } = req.params;
@@ -858,6 +927,9 @@ router.get("/calculate/:employeeId/:period", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /available-sources
+// ─────────────────────────────────────────────
 router.get("/available-sources", async (req, res) => {
   try {
     const { excludeIds } = req.query;
@@ -886,6 +958,9 @@ router.get("/available-sources", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /:id
+// ─────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
   try {
     const payroll = await Payroll.findById(req.params.id).populate(
@@ -944,7 +1019,6 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       status,
       paymentMethod,
       bankAccount,
-      paymentDate,
       remarks,
       sources,
     } = req.body;
@@ -1056,14 +1130,10 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
 
     const deductionsNum = toExactAmount(deductions || 0);
 
+    // ── Deduct balances from each source account ──
     let totalSourceAmount = 0;
-    for (const src of sources) {
-      totalSourceAmount += toExactAmount(src.amount);
-    }
-
-    const calculatedNetSalary = toFixedAmount(totalSourceAmount);
-
     const sourceAccounts = [];
+
     for (let i = 0; i < sources.length; i++) {
       const src = sources[i];
       const account = await Account.findById(src.accountId).session(session);
@@ -1077,9 +1147,20 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       account.totalAmount = toExactAmount(account.totalAmount - amount);
       await account.save({ session });
       sourceAccounts.push({ account, amount });
+      totalSourceAmount += amount;
     }
 
+    const calculatedNetSalary = toFixedAmount(totalSourceAmount);
     const payrollCode = await generateNextPayrollCode(session);
+
+    // ✅ Get current user ID
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      throw new Error("User not authenticated");
+    }
+
+    // ✅ Set paymentDate to current date when creating payroll
+    const currentDate = new Date();
 
     const payroll = new Payroll({
       employeeId: new mongoose.Types.ObjectId(employeeId),
@@ -1097,14 +1178,16 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       status: status || "pending",
       paymentMethod: paymentMethod || "bank",
       bankAccount: bankAccount || "",
-      paymentDate: paymentDate || null,
+      paymentDate: currentDate,
       remarks: remarks || "",
       payrollCode,
       payrollType: "current",
-      source: null,
-      createdBy: req.user?._id
-        ? new mongoose.Types.ObjectId(req.user._id)
-        : null,
+      sources: sourceAccounts.map(({ account, amount }) => ({
+        accountId: account._id,
+        accountName: account.name || "",
+        amount: toFixedAmount(amount),
+      })),
+      createdBy: new mongoose.Types.ObjectId(userId),
       attendanceInfo: {
         totalWorkingDays: sc.workingDaysInMonth || 0,
         presentDays: sc.presentDays || 0,
@@ -1123,6 +1206,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
 
     await payroll.save({ session });
     console.log(`   ✅ Payroll saved with ID: ${payroll._id}`);
+    console.log(`   ✅ Payment Date set to: ${currentDate}`);
 
     if (advanceDeduction > 0) {
       await MrAdvance.updateMany(
@@ -1132,10 +1216,11 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       );
     }
 
+    // Create financial records with isPayroll = true
     await createPayrollFinancialRecords({
       payrollNetSalary: calculatedNetSalary,
       payrollCode: payroll.payrollCode,
-      payrollId: payroll._id, // Pass the payroll _id
+      payrollId: payroll._id,
       employeeId: payroll.employeeId,
       employeeName: employee.medicalRepName,
       period,
@@ -1216,6 +1301,76 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     await session.endSession();
   }
 });
+
+// ─────────────────────────────────────────────
+// PATCH /:id/payment-status - Update payment status and date
+// ─────────────────────────────────────────────
+router.patch(
+  "/:id/payment-status",
+  protect,
+  allowAdminOnly,
+  async (req, res) => {
+    const session = await mongoose.startSession();
+    try {
+      await session.startTransaction();
+
+      const { status } = req.body;
+      const payrollId = req.params.id;
+
+      if (!mongoose.Types.ObjectId.isValid(payrollId)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid payroll ID" });
+      }
+
+      const payroll = await Payroll.findById(payrollId).session(session);
+      if (!payroll) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Payroll not found" });
+      }
+
+      if (status) {
+        payroll.status = status;
+      }
+
+      if (status === "paid") {
+        payroll.paymentDate = new Date();
+      }
+
+      await payroll.save({ session });
+      await session.commitTransaction();
+
+      await logActivity(req, {
+        action: "UPDATE",
+        actionLabel: `Updated Payment Status: ${payroll.payrollCode} to ${status}`,
+        tableName: "payrolls",
+        tableLabel: "Payroll",
+        recordId: payroll._id,
+        referenceNumber: payroll.payrollCode,
+        newData: { status: payroll.status, paymentDate: payroll.paymentDate },
+        description: `Payment status for ${payroll.payrollCode} updated to ${status}`,
+        refField: "payrollCode",
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Payment status updated successfully",
+        data: payroll,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      console.error("Error updating payment status:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to update payment status",
+        error: error.message,
+      });
+    } finally {
+      await session.endSession();
+    }
+  },
+);
 
 // ─────────────────────────────────────────────
 // POST /bulk
@@ -1323,6 +1478,8 @@ router.post("/bulk", protect, allowAdminOnly, async (req, res) => {
           ? allowanceNum
           : processedAllowances.reduce((sum, a) => sum + a.amount, 0);
 
+      const userId = req.user?._id || req.user?.id;
+
       try {
         const payroll = new Payroll({
           employeeId: new mongoose.Types.ObjectId(employeeId),
@@ -1339,7 +1496,8 @@ router.post("/bulk", protect, allowAdminOnly, async (req, res) => {
           bankAccount,
           remarks,
           payrollType,
-          source: null,
+          sources: [],
+          createdBy: userId ? new mongoose.Types.ObjectId(userId) : null,
         });
         await payroll.save({ session });
         results.push({
@@ -1419,7 +1577,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       status,
       paymentMethod,
       bankAccount,
-      paymentDate,
       remarks,
       enabled,
     } = req.body;
@@ -1449,7 +1606,6 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     if (status) payroll.status = status;
     if (paymentMethod) payroll.paymentMethod = paymentMethod;
     if (bankAccount !== undefined) payroll.bankAccount = bankAccount;
-    if (paymentDate !== undefined) payroll.paymentDate = paymentDate;
     if (remarks !== undefined) payroll.remarks = remarks;
     if (enabled !== undefined) payroll.enabled = enabled;
 
@@ -1531,10 +1687,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// DELETE /:id - Delete single payroll using payrollId
-// ─────────────────────────────────────────────
-// ─────────────────────────────────────────────
-// DELETE /:id - Delete single payroll using payrollId
+// DELETE /:id — Single payroll (also deletes linked transactions and expenses)
 // ─────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
@@ -1556,42 +1709,28 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     console.log(`\n🗑️ DELETING PAYROLL: ${payroll.payrollCode}`);
     console.log(`   Payroll ID: ${payroll._id}`);
     console.log(`   Net Salary: ${payroll.netSalary}`);
+    console.log(`   Stored sources: ${(payroll.sources || []).length}`);
 
-    // Restore source account balances using payroll ID
-    const { transactions, totalRestored, restoredDetails } =
-      await restoreAccountBalancesForPayroll(
-        payroll._id,
-        payroll.payrollCode,
-        session,
-      );
+    // ── Restore account balances (uses payroll.sources, falls back to txns) ──
+    const { totalRestored, restoredDetails } =
+      await restoreAccountBalancesFromSources(payroll, session);
 
-    // Delete all associated transactions
-    if (transactions.length > 0) {
-      console.log(
-        `   🗑️ Deleting ${transactions.length} associated transaction(s)`,
-      );
-      await Transaction.deleteMany({
-        payrollId: payroll._id,
-        transactionType: "payment outward",
-      }).session(session);
-      console.log(`   ✅ Transactions deleted`);
-    }
-
-    // Delete associated expense
-    console.log(
-      `   🔍 Finding associated expense for payrollId: ${payroll._id}`,
-    );
-    const expense = await Expense.findOne({
-      payrollId: payroll._id,
+    // ── Delete associated transactions (including isPayroll flagged) ──
+    const txnDeleteResult = await Transaction.deleteMany({
+      $or: [{ payrollId: payroll._id }, { payrollCode: payroll.payrollCode }],
+      transactionType: "payment outward",
     }).session(session);
+    const transactionsDeleted = txnDeleteResult.deletedCount || 0;
+    console.log(`   ✅ Deleted ${transactionsDeleted} transaction(s)`);
 
-    if (expense) {
-      await Expense.deleteOne({ _id: expense._id }).session(session);
-      console.log(`   ✅ Deleted associated expense: ${expense._id}`);
-    }
+    // ── Delete associated expenses (including isPayroll flagged) ──
+    const expenseDeleteResult = await Expense.deleteMany({
+      $or: [{ payrollId: payroll._id }, { payrollCode: payroll.payrollCode }],
+    }).session(session);
+    const expensesDeleted = expenseDeleteResult.deletedCount || 0;
+    console.log(`   ✅ Deleted ${expensesDeleted} expense(s)`);
 
-    // Delete the payroll record itself
-    console.log(`   🗑️ Deleting payroll record: ${req.params.id}`);
+    // ── Delete the payroll itself ──
     await Payroll.findByIdAndDelete(req.params.id).session(session);
     console.log(`   ✅ Payroll record deleted`);
 
@@ -1606,11 +1745,9 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       recordId: payroll._id,
       referenceNumber: payroll.payrollCode,
       previousData: payroll,
-      description: `Payroll ${payroll.payrollCode} for ${toTitleCase(payroll.employeeId?.medicalRepName || "Unknown")} (${payroll.period}) deleted. Restored $${totalRestored.toFixed(2)} to source accounts. Deleted ${transactions.length} transaction(s).`,
+      description: `Payroll ${payroll.payrollCode} for ${toTitleCase(payroll.employeeId?.medicalRepName || "Unknown")} (${payroll.period}) deleted. Restored $${totalRestored.toFixed(2)} to source accounts. Deleted ${transactionsDeleted} transaction(s) and ${expensesDeleted} expense(s).`,
       refField: "payrollCode",
     });
-
-    console.log(`\n✅ PAYROLL DELETED SUCCESSFULLY`);
 
     res.status(200).json({
       success: true,
@@ -1619,9 +1756,9 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       data: {
         id: req.params.id,
         restoredAmount: totalRestored,
-        restoredDetails: restoredDetails,
-        transactionsDeleted: transactions.length,
-        expenseDeleted: !!expense,
+        restoredDetails,
+        transactionsDeleted,
+        expensesDeleted,
       },
     });
   } catch (error) {
@@ -1644,7 +1781,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// DELETE / — Bulk delete payrolls using payrollId
+// DELETE / — Bulk delete payrolls
 // ─────────────────────────────────────────────
 router.delete("/", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
@@ -1687,38 +1824,24 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
       );
 
       // Restore source account balances
-      const { transactions, totalRestored, restoredDetails } =
-        await restoreAccountBalancesForPayroll(
-          payroll._id,
-          payroll.payrollCode,
-          session,
-        );
+      const { totalRestored, restoredDetails } =
+        await restoreAccountBalancesFromSources(payroll, session);
 
       totalRestoredAmount += totalRestored;
       allRestoredDetails.push(...restoredDetails);
 
-      // Delete transactions
-      if (transactions.length > 0) {
-        await Transaction.deleteMany({
-          $or: [
-            { payrollId: payroll._id },
-            { payrollCode: payroll.payrollCode },
-          ],
-          transactionType: "payment outward",
-        }).session(session);
-        totalTransactionsDeleted += transactions.length;
-        console.log(`   ✅ Deleted ${transactions.length} transaction(s)`);
-      }
+      // Delete transactions (including isPayroll flagged)
+      const txnResult = await Transaction.deleteMany({
+        $or: [{ payrollId: payroll._id }, { payrollCode: payroll.payrollCode }],
+        transactionType: "payment outward",
+      }).session(session);
+      totalTransactionsDeleted += txnResult.deletedCount || 0;
 
-      // Delete expense
-      const expenseResult = await Expense.deleteOne({
+      // Delete expenses (including isPayroll flagged)
+      const expResult = await Expense.deleteMany({
         $or: [{ payrollId: payroll._id }, { payrollCode: payroll.payrollCode }],
       }).session(session);
-
-      if (expenseResult.deletedCount > 0) {
-        totalExpensesDeleted++;
-        console.log(`   ✅ Deleted expense for ${payroll.payrollCode}`);
-      }
+      totalExpensesDeleted += expResult.deletedCount || 0;
     }
 
     // Delete all payroll records
@@ -1744,7 +1867,7 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
       data: {
         deletedCount: result.deletedCount,
         restoredAmount: totalRestoredAmount,
-        restoredDetails: allRestoredDetails.slice(0, 20), // Limit for response size
+        restoredDetails: allRestoredDetails.slice(0, 20),
         transactionsDeleted: totalTransactionsDeleted,
         expensesDeleted: totalExpensesDeleted,
       },
@@ -1764,6 +1887,9 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
+// GET /export — Excel export
+// ─────────────────────────────────────────────
 router.get("/export", protect, allowAdminOnly, async (req, res) => {
   try {
     const { search = "", status = "", period = "" } = req.query;
@@ -1818,6 +1944,7 @@ router.get("/export", protect, allowAdminOnly, async (req, res) => {
       "Net Salary": toFixedAmount(p.netSalary),
       Status: p.status,
       "Payment Method": p.paymentMethod,
+      "Payment Date": p.paymentDate ? formatDateForLog(p.paymentDate) : "",
       "Created At": formatDateForLog(p.createdAt),
     }));
 

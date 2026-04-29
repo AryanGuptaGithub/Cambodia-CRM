@@ -7,41 +7,31 @@ import React, {
 } from "react";
 import {
   Eye,
-  Edit,
   Trash2,
   UserPlus,
-  Upload,
   X,
   Search,
   DollarSign,
-  View,
-  List,
-  Calendar,
   Download,
   Menu,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import * as XLSX from "xlsx";
 import axios from "axios";
-import SampleExcelDownloadPayroll from "../../excels/SampleExcelDownloadPayroll";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
-import { parseExcelDate } from "../../utils/excelUtility";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import Sidebar from "../../components/Sidebar";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const payrollsPerPage = 7;
 const advancesPerPage = 7;
 
-// Allowance types array
 const allowanceTypes = [
   "House Rent Allowance",
   "Dearness Allowance",
@@ -55,7 +45,7 @@ const allowanceTypes = [
   "Other",
 ];
 
-// ─── Custom hook for payroll form (unchanged) ─────────────────────────────
+// ─── Custom hook for payroll form ─────────────────────────────────────────
 const usePayrollForm = (initialForm = {}) => {
   const [form, setForm] = useState({
     employeeId: "",
@@ -71,7 +61,7 @@ const usePayrollForm = (initialForm = {}) => {
     paymentDate: "",
     remarks: "",
     payrollCode: "",
-    source: "",
+    sources: [], // Changed from 'source' to 'sources'
     ...initialForm,
   });
 
@@ -86,18 +76,10 @@ const usePayrollForm = (initialForm = {}) => {
       setMrListLoading(true);
       const response = await fetch(`${backendUrl}/api/staff`);
       const data = await response.json();
-
-      if (!response.ok) {
+      if (!response.ok)
         throw new Error(data.message || "Failed to fetch employees");
-      }
-
-      if (data && data.length > 0) {
-        setMrList(data);
-        setIsMrListEmpty(false);
-      } else {
-        setMrList([]);
-        setIsMrListEmpty(true);
-      }
+      setMrList(data || []);
+      setIsMrListEmpty(!data || data.length === 0);
     } catch (error) {
       console.error("Error fetching employees:", error);
       showToast("error", error.message || "Failed to load employees");
@@ -159,7 +141,7 @@ const usePayrollForm = (initialForm = {}) => {
       const selectedEmployee = mrList.find((mr) => mr._id === employeeId);
       setForm((prev) => ({
         ...prev,
-        employeeId,
+        employeeId: employeeId || "",
         employeeName:
           selectedEmployee?.medicalRepName ||
           selectedEmployee?.employeeName ||
@@ -211,7 +193,7 @@ const usePayrollForm = (initialForm = {}) => {
   };
 };
 
-// ─── MultipleSelectDropdown Component ─────────────────────────
+// ─── MultipleSelectDropdown Component ─────────────────────────────────────
 const MultipleSelectDropdown = ({
   label,
   value = [],
@@ -330,7 +312,7 @@ const MultipleSelectDropdown = ({
   );
 };
 
-// ─── AllowanceBreakdownModal (unchanged) ─────────────────────────────────
+// ─── AllowanceBreakdownModal ──────────────────────────────────────────────
 const AllowanceBreakdownModal = ({
   allowances,
   isOpen,
@@ -360,7 +342,6 @@ const AllowanceBreakdownModal = ({
             <X size={24} />
           </button>
         </div>
-
         <div className="flex-1 overflow-y-auto">
           <div className="space-y-3">
             {allowances.length === 0 ? (
@@ -402,7 +383,6 @@ const AllowanceBreakdownModal = ({
             )}
           </div>
         </div>
-
         {!disabled && (
           <div className="mt-4 pt-4 border-t border-gray-200">
             <p className="text-sm text-gray-600 mb-2">
@@ -411,7 +391,6 @@ const AllowanceBreakdownModal = ({
             </p>
           </div>
         )}
-
         <div className="mt-4 flex justify-end">
           <button
             onClick={onClose}
@@ -426,7 +405,7 @@ const AllowanceBreakdownModal = ({
   );
 };
 
-// ─── CustomDateRangeModal (unchanged) ────────────────────────────────────
+// ─── CustomDateRangeModal ─────────────────────────────────────────────────
 const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
@@ -472,7 +451,6 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
             <X size={24} />
           </button>
         </div>
-
         <div className="p-6">
           <div className="space-y-4">
             <div>
@@ -512,7 +490,6 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
             </div>
           </div>
         </div>
-
         <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
           <button
             onClick={onClose}
@@ -534,22 +511,15 @@ const CustomDateRangeModal = ({ isOpen, onClose, onDateRangeSelect }) => {
   );
 };
 
-// ─── DateSelectionTabs (unchanged) ───────────────────────────────────────
-const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
+// ─── DateSelectionTabs ────────────────────────────────────────────────────
+const DateSelectionTabs = ({ onDateRangeSelect }) => {
   const [activeTab, setActiveTab] = useState("previousMonth");
   const [showCustomModal, setShowCustomModal] = useState(false);
 
-  const getCurrentDateInfo = () => {
-    const now = new Date();
-    return {
-      now,
-      currentYear: now.getFullYear(),
-      currentMonth: now.getMonth(),
-    };
-  };
-
   const getPreviousMonthRange = () => {
-    const { currentYear, currentMonth } = getCurrentDateInfo();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
     const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
     const prevYear = currentMonth === 0 ? currentYear - 1 : currentYear;
     const monthNames = [
@@ -574,7 +544,9 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
   };
 
   const getJanToPreviousMonthRange = () => {
-    const { currentYear, currentMonth } = getCurrentDateInfo();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
     if (currentMonth === 0) {
       return {
         start: new Date(currentYear - 1, 0, 1),
@@ -642,7 +614,6 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
           ))}
         </div>
       </div>
-
       <CustomDateRangeModal
         isOpen={showCustomModal}
         onClose={() => setShowCustomModal(false)}
@@ -655,7 +626,7 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
   );
 };
 
-// ─── YearFilterButtons (unchanged) ───────────────────────────────────────
+// ─── YearFilterButtons ────────────────────────────────────────────────────
 const YearFilterButtons = ({
   allPayrolls,
   selectedYear,
@@ -709,211 +680,8 @@ const YearFilterButtons = ({
   );
 };
 
-// ─── CSVImportModal (unchanged) ──────────────────────────────────────────
-const CSVImportModal = ({ isOpen, onClose, onImport }) => {
-  const [file, setFile] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [importResult, setImportResult] = useState(null);
-  const fileInputRef = useRef(null);
-
-  const handleFileChange = (e) => {
-    const selectedFile = e.target.files[0];
-    if (selectedFile) {
-      if (
-        selectedFile.type === "text/csv" ||
-        selectedFile.name.endsWith(".csv")
-      ) {
-        setFile(selectedFile);
-        setImportResult(null);
-      } else {
-        showToast("error", "Please select a CSV file");
-      }
-    }
-  };
-
-  const handleImport = async () => {
-    if (!file) {
-      showToast("error", "Please select a CSV file first");
-      return;
-    }
-    try {
-      setLoading(true);
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await axios.post(
-        `${backendUrl}/api/hrm/payroll/import/csv`,
-        formData,
-        { headers: { "Content-Type": "multipart/form-data" } },
-      );
-      if (response.data.success) {
-        setImportResult(response.data.data);
-        showToast(
-          "success",
-          `Imported ${response.data.data.success} payrolls successfully`,
-        );
-        if (response.data.data.failed > 0)
-          showToast(
-            "error",
-            `${response.data.data.failed} payrolls failed to import`,
-          );
-        if (onImport) onImport();
-      }
-    } catch (error) {
-      showToast(
-        "error",
-        error.response?.data?.message || "Failed to import CSV",
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const downloadTemplate = async () => {
-    try {
-      const response = await axios.get(
-        `${backendUrl}/api/hrm/payroll/import/template`,
-        { responseType: "blob" },
-      );
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", "payroll_import_template.csv");
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      showToast("success", "Template downloaded successfully");
-    } catch {
-      showToast("error", "Failed to download template");
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Import Payrolls from CSV</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
-          >
-            ✕
-          </button>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Upload CSV File
-            </label>
-            <div
-              className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer ${
-                file
-                  ? "border-green-500 bg-green-50"
-                  : "border-gray-300 hover:border-gray-400"
-              }`}
-              onClick={() => fileInputRef.current.click()}
-            >
-              {file ? (
-                <div>
-                  <p className="text-green-600 font-medium">{file.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {(file.size / 1024).toFixed(2)} KB
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-gray-600">Click to select CSV file</p>
-                  <p className="text-sm text-gray-500 mt-1">
-                    or drag and drop here
-                  </p>
-                </div>
-              )}
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept=".csv"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-            </div>
-          </div>
-          {importResult && (
-            <div className="p-4 bg-gray-50 rounded-lg">
-              <h4 className="font-medium text-gray-800 mb-2">Import Results</h4>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Total:</span>
-                  <span className="font-medium">{importResult.total}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-green-600">Successful:</span>
-                  <span className="font-medium text-green-600">
-                    {importResult.success}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-red-600">Failed:</span>
-                  <span className="font-medium text-red-600">
-                    {importResult.failed}
-                  </span>
-                </div>
-              </div>
-              {importResult.errors && importResult.errors.length > 0 && (
-                <div className="mt-3">
-                  <h5 className="text-sm font-medium text-gray-700 mb-1">
-                    Errors:
-                  </h5>
-                  <div className="max-h-40 overflow-y-auto text-xs">
-                    {importResult.errors.map((error, index) => (
-                      <p key={index} className="text-red-600 mb-1">
-                        {error}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          <div className="flex justify-between items-center pt-2">
-            <button
-              type="button"
-              onClick={downloadTemplate}
-              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-            >
-              Download Template
-            </button>
-          </div>
-        </div>
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleImport}
-            disabled={!file || loading}
-            className={`px-4 py-2 rounded-md text-white ${
-              !file || loading
-                ? "bg-gray-400 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700"
-            }`}
-          >
-            {loading ? "Importing..." : "Import CSV"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-};
-
-// ============================================================================
-// Simplified Advance List Component (no date/year filters)
-// ============================================================================
-const AdvanceList = ({ isMobileView, onDelete }) => {
+// ─── AdvanceList Component ────────────────────────────────────────────────
+const AdvanceList = ({ isMobileView }) => {
   const [advances, setAdvances] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1065,7 +833,7 @@ const AdvanceList = ({ isMobileView, onDelete }) => {
                 Status
               </th>
               {!isMobileView && (
-                <th className={"p-3 text-sm font-medium"}>Actions</th>
+                <th className="p-3 text-sm font-medium">Actions</th>
               )}
             </tr>
           </thead>
@@ -1083,9 +851,7 @@ const AdvanceList = ({ isMobileView, onDelete }) => {
               currentAdvances.map((adv, idx) => (
                 <tr
                   key={adv._id}
-                  className={`hover:bg-gray-50 ${
-                    idx < currentAdvances.length - 1 ? "border-b" : ""
-                  }`}
+                  className={`hover:bg-gray-50 ${idx < currentAdvances.length - 1 ? "border-b" : ""}`}
                 >
                   <td
                     className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-left font-medium`}
@@ -1121,15 +887,13 @@ const AdvanceList = ({ isMobileView, onDelete }) => {
                     className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"}`}
                   >
                     <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(
-                        adv.status,
-                      )}`}
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(adv.status)}`}
                     >
                       {adv.status}
                     </span>
                   </td>
                   {!isMobileView && (
-                    <td className={"p-3 text-sm"}>
+                    <td className="p-3 text-sm">
                       <button
                         onClick={() => handleDelete(adv)}
                         className="text-red-600 hover:text-red-800"
@@ -1187,19 +951,8 @@ const AdvanceList = ({ isMobileView, onDelete }) => {
 const Payroll = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("payroll");
-
-  // ─── Mobile detection ──────────────────────────────────────────────────────
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
-  }, []);
-
-  // ─── All existing payroll state and functions ───────────────────────────
   const [payrolls, setPayrolls] = useState([]);
   const [allPayrolls, setAllPayrolls] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1209,14 +962,10 @@ const Payroll = () => {
   const [selectedDateRange, setSelectedDateRange] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
   const [selected, setSelected] = useState([]);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [parsedData, setParsedData] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [isUploading, setIsUploading] = useState(false);
   const [nextPayrollCode, setNextPayrollCode] = useState(null);
   const inputRef = useRef(null);
-
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isAllowanceModalOpen, setIsAllowanceModalOpen] = useState(false);
@@ -1242,7 +991,6 @@ const Payroll = () => {
     fetchMRList,
   } = usePayrollForm();
 
-  // ─── Functions ──────────────────────────────────────────────────────────
   const fetchSourceOptions = useCallback(async () => {
     try {
       setSourceLoading(true);
@@ -1254,12 +1002,8 @@ const Payroll = () => {
           .filter((d) => d.totalAmount > 0)
           .map((d) => ({
             value: d._id || d.id,
-            label:
-              typeof d.name === "string"
-                ? d.name
-                : typeof d.destinationName === "string"
-                  ? d.destinationName
-                  : `Destination ${d._id}`,
+            label: d.name || d.destinationName || `Destination ${d._id}`,
+            balance: d.totalAmount,
           }));
         setSourceOptions(options);
       } else {
@@ -1272,11 +1016,6 @@ const Payroll = () => {
       setSourceLoading(false);
     }
   }, []);
-
-  const handleSourceChange = (sourceId) => {
-    setForm((prev) => ({ ...prev, source: sourceId }));
-    setErrors((prev) => ({ ...prev, source: "" }));
-  };
 
   const exportToCSV = async () => {
     try {
@@ -1298,10 +1037,6 @@ const Payroll = () => {
     } catch (error) {
       showToast("error", "Failed to export payrolls");
     }
-  };
-
-  const handleCSVImportSuccess = () => {
-    fetchPayrolls();
   };
 
   useEffect(() => {
@@ -1356,12 +1091,6 @@ const Payroll = () => {
     setPayrolls(filterPayrollsByDateRange(dateRange, allPayrolls));
   };
 
-  const handleClearDateFilter = () => {
-    setSelectedDateRange(null);
-    setPayrolls(allPayrolls);
-    setCurrentPage(1);
-  };
-
   const handleYearSelect = (year) => {
     setSelectedYear(year);
     setSelectedDateRange(null);
@@ -1370,10 +1099,9 @@ const Payroll = () => {
       setPayrolls(allPayrolls);
     } else {
       setPayrolls(
-        allPayrolls.filter((p) => {
-          if (!p.period) return false;
-          return parseInt(p.period.split("-")[0], 10) === year;
-        }),
+        allPayrolls.filter(
+          (p) => p.period && parseInt(p.period.split("-")[0], 10) === year,
+        ),
       );
     }
   };
@@ -1401,22 +1129,23 @@ const Payroll = () => {
     currentPage * payrollsPerPage,
   );
 
-  function getVisiblePages(currentPage, totalPages) {
+  const getVisiblePages = (currentPage, totalPages) => {
     if (totalPages <= 5)
       return Array.from({ length: totalPages }, (_, i) => i + 1);
     if (currentPage <= 3) return [1, 2, 3, "...", totalPages];
     if (currentPage >= totalPages - 2)
       return [1, "...", totalPages - 2, totalPages - 1, totalPages];
     return [1, "...", currentPage, "...", totalPages];
-  }
+  };
 
   const visiblePages = getVisiblePages(currentPage, totalPages);
 
   const toggleSelect = (payroll) => {
     setSelected((prev) => {
       const exists = prev.some((p) => p.id === payroll._id);
-      if (exists) return prev.filter((p) => p.id !== payroll._id);
-      return [...prev, { id: payroll._id, name: payroll.employeeName }];
+      return exists
+        ? prev.filter((p) => p.id !== payroll._id)
+        : [...prev, { id: payroll._id, name: payroll.employeeName }];
     });
   };
 
@@ -1531,10 +1260,30 @@ const Payroll = () => {
           if (!isNaN(amt))
             allowances = [{ type: "Total Allowance", amount: amt }];
         }
-      } else if (typeof payroll.allowances === "number")
+      } else if (typeof payroll.allowances === "number") {
         allowances = [{ type: "Total Allowance", amount: payroll.allowances }];
+      }
       if (!Array.isArray(allowances)) allowances = [];
       await fetchMRList();
+
+      // Handle sources - ensure it's an array
+      let sources = [];
+      if (payroll.sources && Array.isArray(payroll.sources)) {
+        sources = payroll.sources;
+      } else if (payroll.source) {
+        // Legacy support: convert single source to array
+        sources = [
+          {
+            accountId:
+              typeof payroll.source === "object"
+                ? payroll.source._id
+                : payroll.source,
+            accountName: payroll.source?.name || "",
+            amount: payroll.netSalary || 0,
+          },
+        ];
+      }
+
       setForm({
         ...payroll,
         employeeId: payroll.employeeId || "",
@@ -1550,14 +1299,12 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
-        source:
-          (typeof payroll.source === "object"
-            ? payroll.source._id
-            : payroll.source) || "",
+        sources: sources,
         _id: payroll._id,
       });
       setIsEditModalOpen(true);
     } catch (error) {
+      console.error("Edit payroll error:", error);
       showToast("error", "Failed to load payroll data for editing");
     }
   };
@@ -1565,41 +1312,71 @@ const Payroll = () => {
   const handleView = async (payroll) => {
     try {
       let allowances = [];
-      if (Array.isArray(payroll.allowances)) allowances = payroll.allowances;
-      else if (typeof payroll.allowances === "string") {
+
+      if (Array.isArray(payroll.allowances)) {
+        allowances = payroll.allowances;
+      } else if (typeof payroll.allowances === "string") {
         try {
           allowances = JSON.parse(payroll.allowances);
-        } catch {
+          if (!Array.isArray(allowances)) allowances = [];
+        } catch (parseError) {
           const amt = parseFloat(payroll.allowances);
-          if (!isNaN(amt))
+          if (!isNaN(amt)) {
             allowances = [{ type: "Total Allowance", amount: amt }];
+          }
         }
-      } else if (typeof payroll.allowances === "number")
+      } else if (
+        typeof payroll.allowances === "number" &&
+        !isNaN(payroll.allowances)
+      ) {
         allowances = [{ type: "Total Allowance", amount: payroll.allowances }];
+      }
+
       if (!Array.isArray(allowances)) allowances = [];
-      setForm({
-        ...payroll,
+
+      // Handle sources - ensure we have an array
+      let sources = [];
+      if (payroll.sources && Array.isArray(payroll.sources)) {
+        sources = payroll.sources;
+      } else if (payroll.source) {
+        // Legacy support
+        sources = [
+          {
+            accountId:
+              typeof payroll.source === "object"
+                ? payroll.source._id
+                : payroll.source,
+            accountName: payroll.source?.name || "Unknown Account",
+            amount: payroll.netSalary || 0,
+          },
+        ];
+      }
+
+      const viewFormData = {
+        _id: payroll._id,
+        payrollCode: payroll.payrollCode || "N/A",
         employeeId: payroll.employeeId || "",
-        employeeName: payroll.employeeName || "",
+        employeeName: payroll.employeeName || "Unknown",
         period: payroll.period || "",
-        basicSalary: payroll.basicSalary?.toString() || "",
-        allowances,
-        deductions: payroll.deductions?.toString() || "",
+        basicSalary: payroll.basicSalary?.toString() || "0",
+        allowances: allowances,
+        deductions: payroll.deductions?.toString() || "0",
         netSalary: payroll.netSalary?.toString() || "0.00",
         status: payroll.status || "pending",
         paymentMethod: payroll.paymentMethod || "",
         bankAccount: payroll.bankAccount || "",
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
-        payrollCode: payroll.payrollCode || "",
-        source:
-          (typeof payroll.source === "object"
-            ? payroll.source._id
-            : payroll.source) || "",
-        _id: payroll._id,
-      });
+        sources: sources,
+        payrollType: payroll.payrollType,
+        adjustedBasicSalary: payroll.adjustedBasicSalary,
+        displayBasicSalary: payroll.displayBasicSalary,
+      };
+
+      setForm(viewFormData);
       setIsViewModalOpen(true);
     } catch (error) {
+      console.error("View payroll error:", error);
       showToast("error", "Failed to load payroll data for viewing");
     }
   };
@@ -1615,8 +1392,9 @@ const Payroll = () => {
         if (!isNaN(amt))
           allowances = [{ type: "Total Allowance", amount: amt }];
       }
-    } else if (typeof payroll.allowances === "number")
+    } else if (typeof payroll.allowances === "number") {
       allowances = [{ type: "Total Allowance", amount: payroll.allowances }];
+    }
     setCurrentAllowances(allowances);
     setIsAllowanceModalOpen(true);
   };
@@ -1634,6 +1412,7 @@ const Payroll = () => {
         ...form,
         totalAllowance: totalAllowance.toFixed(2),
         allowances: form.allowances,
+        // Don't send sources in update for now (keep existing)
       };
       const res = await axios.put(
         `${backendUrl}/api/hrm/payroll/${form._id}`,
@@ -1683,42 +1462,13 @@ const Payroll = () => {
     return 0;
   };
 
-  const mrOptions = useMemo(() => {
-    if (isMrListEmpty) {
-      if (form.employeeId && form.employeeName)
-        return [{ value: form.employeeId, label: form.employeeName }];
-      return [{ value: "", label: "No Employees Available", disabled: true }];
+  // Helper function to format source label
+  const getSourceLabel = (source) => {
+    if (!source) return "Not specified";
+    if (typeof source === "object") {
+      return source.accountName || source.name || "Unknown Account";
     }
-    let options = mrList.map((mr) => ({
-      value: mr._id,
-      label: mr.medicalRepName || mr.employeeName || `Employee ${mr._id}`,
-    }));
-    if (
-      form.employeeId &&
-      form.employeeName &&
-      !options.some((opt) => opt.value === form.employeeId)
-    )
-      options = [
-        ...options,
-        { value: form.employeeId, label: form.employeeName },
-      ];
-    return options;
-  }, [mrList, isMrListEmpty, form.employeeId, form.employeeName]);
-
-  const selectedAllowanceTypes = useMemo(
-    () => (form.allowances || []).map((a) => a.type),
-    [form.allowances],
-  );
-
-  const getSourceLabel = (sourceId) => {
-    if (!sourceId) return "Not specified";
-    if (typeof sourceId === "object") {
-      if (sourceId.name) return sourceId.name.toString();
-      if (sourceId.destinationName) return sourceId.destinationName.toString();
-      return `Destination ${sourceId._id || sourceId.id || "Unknown"}`;
-    }
-    const source = sourceOptions.find((opt) => opt.value === sourceId);
-    return source ? source.label.toString() : sourceId.toString();
+    return source.toString();
   };
 
   useEffect(() => {
@@ -1727,12 +1477,18 @@ const Payroll = () => {
         setIsEditModalOpen(false);
         setIsViewModalOpen(false);
         setIsAllowanceModalOpen(false);
-        setShowImportModal(false);
         setShowAllowanceBreakdown(false);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileView(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
   if (loading && activeTab === "payroll")
@@ -1759,7 +1515,6 @@ const Payroll = () => {
 
   return (
     <div className={`${isMobileView ? "px-3 pb-20" : "p-6"} relative`}>
-      {/* ── Sidebar (mobile only) ── */}
       {isMobileView && (
         <Sidebar
           isOpen={sidebarOpen}
@@ -1768,7 +1523,6 @@ const Payroll = () => {
         />
       )}
 
-      {/* ── MOBILE Header ── */}
       {isMobileView && (
         <div className="flex justify-between items-center mb-1 bg-gray-200 border-gray-200 p-2 rounded-2xl">
           <div className="flex items-center gap-2">
@@ -1787,7 +1541,6 @@ const Payroll = () => {
         </div>
       )}
 
-      {/* Tab Switcher */}
       <div className="flex border-b border-gray-200 mb-4 md:mb-6">
         <button
           onClick={() => setActiveTab("payroll")}
@@ -1812,9 +1565,7 @@ const Payroll = () => {
       </div>
 
       {activeTab === "payroll" ? (
-        // ── Existing Payroll Content ────────────────────────────────────────
         <>
-          {/* Desktop Header */}
           {!isMobileView && (
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
               <div className="flex flex-wrap gap-3">
@@ -1843,7 +1594,6 @@ const Payroll = () => {
                   </button>
                 )}
               </div>
-
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
                 <div className="bg-blue-50 px-4 py-2 rounded-lg">
                   <p className="text-sm font-medium text-blue-800">
@@ -1873,7 +1623,6 @@ const Payroll = () => {
             </div>
           )}
 
-          {/* MOBILE Search Bar */}
           {isMobileView && (
             <div className="relative mb-4">
               <Search
@@ -1893,7 +1642,6 @@ const Payroll = () => {
             </div>
           )}
 
-          {/* Year Filter Buttons */}
           <YearFilterButtons
             allPayrolls={allPayrolls}
             selectedYear={selectedYear}
@@ -1901,13 +1649,8 @@ const Payroll = () => {
             isMobileView={isMobileView}
           />
 
-          {/* Month Range Tabs */}
-          <DateSelectionTabs
-            onDateRangeSelect={handleDateRangeSelect}
-            selectedRange={selectedDateRange}
-          />
+          <DateSelectionTabs onDateRangeSelect={handleDateRangeSelect} />
 
-          {/* Active filter badge */}
           {(selectedYear !== null || selectedDateRange) && (
             <div className="mb-4 flex flex-wrap items-center gap-3">
               <span className="text-xs md:text-sm text-indigo-700 font-medium bg-indigo-50 border border-indigo-200 px-2 md:px-3 py-1 rounded-full">
@@ -1929,7 +1672,6 @@ const Payroll = () => {
             </div>
           )}
 
-          {/* Payroll Table */}
           <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
             <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
               <thead className="bg-gray-100 text-gray-700 border-b">
@@ -2013,9 +1755,7 @@ const Payroll = () => {
                   currentPayrolls.map((payroll, idx) => (
                     <tr
                       key={payroll._id}
-                      className={`hover:bg-gray-50 ${
-                        idx < currentPayrolls.length - 1 ? "border-b" : ""
-                      }`}
+                      className={`hover:bg-gray-50 ${idx < currentPayrolls.length - 1 ? "border-b" : ""}`}
                     >
                       <td
                         className={`${isMobileView ? "p-2 text-xs" : "p-3 text-sm"} text-left`}
@@ -2145,7 +1885,6 @@ const Payroll = () => {
               </tbody>
             </table>
 
-            {/* Pagination */}
             {currentPayrolls.length > 0 && (
               <div
                 className={`mt-4 p-3 md:p-5 flex ${isMobileView ? "justify-center" : "justify-start"} gap-1 md:gap-2 flex-wrap`}
@@ -2192,7 +1931,7 @@ const Payroll = () => {
             )}
           </div>
 
-          {/* Modals (unchanged - keep existing modal code) */}
+          {/* Allowance Details Modal */}
           {isAllowanceModalOpen &&
             ReactDOM.createPortal(
               <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
@@ -2316,6 +2055,7 @@ const Payroll = () => {
               document.body,
             )}
 
+          {/* Edit Modal */}
           {isEditModalOpen &&
             ReactDOM.createPortal(
               <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
@@ -2345,8 +2085,8 @@ const Payroll = () => {
                             disabled
                           />
                         </div>
-                        <div className="flex flex-col">
-                          <label className="text-sm font-medium text-gray-700 mb-1">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
                             Employee Name
                           </label>
                           <input
@@ -2389,7 +2129,7 @@ const Payroll = () => {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                         <MultipleSelectDropdown
                           label="Allowance Type"
-                          value={selectedAllowanceTypes}
+                          value={form.allowances?.map((a) => a.type) || []}
                           onChange={handleAllowanceChange}
                           options={allowanceOptions}
                           placeholder="Select allowance types"
@@ -2416,24 +2156,6 @@ const Payroll = () => {
                             </button>
                           </div>
                         </div>
-                      </div>
-
-                      <div className="mb-6">
-                        <SearchableDropdown
-                          label="Source"
-                          value={form.source}
-                          onChange={handleSourceChange}
-                          options={sourceOptions}
-                          placeholder={
-                            sourceLoading
-                              ? "Loading sources..."
-                              : "Select Source"
-                          }
-                          required
-                          loading={sourceLoading}
-                          error={errors.source}
-                          disabled={isMrListEmpty || sourceLoading}
-                        />
                       </div>
 
                       <div className="mb-6">
@@ -2515,6 +2237,7 @@ const Payroll = () => {
               document.body,
             )}
 
+          {/* View Modal - Updated to show ALL sources */}
           {isViewModalOpen &&
             ReactDOM.createPortal(
               <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
@@ -2531,6 +2254,7 @@ const Payroll = () => {
                     </button>
                   </div>
                   <div className="flex-1 overflow-y-auto p-6">
+                    {/* Row 1: Payroll Code and Employee Name */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                       <div>
                         <label className="block text-sm font-medium text-gray-600 mb-1">
@@ -2549,24 +2273,45 @@ const Payroll = () => {
                         </p>
                       </div>
                     </div>
+
+                    {/* Row 2: Pay Period, Net Salary, Payment Date - ALL ON SAME ROW */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Pay Period
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                          {form.period || "N/A"}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Net Salary
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 font-semibold text-green-600">
+                          {formatCurrency(form.netSalary)}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Payment Date
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                          {form.paymentDate
+                            ? formatDateToReadable(form.paymentDate)
+                            : "Not Paid Yet"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Row 3: Basic Salary, Total Allowances, Deductions */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                       <div>
                         <label className="block text-sm font-medium text-gray-600 mb-1">
                           Basic Salary
-                          {form.payrollType === "current" &&
-                            form.adjustedBasicSalary != null &&
-                            form.adjustedBasicSalary !== form.basicSalary && (
-                              <span className="ml-1 text-xs text-gray-400 font-normal">
-                                (Full: {formatCurrency(form.basicSalary)})
-                              </span>
-                            )}
                         </label>
                         <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
-                          {formatCurrency(
-                            form.displayBasicSalary != null
-                              ? form.displayBasicSalary
-                              : form.basicSalary,
-                          )}
+                          {formatCurrency(form.basicSalary)}
                         </p>
                       </div>
                       <div>
@@ -2581,51 +2326,81 @@ const Payroll = () => {
                         <label className="block text-sm font-medium text-gray-600 mb-1">
                           Deductions
                         </label>
-                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 text-red-600">
                           {formatCurrency(form.deductions)}
                         </p>
                       </div>
                     </div>
-                    <div
-                      className={`grid gap-4 mb-6 ${
-                        form.status === "paid"
-                          ? "grid-cols-1 md:grid-cols-2"
-                          : "grid-cols-1 md:grid-cols-3"
-                      }`}
-                    >
-                      <div>
+
+                    {/* Status and Payment Method Row */}
+      
+
+                    {/* Bank Account Row (if exists) */}
+                    {form.bankAccount && (
+                      <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-600 mb-1">
-                          Net Salary
+                          Bank Account
                         </label>
-                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 font-semibold">
-                          {formatCurrency(form.netSalary)}
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                          {form.bankAccount}
                         </p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-600 mb-1">
-                          Source
+                    )}
+
+                    {/* SOURCES SECTION - SHOW ALL SOURCES */}
+                    {form.sources && form.sources.length > 0 && (
+                      <div className="mb-6">
+                        <label className="block text-sm font-medium text-gray-600 mb-2">
+                          Payment Sources ({form.sources.length})
                         </label>
-                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
-                          {getSourceLabel(form.source)}
-                        </p>
+                        <div className="border border-gray-300 rounded-lg overflow-hidden">
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-sm font-medium text-gray-700">
+                                  Account Name
+                                </th>
+                                <th className="px-4 py-2 text-right text-sm font-medium text-gray-700">
+                                  Amount
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {form.sources.map((source, index) => (
+                                <tr key={index} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2 text-sm text-gray-900">
+                                    {source.accountName ||
+                                      source.name ||
+                                      `Account ${source.accountId}`}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm text-right font-medium text-green-600">
+                                    {formatCurrency(source.amount)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-gray-50 border-t border-gray-200">
+                              <tr>
+                                <td className="px-4 py-2 text-sm font-semibold text-gray-900">
+                                  Total from Sources
+                                </td>
+                                <td className="px-4 py-2 text-sm font-semibold text-right text-green-700">
+                                  {formatCurrency(
+                                    form.sources.reduce(
+                                      (total, s) =>
+                                        total + (parseFloat(s.amount) || 0),
+                                      0,
+                                    ),
+                                  )}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-600 mb-1">
-                          Status
-                        </label>
-                        <p
-                          className={`border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize ${
-                            form.status === "paid"
-                              ? "text-green-600"
-                              : form.status === "pending"
-                                ? "text-yellow-600"
-                                : "text-red-600"
-                          }`}
-                        >
-                          {form.status || "N/A"}
-                        </p>
-                      </div>
-                    </div>
+                    )}
+
+                    {/* Allowance Breakdown Section */}
                     {form.allowances && form.allowances.length > 0 && (
                       <div className="mb-6">
                         <label className="block text-sm font-medium text-gray-600 mb-2">
@@ -2669,14 +2444,18 @@ const Payroll = () => {
                         </div>
                       </div>
                     )}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600 mb-1">
-                        Remarks
-                      </label>
-                      <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 min-h-[80px]">
-                        {form.remarks?.trim() ? form.remarks : "No Remarks"}
-                      </p>
-                    </div>
+
+                    {/* Remarks Section */}
+                    {form.remarks && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">
+                          Remarks
+                        </label>
+                        <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 min-h-[80px]">
+                          {form.remarks.trim() ? form.remarks : "No Remarks"}
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
                     <button
@@ -2702,7 +2481,6 @@ const Payroll = () => {
           )}
         </>
       ) : (
-        // ── Advance Tab Content ────────────────────────────────────────────────
         <AdvanceList isMobileView={isMobileView} />
       )}
     </div>

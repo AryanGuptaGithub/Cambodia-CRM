@@ -58,8 +58,6 @@ export default function RevertNotifications({ apiBase = "/api" }) {
 
     try {
       const url = `${apiBase}/activity-logs/revert-notifications?limit=20`;
-      console.log("Fetching notifications from:", url);
-
       const res = await fetch(url, {
         method: "GET",
         credentials: "include",
@@ -69,7 +67,6 @@ export default function RevertNotifications({ apiBase = "/api" }) {
         },
       });
 
-      console.log('value sof res', res);
       if (res.status === 401) {
         console.warn("Authentication failed - token may be expired");
         setError("Authentication failed. Please refresh the page.");
@@ -81,7 +78,6 @@ export default function RevertNotifications({ apiBase = "/api" }) {
       }
 
       const data = await res.json();
-      console.log('values of data----->data', data);
       if (data.success) {
         setNotifications(data.notifications || []);
         setStats(

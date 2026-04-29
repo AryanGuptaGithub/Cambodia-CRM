@@ -208,7 +208,6 @@ export const CompanyBalancePanel = () => {
         ? `${backendUrl}/api/accounts/transactions?accountId=${accountId}`
         : `${backendUrl}/api/accounts/transactions`;
       const response = await axios.get(url);
-      console.log('values of response', response);
       if (response.data.success) {
         setTransactions(response.data.data || []);
       } else {
