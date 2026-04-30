@@ -1,3 +1,4 @@
+// backend/routers/reports/ProfitAndLoss.js
 import mongoose from "mongoose";
 
 const profitLossSchema = new mongoose.Schema(

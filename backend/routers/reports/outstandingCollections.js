@@ -6,6 +6,7 @@ import Customer from "../../models/master/customer.js";
 import MRCash from "../../models/accounts/MRCash.js";
 import Staff from "../../models/staffMember/staff.js";
 import ExcelJS from "exceljs";
+import { getCached, setCached, CACHE_TTL } from "../../utils/reportCache.js";
 
 const router = express.Router();
 
@@ -403,6 +404,12 @@ router.get("/", async (req, res) => {
       customerCode,
     } = req.query;
 
+    // ── Cache check ────────────────────────────────────────────────────────
+    const cacheKey = `outstanding:${startDate ?? ""}:${endDate ?? ""}:${search ?? ""}:${customerCode ?? ""}:${page}:${limit}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+    // ──────────────────────────────────────────────────────────────────────
+
     // Validate dates
     if (startDate && !parseLocalDate(startDate)) {
       return res
@@ -660,7 +667,7 @@ router.get("/", async (req, res) => {
       overdueDays: inv.overdueDays || 0,
     }));
 
-    return res.json({
+    const outstandingResponse = {
       success: true,
       data: { summary, records },
       pagination: {
@@ -671,7 +678,9 @@ router.get("/", async (req, res) => {
         hasPrev: pageNum > 1,
       },
       count: records.length,
-    });
+    };
+    setCached(cacheKey, outstandingResponse, CACHE_TTL.REPORTS);
+    return res.json(outstandingResponse);
   } catch (error) {
     console.error("ERROR in outstanding-collections report:", error);
     return res.status(500).json({

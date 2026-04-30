@@ -14,6 +14,8 @@ import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import XLSX from "xlsx";
 import { logActivity } from "../activity/activityLog.js";
 
+import { invalidateReportCaches } from "../../utils/reportCache.js";
+
 const router = express.Router();
 const importProgressMap = new Map();
 let isImportInProgress = false;
@@ -2014,10 +2016,14 @@ router.post("/create", async (req, res) => {
       referenceNumber: sale[0].invoiceNumber,
       newData: sale[0].toObject(),
       description: `New sale invoice ${sale[0].invoiceNumber} created for ${toTitleCase(customerName)}`,
-    });
+    }, session);  // ⭐ pass session so logActivity is inside the transaction
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Invalidate report caches affected by this sale ────────────────────
+    invalidateReportCaches("pl:", "province:", "outstanding:");
+    // ─────────────────────────────────────────────────────────────────────
 
     res.status(201).json({
       success: true,
@@ -2878,7 +2884,11 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
 router.get("/all", async (req, res) => {
   try {
     const { search = "", tab = "All", saleType = "all" } = req.query;
-    const matchConditions = buildMatchConditions(search, tab, saleType);
+    // ✅ ADD SOFT DELETE FILTER HERE
+    const matchConditions = {
+      ...buildMatchConditions(search, tab, saleType),
+      isDeleted: { $ne: true },
+    };
 
     const enrichedSales = await SaleSummary.aggregate([
       { $match: matchConditions },
@@ -3676,6 +3686,11 @@ router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Invalidate report caches ───────────────────────────────────────────
+    invalidateReportCaches("pl:", "province:", "outstanding:");
+    // ─────────────────────────────────────────────────────────────────────
+
     res.status(200).json({
       success: true,
       message: `${result.deletedCount} sale(s) deleted successfully`,
@@ -3763,38 +3778,55 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       }
     }
 
-    await SaleSummary.findByIdAndDelete(id).session(session);
+    // ─────────────────────────────
+    // 3. SOFT DELETE (NEW PART)
+    // ─────────────────────────────
+    const userId = req.user?._id ?? null;
 
+    await SaleSummary.findByIdAndUpdate(
+      id,
+      {
+        isDeleted: true,
+        deletedAt: new Date(),
+        deletedBy: userId,
+      },
+      { session },
+    );
+
+    // ─────────────────────────────
+    // 4. LOG ACTIVITY (UPDATED)
+    // ─────────────────────────────
     await logActivity(req, {
       action: "DELETE",
-      actionLabel: `Deleted Sale: ${saleToDelete.invoiceNumber}`,
+      actionLabel: `Soft Deleted Sale: ${saleToDelete.invoiceNumber}`,
       tableName: "sales",
       tableLabel: "Sale",
       recordId: saleToDelete._id,
       referenceNumber: saleToDelete.invoiceNumber,
       previousData: saleToDelete.toObject(),
-      description: `Sale invoice ${saleToDelete.invoiceNumber} permanently deleted. Stock restored: ${saleToDelete.products.reduce((sum, p) => sum + (Number(p.salesQty) + Number(p.bonusQty)), 0)} boxes restored.`,
+      description: `Sale invoice ${saleToDelete.invoiceNumber} soft deleted. Stock restored.`,
     });
 
     await session.commitTransaction();
     session.endSession();
 
+    // ── Invalidate report caches ───────────────────────────────────────────
+    invalidateReportCaches("pl:", "province:", "outstanding:");
+    // ─────────────────────────────────────────────────────────────────────
+
     res.status(200).json({
       success: true,
-      message: "Sales record deleted successfully and stock restored.",
-      deletedSale: saleToDelete,
-      stockRestored: saleToDelete.products.reduce(
-        (sum, p) => sum + (Number(p.salesQty) + Number(p.bonusQty)),
-        0,
-      ),
+      message: "Sales record soft deleted successfully.",
     });
+
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
+
     console.error("❌ DELETE error:", err);
-    res
-      .status(500)
-      .json({ error: err.message || "Failed to delete sales record." });
+    res.status(500).json({
+      error: err.message || "Failed to delete sales record.",
+    });
   }
 });
 
@@ -4347,6 +4379,11 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Invalidate report caches ───────────────────────────────────────────
+    invalidateReportCaches("pl:", "province:", "outstanding:");
+    // ─────────────────────────────────────────────────────────────────────
+
     res
       .status(200)
       .json({ message: "Sale updated successfully", sale: updatedSale });

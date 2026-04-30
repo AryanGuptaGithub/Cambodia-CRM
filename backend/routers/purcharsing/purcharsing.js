@@ -9,6 +9,7 @@ import dayjs from "dayjs";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
+import Supplier from "../../models/master/supplier.js";
 
 const router = express.Router();
 
@@ -104,6 +105,7 @@ const updateReportInHand = async (
   productData,
   operation = "add",
   oldQty = 0,
+  session
 ) => {
   try {
     const {
@@ -132,7 +134,7 @@ const updateReportInHand = async (
     if (operation === "subtract") {
       const existingDoc = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
-      }).lean();
+      }).lean().session(session);
 
       if (!existingDoc) {
         console.warn(`No stock found for ${finalProductName} to subtract`);
@@ -192,11 +194,12 @@ const updateReportInHand = async (
             updatedAt: new Date(),
           },
         },
+        { session },
       );
     } else if (operation === "update") {
       const existingDoc = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
-      }).lean();
+      }).lean().session(session);
 
       if (!existingDoc) {
         const lcValue = Number(lc || 0);
@@ -306,6 +309,7 @@ const updateReportInHand = async (
             updatedAt: new Date(),
           },
         },
+        { session },
       );
     } else if (operation === "add") {
       const lcValue = Number(lc || 0);
@@ -326,7 +330,7 @@ const updateReportInHand = async (
 
       const existingDoc = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
-      }).lean();
+      }).lean().session(session);
 
       if (existingDoc) {
         if (batchExists(existingDoc.batches || [], newBatch)) return;
@@ -363,12 +367,13 @@ const updateReportInHand = async (
               updatedAt: new Date(),
             },
           },
+          { session },
         );
       } else {
         const { totalBoxesFromBatches, totalAmount, averagePrice } =
           calculateTotalsFromBatches([newBatch]);
         const totalBoxes = totalBoxesFromBatches;
-        await ReportInHand.create({
+        await ReportInHand.create([{
           productName: finalProductName,
           supplierName: validSupplier,
           type: type || "",
@@ -382,7 +387,7 @@ const updateReportInHand = async (
           removeStockAdjustment: 0,
           status: calculateStockStatus(totalBoxes),
           minStockLevel: 10,
-        });
+        }], { session });
       }
     }
   } catch (err) {
@@ -458,40 +463,56 @@ const processProductLines = async (rawProducts) => {
   } = await buildProductMaps(rawProducts);
 
   let totalAmount = 0;
+
   const products = await Promise.all(
     rawProducts.map(async (p) => {
-      // ✅ Accept both quantityPerBoxStrip (from Add form) and qtyBox (legacy)
+      // ✅ STEP 1 — resolve productId
+      let productId = p.productId;
+
+      if (!productId && p.productName) {
+        const productDoc = await Product.findOne({
+          productName: {
+            $regex: new RegExp(`^${p.productName.trim()}$`, "i"),
+          },
+        }).lean();
+
+        productId = productDoc?._id ?? null;
+      }
+
+      // ✅ quantity
       const qty = Number(p.quantityPerBoxStrip ?? p.qtyBox ?? 0);
 
-      const productBatch = p.productId
-        ? productBatchMap.get(p.productId.toString())
+      const productBatch = productId
+        ? productBatchMap.get(productId.toString())
         : null;
 
-      // ✅ Accept both lc (from Add form) and lcNumber (from import)
+      // ✅ pricing fields
       const lc = Number(p.lc ?? p.lcNumber ?? productBatch?.lc ?? 0);
       const fob = Number(p.fob ?? productBatch?.fob ?? 0);
       const cif = Number(p.cif ?? productBatch?.cif ?? 0);
+
       const amount = qty * lc;
       totalAmount += amount;
 
-      // Resolve product name
+      // ✅ product name resolution
       let productNameToUse = p.productName;
-      if (p.productId && productNameMap.has(p.productId.toString())) {
-        productNameToUse = productNameMap.get(p.productId.toString());
+      if (productId && productNameMap.has(productId.toString())) {
+        productNameToUse = productNameMap.get(productId.toString());
       }
       productNameToUse = await getStandardizedProductName(productNameToUse);
 
       const sellingPrice =
         p.sellingPrice ||
-        (p.productId && productSellingPriceMap.get(p.productId.toString())) ||
+        (productId && productSellingPriceMap.get(productId.toString())) ||
         0;
 
-      // ✅ Accept both expiryDate (from Add form) and expiredDate (legacy)
+      // ✅ expiry
       const expiryDate = p.expiryDate ?? p.expiredDate ?? null;
 
       return {
+        productId, // ✅ added
         productName: productNameToUse,
-        type: p.type || productTypeMap.get(p.productId?.toString()) || "",
+        type: p.type || productTypeMap.get(productId?.toString()) || "",
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         quantityPerBoxStrip: qty,
         lc,
@@ -500,12 +521,11 @@ const processProductLines = async (rawProducts) => {
         amount,
         sellingPrice,
       };
-    }),
+    })
   );
 
   return { products, totalAmount };
 };
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Debug & utility routes
 // ─────────────────────────────────────────────────────────────────────────────
@@ -824,24 +844,33 @@ router.get("/invoice", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const purchases = await purchaseInventory
-      .find()
+      .find({ isDeleted: { $ne: true } }) // ✅ SOFT DELETE FILTER ADDED
       .sort({ invoiceDate: -1 })
       .lean();
+
     const productList = await Product.find(
       {},
       "productName type packing qtyPerBoxStrip sellingPrice batches",
     ).lean();
+
     const productMap = new Map();
+
     productList.forEach((prod) => {
-      if (prod.productName)
-        productMap.set(normalizeProductName(prod.productName), prod);
+      if (prod.productName) {
+        productMap.set(
+          normalizeProductName(prod.productName),
+          prod
+        );
+      }
     });
 
     const enhancedPurchases = purchases.map((invoice) => ({
       ...invoice,
       products: invoice.products.map((p) => {
         const normalizedProductName = normalizeProductName(p.productName);
+
         let matchedProduct = productMap.get(normalizedProductName);
+
         if (!matchedProduct) {
           for (const [key, prod] of productMap.entries()) {
             if (
@@ -853,12 +882,15 @@ router.get("/", async (req, res) => {
             }
           }
         }
+
         return {
           ...p,
           productType: matchedProduct?.type || p?.type || "",
           productPacking: matchedProduct?.packing || "",
-          productQtyPerBoxStrip: matchedProduct?.qtyPerBoxStrip || 0,
-          sellingPrice: p.sellingPrice || matchedProduct?.sellingPrice || 0,
+          productQtyPerBoxStrip:
+            matchedProduct?.qtyPerBoxStrip || 0,
+          sellingPrice:
+            p.sellingPrice || matchedProduct?.sellingPrice || 0,
           fob: p.fob || matchedProduct?.batches?.[0]?.fob || 0,
           cif: p.cif || matchedProduct?.batches?.[0]?.cif || 0,
           lc: p.lc || matchedProduct?.batches?.[0]?.lc || 0,
@@ -881,78 +913,102 @@ router.get("/", async (req, res) => {
 // POST /  –  Create purchase invoice
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const data = req.body;
-    if (
-      !data.invoiceNumber ||
-      !data.supplierName ||
-      !Array.isArray(data.products)
-    ) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
+      const data = req.body;
 
-    const existing = await purchaseInventory.findOne({
-      invoiceNumber: data.invoiceNumber,
-    });
-    if (existing) {
-      return res.status(400).json({
-        success: false,
-        message: `Invoice '${data.invoiceNumber}' already exists.`,
-      });
-    }
+      if (
+        !data.invoiceNumber ||
+        !data.supplierName ||
+        !Array.isArray(data.products)
+      ) {
+        throw new Error("Missing required fields");
+      }
 
-    // ✅ processProductLines now handles lc/lcNumber and quantityPerBoxStrip/qtyBox
-    const { products, totalAmount } = await processProductLines(data.products);
-
-    const invoice = await purchaseInventory.create({
-      ...data,
-      supplierName: data.supplierName.trim(),
-      products,
-      totalAmount,
-    });
-
-    // Update stock
-    for (const p of products) {
-      await updateReportInHand(
-        {
-          productName: p.productName,
-          supplierName: data.supplierName,
-          quantityPerBoxStrip: p.quantityPerBoxStrip,
-          lc: p.lc,
-          fob: p.fob,
-          cif: p.cif,
-          expiryDate: p.expiryDate,
-          type: p.type,
-          sellingPrice: p.sellingPrice,
-        },
-        "add",
-        0,
+      // 1. duplicate check
+      const existing = await purchaseInventory.findOne(
+        { invoiceNumber: data.invoiceNumber },
+        null,
+        { session }
       );
-    }
 
-    await logActivity(req, {
-      action: "CREATE",
-      actionLabel: `Created Purchase Invoice: ${invoice.invoiceNumber}`,
-      tableName: "purchase",
-      tableLabel: "Purchase",
-      recordId: invoice._id,
-      referenceNumber: invoice.invoiceNumber,
-      newData: invoice.toObject ? invoice.toObject() : invoice,
-      description: `New purchase invoice ${invoice.invoiceNumber} from ${invoice.supplierName} — ${products.length} product(s), total $${totalAmount.toFixed(2)}`,
-      refField: "invoiceNumber",
+      if (existing) {
+        throw new Error("Invoice already exists");
+      }
+
+      // 2. supplier lookup (outside DB write risk OK)
+      const supplierDoc = await Supplier.findOne({
+        name: { $regex: new RegExp(`^${data.supplierName.trim()}$`, "i") }
+      });
+
+      const { products, totalAmount } = await processProductLines(data.products);
+
+      // 3. create invoice
+      const invoice = await purchaseInventory.create(
+        [{
+          ...data,
+          supplierName: data.supplierName.trim(),
+          supplierId: supplierDoc?._id ?? null,
+          products,
+          totalAmount
+        }],
+        { session }
+      );
+
+      // 4. stock update MUST be session-safe
+      for (const p of products) {
+        await updateReportInHand(
+          {
+            productName: p.productName,
+            supplierName: data.supplierName,
+            quantityPerBoxStrip: p.quantityPerBoxStrip,
+            lc: p.lc,
+            fob: p.fob,
+            cif: p.cif,
+            expiryDate: p.expiryDate,
+            type: p.type,
+            sellingPrice: p.sellingPrice,
+          },
+          "add",
+          0,
+          session   // ⭐ IMPORTANT CHANGE
+        );
+      }
+
+      // 5. activity log MUST be inside session (before commit)
+      await logActivity(
+        req,
+        {
+          action: "CREATE",
+          actionLabel: `Created Purchase Invoice: ${invoice[0].invoiceNumber}`,
+          tableName: "purchase",
+          tableLabel: "Purchase",
+          recordId: invoice[0]._id,
+          referenceNumber: invoice[0].invoiceNumber,
+          newData: invoice[0],
+          description: `Purchase ${invoice[0].invoiceNumber}`,
+        },
+        session   // ⭐ ADD THIS
+      );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(201).json({
+      success: true,
+      message: "Purchase created successfully"
     });
 
-    res
-      .status(201)
-      .json({ success: true, message: "Purchase added", purchase: invoice });
   } catch (err) {
-    console.error("Add error:", err);
-    if (err.code === 11000)
-      return res.status(400).json({
-        success: false,
-        message: "This invoice number already exists.",
-      });
-    res.status(500).json({ message: "Server error" });
+    try { await session.abortTransaction(); } catch {}
+    try { session.endSession(); } catch {}
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
   }
 });
 
@@ -1084,9 +1140,15 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   try {
-    const invoice = await purchaseInventory.findById(req.params.id).lean();
-    if (!invoice) return res.status(404).json({ error: "Not found" });
+    const invoice = await purchaseInventory.findById(req.params.id);
 
+    if (!invoice) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    // ─────────────────────────────
+    // STOCK REVERSE (KEEP AS IS)
+    // ─────────────────────────────
     for (const p of invoice.products || []) {
       await updateReportInHand(
         {
@@ -1105,21 +1167,37 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       );
     }
 
-    await purchaseInventory.findByIdAndDelete(req.params.id);
+    // ─────────────────────────────
+    // SOFT DELETE (NEW)
+    // ─────────────────────────────
+    const userId = req.user?._id ?? null;
 
+    await purchaseInventory.findByIdAndUpdate(req.params.id, {
+      isDeleted: true,
+      deletedAt: new Date(),
+      deletedBy: userId,
+    });
+
+    // ─────────────────────────────
+    // LOG (UPDATED)
+    // ─────────────────────────────
     await logActivity(req, {
       action: "DELETE",
-      actionLabel: `Deleted Purchase Invoice: ${invoice.invoiceNumber}`,
+      actionLabel: `Soft Deleted Purchase Invoice: ${invoice.invoiceNumber}`,
       tableName: "purchase",
       tableLabel: "Purchase",
       recordId: invoice._id,
       referenceNumber: invoice.invoiceNumber,
-      previousData: invoice,
-      description: `Purchase invoice ${invoice.invoiceNumber} from ${invoice.supplierName} permanently deleted — ${(invoice.products || []).length} product(s)`,
+      previousData: invoice.toObject ? invoice.toObject() : invoice,
+      description: `Purchase invoice ${invoice.invoiceNumber} soft deleted — stock reversed.`,
       refField: "invoiceNumber",
     });
 
-    res.json({ message: "Deleted successfully" });
+    res.json({
+      success: true,
+      message: "Purchase invoice soft deleted successfully",
+    });
+
   } catch (err) {
     console.error("Delete purchase error:", err);
     res.status(500).json({ error: "Server error" });
@@ -1132,13 +1210,22 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 router.delete("/", protect, allowAdminOnly, async (req, res) => {
   try {
     const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0)
+
+    if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: "No purchase IDs provided" });
+    }
 
-    const invoices = await purchaseInventory.find({ _id: { $in: ids } }).lean();
-    if (invoices.length === 0)
+    const invoices = await purchaseInventory.find({
+      _id: { $in: ids },
+    });
+
+    if (invoices.length === 0) {
       return res.status(404).json({ error: "No purchases found" });
+    }
 
+    // ─────────────────────────────
+    // STOCK REVERSE (KEEP AS IS)
+    // ─────────────────────────────
     for (const inv of invoices) {
       for (const p of inv.products || []) {
         await updateReportInHand(
@@ -1159,23 +1246,41 @@ router.delete("/", protect, allowAdminOnly, async (req, res) => {
       }
     }
 
-    const result = await purchaseInventory.deleteMany({ _id: { $in: ids } });
+    // ─────────────────────────────
+    // SOFT DELETE (NEW)
+    // ─────────────────────────────
+    const userId = req.user?._id ?? null;
 
+    await purchaseInventory.updateMany(
+      { _id: { $in: ids } },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: userId,
+        },
+      }
+    );
+
+    // ─────────────────────────────
+    // LOG (UPDATED)
+    // ─────────────────────────────
     await logActivity(req, {
       action: "DELETE",
-      actionLabel: `Bulk Deleted ${result.deletedCount} Purchase Invoice(s)`,
+      actionLabel: `Bulk Soft Deleted ${ids.length} Purchase Invoice(s)`,
       tableName: "purchase",
       tableLabel: "Purchase",
       previousData: invoices,
-      description: `Bulk deleted ${result.deletedCount} purchase invoices`,
+      description: `Bulk soft deleted ${ids.length} purchase invoices — stock reversed`,
       refField: "invoiceNumber",
     });
 
     res.json({
       success: true,
-      message: `Deleted ${result.deletedCount} invoices successfully`,
-      deletedCount: result.deletedCount,
+      message: `Soft deleted ${ids.length} invoices successfully`,
+      deletedCount: ids.length,
     });
+
   } catch (err) {
     console.error("Delete multiple purchases error:", err);
     res.status(500).json({ error: "Server error" });
@@ -1442,7 +1547,7 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
           const existingWithNewName = await ReportInHand.findOne({
             productName: { $regex: new RegExp(`^${standardizedName}$`, "i") },
             _id: { $ne: report._id },
-          }).lean();
+          }).lean().session(session);
           if (existingWithNewName) {
             const mergedBatches = [
               ...(existingWithNewName.batches || []),
@@ -1602,7 +1707,7 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
     const existingWithNewName = await ReportInHand.findOne({
       productName: { $regex: new RegExp(`^${newName}$`, "i") },
       _id: { $ne: id },
-    }).lean();
+    }).lean().session(session);
     if (existingWithNewName) {
       const mergedBatches = [
         ...(existingWithNewName.batches || []),
@@ -1628,6 +1733,7 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
             status: calculateStockStatus(totalBoxes),
           },
         },
+        { session }
       );
       await ReportInHand.findByIdAndDelete(id);
       return res.json({

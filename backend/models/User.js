@@ -1,3 +1,4 @@
+// backend/models/User.js
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
@@ -40,10 +41,9 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-/* 🔐 Pre-save hook to hash password automatically - ONLY FOR ADMIN ROLE */
+/* 🔐 Pre-save hook — hash password for ALL roles */
 userSchema.pre("save", async function (next) {
-  // Only hash password if user is an admin AND password is modified
-  if (this.role === "admin" && this.isModified("password")) {
+  if (this.isModified("password")) {
     try {
       const salt = await bcrypt.genSalt(10);
       this.password = await bcrypt.hash(this.password, salt);
@@ -52,21 +52,13 @@ userSchema.pre("save", async function (next) {
       return next(err);
     }
   } else {
-    // For non-admin roles, skip password hashing
     next();
   }
 });
 
-/* 🔑 Method to compare password - HANDLES BOTH ADMIN AND NON-ADMIN */
+/* 🔑 Method to compare password — always uses bcrypt */
 userSchema.methods.comparePassword = async function (candidatePassword) {
-  // For admin role: use bcrypt comparison
-  if (this.role === "admin") {
-    return bcrypt.compare(candidatePassword, this.password);
-  }
-  
-  // For non-admin roles: direct string comparison (if not hashed)
-  // If you hash passwords for all roles, use bcrypt.compare for all
-  return candidatePassword === this.password;
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
 /* 🚫 Hide password & __v in responses */

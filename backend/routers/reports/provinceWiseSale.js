@@ -2,6 +2,7 @@ import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Customer from "../../models/master/customer.js";
 import ExcelJS from "exceljs";
+import { getCached, setCached, CACHE_TTL } from "../../utils/reportCache.js";
 
 const router = express.Router();
 
@@ -11,6 +12,12 @@ router.get("/", async (req, res) => {
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
+
+    // ── Cache check ────────────────────────────────────────────────────────
+    const cacheKey = `province:${period}:${search ?? ""}:${page}:${limit}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+    // ──────────────────────────────────────────────────────────────────────
     
     let customerSearchCondition = {};
     if (search && search.trim() !== "") {
@@ -271,13 +278,13 @@ router.get("/", async (req, res) => {
 
     console.timeEnd("⏱️ province-wise-sale-query");
 
-    res.json({
+    const provinceResponse = {
       success: true,
       data: {
         summary,
         records: paginatedRecords,
         uniqueProvincesCount: uniqueProvincesCount,
-        allRecords: records, // Include all records for export
+        allRecords: records,
       },
       pagination: {
         currentPage: pageNum,
@@ -286,7 +293,9 @@ router.get("/", async (req, res) => {
         hasNext: pageNum < totalPages,
         hasPrev: pageNum > 1,
       },
-    });
+    };
+    setCached(cacheKey, provinceResponse, CACHE_TTL.REPORTS);
+    res.json(provinceResponse);
     
   } catch (error) {
     console.error("❌ Error in /province-wise-sale:", error);

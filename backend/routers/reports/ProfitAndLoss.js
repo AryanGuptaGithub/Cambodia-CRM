@@ -4,6 +4,7 @@ import SalesReturn from "../../models/sale/saleReturn.js";
 import Payroll from "../../models/Hrm/Payroll.js";
 import addExpense from "../../models/expenses/addExpense.js";
 import addExpenseCategary from "../../models/expenses/addExpenseCategary.js";
+import { getCached, setCached, CACHE_TTL } from "../../utils/reportCache.js";
 
 const router = express.Router();
 
@@ -77,6 +78,12 @@ router.get("/", async (req, res) => {
       page = 1,
       limit = 10,
     } = req.query;
+
+    // ── Cache check ──────────────────────────────────────────────────────────
+    const cacheKey = `pl:${startDate ?? ""}:${endDate ?? ""}:${sortOrder}:${page}:${limit}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
+    // ────────────────────────────────────────────────────────────────────────
 
     const saleFilter = createDateRangeFilter(
       startDate,
@@ -456,6 +463,7 @@ router.get("/", async (req, res) => {
       },
     };
 
+    setCached(cacheKey, response, CACHE_TTL.REPORTS);
     res.json(response);
   } catch (error) {
     console.error("Profit Loss Report Error:", error);

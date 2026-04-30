@@ -22,6 +22,11 @@ const ReportInHandSchema = new mongoose.Schema(
     },
     batches: [
       {
+        productId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Product",
+        default: null,
+        },
         boxes: { type: Number, default: 0 },
         lc: { type: Number, default: 0 },
         sellingPrice: { type: Number, default: 0, min: 0 },

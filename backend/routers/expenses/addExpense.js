@@ -1,5 +1,7 @@
 // routes/expenses/addExpense.js (full corrected file with activity logging)
 import express from "express";
+import { invalidateReportCaches } from "../../utils/reportCache.js";
+
 const router = express.Router();
 import Expense from "../../models/expenses/addExpense.js";
 import addExpenseCategary from "../../models/expenses/addExpenseCategary.js";
@@ -538,6 +540,10 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // ── Invalidate P&L cache (expenses affect profit) ─────────────────────
+    invalidateReportCaches("pl:");
+    // ─────────────────────────────────────────────────────────────────────
+
     await logActivity(req, {
       action: "CREATE",
       actionLabel: `Created Expense: ${toTitleCase(savedExpense.category.category)} - ₹${savedExpense.amount}`,
@@ -814,6 +820,10 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // ── Invalidate P&L cache ───────────────────────────────────────────────
+    invalidateReportCaches("pl:");
+    // ─────────────────────────────────────────────────────────────────────
+
     // ── Log activity ──────────────────────────────────────────────────────
     await logActivity(req, {
       action: "UPDATE",
@@ -906,6 +916,10 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // ── Invalidate P&L cache ───────────────────────────────────────────────
+    invalidateReportCaches("pl:");
+    // ─────────────────────────────────────────────────────────────────────
 
     await logActivity(req, {
       action: "DELETE",

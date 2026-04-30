@@ -6,8 +6,17 @@
  *      This affects two places:
  *        1. recomputeMRStock()        — replay logic
  *        2. returnAllMRStockToWarehouse() — live zeroing of MR stock doc
+ *
+ * FEATURE: expiryDate is now carried from transfer items → MR carry stock.
+ *          The isExpired flag is recomputed on every save in the model.
+ *          Three places updated:
+ *        1. recomputeMRStock()   — productMap and finalProducts include expiryDate
+ *        2. POST / (send)        — transferItems include expiryDate from request
+ *        3. POST /import-excel   — transferItems include expiryDate from request
  */
 
+
+// backend/routers/stock/stockTransferToMRRoutes.js
 import express from "express";
 import multer from "multer";
 import * as XLSX from "xlsx";
@@ -421,6 +430,8 @@ const recomputeMRStock = async (mrId, mrName, session) => {
           sellingPrice: item.sellingPrice || 0,
           assignedQuantity: 0,
           quantity: 0,
+          // ✅ FEATURE: carry expiryDate from the transfer item
+          expiryDate: item.expiryDate ?? null,
           lastUpdated: transfer.updatedAt || transfer.createdAt || new Date(),
         });
       }
@@ -430,6 +441,8 @@ const recomputeMRStock = async (mrId, mrName, session) => {
       if (item.lc) entry.lc = item.lc;
       if (item.sellingPrice) entry.sellingPrice = item.sellingPrice;
       if (item.productName) entry.productName = item.productName;
+      // ✅ FEATURE: update expiryDate to the most recent transfer's value
+      if (item.expiryDate !== undefined) entry.expiryDate = item.expiryDate ?? null;
 
       const transferDate =
         transfer.updatedAt || transfer.createdAt || new Date();
@@ -472,6 +485,8 @@ const recomputeMRStock = async (mrId, mrName, session) => {
       sellingPrice: entry.sellingPrice || 0,
       amount: (entry.lc || 0) * entry.quantity,
       productCost: Math.ceil((entry.lc || 0) * entry.quantity),
+      // ✅ FEATURE: include expiryDate in MR carry stock
+      expiryDate: entry.expiryDate ?? null,
       lastUpdated: entry.lastUpdated,
     });
   }
@@ -576,10 +591,14 @@ router.get("/mr-stock-by-mr-id/:mrId", async (req, res) => {
       return res.json({ success: true, data: null, products: [] });
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const products = (mrStock.productsInHand || [])
       .filter((p) => (p.quantity || 0) > 0)
       .map((p) => {
         const lc = p.lc || p.productId?.lc || p.productId?.costPrice || 0;
+        const expiryDate = p.expiryDate ?? null;
         return {
           _id: p._id?.toString(),
           productId: (p.productId?._id || p.productId)?.toString(),
@@ -590,6 +609,9 @@ router.get("/mr-stock-by-mr-id/:mrId", async (req, res) => {
           sellingPrice: p.sellingPrice || 0,
           amount: p.amount || 0,
           productCost: p.productCost || 0,
+          expiryDate,
+          // ✅ Expose isExpired so the sales screen can show a red warning
+          isExpired: expiryDate != null && new Date(expiryDate) < today,
           lastUpdated: p.lastUpdated,
         };
       });
@@ -708,6 +730,9 @@ router.get("/mr-hand-admin", async (req, res) => {
           sellingPrice: "$productsInHand.sellingPrice",
           amount: "$productsInHand.amount",
           productCost: "$productsInHand.productCost",
+          // ✅ FEATURE: expose expiryDate and isExpired in admin view
+          expiryDate: "$productsInHand.expiryDate",
+          isExpired: "$productsInHand.isExpired",
           costPrice: "$productDetails.costPrice",
           unit: "$productDetails.unit",
           category: "$productDetails.category",
@@ -722,6 +747,9 @@ router.get("/mr-hand-admin", async (req, res) => {
 
     const stockResults = await stockInMRHand.aggregate(stockAggregation);
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const formattedResult = stockResults.map((item) => {
       const remainingQty = item.quantity || 0;
       const assignedQty = item.assignedQuantity || remainingQty;
@@ -735,6 +763,9 @@ router.get("/mr-hand-admin", async (req, res) => {
         item.productCost !== undefined && item.productCost !== null
           ? item.productCost
           : Math.ceil(amount);
+      const expiryDate = item.expiryDate ?? null;
+      const isExpired =
+        item.isExpired ?? (expiryDate != null && new Date(expiryDate) < today);
 
       return {
         assignedDate: item.lastUpdated
@@ -745,7 +776,11 @@ router.get("/mr-hand-admin", async (req, res) => {
         createdAt: item.createdAt
           ? new Date(item.createdAt).toISOString().split("T")[0]
           : new Date().toISOString().split("T")[0],
-        expiry: "N/A",
+        expiry: expiryDate
+          ? new Date(expiryDate).toISOString().split("T")[0]
+          : "N/A",
+        expiryDate,
+        isExpired,
         id: `${item.stockId?.toString()}-${item.productId}`,
         invoiceNumbers: [],
         mrCode: item.mrName,
@@ -818,6 +853,9 @@ router.get("/mr-hand", async (req, res) => {
       })
       .sort({ mrName: 1 });
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const flattenedStock = stock
       .map((mrStock) =>
         (mrStock.productsInHand || [])
@@ -856,6 +894,11 @@ router.get("/mr-hand", async (req, res) => {
               product.productCost !== undefined && product.productCost !== null
                 ? product.productCost
                 : Math.ceil(amount);
+            const expiryDate = product.expiryDate ?? null;
+            // ✅ FEATURE: expose isExpired — sales screen can check this
+            const isExpired =
+              product.isExpired ??
+              (expiryDate != null && new Date(expiryDate) < today);
 
             return {
               id: `${mrStock._id}-${product._id}`,
@@ -874,6 +917,8 @@ router.get("/mr-hand", async (req, res) => {
               sellingPrice,
               amount,
               productCost,
+              expiryDate,
+              isExpired,
               assignedDate: product.lastUpdated || mrStock.createdAt,
               lastUpdated: product.lastUpdated || mrStock.updatedAt,
               createdAt: mrStock.createdAt,
@@ -1137,6 +1182,8 @@ router.post(
           productName: warehouseProd.productName,
           sendQuantity,
           lc: warehouseProd.lc || warehouseProd.costPrice || 0,
+          // ✅ FEATURE: carry expiryDate from the request row if provided
+          expiryDate: row.expiryDate ?? null,
         });
       }
 
@@ -1175,6 +1222,7 @@ router.post(
 
       const transferDate = date || new Date().toISOString().split("T")[0];
 
+      // ✅ FEATURE: include expiryDate on each transfer item so recomputeMRStock can carry it forward
       const transferItems = itemsWithPrices.map((item) => ({
         productId: item.productId,
         productName: item.productName,
@@ -1183,6 +1231,7 @@ router.post(
         sellingPrice: item.sellingPrice,
         productCost: Math.ceil(item.lc * item.sendQuantity),
         amount: item.lc * item.sendQuantity,
+        expiryDate: item.expiryDate ?? null,
       }));
 
       const [newTransfer] = await StockTransferToMR.create(
@@ -1215,6 +1264,7 @@ router.post(
         item.sellingPrice = deductedSP || item.sellingPrice;
         item.amount = item.lc * item.boxQuantity;
         item.productCost = Math.ceil(item.amount);
+        // expiryDate already set above — deduction doesn't change it
       }
 
       await StockTransferToMR.findByIdAndUpdate(
@@ -1285,6 +1335,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         sellingPrice: item.sellingPrice || 0,
         amount: (item.lc || 0) * (item.boxQuantity || 0),
         productCost: Math.ceil((item.lc || 0) * (item.boxQuantity || 0)),
+        // expiryDate is preserved from the item as-is (it's a receive, not assigning new stock)
       }));
 
       const [newTransfer] = await StockTransferToMR.create(
@@ -1322,6 +1373,8 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
             lc: lcValue,
             sellingPrice: item.sellingPrice || sellingPrice || 0,
             productName: item.productName || "Unknown",
+            // ✅ FEATURE: expiryDate flows through from the request item
+            expiryDate: item.expiryDate ?? null,
           };
         } catch {
           return {
@@ -1329,6 +1382,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
             lc: 0,
             sellingPrice: 0,
             productName: item.productName || "Unknown",
+            expiryDate: item.expiryDate ?? null,
           };
         }
       }),
@@ -1343,6 +1397,8 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         ex.amount = (ex.lc || 0) * ex.boxQuantity;
         ex.productCost = Math.ceil(ex.amount);
         if (item.sellingPrice) ex.sellingPrice = item.sellingPrice;
+        // Keep the latest expiryDate when merging duplicate product lines
+        if (item.expiryDate != null) ex.expiryDate = item.expiryDate;
       } else {
         mergedItemsMap.set(key, { ...item });
       }
@@ -1365,6 +1421,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       item.sellingPrice = deductedSP || item.sellingPrice;
       item.amount = (item.lc || 0) * item.boxQuantity;
       item.productCost = Math.ceil(item.amount);
+      // expiryDate already set above — deduction doesn't change it
     }
 
     await StockTransferToMR.findByIdAndUpdate(
@@ -1484,6 +1541,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
             lc: lcValue,
             sellingPrice: item.sellingPrice || sellingPrice || 0,
             productName: item.productName || "Unknown",
+            expiryDate: item.expiryDate ?? null,
           };
         } catch {
           return {
@@ -1491,6 +1549,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
             lc: 0,
             sellingPrice: 0,
             productName: item.productName || "Unknown",
+            expiryDate: item.expiryDate ?? null,
           };
         }
       }),
@@ -1505,6 +1564,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         ex.amount = (ex.lc || 0) * ex.boxQuantity;
         ex.productCost = Math.ceil(ex.amount);
         if (item.sellingPrice) ex.sellingPrice = item.sellingPrice;
+        if (item.expiryDate != null) ex.expiryDate = item.expiryDate;
       } else {
         newItemsMap.set(key, { ...item });
       }
@@ -1891,6 +1951,8 @@ router.post(
               if (dupProduct.lc) p.lc = dupProduct.lc;
               if (dupProduct.sellingPrice)
                 p.sellingPrice = dupProduct.sellingPrice;
+              // Prefer the later (more recent) expiryDate when merging
+              if (dupProduct.expiryDate != null) p.expiryDate = dupProduct.expiryDate;
             } else {
               primary.productsInHand.push(dupProduct);
             }

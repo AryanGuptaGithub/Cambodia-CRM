@@ -170,6 +170,7 @@ import customerRepeateRate from "./routers/reports/customerRepeatRate.js";
 import stockInHandRoutes from "./routers/reports/stockInHand.js";
 import activityLogRoutes from "./routers/activity/activityLog.js"; 
 
+
 // ==================== HEALTH CHECK ====================
 app.get("/health", (req, res) => {
   res.json({
