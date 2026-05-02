@@ -773,7 +773,6 @@ const AddReturnSale = () => {
       const res = await fetch(`${backendUrl}/api/sales-return`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
-      console.log('value of res', res);
       if (!res.ok) throw new Error("Failed to fetch sale returns");
       const data = await res.json();
       setSaleReturns(data.data || []);

@@ -1,4 +1,3 @@
-
 import { Search, Download, X, Plus, Trash2, Edit, Settings, Upload, FileSpreadsheet, Menu, Eye } from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
@@ -2237,6 +2236,7 @@ const CashAndBank = () => {
           categoryType: tx.categoryType || null,
           amount: Number(tx.amount) || 0,
           finalAmount: Number(tx.finalAmount) || 0,
+          isPayroll: tx.isPayroll || false, // ✅ Add isPayroll flag
         }));
         setAllTransactions(normalized);
         setDestinations(destinationsData);
@@ -2335,14 +2335,25 @@ const CashAndBank = () => {
   };
 
   const handleEdit = (transaction) => {
+    // ✅ Block editing of payroll transactions
+    if (transaction.isPayroll) {
+      showToast(
+        "error",
+        "Salary Expenses cannot be edited directly. Please edit the linked Payroll record instead.",
+      );
+      return;
+    }
     setEditingTransaction(transaction);
     setIsEditModalOpen(true);
   };
 
   const handleDelete = async (transaction) => {
-    // Check if transaction contains "Salary payment" in remarks
-    if (transaction.remarks && transaction.remarks.toLowerCase().includes("salary payment")) {
-      showToast("error", "Salary Expenses expenses cannot be deleted directly. Please delete the linked Payroll record instead — that will automatically remove this expense.");
+    console.log('valueso f handleDelete', transaction);
+    if (transaction.isPayroll) {
+      showToast(
+        "error",
+        "Salary Expenses cannot be deleted directly. Please delete the linked Payroll record instead — that will automatically remove this expense.",
+      );
       return;
     }
 
@@ -2371,17 +2382,17 @@ const CashAndBank = () => {
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
 
-    // Check if any selected transaction contains "Salary payment" in remarks
+    // ✅ Check if any selected transaction is a payroll transaction
     const selectedTransactions = allTransactions.filter(tx => selected.includes(tx._id));
     const salaryPaymentTransactions = selectedTransactions.filter(
-      tx => tx.remarks && tx.remarks.toLowerCase().includes("salary payment")
+      tx => tx.isPayroll === true
     );
 
     if (salaryPaymentTransactions.length > 0) {
       const salaryInvoiceNumbers = salaryPaymentTransactions.map(tx => tx.invoiceNumber).join(", ");
       showToast(
         "error", 
-        `Cannot delete ${salaryPaymentTransactions.length} transaction(s) containing 'Salary payment' in remarks: ${salaryInvoiceNumbers}`
+        `Cannot delete ${salaryPaymentTransactions.length} Salary Expense transaction(s) (${salaryInvoiceNumbers}). Please delete the linked Payroll records instead.`
       );
       return;
     }
@@ -2410,15 +2421,27 @@ const CashAndBank = () => {
     }
   };
 
-  const toggleSelect = (item) =>
+  const toggleSelect = (item) => {
+    // ✅ Prevent selecting payroll transactions for bulk delete
+    if (item.isPayroll) {
+      showToast("warning", "Salary expenses cannot be selected for deletion");
+      return;
+    }
     setSelected((prev) =>
       prev.some((s) => s === item._id)
         ? prev.filter((s) => s !== item._id)
         : [...prev, item._id],
     );
+  };
+  
   const toggleSelectAll = (checked) => {
-    if (checked) setSelected(currentData.map((r) => r._id));
-    else setSelected([]);
+    if (checked) {
+      // ✅ Only select non-payroll transactions
+      const selectableIds = currentData.filter(item => !item.isPayroll).map(r => r._id);
+      setSelected(selectableIds);
+    } else {
+      setSelected([]);
+    }
   };
 
   const renderCellContent = (item, field) => {
@@ -2434,15 +2457,16 @@ const CashAndBank = () => {
             <Eye size={18} />
           </button>
           <button
-            className="text-green-600 hover:text-green-800 cursor-pointer"
-            title="Edit"
+            className={`${item.isPayroll ? "text-gray-400 cursor-not-allowed" : "text-green-600 hover:text-green-800 cursor-pointer"}`}
+            title={item.isPayroll ? "Cannot edit - Linked to Payroll" : "Edit"}
             onClick={() => handleEdit(item)}
+            disabled={item.isPayroll}
           >
             <Edit size={18} />
           </button>
           <button
             className="text-red-600 hover:text-red-800 cursor-pointer"
-            title="Delete"
+            title={item.isPayroll ? "Cannot delete - Delete Payroll instead" : "Delete"}
             onClick={() => handleDelete(item)}
           >
             <Trash2 size={18} />
@@ -2606,11 +2630,11 @@ const CashAndBank = () => {
           ? "text-green-700"
           : "text-red-600";
 
-    // Check if transaction has Salary payment in remarks
-    const hasSalaryPayment = item.remarks && item.remarks.toLowerCase().includes("salary payment");
+    // ✅ Check if transaction is a payroll transaction using isPayroll flag
+    const isPayrollTransaction = item.isPayroll === true;
 
     return (
-      <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3">
+      <div className={`bg-white rounded-lg shadow-md border border-gray-200 p-4 mb-3 ${isPayrollTransaction ? "bg-orange-50 border-orange-200" : ""}`}>
         <div className="flex justify-between items-start mb-3">
           <div className="flex-1">
             <h3 className="font-semibold text-gray-800 text-lg">
@@ -2638,9 +2662,10 @@ const CashAndBank = () => {
               ${(item.finalAmount || item.amount || 0).toFixed(2)}
             </span>
           </div>
-          {hasSalaryPayment && (
+          {isPayrollTransaction && (
             <div className="flex justify-between">
-              <span className="text-red-600 font-semibold">⚠️ Salary Payment</span>
+              <span className="text-orange-600 font-semibold">⚠️ Salary Payment</span>
+              <span className="text-xs text-orange-500">(Manage via Payroll)</span>
             </div>
           )}
           <div className="flex justify-between">
@@ -2714,8 +2739,8 @@ const CashAndBank = () => {
           ? "text-green-700"
           : "text-red-600";
 
-    // Check if transaction has Salary payment in remarks
-    const hasSalaryPayment = tx.remarks && tx.remarks.toLowerCase().includes("salary payment");
+    // ✅ Check if transaction is a payroll transaction
+    const isPayrollTransaction = tx.isPayroll === true;
 
     return ReactDOM.createPortal(
       <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4">
@@ -2736,10 +2761,10 @@ const CashAndBank = () => {
           </div>
 
           <div className="p-4 space-y-4">
-            {hasSalaryPayment && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-2">
-                <p className="text-red-700 text-sm font-semibold">
-                  ⚠️ This transaction contains cannot be deleted
+            {isPayrollTransaction && (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-2">
+                <p className="text-orange-700 text-sm font-semibold">
+                  ⚠️ This is a Salary Expense transaction. It cannot be edited or deleted directly. Please manage it through the Payroll module.
                 </p>
               </div>
             )}
@@ -2866,7 +2891,6 @@ const CashAndBank = () => {
           </div>
 
           <div className="sticky bottom-0 bg-gray-50 border-t px-4 py-3 flex justify-end gap-2">
-        
             <button
               onClick={() => {
                 setIsViewModalOpen(false);
@@ -3103,8 +3127,8 @@ const CashAndBank = () => {
                               type="checkbox"
                               aria-label="Select all"
                               checked={
-                                selected.length === currentData.length &&
-                                currentData.length > 0
+                                selected.length === currentData.filter(item => !item.isPayroll).length &&
+                                currentData.filter(item => !item.isPayroll).length > 0
                               }
                               onChange={(e) =>
                                 toggleSelectAll(e.target.checked)
@@ -3140,11 +3164,11 @@ const CashAndBank = () => {
                 </tr>
               ) : (
                 currentData.map((item, index) => {
-                  const hasSalaryPayment = item.remarks && item.remarks.toLowerCase().includes("salary payment");
+                  const isPayrollTransaction = item.isPayroll === true;
                   return (
                     <tr
                       key={`row-${item._id || index}`}
-                      className={`hover:bg-gray-50 ${index < currentData.length - 1 ? "border-b" : ""} ${hasSalaryPayment ? "bg-red-50" : ""}`}
+                      className={`hover:bg-gray-50 ${index < currentData.length - 1 ? "border-b" : ""} ${isPayrollTransaction ? "bg-orange-50" : ""}`}
                     >
                       {allFields
                         .filter((f) => tableColumns.includes(f.id))
@@ -3159,13 +3183,17 @@ const CashAndBank = () => {
                                   type="checkbox"
                                   checked={selected.includes(item._id)}
                                   onChange={() => toggleSelect(item)}
-                                  disabled={hasSalaryPayment}
-                                  className={hasSalaryPayment ? "opacity-50 cursor-not-allowed" : ""}
+                                  disabled={isPayrollTransaction}
+                                  className={isPayrollTransaction ? "opacity-50 cursor-not-allowed" : ""}
                                 />
                                 <span className="capitalize">
                                   {item.invoiceNumber || "NA"}
                                 </span>
-                       
+                                {isPayrollTransaction && (
+                                  <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full ml-2">
+                                    Payroll
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               renderCellContent(item, field)

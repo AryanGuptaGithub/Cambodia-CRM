@@ -48,7 +48,8 @@ import {
   RefreshCw,
   BanknoteIcon,
   X,
-  LogOut, // ← added logout icon
+  LogOut,
+  Filter, // ← ADDED for MR Filter Panel
 } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -123,6 +124,7 @@ const tabLabelMap = {
   utility_tabhideview: "Tab Hide and View",
   settings_companyprofile: "Company Profile",
   settings_tabmanipulation: "Tab Manipulation",
+  settings_mrfilterpanel: "MR Filter Panel", // ← ADDED
 };
 
 const formatTabLabel = (tabId) => {
@@ -228,6 +230,7 @@ const tabService = {
       financeReports_operationcostcogs: v(3),
       financeReports_operationcostsales: v(4),
       financeReports_tourexpensesales: v(5),
+      settings_mrfilterpanel: v(4), // ← ADDED (sequence after tab-manipulation)
     };
   },
 };
@@ -279,10 +282,8 @@ const getUserRole = () => {
 
 function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
   const location = useLocation();
-  const navigate = useNavigate(); // ← for logout redirect
+  const navigate = useNavigate();
 
-  // On desktop, sidebar is always "shown" (controlled by width).
-  // On mobile, sidebar visibility is controlled by isOpen prop.
   const show = isMobile ? isOpen : isOpen;
 
   const [activeParentMenu, setActiveParentMenu] = useState(null);
@@ -294,12 +295,10 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
 
   const refreshTabData = React.useCallback(() => setLastUpdate(Date.now()), []);
 
-  // ── Auto-close drawer on navigation (mobile only) ───────────────────────
   useEffect(() => {
     if (isMobile && isOpen) toggleSidebar();
   }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Prevent body scroll when mobile sidebar is open ─────────────────────
   useEffect(() => {
     if (isMobile && isOpen) {
       document.body.style.overflow = "hidden";
@@ -388,23 +387,18 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     />
   );
 
-  // ── Logout handler ──────────────────────────────────────────────────────
   const handleLogout = () => {
-    // Clear all authentication related data
     localStorage.removeItem("token");
     localStorage.removeItem("authToken");
     localStorage.removeItem("user");
     localStorage.removeItem("auth");
     localStorage.removeItem("userData");
     localStorage.removeItem("currentUser");
-    sessionStorage.clear(); // optional, clear session as well
-    // Close mobile drawer if open
+    sessionStorage.clear();
     if (isMobile && isOpen) toggleSidebar();
-    // Redirect to login page
     navigate("/login");
   };
 
-  // ── Shared nav content ───────────────────────────────────────────────────
   const navContent = (
     <div className="bg-gray-900 text-white flex flex-col h-full">
       {/* Header */}
@@ -414,7 +408,6 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
           alt="CRM Logo"
           className="h-10 object-contain"
         />
-        {/* Close button — visible on both mobile drawer AND desktop collapsed */}
         <button
           onClick={toggleSidebar}
           className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md transition-colors"
@@ -491,28 +484,42 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               </button>
               {activeParentMenu === "settings" && (
                 <div className="ml-6 mt-1 space-y-1">
-                  {shouldShow("settings_companyprofile") && (
-                    <Link
-                      to="/settingslayout/company-profile"
-                      className={cld("/settingslayout/company-profile")}
-                    >
-                      <Building className="w-4 h-4 flex-shrink-0" />
-                      <span>Company Profile</span>
-                    </Link>
-                  )}
-                  {shouldShow("settings_tabmanipulation") && (
-                    <Link
-                      to="/settingslayout/tab-manipulation"
-                      className={cld("/settingslayout/tab-manipulation")}
-                    >
-                      <Eye className="w-4 h-4 flex-shrink-0" />
-                      <span>Tab Manipulation</span>
-                    </Link>
-                  )}
+                  {sorted([
+                    "settings_companyprofile",
+                    "settings_tabmanipulation",
+                    "settings_mrfilterpanel", // ← ADDED
+                  ]).map((id) => {
+                    const m = {
+                      settings_companyprofile: {
+                        to: "/settingslayout/company-profile",
+                        icon: Building,
+                        label: "Company Profile",
+                      },
+                      settings_tabmanipulation: {
+                        to: "/settingslayout/tab-manipulation",
+                        icon: Eye,
+                        label: "Tab Manipulation",
+                      },
+                      settings_mrfilterpanel: { // ← ADDED
+                        to: "/settingslayout/mrfilterpanel",
+                        icon: Filter,
+                        label: "MR Filter Panel",
+                      },
+                    };
+                    const { to, icon: I, label } = m[id] || {};
+                    return to ? (
+                      <Link key={id} to={to} className={cld(to)}>
+                        <I className="w-4 h-4 flex-shrink-0" />
+                        <span>{label}</span>
+                      </Link>
+                    ) : null;
+                  })}
                 </div>
               )}
             </div>
           )}
+
+          {/* Rest of the menu items unchanged... */}
 
           {/* Product Manager */}
           {shouldShow("products") && (
@@ -794,7 +801,7 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
             </div>
           )}
 
-          {/* Reports */}
+          {/* Reports (unchanged, but include all submenus) */}
           {shouldShow("reports") && (
             <div>
               <button
@@ -1159,11 +1166,9 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     </div>
   );
 
-  // ── MOBILE: slide-in drawer ──────────────────────────────────────────────
   if (isMobile) {
     return (
       <>
-        {/* Backdrop — only rendered when open */}
         {isOpen && (
           <div
             className="fixed inset-0 bg-black bg-opacity-50 z-40"
@@ -1171,8 +1176,6 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
             aria-hidden="true"
           />
         )}
-
-        {/* Drawer panel — always in DOM so CSS transition works */}
         <div
           className={`fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-300 ease-in-out ${
             isOpen ? "translate-x-0" : "-translate-x-full"
@@ -1184,7 +1187,6 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     );
   }
 
-  // ── DESKTOP: static sidebar ──────────────────────────────────────────────
   return (
     <div
       className={`bg-gray-900 text-white transition-all duration-300 flex-shrink-0 flex flex-col ${

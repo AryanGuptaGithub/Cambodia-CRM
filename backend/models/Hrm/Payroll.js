@@ -13,6 +13,24 @@ const allowanceSchema = new mongoose.Schema({
   },
 });
 
+const sourceSchema = new mongoose.Schema({
+  accountId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Destination",
+    required: true,
+  },
+  accountName: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  amount: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
+});
+
 const payrollSchema = new mongoose.Schema(
   {
     payrollCode: {
@@ -67,16 +85,16 @@ const payrollSchema = new mongoose.Schema(
     },
     paymentDate: {
       type: Date,
+      default: null,
     },
     remarks: {
       type: String,
       trim: true,
     },
-    source: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Destination",
-      required: false,
-      default: null,
+    // ── Multi-source split (ground truth for balance restoration) ──
+    sources: {
+      type: [sourceSchema],
+      default: [],
     },
     payrollType: {
       type: String,
@@ -109,6 +127,10 @@ const payrollSchema = new mongoose.Schema(
       extraMinutes: { type: Number, default: 0 },
       extraTimeAmount: { type: Number, default: 0 },
       calculationDate: { type: String, default: null },
+      perDaySalaryExact: { type: Number, default: 0 },
+      effectiveDays: { type: Number, default: 0 },
+      leaveDeductionExact: { type: Number, default: 0 },
+      isFull: { type: Boolean, default: true },
     },
     netSalaryExact: {
       type: Number,
@@ -121,6 +143,7 @@ const payrollSchema = new mongoose.Schema(
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      required: true, // Make it required
     },
   },
   {
@@ -172,21 +195,12 @@ payrollSchema.pre("save", function (next) {
 
 // ─────────────────────────────────────────────
 // PRE-SAVE: Calculate netSalary based on payrollType
-// For current month: netSalary = adjustedBasicSalary + totalAllowance - deductions
-// For previous month: netSalary = basicSalary + totalAllowance - deductions
 // ─────────────────────────────────────────────
 payrollSchema.pre("save", function (next) {
-  // ONLY calculate netSalary if it hasn't been set or is being auto-calculated
-  // For current month payrolls, use adjustedBasicSalary (prorated)
-  // For previous month payrolls, use basicSalary (full)
-
   if (this.payrollType === "current") {
-    // Current month: use adjustedBasicSalary (prorated based on actual days)
     const basic = this.adjustedBasicSalary || 0;
     const allowances = this.totalAllowance || 0;
     const deductions = this.deductions || 0;
-    // Only set if not already set with a valid value (check if it's zero or not)
-    // But preserve the value if it was explicitly set
     if (
       this.netSalary === undefined ||
       this.netSalary === null ||
@@ -195,7 +209,6 @@ payrollSchema.pre("save", function (next) {
       this.netSalary = basic + allowances - deductions;
     }
   } else {
-    // Previous month: use full basicSalary
     const basic = this.basicSalary || 0;
     const allowances = this.totalAllowance || 0;
     const deductions = this.deductions || 0;
@@ -208,7 +221,6 @@ payrollSchema.pre("save", function (next) {
     }
   }
 
-  // Ensure netSalary is not negative
   if (this.netSalary < 0) this.netSalary = 0;
 
   next();

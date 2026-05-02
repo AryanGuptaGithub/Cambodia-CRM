@@ -631,10 +631,6 @@ router.get("/category-wise", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /sample-wise  <-- UPDATED to include sale details
-// ─────────────────────────────────────────────────────────────────────────────
 router.get("/sample-wise", async (req, res) => {
   try {
     const { period, month, year, startDate, endDate } = req.query;
@@ -645,7 +641,6 @@ router.get("/sample-wise", async (req, res) => {
     const filterMonth = month ? parseInt(month) : currentMonth;
     const filterYear = year ? parseInt(year) : currentYear;
 
-    // Build MongoDB date range query for samples (same as for sales)
     let dateQuery = {};
     if (period === "custom" && startDate && endDate) {
       const start = new Date(startDate);
@@ -662,7 +657,6 @@ router.get("/sample-wise", async (req, res) => {
       dateQuery = { date: { $gte: start, $lte: end } };
     }
 
-    // Fetch ALL sample records within the date range – including zero‑qty entries
     const samples = await DailySampleReport.find(dateQuery)
       .sort({ date: 1, createdAt: 1 })
       .lean();
@@ -671,17 +665,16 @@ router.get("/sample-wise", async (req, res) => {
       return res.json({ success: true, data: [] });
     }
 
-    // Prepare sale data lookup – fetch all sales within the SAME date range
-    const saleDateQuery = {
-      invoiceDate: dateQuery.date,
-    };
-
+    // Fetch all sales within the same date range
+    const saleDateQuery = dateQuery.date ? { invoiceDate: dateQuery.date } : {};
     const sales = await SaleSummary.find(saleDateQuery)
-      .select("products invoiceDate invoiceNumber customerName customerId")
+      .select(
+        "products invoiceDate invoiceNumber customerName customerId mrName",
+      )
       .lean();
 
     // Index sales by (customerId, normalized product name)
-    const salesByCustomerProduct = new Map(); // key: `${customerId}|${productNorm}`
+    const salesByCustomerProduct = new Map();
 
     for (const sale of sales) {
       if (!sale.products?.length) continue;
@@ -702,12 +695,12 @@ router.get("/sample-wise", async (req, res) => {
           totalQty: (prod.salesQty || 0) + (prod.bonusQty || 0),
           netSellingAmount: prod.netSellingAmount || prod.amount || 0,
           profitLoss: prod.profitLoss || 0,
-          invoiceNumber: sale.invoiceNumber, // ← ADDED for sale details
+          invoiceNumber: sale.invoiceNumber,
         });
       }
     }
 
-    // Group samples by date and enrich with sale data
+    // Group samples by date
     const dayMap = new Map();
 
     for (const sample of samples) {
@@ -724,56 +717,67 @@ router.get("/sample-wise", async (req, res) => {
       }
 
       const day = dayMap.get(dateKey);
-      const sampleQty = sample.totalQty ?? 0;
-      day.totalSamples += sampleQty;
 
-      // Find matching sale(s) for this customer + product after sample date
-      const productNorm = normalizeProductName(sample.productName);
-      const saleKey = `${sample.customerId}|${productNorm}`;
-      const salesForCustomerProduct = salesByCustomerProduct.get(saleKey) || [];
+      // ✅ FIX: Loop through sample.products array (not top-level fields)
+      const productsArray = sample.products || [];
 
-      // Filter sales that occurred on or after the sample date
-      const relevantSales = salesForCustomerProduct.filter((s) => s.date >= d);
+      for (const productEntry of productsArray) {
+        const productName = productEntry.productName || "—";
+        // ✅ FIX: Use totalQty field from the product sub-document
+        const sampleQty = Number(productEntry.totalQty) || 0;
 
-      // Aggregate sale data and collect individual sale details
-      let totalOrderQty = 0;
-      let totalSaleAmount = 0;
-      let totalProfit = 0;
-      const salesDetails = [];
+        day.totalSamples += sampleQty;
 
-      for (const s of relevantSales) {
-        totalOrderQty += s.totalQty;
-        totalSaleAmount += s.netSellingAmount;
-        totalProfit += s.profitLoss;
+        // Find matching sales for this customer + product
+        const productNorm = normalizeProductName(productName);
+        const saleKey = `${sample.customerId}|${productNorm}`;
+        const salesForCustomerProduct =
+          salesByCustomerProduct.get(saleKey) || [];
 
-        salesDetails.push({
-          invoiceNumber: s.invoiceNumber,
-          invoiceDate: s.date,
-          salesQty: s.salesQty,
-          bonusQty: s.bonusQty,
-          totalQty: s.totalQty,
-          amount: s.netSellingAmount,
-          profit: s.profitLoss,
+        // Only sales on or after the sample date
+        const relevantSales = salesForCustomerProduct.filter(
+          (s) => s.date >= d,
+        );
+
+        let totalOrderQty = 0;
+        let totalSaleAmount = 0;
+        let totalProfit = 0;
+        const salesDetails = [];
+
+        for (const s of relevantSales) {
+          totalOrderQty += s.totalQty;
+          totalSaleAmount += s.netSellingAmount;
+          totalProfit += s.profitLoss;
+          salesDetails.push({
+            invoiceNumber: s.invoiceNumber,
+            invoiceDate: s.date,
+            salesQty: s.salesQty,
+            bonusQty: s.bonusQty,
+            totalQty: s.totalQty,
+            amount: s.netSellingAmount,
+            profit: s.profitLoss,
+          });
+        }
+
+        day.entries.push({
+          srNo: day.entries.length + 1,
+          customerName: sample.customerName || "—",
+          customerCode: sample.customerCode || "—",
+          // ✅ FIX: productName from the product sub-document
+          productName: productName,
+          // ✅ FIX: sampleQty from the product sub-document's totalQty
+          sampleQty: sampleQty,
+          orderQty: totalOrderQty,
+          saleAmount: totalSaleAmount,
+          profit: totalProfit,
+          sales: salesDetails,
+          hasSale: totalOrderQty > 0,
+          mrName: sample.mrName || "—",
+          remark: sample.remark || "",
         });
       }
-
-      day.entries.push({
-        srNo: day.entries.length + 1,
-        customerName: sample.customerName || "—",
-        customerCode: sample.customerCode || "—",
-        productName: sample.productName || "—",
-        sampleQty,
-        orderQty: totalOrderQty,
-        saleAmount: totalSaleAmount,
-        profit: totalProfit,
-        sales: salesDetails, // ← attach the list
-        hasSale: totalOrderQty > 0,
-        mrName: sample.mrName || "—",
-        remark: sample.remark || "",
-      });
     }
 
-    // Sort days oldest→newest
     const result = Array.from(dayMap.values())
       .sort((a, b) => new Date(a.date) - new Date(b.date))
       .map((day) => ({
@@ -789,6 +793,161 @@ router.get("/sample-wise", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// router.get("/sample-wise", async (req, res) => {
+//   try {
+//     const { period, month, year, startDate, endDate } = req.query;
+
+//     const currentDate = new Date();
+//     const currentMonth = currentDate.getMonth() + 1;
+//     const currentYear = currentDate.getFullYear();
+//     const filterMonth = month ? parseInt(month) : currentMonth;
+//     const filterYear = year ? parseInt(year) : currentYear;
+
+//     // Build MongoDB date range query for samples (same as for sales)
+//     let dateQuery = {};
+//     if (period === "custom" && startDate && endDate) {
+//       const start = new Date(startDate);
+//       const end = new Date(endDate);
+//       end.setHours(23, 59, 59, 999);
+//       dateQuery = { date: { $gte: start, $lte: end } };
+//     } else if (period === "month") {
+//       const start = new Date(filterYear, filterMonth - 1, 1);
+//       const end = new Date(filterYear, filterMonth, 0, 23, 59, 59, 999);
+//       dateQuery = { date: { $gte: start, $lte: end } };
+//     } else if (period === "year") {
+//       const start = new Date(filterYear, 0, 1);
+//       const end = new Date(filterYear, 11, 31, 23, 59, 59, 999);
+//       dateQuery = { date: { $gte: start, $lte: end } };
+//     }
+
+//     // Fetch ALL sample records within the date range – including zero‑qty entries
+//     const samples = await DailySampleReport.find(dateQuery)
+//       .sort({ date: 1, createdAt: 1 })
+//       .lean();
+
+//     if (samples.length === 0) {
+//       return res.json({ success: true, data: [] });
+//     }
+
+//     // Prepare sale data lookup – fetch all sales within the SAME date range
+//     const saleDateQuery = {
+//       invoiceDate: dateQuery.date,
+//     };
+
+//     const sales = await SaleSummary.find(saleDateQuery)
+//       .select("products invoiceDate invoiceNumber customerName customerId")
+//       .lean();
+
+//     // Index sales by (customerId, normalized product name)
+//     const salesByCustomerProduct = new Map(); // key: `${customerId}|${productNorm}`
+
+//     for (const sale of sales) {
+//       if (!sale.products?.length) continue;
+//       const saleDate = new Date(sale.invoiceDate);
+//       if (isNaN(saleDate.getTime())) continue;
+
+//       for (const prod of sale.products) {
+//         if (!prod.productName) continue;
+//         const productNorm = normalizeProductName(prod.productName);
+//         const key = `${sale.customerId}|${productNorm}`;
+//         if (!salesByCustomerProduct.has(key)) {
+//           salesByCustomerProduct.set(key, []);
+//         }
+//         salesByCustomerProduct.get(key).push({
+//           date: saleDate,
+//           salesQty: prod.salesQty || 0,
+//           bonusQty: prod.bonusQty || 0,
+//           totalQty: (prod.salesQty || 0) + (prod.bonusQty || 0),
+//           netSellingAmount: prod.netSellingAmount || prod.amount || 0,
+//           profitLoss: prod.profitLoss || 0,
+//           invoiceNumber: sale.invoiceNumber, // ← ADDED for sale details
+//         });
+//       }
+//     }
+
+//     // Group samples by date and enrich with sale data
+//     const dayMap = new Map();
+
+//     for (const sample of samples) {
+//       const d = new Date(sample.date);
+//       const dateKey = d.toISOString().split("T")[0];
+
+//       if (!dayMap.has(dateKey)) {
+//         dayMap.set(dateKey, {
+//           date: sample.date,
+//           dateKey,
+//           totalSamples: 0,
+//           entries: [],
+//         });
+//       }
+
+//       const day = dayMap.get(dateKey);
+//       const sampleQty = sample.totalQty ?? 0;
+//       day.totalSamples += sampleQty;
+
+//       // Find matching sale(s) for this customer + product after sample date
+//       const productNorm = normalizeProductName(sample.productName);
+//       const saleKey = `${sample.customerId}|${productNorm}`;
+//       const salesForCustomerProduct = salesByCustomerProduct.get(saleKey) || [];
+
+//       // Filter sales that occurred on or after the sample date
+//       const relevantSales = salesForCustomerProduct.filter((s) => s.date >= d);
+
+//       // Aggregate sale data and collect individual sale details
+//       let totalOrderQty = 0;
+//       let totalSaleAmount = 0;
+//       let totalProfit = 0;
+//       const salesDetails = [];
+
+//       for (const s of relevantSales) {
+//         totalOrderQty += s.totalQty;
+//         totalSaleAmount += s.netSellingAmount;
+//         totalProfit += s.profitLoss;
+
+//         salesDetails.push({
+//           invoiceNumber: s.invoiceNumber,
+//           invoiceDate: s.date,
+//           salesQty: s.salesQty,
+//           bonusQty: s.bonusQty,
+//           totalQty: s.totalQty,
+//           amount: s.netSellingAmount,
+//           profit: s.profitLoss,
+//         });
+//       }
+
+//       day.entries.push({
+//         srNo: day.entries.length + 1,
+//         customerName: sample.customerName || "—",
+//         customerCode: sample.customerCode || "—",
+//         productName: sample.productName || "—",
+//         sampleQty,
+//         orderQty: totalOrderQty,
+//         saleAmount: totalSaleAmount,
+//         profit: totalProfit,
+//         sales: salesDetails, // ← attach the list
+//         hasSale: totalOrderQty > 0,
+//         mrName: sample.mrName || "—",
+//         remark: sample.remark || "",
+//       });
+//     }
+
+//     // Sort days oldest→newest
+//     const result = Array.from(dayMap.values())
+//       .sort((a, b) => new Date(a.date) - new Date(b.date))
+//       .map((day) => ({
+//         date: day.date,
+//         dateKey: day.dateKey,
+//         totalSamples: day.totalSamples,
+//         entries: day.entries,
+//       }));
+
+//     res.json({ success: true, data: result });
+//   } catch (error) {
+//     console.error("❌ SAMPLE-WISE ERROR:", error);
+//     res.status(500).json({ success: false, error: error.message });
+//   }
+// });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /report  (same as /all but different response shape)

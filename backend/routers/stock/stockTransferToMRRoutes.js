@@ -15,7 +15,6 @@
  *        3. POST /import-excel   — transferItems include expiryDate from request
  */
 
-
 // backend/routers/stock/stockTransferToMRRoutes.js
 import express from "express";
 import multer from "multer";
@@ -29,7 +28,7 @@ import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import User from "../../models/User.js";
 import staffSchema from "../../models/staffMember/staff.js";
-
+import DailySampleReport from "../../models/reports/dailysample.js";
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -571,40 +570,70 @@ router.get("/last-number", async (req, res) => {
 router.get("/mr-stock-by-mr-id/:mrId", async (req, res) => {
   try {
     const { mrId } = req.params;
-    let mrStock = null;
 
-    try {
-      mrStock = await stockInMRHand
-        .findOne({ mrId: new mongoose.Types.ObjectId(mrId) })
-        .populate({
-          path: "productsInHand.productId",
-          select: "productName lc costPrice",
-        });
-    } catch {
-      mrStock = await stockInMRHand.findOne({ mrId }).populate({
-        path: "productsInHand.productId",
-        select: "productName lc costPrice",
-      });
+    if (!mongoose.Types.ObjectId.isValid(mrId)) {
+      return res.status(400).json({ success: false, message: "Invalid MR ID" });
     }
 
+    // Get MR stock data
+    const mrStock = await stockInMRHand.findOne({
+      mrId: new mongoose.Types.ObjectId(mrId),
+    });
+
     if (!mrStock) {
-      return res.json({ success: true, data: null, products: [] });
+      return res.status(200).json({
+        success: true,
+        data: { mrId, mrName: "" },
+        products: [],
+      });
     }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Get all daily sample reports for this MR to calculate total samples taken
+    const dailySamples = await DailySampleReport.find({
+      mrId: new mongoose.Types.ObjectId(mrId),
+      "products.totalQty": { $gt: 0 },
+    });
+
+    // Calculate total samples used per product from daily samples
+    const samplesUsedMap = new Map();
+    dailySamples.forEach((report) => {
+      report.products.forEach((prod) => {
+        const productName = prod.productName;
+        const qty = Number(prod.totalQty) || 0;
+        if (qty > 0) {
+          samplesUsedMap.set(
+            productName,
+            (samplesUsedMap.get(productName) || 0) + qty,
+          );
+        }
+      });
+    });
+
+    // Map products with stock/expiry logic (aryan branch) + in-hand calculation (SurajPal branch)
     const products = (mrStock.productsInHand || [])
       .filter((p) => (p.quantity || 0) > 0)
       .map((p) => {
         const lc = p.lc || p.productId?.lc || p.productId?.costPrice || 0;
         const expiryDate = p.expiryDate ?? null;
+        const samplesUsed = samplesUsedMap.get(p.productName) || 0;
+        const inHandQuantity = Math.max(
+          0,
+          (p.assignedQuantity || p.quantity || 0) - samplesUsed,
+        );
+
         return {
           _id: p._id?.toString(),
           productId: (p.productId?._id || p.productId)?.toString(),
           productName: p.productName || p.productId?.productName || "Unknown",
           quantity: p.quantity || 0,
           assignedQuantity: p.assignedQuantity || 0,
+          inHandQuantity,
+          samplesUsed,
+          returnQuantity: inHandQuantity,
+          returnQuantityDisplay: String(inHandQuantity),
           lc,
           sellingPrice: p.sellingPrice || 0,
           amount: p.amount || 0,
@@ -616,20 +645,23 @@ router.get("/mr-stock-by-mr-id/:mrId", async (req, res) => {
         };
       });
 
-    res.json({
+    res.status(200).json({
       success: true,
       data: {
-        _id: mrStock._id?.toString(),
-        mrId: mrStock.mrId?.toString(),
+        mrId: mrStock.mrId,
         mrName: mrStock.mrName,
-        totalAmount: mrStock.totalAmount || 0,
-        totalProductCost: mrStock.totalProductCost || 0,
       },
       products,
+      samplesSummary: Array.from(samplesUsedMap.entries()).map(
+        ([name, qty]) => ({
+          productName: name,
+          samplesUsed: qty,
+        }),
+      ),
     });
-  } catch (err) {
-    console.error("Failed to fetch MR stock by mrId:", err);
-    res.status(500).json({ success: false, error: err.message });
+  } catch (error) {
+    console.error("Error fetching MR stock:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -946,6 +978,7 @@ router.get("/mrs-list", async (_, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /mrs
 // ─────────────────────────────────────────────────────────────────────────────
