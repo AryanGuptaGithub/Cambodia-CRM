@@ -131,7 +131,7 @@ import LeaveAndAttendance from "./pages/HRM/LeaveAttendance";
 
 // Import UserActivity
 import UserActivity from "./pages/ActivityLog/UserActivity";
-
+import MrFilterPanel from "./pages/Settings/ReportWiseActiveMr";
 // ─────────────────────────────────────────────────────────────────────────────
 // readUserFromStorage
 // Login.jsx now stores a "user" key with { _id, name, email, role }.
@@ -274,6 +274,7 @@ function App() {
             <Route index element={<CompanyProfile />} />
             <Route path="company-profile" element={<CompanyProfile />} />
             <Route path="tab-manipulation" element={<HTabsManipulation />} />
+            <Route path="mrfilterpanel" element={<MrFilterPanel />} />
           </Route>
 
           {/* Product Manager routes */}

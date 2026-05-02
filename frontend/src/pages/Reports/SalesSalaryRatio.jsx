@@ -12,6 +12,11 @@ import {
   Menu,
   ChevronDown,
   ChevronUp,
+  UserCheck,
+  CheckSquare,
+  Square,
+  Save,
+  RefreshCw,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -39,6 +44,7 @@ const SalesSalaryRatio = () => {
       totalProfit: 0,
       ratio: 0,
       totalTourExpense: 0,
+      totalTourAllowance: 0,
       totalAllowance: 0,
       totalIncentive: 0,
       expenseSaleRatio: 0,
@@ -64,6 +70,15 @@ const SalesSalaryRatio = () => {
   const [expandedMr, setExpandedMr] = useState(null);
   const [isMobileView, setIsMobileView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // MR Filter State
+  const [showMrFilterModal, setShowMrFilterModal] = useState(false);
+  const [allMrList, setAllMrList] = useState([]);
+  const [activeMrIds, setActiveMrIds] = useState([]);
+  const [tempSelected, setTempSelected] = useState([]);
+  const [mrListLoading, setMrListLoading] = useState(false);
+  const [mrSaveLoading, setMrSaveLoading] = useState(false);
+  const [mrSearchTerm, setMrSearchTerm] = useState("");
 
   useEffect(() => {
     const checkMobile = () => setIsMobileView(window.innerWidth < 768);
@@ -162,6 +177,7 @@ const SalesSalaryRatio = () => {
       totalProfit: 0,
       ratio: 0,
       totalTourExpense: 0,
+      totalTourAllowance: 0,
       totalAllowance: 0,
       totalIncentive: 0,
       expenseSaleRatio: 0,
@@ -169,7 +185,43 @@ const SalesSalaryRatio = () => {
     records: [],
   });
 
-  const fetchData = async (page = 1, search = searchTerm) => {
+  const fetchActiveMrs = async () => {
+    try {
+      const res = await axios.get(
+        `${backendUrl}/api/reports/sales-and-salary/active-mrs`,
+      );
+      if (res.data.success) setActiveMrIds(res.data.data || []);
+    } catch {
+      setActiveMrIds([]);
+    }
+  };
+
+  const fetchMrList = async () => {
+    setMrListLoading(true);
+    try {
+      const res = await axios.get(
+        `${backendUrl}/api/reports/sales-and-salary/mrs`,
+      );
+      if (res.data.success) {
+        const validMrs = (res.data.data || []).filter((m) => m.mrId);
+        setAllMrList(validMrs);
+      }
+    } catch {
+      showToast("error", "Failed to fetch MR list");
+    } finally {
+      setMrListLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchActiveMrs();
+  }, []);
+
+  const fetchData = async (
+    page = 1,
+    search = searchTerm,
+    activeIds = activeMrIds,
+  ) => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
@@ -191,6 +243,7 @@ const SalesSalaryRatio = () => {
         if (dateRange.period) params.period = dateRange.period;
       }
       if (search?.trim()) params.search = search.trim();
+      if (activeIds && activeIds.length > 0) params.mrIds = activeIds.join(",");
 
       const response = await axios.get(
         `${backendUrl}/api/reports/sales-and-salary`,
@@ -206,7 +259,7 @@ const SalesSalaryRatio = () => {
             totalProfit: parseFloat(s.totalProfit) || 0,
             ratio: parseFloat(s.ratio) || 0,
             totalTourExpense: parseFloat(s.totalTourExpense) || 0,
-            // ✅ CHANGE: use merged totalAllowance
+            totalTourAllowance: parseFloat(s.totalTourAllowance) || 0,
             totalAllowance: parseFloat(s.totalAllowance) || 0,
             totalIncentive: parseFloat(s.totalIncentive) || 0,
             expenseSaleRatio: parseFloat(s.expenseSaleRatio) || 0,
@@ -246,7 +299,8 @@ const SalesSalaryRatio = () => {
 
   useEffect(() => {
     if (selectedTab === "custom") {
-      if (customDateRange.startDate && customDateRange.endDate) fetchData(1);
+      if (customDateRange.startDate && customDateRange.endDate)
+        fetchData(1, searchTerm, activeMrIds);
       else {
         setData(emptyData());
         setPagination({
@@ -258,9 +312,9 @@ const SalesSalaryRatio = () => {
         });
       }
     } else {
-      fetchData(1);
+      fetchData(1, searchTerm, activeMrIds);
     }
-  }, [selectedTab]);
+  }, [selectedTab, activeMrIds]);
 
   useEffect(() => {
     if (
@@ -268,23 +322,23 @@ const SalesSalaryRatio = () => {
       customDateRange.startDate &&
       customDateRange.endDate
     )
-      fetchData(1);
+      fetchData(1, searchTerm, activeMrIds);
   }, [customDateRange.startDate, customDateRange.endDate]);
 
   useEffect(() => {
-    const t = setTimeout(() => fetchData(1, searchTerm), 500);
+    const t = setTimeout(() => fetchData(1, searchTerm, activeMrIds), 500);
     return () => clearTimeout(t);
   }, [searchTerm]);
 
   const handlePageChange = (page) => {
     if (page >= 1 && page <= pagination.totalPages) {
-      fetchData(page);
+      fetchData(page, searchTerm, activeMrIds);
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
   const handleClearSearch = () => {
     setSearchTerm("");
-    fetchData(1);
+    fetchData(1, "", activeMrIds);
   };
   const handleCustomDateChange = (name, date) =>
     setCustomDateRange((p) => ({ ...p, [name]: date }));
@@ -299,7 +353,7 @@ const SalesSalaryRatio = () => {
     }
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    fetchData(1);
+    fetchData(1, searchTerm, activeMrIds);
   };
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
@@ -317,6 +371,64 @@ const SalesSalaryRatio = () => {
   };
   const toggleMrExpand = (mrId) =>
     setExpandedMr(expandedMr === mrId ? null : mrId);
+
+  const openMrFilterModal = async () => {
+    await fetchMrList();
+    const validMrList = allMrList.filter((m) => m.mrId);
+    setTempSelected(
+      activeMrIds.length > 0
+        ? [...activeMrIds]
+        : validMrList.map((m) => m.mrId),
+    );
+    setMrSearchTerm("");
+    setShowMrFilterModal(true);
+  };
+
+  useEffect(() => {
+    if (
+      showMrFilterModal &&
+      allMrList.length > 0 &&
+      tempSelected.length === 0 &&
+      activeMrIds.length === 0
+    ) {
+      const validMrList = allMrList.filter((m) => m.mrId);
+      setTempSelected(validMrList.map((m) => m.mrId));
+    }
+  }, [allMrList, showMrFilterModal]);
+
+  const toggleMrInTemp = (mrId) => {
+    setTempSelected((prev) =>
+      prev.includes(mrId) ? prev.filter((id) => id !== mrId) : [...prev, mrId],
+    );
+  };
+  const selectAllMrs = () => {
+    const validIds = allMrList.filter((m) => m.mrId).map((m) => m.mrId);
+    setTempSelected(validIds);
+  };
+  const clearAllMrs = () => setTempSelected([]);
+
+  const saveMrFilter = async () => {
+    setMrSaveLoading(true);
+    try {
+      const toSave = tempSelected.filter((id) => id && typeof id === "string");
+      await axios.post(
+        `${backendUrl}/api/reports/sales-and-salary/active-mrs`,
+        { mrIds: toSave },
+      );
+      setActiveMrIds(toSave);
+      setShowMrFilterModal(false);
+      showToast("success", "MR filter saved successfully");
+      fetchData(1, searchTerm, toSave);
+    } catch {
+      showToast("error", "Failed to save MR filter");
+    } finally {
+      setMrSaveLoading(false);
+    }
+  };
+
+  const filteredMrList = allMrList.filter((m) =>
+    m.mrName.toLowerCase().includes(mrSearchTerm.toLowerCase()),
+  );
 
   const exportToExcel = async () => {
     if (!data.records.length) {
@@ -336,6 +448,7 @@ const SalesSalaryRatio = () => {
         if (dateRange.endDate) params.endDate = dateRange.endDate;
         if (dateRange.period) params.period = dateRange.period;
       }
+      if (activeMrIds.length > 0) params.mrIds = activeMrIds.join(",");
       const response = await axios.get(
         `${backendUrl}/api/reports/sales-and-salary/export`,
         { params, responseType: "blob" },
@@ -382,12 +495,11 @@ const SalesSalaryRatio = () => {
   };
   const fmtRatio = (v) => {
     const n = parseFloat(v);
-    return isNaN(n) ? "0.0000" : n.toFixed(4);
+    return isNaN(n) ? "0.00" : n.toFixed(2);
   };
 
   const calcSalarySaleRatio = (salary, sale) =>
     sale === 0 ? 0 : (salary / sale) * 100;
-  // ✅ NEW helper
   const calcExpenseSaleRatio = (totalExpense, sale) =>
     sale === 0 ? 0 : (totalExpense / sale) * 100;
 
@@ -457,22 +569,17 @@ const SalesSalaryRatio = () => {
     );
   };
 
-  // ── Mobile Record Card ─────────────────────────────────────────────────────
   const MobileRecordCard = ({ record, index }) => {
     const isExpanded = expandedMr === record.mrId;
     const salary = parseFloat(record.salary) || 0;
     const incentive = parseFloat(record.incentive) || 0;
-    // ✅ CHANGE: allowance already includes tour allowance from backend
     const allowance = parseFloat(record.allowance) || 0;
     const tourExpense = parseFloat(record.tourExpense) || 0;
+    const tourAllowance = parseFloat(record.tourAllowance) || 0;
     const profit = parseFloat(record.profit) || 0;
     const sale = parseFloat(record.sale) || 0;
-    const totalExpense =
-      parseFloat(record.totalExpense) ||
-      salary + incentive + allowance + tourExpense;
-
+    const totalExpense = parseFloat(record.totalExpense) || 0;
     const salarySaleRatio = calcSalarySaleRatio(salary, sale);
-    // ✅ NEW
     const expenseSaleRatio =
       parseFloat(record.expenseSaleRatio) ||
       calcExpenseSaleRatio(totalExpense, sale);
@@ -512,7 +619,7 @@ const SalesSalaryRatio = () => {
             </div>
           </div>
           <div className="bg-white px-4 py-3">
-            <div className="text-xs text-gray-500 mb-0.5">Salary ($)</div>
+            <div className="text-xs text-gray-500 mb-0.5">Net Salary ($)</div>
             <div className="font-semibold text-purple-600 text-sm">
               {fmt$(salary)}
             </div>
@@ -539,7 +646,6 @@ const SalesSalaryRatio = () => {
               {fmtPct(salarySaleRatio)}
             </div>
           </div>
-          {/* ✅ NEW */}
           <div className="bg-white px-4 py-3">
             <div className="text-xs text-gray-500 mb-0.5">
               Expense/Sales (%)
@@ -565,24 +671,188 @@ const SalesSalaryRatio = () => {
               Expense Breakdown — {record.mrName}
             </h4>
             <div className="space-y-2">
-              {/* ✅ CHANGE: Show merged Allowance label */}
+              {/* ── CHANGED: Allowance now shows allowance + tourAllowance combined ── */}
               <div className="flex justify-between items-center py-1 border-b border-blue-200">
                 <span className="text-xs text-gray-600">
-                  Allowance ($)
+                  Allowance ($){" "}
+                  <span className="text-gray-400">
+                    (Salary Allow. + Tour Allow.)
+                  </span>
                 </span>
                 <span className="font-semibold text-yellow-600 text-sm">
-                  {fmt$(allowance)}
+                  {fmt$(allowance + tourAllowance)}
                 </span>
               </div>
-              <div className="flex justify-between items-center py-1">
+              <div className="flex justify-between items-center py-1 border-b border-blue-200">
+                <span className="text-xs text-gray-600">
+                  Incentive ($){" "}
+                  <span className="text-gray-400">(in salary)</span>
+                </span>
+                <span className="font-semibold text-green-600 text-sm">
+                  {fmt$(incentive)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-blue-200">
                 <span className="text-xs text-gray-600">Tour Expense ($)</span>
                 <span className="font-semibold text-red-600 text-sm">
                   {fmt$(tourExpense)}
                 </span>
               </div>
+              <div className="flex justify-between items-center py-1 pt-1 border-t-2 border-blue-300">
+                <span className="text-xs font-bold text-gray-700">
+                  Total Expense = Salary + Tour Allow. + Tour Exp.
+                </span>
+                <span className="font-bold text-gray-800 text-sm">
+                  {fmt$(totalExpense)}
+                </span>
+              </div>
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const MrFilterModal = () => {
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+        <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-100 rounded-lg">
+                <UserCheck size={20} className="text-indigo-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">
+                  Manage Active MRs
+                </h2>
+                <p className="text-xs text-gray-500">
+                  Select MRs to include in reports
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowMrFilterModal(false)}
+              className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div className="px-6 pt-3">
+            <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              <span className="text-xs text-green-700 font-medium">
+                Showing only active MRs (isActive: true)
+              </span>
+            </div>
+          </div>
+          <div className="px-6 py-3 border-b border-gray-100 space-y-3">
+            <div className="relative">
+              <Search
+                size={15}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+              <input
+                type="text"
+                placeholder="Search MR name..."
+                value={mrSearchTerm}
+                onChange={(e) => setMrSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">
+                {tempSelected.length} of {allMrList.length} MRs selected
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={selectAllMrs}
+                  className="text-xs px-3 py-1 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 font-medium transition-colors"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={clearAllMrs}
+                  className="text-xs px-3 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 font-medium transition-colors"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-6 py-3">
+            {mrListLoading ? (
+              <div className="flex justify-center items-center py-10">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+              </div>
+            ) : filteredMrList.length === 0 ? (
+              <div className="text-center py-10 text-gray-500 text-sm">
+                No MRs found
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {filteredMrList.map((mr) => {
+                  const isSelected = tempSelected.includes(mr.mrId);
+                  return (
+                    <button
+                      key={mr.mrId}
+                      onClick={() => toggleMrInTemp(mr.mrId)}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${isSelected ? "bg-indigo-50 border border-indigo-200" : "bg-gray-50 border border-transparent hover:bg-gray-100"}`}
+                    >
+                      {isSelected ? (
+                        <CheckSquare
+                          size={18}
+                          className="text-indigo-600 flex-shrink-0"
+                        />
+                      ) : (
+                        <Square
+                          size={18}
+                          className="text-gray-400 flex-shrink-0"
+                        />
+                      )}
+                      <span
+                        className={`text-sm font-medium capitalize ${isSelected ? "text-indigo-700" : "text-gray-700"}`}
+                      >
+                        {mr.mrName}
+                      </span>
+                      <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 font-medium">
+                        Active
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+        
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowMrFilterModal(false)}
+                className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveMrFilter}
+                disabled={mrSaveLoading}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-sm font-medium transition-colors"
+              >
+                {mrSaveLoading ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save size={14} />
+                    <span>Save Filter</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -612,8 +882,22 @@ const SalesSalaryRatio = () => {
               Sales/Salary Ratio
             </h1>
           </div>
-          <div className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-medium">
-            Total: {pagination.totalRecords}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openMrFilterModal}
+              className="relative flex items-center gap-1 bg-indigo-600 text-white px-3 py-1.5 rounded-full text-xs font-medium"
+            >
+              <UserCheck size={13} />
+              <span>MRs</span>
+              {activeMrIds.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                  {activeMrIds.length}
+                </span>
+              )}
+            </button>
+            <div className="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-medium">
+              Total: {pagination.totalRecords}
+            </div>
           </div>
         </div>
       )}
@@ -655,6 +939,22 @@ const SalesSalaryRatio = () => {
                 </button>
               )}
             </div>
+            <button
+              onClick={openMrFilterModal}
+              className="relative flex items-center justify-center gap-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-4 py-2 rounded-lg font-medium transition-colors min-w-[140px]"
+            >
+              <UserCheck size={18} />
+              <span>
+                {activeMrIds.length > 0
+                  ? `MR Filter (${activeMrIds.length})`
+                  : "Filter MRs"}
+              </span>
+              {activeMrIds.length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                  {activeMrIds.length}
+                </span>
+              )}
+            </button>
             <button
               onClick={exportToExcel}
               disabled={exportLoading || !data.records.length}
@@ -804,9 +1104,9 @@ const SalesSalaryRatio = () => {
         ))}
       </div>
 
-      {/* ✅ CHANGE: Expense breakdown — 3 cards, Tour Allowance removed (merged into Allowance) */}
+      {/* Summary breakdown cards */}
       <div
-        className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-1" : "grid-cols-1 md:grid-cols-3 gap-4 mb-6"}`}
+        className={`grid gap-3 mb-4 ${isMobileView ? "grid-cols-2" : "grid-cols-1 md:grid-cols-4 gap-4 mb-6"}`}
       >
         <div className="bg-white p-3 rounded-lg shadow-md border-l-4 border-purple-400 border border-gray-200">
           <div className="flex justify-between items-center">
@@ -817,19 +1117,38 @@ const SalesSalaryRatio = () => {
               <p className="text-base font-bold text-purple-600">
                 {fmt$(data.summary.totalTourExpense)}
               </p>
+              <p className="text-[10px] text-gray-400">
+                Petrol / Van / Province
+              </p>
             </div>
             <BarChart3 className="w-6 h-6 text-purple-400" />
           </div>
         </div>
-        {/* ✅ CHANGE: Label updated — now shows merged allowance */}
-        <div className="bg-white p-3 rounded-lg shadow-md border-l-4 border-amber-400 border border-gray-200">
+        <div className="bg-white p-3 rounded-lg shadow-md border-l-4 border-indigo-400 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-xs font-semibold text-gray-600">
-                Allowance
+                Tour Allowance
               </p>
+              <p className="text-base font-bold text-indigo-600">
+                {fmt$(data.summary.totalTourAllowance)}
+              </p>
+              <p className="text-[10px] text-gray-400">
+                Tour allowance category
+              </p>
+            </div>
+            <DollarSign className="w-6 h-6 text-indigo-400" />
+          </div>
+        </div>
+        <div className="bg-white p-3 rounded-lg shadow-md border-l-4 border-amber-400 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-xs font-semibold text-gray-600">Allowance</p>
               <p className="text-base font-bold text-amber-600">
                 {fmt$(data.summary.totalAllowance)}
+              </p>
+              <p className="text-[10px] text-gray-400">
+                In Net Salary (display only)
               </p>
             </div>
             <DollarSign className="w-6 h-6 text-amber-400" />
@@ -842,13 +1161,17 @@ const SalesSalaryRatio = () => {
               <p className="text-base font-bold text-green-600">
                 {fmt$(data.summary.totalIncentive)}
               </p>
+              <p className="text-[10px] text-gray-400">
+                In Net Salary (display only)
+              </p>
             </div>
             <Percent className="w-6 h-6 text-green-400" />
           </div>
         </div>
       </div>
 
-      {/* Performance legend (desktop) */}
+
+      {/* Performance legend */}
       {!isMobileView && (
         <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-500">
           <span className="font-semibold text-gray-600">
@@ -925,7 +1248,7 @@ const SalesSalaryRatio = () => {
           )}
         </div>
       ) : (
-        /* Desktop: Table */
+        /* ── DESKTOP TABLE ── */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -934,17 +1257,13 @@ const SalesSalaryRatio = () => {
                 <th className="p-3 text-sm font-medium">MR Name</th>
                 <th className="p-3 text-sm font-medium">Sale ($)</th>
                 <th className="p-3 text-sm font-medium">Profit ($)</th>
-                <th className="p-3 text-sm font-medium">Salary ($)</th>
+                <th className="p-3 text-sm font-medium">Net Salary ($)</th>
                 <th className="p-3 text-sm font-medium">Incentive ($)</th>
-                {/* ✅ CHANGE: merged column header */}
-                <th className="p-3 text-sm font-medium">
-                  Allowance ($)
-                  <br />
-                </th>
+                {/* ── CHANGED: merged Allowance + Tour Allow into one column ── */}
+                <th className="p-3 text-sm font-medium">Allowance ($)</th>
                 <th className="p-3 text-sm font-medium">Tour Expense ($)</th>
                 <th className="p-3 text-sm font-medium">Total Expense ($)</th>
                 <th className="p-3 text-sm font-medium">Salary/Sale (%)</th>
-                {/* ✅ NEW column */}
                 <th className="p-3 text-sm font-medium">Expense/Sales (%)</th>
                 <th className="p-3 text-sm font-medium">Performance</th>
               </tr>
@@ -952,6 +1271,7 @@ const SalesSalaryRatio = () => {
             <tbody>
               {loading ? (
                 <tr>
+                  {/* ── CHANGED: colSpan 13 → 12 (one column removed) ── */}
                   <td colSpan={12} className="p-8 text-center">
                     <div className="flex flex-col items-center">
                       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4" />
@@ -963,17 +1283,13 @@ const SalesSalaryRatio = () => {
                 data.records.map((record, index) => {
                   const salary = parseFloat(record.salary) || 0;
                   const incentive = parseFloat(record.incentive) || 0;
-                  // ✅ CHANGE: allowance = merged (payroll + tour allowance)
                   const allowance = parseFloat(record.allowance) || 0;
                   const tourExpense = parseFloat(record.tourExpense) || 0;
+                  const tourAllowance = parseFloat(record.tourAllowance) || 0;
                   const profit = parseFloat(record.profit) || 0;
                   const sale = parseFloat(record.sale) || 0;
-                  const totalExpense =
-                    parseFloat(record.totalExpense) ||
-                    salary + incentive + allowance + tourExpense;
-
+                  const totalExpense = parseFloat(record.totalExpense) || 0;
                   const salarySaleRatio = calcSalarySaleRatio(salary, sale);
-                  // ✅ NEW: use value from backend, fallback to local calc
                   const expenseSaleRatio =
                     parseFloat(record.expenseSaleRatio) ||
                     calcExpenseSaleRatio(totalExpense, sale);
@@ -1006,9 +1322,9 @@ const SalesSalaryRatio = () => {
                       <td className="p-3 text-sm font-semibold text-green-600">
                         {fmt$(incentive)}
                       </td>
-                      {/* ✅ CHANGE: merged allowance */}
+                      {/* ── CHANGED: allowance + tourAllowance combined in one cell ── */}
                       <td className="p-3 text-sm font-semibold text-yellow-600">
-                        {fmt$(allowance)}
+                        {fmt$(allowance + tourAllowance)}
                       </td>
                       <td className="p-3 text-sm font-semibold text-red-600">
                         {fmt$(tourExpense)}
@@ -1021,7 +1337,6 @@ const SalesSalaryRatio = () => {
                       >
                         {fmtPct(salarySaleRatio)}
                       </td>
-                      {/* ✅ NEW column */}
                       <td
                         className={`p-3 text-sm font-semibold ${expenseSaleRatio > 100 ? "text-red-600" : "text-orange-600"}`}
                       >
@@ -1039,6 +1354,7 @@ const SalesSalaryRatio = () => {
                 })
               ) : (
                 <tr>
+                  {/* ── CHANGED: colSpan 13 → 12 (one column removed) ── */}
                   <td colSpan={12} className="p-8 text-center">
                     <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -1062,7 +1378,7 @@ const SalesSalaryRatio = () => {
 
       {renderPagination()}
 
-      {/* Custom Filter Modal */}
+      {/* Custom Date Filter Modal */}
       {showCustomFilter && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
           <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg mx-4">
@@ -1137,6 +1453,8 @@ const SalesSalaryRatio = () => {
           </div>
         </div>
       )}
+
+      {showMrFilterModal && <MrFilterModal />}
     </div>
   );
 };

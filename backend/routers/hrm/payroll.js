@@ -592,7 +592,7 @@ router.get("/", async (req, res) => {
       sortBy = "createdAt",
       sortOrder = "desc",
     } = req.query;
-    
+
     const pageNum = parseInt(page);
     // If limit is not provided, get ALL records (no pagination)
     let limitNum = limit ? parseInt(limit) : null;
@@ -601,12 +601,31 @@ router.get("/", async (req, res) => {
     const matchConditions = { enabled: true };
     if (status && status !== "all") matchConditions.status = status;
     if (period) {
-      if (period.endsWith("-YTD"))
+      if (period.endsWith("-YTD")) {
         matchConditions.period = {
           $regex: `^${period.split("-")[0]}-`,
           $options: "i",
         };
-      else if (period !== "all") matchConditions.period = period;
+      } else if (period === "custom") {
+        // Custom date range: filter by the period strings that fall within startDate–endDate
+        const { startDate, endDate } = req.query;
+        if (startDate && endDate) {
+          // Generate all YYYY-MM periods between startDate and endDate
+          const periods = [];
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+          while (cur <= end) {
+            periods.push(
+              `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}`,
+            );
+            cur.setMonth(cur.getMonth() + 1);
+          }
+          matchConditions.period = { $in: periods };
+        }
+      } else if (period !== "all") {
+        matchConditions.period = period;
+      }
     }
 
     let searchConditions = {};

@@ -39,11 +39,7 @@ const transactionSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-    accountType: {
-      type: String,
-      enum: ["Cash Balance", "Personal Account", "Company Account"],
-      required: true,
-    },
+    accountType: { type: String, required: true },
     remarks: {
       type: String,
     },
