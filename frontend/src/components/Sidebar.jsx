@@ -49,7 +49,8 @@ import {
   BanknoteIcon,
   X,
   LogOut,
-  Filter, // ← ADDED for MR Filter Panel
+  Filter, 
+  Activity,
 } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -125,6 +126,7 @@ const tabLabelMap = {
   settings_companyprofile: "Company Profile",
   settings_tabmanipulation: "Tab Manipulation",
   settings_mrfilterpanel: "MR Filter Panel", // ← ADDED
+  observability: "Observability", 
 };
 
 const formatTabLabel = (tabId) => {
@@ -259,7 +261,9 @@ const getUserRole = () => {
         try {
           const parsed = JSON.parse(raw);
           if (parsed && parsed.role) return parsed.role;
-        } catch (e) {}
+        } catch (e) {
+           console.error(e.message);
+        }
       }
     }
     const token =
@@ -339,6 +343,8 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
     else if (p.startsWith("/settingslayout")) setActiveParentMenu("settings");
     else if (p.startsWith("/mrcarrystocklayout"))
       setActiveParentMenu("mrCarryStock");
+    else if (p.startsWith("/observabilitylayout"))   // ← ADD THIS LINE
+      setActiveParentMenu("observability");           // ← ADD THIS LINE
     else setActiveParentMenu(null);
   }, [location.pathname]);
 
@@ -1149,6 +1155,43 @@ function Sidebar({ isOpen, toggleSidebar, isMobile = false }) {
               )}
             </div>
           )}
+
+          {/* Observability — admin audit dashboard */}
+         <div>
+  <button
+    onClick={() => toggleMenu("observability")}
+    className={drp("observability")}
+  >
+    <span className="flex items-center gap-3">
+      <Activity className="w-5 h-5 flex-shrink-0" />
+      <span>Observability</span>
+    </span>
+    {chv(activeParentMenu === "observability")}
+  </button>
+
+  {activeParentMenu === "observability" && (
+    <div className="ml-6 mt-1 space-y-1">
+      <Link
+        to="/observabilitylayout/events"
+        className={cld("/observabilitylayout/events")}
+      >
+        <Activity className="w-4 h-4 flex-shrink-0" />
+        <span>System Events</span>
+      </Link>
+
+      <Link
+        to="/observabilitylayout/logs"
+        className={cld("/observabilitylayout/logs")}
+      >
+        <FileText className="w-4 h-4 flex-shrink-0" />
+        <span>Log Viewer</span>
+      </Link>
+    </div>
+  )}
+</div>
+
+
+
         </nav>
       )}
 

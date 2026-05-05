@@ -10,6 +10,7 @@ import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
 import Supplier from "../../models/master/supplier.js";
+import { emitEvent, auditChange, EVENT_TYPES } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -996,6 +997,45 @@ router.post("/", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PURCHASE_RECORDED,
+      entityType: 'PurchaseInventory',
+      entityId:   invoice[0]._id?.toString(),
+      status:     'SUCCESS',
+      changes: products.map(p => ({
+        module: "ReportInHand",
+        action: "STOCK_ADDED_FROM_PURCHASE",
+        field:  p.productName,
+        before: null,
+        after:  p.quantity || p.boxes || p.boxQuantity,
+        status: "SUCCESS",
+      })),
+      metadata: {
+        invoiceNumber:  invoice[0].invoiceNumber,
+        supplierName:   invoice[0].supplierName,
+        totalAmount:    invoice[0].totalAmount,
+        productCount:   products.length,
+        products: products.map(p => ({
+          productName: p.productName,
+          qty:         p.quantity || p.boxes || p.boxQuantity,
+          lc:          p.lc,
+          amount:      (p.lc || 0) * (p.quantity || p.boxes || p.boxQuantity || 0),
+          expiryDate:  p.expiryDate,
+        })),
+      },
+    });
+
+    await auditChange(req, {
+      module:           'Purchase',
+      operation:        'CREATE',
+      collectionName:   'purchaseinventories',
+      docId:            invoice[0]._id?.toString(),
+      referenceNo:      invoice[0].invoiceNumber,
+      before:           null,
+      after:            invoice[0],
+      triggeredByEvent: EVENT_TYPES.PURCHASE_RECORDED,
+    });
+
     res.status(201).json({
       success: true,
       message: "Purchase created successfully"
@@ -1004,6 +1044,12 @@ router.post("/", async (req, res) => {
   } catch (err) {
     try { await session.abortTransaction(); } catch {}
     try { session.endSession(); } catch {}
+
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.PURCHASE_RECORDED,
+      status:       'FAILED',
+      errorMessage: err.message,
+    });
 
     res.status(500).json({
       success: false,
@@ -1128,9 +1174,33 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNumber",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PURCHASE_UPDATED,
+      entityType: 'PurchaseInventory',
+      entityId:   updated._id?.toString(),
+      status:     'SUCCESS',
+      metadata:   { invoiceNumber: updated.invoiceNumber, supplierName: updated.supplierName },
+    });
+
+    await auditChange(req, {
+      module:           'Purchase',
+      operation:        'UPDATE',
+      collectionName:   'purchaseinventories',
+      docId:            updated._id?.toString(),
+      referenceNo:      updated.invoiceNumber,
+      before:           oldInvoice,
+      after:            updated,
+      triggeredByEvent: EVENT_TYPES.PURCHASE_UPDATED,
+    });
+
     res.json(updated);
   } catch (err) {
     console.error("Update error:", err);
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.PURCHASE_UPDATED,
+      status:       'FAILED',
+      errorMessage: err.message,
+    });
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -1193,6 +1263,25 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNumber",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PURCHASE_DELETED,
+      entityType: 'PurchaseInventory',
+      entityId:   invoice._id?.toString(),
+      status:     'SUCCESS',
+      metadata:   { invoiceNumber: invoice.invoiceNumber },
+    });
+
+    await auditChange(req, {
+      module:           'Purchase',
+      operation:        'DELETE',
+      collectionName:   'purchaseinventories',
+      docId:            invoice._id?.toString(),
+      referenceNo:      invoice.invoiceNumber,
+      before:           invoice.toObject ? invoice.toObject() : invoice,
+      after:            null,
+      triggeredByEvent: EVENT_TYPES.PURCHASE_DELETED,
+    });
+
     res.json({
       success: true,
       message: "Purchase invoice soft deleted successfully",
@@ -1200,6 +1289,11 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 
   } catch (err) {
     console.error("Delete purchase error:", err);
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.PURCHASE_DELETED,
+      status:       'FAILED',
+      errorMessage: err.message,
+    });
     res.status(500).json({ error: "Server error" });
   }
 });

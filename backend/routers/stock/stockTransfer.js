@@ -7,6 +7,7 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
+import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -465,6 +466,20 @@ router.post("/", protect, async (req, res) => {
       refField: "invoiceNo",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+      entityType: 'StockTransfer',
+      entityId:   savedTransfer._id?.toString(),
+      status:     'SUCCESS',
+      metadata: {
+        invoiceNo,
+        transferType,
+        itemsCount:  items.length,
+        grandTotal:  parseFloat(grandTotal) || 0,
+        destination: destination || source,
+      },
+    });
+
     res.status(201).json({
       success: true,
       message: `Stock transfer ${transferType === "send" ? "sent" : "received"} successfully`,
@@ -474,6 +489,12 @@ router.post("/", protect, async (req, res) => {
     console.error("❌ Error in stock transfer:", error);
     await session.abortTransaction();
     session.endSession();
+
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.STOCK_TRANSFERRED,
+      status:       'FAILED',
+      errorMessage: error.message,
+    });
 
     if (error.code === 11000) {
       return res.status(400).json({
@@ -669,6 +690,14 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNo",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+      entityType: 'StockTransfer',
+      entityId:   updatedTransfer._id?.toString(),
+      status:     'SUCCESS',
+      metadata:   { invoiceNo, transferType, action: 'UPDATE' },
+    });
+
     res.json({
       success: true,
       message: "Stock transfer updated successfully",
@@ -684,6 +713,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         success: false,
         message: error.message || "Failed to update transfer",
       });
+    await emitEvent(req, { eventType: EVENT_TYPES.STOCK_TRANSFERRED, status: 'FAILED', errorMessage: error.message });
   }
 });
 
@@ -750,6 +780,14 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNo",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+      entityType: 'StockTransfer',
+      entityId:   req.params.id,
+      status:     'SUCCESS',
+      metadata:   { invoiceNo: transfer.invoiceNo, action: 'DELETE' },
+    });
+
     res.status(200).json({
       success: true,
       message: "Stock transfer deleted successfully",
@@ -759,6 +797,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error deleting stock transfer:", error);
+    await emitEvent(req, { eventType: EVENT_TYPES.STOCK_TRANSFERRED, status: 'FAILED', errorMessage: error.message });
     res.status(500).json({
       success: false,
       message: "Server error while deleting stock transfer",

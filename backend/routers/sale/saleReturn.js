@@ -8,6 +8,7 @@ import ExcelJS from "exceljs";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
+import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -292,6 +293,7 @@ const updateStockQuantityDifference = async (
 // ================== POST / ==================
 router.post("/", protect, async (req, res) => {
   console.log("🚀 [START] POST /sales-return endpoint called");
+  const _startMs = Date.now(); // ── NEW ──
 
   try {
     const data = req.body;
@@ -509,6 +511,47 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.SALE_RETURN_CREATED,
+      entityType: "SalesReturn",
+      entityId:   savedReturns[0]?._id?.toString(),
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      changes: savedReturns.flatMap(r =>
+        r.products
+          .filter(p => p.returnQuantity > 0)
+          .map(p => ({
+            module: "ReportInHand",
+            action: "RETURN_STOCK_ADDED_BACK",
+            field:  p.productName,
+            before: 0,
+            after:  p.returnQuantity,
+            status: "SUCCESS",
+          }))
+      ),
+      metadata: {
+        count:         savedReturns.length,
+        invoiceNos:    savedReturns.map(r => r.invoiceNumber),
+        totalAmounts:  savedReturns.map(r => r.totalAmount),
+        customerName:  savedReturns[0]?.customerName,
+        mrName:        savedReturns[0]?.mrName,
+        saleType:      savedReturns[0]?.saleType,
+        totalReturnAmount: savedReturns.reduce((s, r) => s + (r.totalAmount || 0), 0),
+        products: savedReturns.flatMap(r =>
+          r.products
+            .filter(p => p.returnQuantity > 0)
+            .map(p => ({
+              productName:   p.productName,
+              returnQty:     p.returnQuantity,
+              returnAmount:  p.returnAmount || (p.returnQuantity * (p.sellingPrice || 0)),
+              invoiceNo:     r.invoiceNumber,
+            }))
+        ),
+      },
+    });
+    // ─────────
+
     return res.status(201).json({
       success: true,
       message: `${savedReturns.length} sales return record(s) saved successfully`,
@@ -516,6 +559,14 @@ router.post("/", protect, async (req, res) => {
     });
   } catch (error) {
     console.error(`❌ Error saving sales returns:`, error);
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.SALE_RETURN_CREATED,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+    });
+    // ─────────
     return res.status(500).json({
       success: false,
       message: error.message || "Server error while saving sales return",
@@ -810,6 +861,7 @@ router.put("/update-product", protect, allowAdminOnly, async (req, res) => {
 
 // ================== PUT /:id ==================
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+  const _startMs = Date.now(); // ── NEW ──
   try {
     const { id } = req.params;
     const updatedData = req.body;
@@ -985,6 +1037,21 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNumber",
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.SALE_RETURN_UPDATED,
+      entityType: "SalesReturn",
+      entityId:   updatedReturn._id.toString(),
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      metadata: {
+        invoiceNo:          updatedReturn.invoiceNumber,
+        totalAmountBefore:  previousRecord.totalAmount,
+        totalAmountAfter:   updatedReturn.totalAmount,
+      },
+    });
+    // ─────────
+
     return res.status(200).json({
       success: true,
       message: "Sales return updated successfully",
@@ -992,6 +1059,14 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating sales return:", error);
+    await emitEvent(req, { // ── NEW ──
+      eventType:    EVENT_TYPES.SALE_RETURN_UPDATED,
+      entityType:   "SalesReturn",
+      entityId:     req.params.id,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+    });
     return res.status(500).json({
       success: false,
       message: "Server error",
@@ -1003,6 +1078,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 // ================== DELETE /:id ==================
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const { id } = req.params;
+  const _startMs = Date.now(); // ── NEW ──
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({
@@ -1068,12 +1144,45 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       description: `Deleted sales return for invoice ${recordToDelete.invoiceNumber}`,
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.SALE_RETURN_CREATED,
+      entityType: "SalesReturn",
+      entityId:   id,
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      changes: recordToDelete.products
+        .filter(p => p.returnQuantity > 0)
+        .map(p => ({
+          module: "ReportInHand",
+          action: "RETURN_BATCH_REMOVED",
+          field:  p.productName,
+          after:  0,
+          status: "SUCCESS",
+        })),
+      metadata: {
+        invoiceNo:    recordToDelete.invoiceNumber,
+        customerName: recordToDelete.customerName,
+        totalAmount:  recordToDelete.totalAmount,
+        deleted:      true,
+      },
+    });
+    // ─────────
+
     return res.status(200).json({
       success: true,
       message: "Sales return deleted successfully and stock restored",
     });
   } catch (error) {
     console.error("Error deleting sales return:", error);
+    await emitEvent(req, { // ── NEW ──
+      eventType:    EVENT_TYPES.SALE_RETURN_CREATED,
+      entityType:   "SalesReturn",
+      entityId:     req.params.id,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+    });
     return res.status(500).json({
       success: false,
       message: "Server error while deleting sales return",

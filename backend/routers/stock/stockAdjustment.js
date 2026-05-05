@@ -6,6 +6,7 @@ import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";
 import { logActivity } from "../activity/activityLog.js";
+import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -414,6 +415,32 @@ router.post("/", protect, async (req, res) => {
       refField: "batchNumber",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_ADJUSTED,
+      entityType: 'StockAdjustment',
+      entityId:   adjustment._id?.toString(),
+      status:     'SUCCESS',
+      changes: [{
+        module: "ReportInHand",
+        action: adjustmentType === "add" ? "STOCK_ADDED" : "STOCK_REMOVED",
+        field:  product.productName,
+        before: currentStock,
+        after:  reportItem.totalBoxes,
+        status: "SUCCESS",
+      }],
+      metadata: {
+        productName:    product.productName,
+        adjustmentType,
+        boxQuantity:    adjustmentQty,
+        costPerBox,
+        amount:         adjustmentAmount,
+        stockBefore:    currentStock,
+        stockAfter:     reportItem.totalBoxes,
+        delta:          adjustmentType === "add" ? adjustmentQty : -adjustmentQty,
+        remarks:        remarks || null,
+      },
+    });
+
     const overrideMap = new Map([
       [
         reportItem.productName.toLowerCase(),
@@ -454,6 +481,11 @@ router.post("/", protect, async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error creating adjustment:", error);
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.STOCK_ADJUSTED,
+      status:       'FAILED',
+      errorMessage: error.message,
+    });
     res.status(400).json({
       success: false,
       message: error.message || "Failed to create adjustment",
@@ -631,6 +663,14 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     ]);
     const warehouseSummary = await getWarehouseInventorySummary(overrideMap);
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_ADJUSTED,
+      entityType: 'StockAdjustment',
+      entityId:   existingAdjustment._id?.toString(),
+      status:     'SUCCESS',
+      metadata:   { productName: product.productName, adjustmentType, boxQuantity: newQty },
+    });
+
     res.json({
       success: true,
       message: "Adjustment updated successfully",
@@ -659,6 +699,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error updating adjustment:", error);
+    await emitEvent(req, { eventType: EVENT_TYPES.STOCK_ADJUSTED, status: 'FAILED', errorMessage: error.message });
     res.status(400).json({ success: false, message: error.message });
   }
 });
@@ -750,6 +791,14 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       : null;
     const warehouseSummary = await getWarehouseInventorySummary(overrideMap);
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_ADJUSTED,
+      entityType: 'StockAdjustment',
+      entityId:   id,
+      status:     'SUCCESS',
+      metadata:   { action: 'DELETE', productName: product.productName },
+    });
+
     res.json({
       success: true,
       message: "Adjustment deleted and warehouse stock reverted",
@@ -759,6 +808,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error deleting adjustment:", error);
+    await emitEvent(req, { eventType: EVENT_TYPES.STOCK_ADJUSTED, status: 'FAILED', errorMessage: error.message });
     res.status(400).json({ success: false, message: error.message });
   }
 });
@@ -850,6 +900,13 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
     const warehouseSummary = await getWarehouseInventorySummary(
       overrideMap.size > 0 ? overrideMap : null,
     );
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_ADJUSTED,
+      entityType: 'StockAdjustment',
+      status:     'SUCCESS',
+      metadata:   { action: 'BULK_DELETE', deletedCount: result.deletedCount },
+    });
+
     res.json({
       success: true,
       message: `${result.deletedCount} adjustment(s) deleted and warehouse stock reverted`,
@@ -859,6 +916,7 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Bulk delete error:", error);
+    await emitEvent(req, { eventType: EVENT_TYPES.STOCK_ADJUSTED, status: 'FAILED', errorMessage: error.message });
     res.status(400).json({ success: false, message: error.message });
   }
 });

@@ -7,6 +7,7 @@ import Product from "../../models/projectManger/product.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js"; // ✅ activity logger
+import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -514,6 +515,35 @@ router.post("/", async (req, res) => {
       refField: "invoiceNumber",
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PURCHASE_RECORDED,
+      entityType: "PurchaseReturn",
+      entityId:   saved._id.toString(),
+      status:     "SUCCESS",
+      changes: processedProducts.map(p => ({
+        module: "ReportInHand",
+        action: "PURCHASE_RETURN_STOCK_DEDUCTED",
+        field:  p.productName,
+        before: p.returnQuantity,
+        after:  0,
+        status: "SUCCESS",
+      })),
+      metadata: {
+        invoiceNo:        saved.invoiceNumber,
+        supplierName:     saved.supplierName,
+        totalReturnQty,
+        totalReturnAmount,
+        productCount:     processedProducts.length,
+        products: processedProducts.map(p => ({
+          productName:    p.productName,
+          returnQty:      p.returnQuantity,
+          returnAmount:   p.returnAmount || (p.returnQuantity * (p.unitCost || p.lc || 0)),
+        })),
+      },
+    });
+    // ─────────
+
     res
       .status(201)
       .json({
@@ -542,6 +572,7 @@ router.post("/", async (req, res) => {
 // PUT /:id  –  Update purchase return                        ✅ LOGGED
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+  const _startMs = Date.now(); // ── NEW ──
   try {
     const { id } = req.params;
     const updatedData = req.body;
@@ -604,6 +635,20 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNumber",
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PURCHASE_UPDATED,
+      entityType: "PurchaseReturn",
+      entityId:   updated._id.toString(),
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      metadata: {
+        invoiceNo:    updated.invoiceNumber,
+        supplierName: updated.supplierName,
+      },
+    });
+    // ─────────
+
     res.json({
       success: true,
       message: "Purchase return updated successfully",
@@ -611,6 +656,14 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating purchase return:", error);
+    await emitEvent(req, { // ── NEW ──
+      eventType:    EVENT_TYPES.PURCHASE_UPDATED,
+      entityType:   "PurchaseReturn",
+      entityId:     req.params.id,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+    });
     try {
       const originalReturn = await PurchaseReturn.findById(req.params.id);
       if (originalReturn)
@@ -628,6 +681,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 // DELETE /:id  –  Delete single purchase return              ✅ LOGGED
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
+  const _startMs = Date.now(); // ── NEW ──
   try {
     const { id } = req.params;
     const purchaseReturn = await PurchaseReturn.findById(id);
@@ -662,6 +716,30 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNumber",
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PURCHASE_DELETED,
+      entityType: "PurchaseReturn",
+      entityId:   id,
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      changes: (snapshot.products || []).map(p => ({
+        module: "ReportInHand",
+        action: "PURCHASE_RETURN_REVERSED",
+        field:  p.productName,
+        after:  p.returnQuantity,
+        status: "SUCCESS",
+      })),
+      metadata: {
+        invoiceNo:        snapshot.invoiceNumber,
+        supplierName:     snapshot.supplierName,
+        totalReturnQty,
+        totalReturnAmount,
+        deleted: true,
+      },
+    });
+    // ─────────
+
     res.json({
       success: true,
       message: "Purchase return deleted successfully",
@@ -669,6 +747,14 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting purchase return:", error);
+    await emitEvent(req, { // ── NEW ──
+      eventType:    EVENT_TYPES.PURCHASE_DELETED,
+      entityType:   "PurchaseReturn",
+      entityId:     req.params.id,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+    });
     res
       .status(500)
       .json({ success: false, message: "Server error", error: error.message });

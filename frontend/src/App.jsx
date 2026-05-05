@@ -19,6 +19,8 @@ import CashAndBankLayout from "./pages/CashAndBankLayout";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 import MrCarryStockLayout from "./pages/MrCarryStock/MrCarryStockLayout";
 
+import LogViewer from "./pages/Observability/LogViewer";
+
 // Dashboard and Main pages
 import Dashboard from "./pages/Dashboard/Dashbaord";
 import MobileDashboard from "./pages/Dashboard/MobileDashboard";
@@ -132,6 +134,14 @@ import LeaveAndAttendance from "./pages/HRM/LeaveAttendance";
 // Import UserActivity
 import UserActivity from "./pages/ActivityLog/UserActivity";
 import MrFilterPanel from "./pages/Settings/ReportWiseActiveMr";
+
+
+// Import UserObservability
+import ObservabilityLayout from "./pages/ObservabilityLayout";
+import ObservabilityDashboard from "./pages/Observability/ObservabilityDashboard";
+
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // readUserFromStorage
 // Login.jsx now stores a "user" key with { _id, name, email, role }.
@@ -435,6 +445,19 @@ function App() {
             <Route path="carrystockview" element={<CarryStockView />} />
             <Route path="stockreturn" element={<StockReturn />} />
           </Route>
+
+
+           {/* Observability routes */}
+          <Route path="observabilitylayout" element={<ObservabilityLayout />}>
+            <Route index element={<ObservabilityDashboard />} />
+            <Route path="events" element={<ObservabilityDashboard tab="events" />} />
+            <Route path="audit" element={<ObservabilityDashboard tab="audit" />} />
+            <Route path="reconciliation" element={<ObservabilityDashboard tab="reconciliation" />} />
+            <Route path="logs" element={<LogViewer />} />
+          </Route>
+
+          
+
         </Route>
       </Routes>
       <InstallPWA />

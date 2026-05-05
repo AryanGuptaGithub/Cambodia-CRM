@@ -1,9 +1,12 @@
+// middleware/auth.js
 import jwt from "jsonwebtoken";
 
 export const protect = (req, res, next) => {
   try {
+    // console.log("Body: "  + req.body);
     const authHeader = req.headers.authorization;
-
+    // console.log("Header : " + authHeader);
+    // console.log("All headers:", req.headers);
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,

@@ -2190,10 +2190,13 @@ const AddSale = () => {
         });
         saleData._mrDistribution = mrDistribution;
       }
-
+      const token = localStorage.getItem("token");
       const response = await fetch(`${backendUrl}/api/sales/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+         headers: {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${token}`,   // ✅ THIS LINE FIXES EVERYTHING
+  },
         body: JSON.stringify(saleData),
       });
 

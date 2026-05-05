@@ -13,6 +13,7 @@ import Transaction from "../../models/accounts/Transaction.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
+import { emitEvent, auditChange, EVENT_TYPES } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -1290,11 +1291,41 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       message: "Payroll created successfully.",
       data: responseData,
     });
+
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PAYROLL_PROCESSED,
+      entityType: 'Payroll',
+      entityId:   payroll._id?.toString(),
+      status:     'SUCCESS',
+      metadata: {
+        payrollCode,
+        employeeId:  employeeId?.toString(),
+        period,
+        netSalary:   calculatedNetSalary,
+      },
+    });
+
+    await auditChange(req, {
+      module:           'Payroll',
+      operation:        'CREATE',
+      collectionName:   'payrolls',
+      docId:            payroll._id?.toString(),
+      referenceNo:      payrollCode,
+      before:           null,
+      after:            payroll.toObject(),
+      triggeredByEvent: EVENT_TYPES.PAYROLL_PROCESSED,
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
     console.error("\n❌ PAYROLL CREATION ERROR:", error);
+
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.PAYROLL_PROCESSED,
+      status:       'FAILED',
+      errorMessage: error.message,
+    });
 
     if (error.name === "ValidationError")
       return res.status(400).json({
@@ -1676,6 +1707,14 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       );
     }
     responseData.displayBasicSalary = responseData.basicSalary;
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PAYROLL_PROCESSED,
+      entityType: 'Payroll',
+      entityId:   req.params.id,
+      status:     'SUCCESS',
+      metadata:   { action: 'UPDATE', period: previousRecord?.period },
+    });
+
     res.status(200).json({
       success: true,
       message: "Payroll updated successfully",
@@ -1685,6 +1724,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     try {
       await session.abortTransaction();
     } catch (_) {}
+    await emitEvent(req, { eventType: EVENT_TYPES.PAYROLL_PROCESSED, status: 'FAILED', errorMessage: error.message });
     if (error.name === "ValidationError")
       return res.status(400).json({
         success: false,
@@ -1780,11 +1820,29 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
         expensesDeleted,
       },
     });
+
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.PAYROLL_DELETED,
+      entityType: 'Payroll',
+      entityId:   req.params.id,
+      status:     'SUCCESS',
+      metadata: {
+        payrollCode:     payroll.payrollCode,
+        period:          payroll.period,
+        restoredAmount:  totalRestored,
+      },
+    });
   } catch (error) {
     try {
       await session.abortTransaction();
     } catch (_) {}
     console.error("Error deleting payroll:", error);
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.PAYROLL_DELETED,
+      entityId:     req.params.id,
+      status:       'FAILED',
+      errorMessage: error.message,
+    });
     if (error.name === "CastError")
       return res
         .status(400)

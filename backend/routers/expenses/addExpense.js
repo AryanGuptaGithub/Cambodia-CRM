@@ -11,6 +11,7 @@ import Transaction from "../../models/accounts/Transaction.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
+import { emitEvent, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 // ─── Utility helpers ──────────────────────────────────────────────────────────
 
@@ -412,6 +413,7 @@ router.get("/:id", async (req, res) => {
 router.post("/", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const snapshotBefore = await captureSnapshotBefore();
 
   try {
     const expenseData = req.body;
@@ -556,6 +558,20 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNo",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.EXPENSE_ADDED,
+      entityType: 'Expense',
+      entityId:   savedExpense._id?.toString(),
+      status:     'SUCCESS',
+      metadata: {
+        category:      savedExpense.category?.category,
+        amount:        savedExpense.amount,
+        sourceAccount: savedExpense.sourceAccount?.name,
+        mrName:        expenseData.mrName || null,
+        snapshotBefore,  // ← ADD
+      },
+    });
+
     const successMessage = `Added expense <b>${savedExpense.category.category}</b> of <b>₹${savedExpense.amount}</b> from <b>${savedExpense.sourceAccount.name}</b> successfully${needsMR && expenseData.mrName ? ` for MR <b>${expenseData.mrName}</b>` : ""}`;
 
     res
@@ -583,6 +599,11 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: `Invalid ID format: ${error.value}` });
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.EXPENSE_ADDED,
+      status:       'FAILED',
+      errorMessage: error.message,
+    });
     res.status(500).json({
       success: false,
       message: "Failed to create expense",
@@ -595,6 +616,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+   const snapshotBefore = await captureSnapshotBefore();
 
   try {
     const { id } = req.params;
@@ -839,6 +861,19 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNo",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.EXPENSE_UPDATED,
+      entityType: 'Expense',
+      entityId:   updatedExpense._id?.toString(),
+      status:     'SUCCESS',
+      metadata: {
+        category: updatedExpense.category?.category,
+        oldAmount: previousRecord?.amount,
+        newAmount: updatedExpense.amount,
+        snapshotBefore,  // ← ADD
+      },
+    });
+
     res.json({
       success: true,
       message: "Expense updated successfully",
@@ -866,6 +901,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Invalid expense ID" });
+    await emitEvent(req, { eventType: EVENT_TYPES.EXPENSE_UPDATED, status: 'FAILED', errorMessage: error.message });
     res.status(500).json({
       success: false,
       message: "Failed to update expense",
@@ -878,6 +914,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const snapshotBefore = await captureSnapshotBefore();
 
   try {
     const { id } = req.params;
@@ -933,6 +970,15 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNo",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.EXPENSE_DELETED,
+      entityType: 'Expense',
+      entityId:   req.params.id,
+      status:     'SUCCESS',
+      metadata:   { category: expense.category?.category, amount: expense.amount },
+       snapshotBefore,
+    });
+
     return res.json({
       success: true,
       message:
@@ -947,6 +993,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Invalid expense ID" });
+    await emitEvent(req, { eventType: EVENT_TYPES.EXPENSE_DELETED, status: 'FAILED', errorMessage: error.message });
     return res.status(500).json({
       success: false,
       message: "Failed to delete expense",
@@ -959,7 +1006,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
+   const snapshotBefore = await captureSnapshotBefore();
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -1013,6 +1060,13 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
       refField: "invoiceNo",
     });
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.EXPENSE_DELETED,
+      entityType: 'Expense',
+      status:     'SUCCESS',
+      metadata:   { action: 'BULK_DELETE', deletedCount: result.deletedCount, snapshotBefore,  },
+    });
+
     res.json({
       success: true,
       message: `${result.deletedCount} expense(s) deleted successfully`,
@@ -1023,6 +1077,7 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("Error bulk deleting expenses:", error);
+    await emitEvent(req, { eventType: EVENT_TYPES.EXPENSE_DELETED, status: 'FAILED', errorMessage: error.message });
     handleServerError(res, error, "Failed to bulk delete expenses");
   }
 });

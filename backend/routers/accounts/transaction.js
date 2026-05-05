@@ -8,6 +8,7 @@ import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import multer from "multer";
 import { logActivity } from "../activity/activityLog.js";
+import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -542,6 +543,7 @@ router.get("/:id", async (req, res) => {
 // =============================================================================
 router.post("/", async (req, res) => {
   console.log("=== [TRANSACTION POST] Request received ===");
+  const _startMs = Date.now(); // ── NEW ──
 
   const session = await mongoose.startSession();
   console.log("[SESSION] MongoDB session started");
@@ -739,6 +741,26 @@ router.post("/", async (req, res) => {
       description: `New ${categoryType} transaction created. Amount: $${amountNum}, Account: ${accountType}${invoiceNoClean !== "NA" ? `, Invoice: ${invoiceNoClean}` : ""}`,
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.TRANSACTION_CREATED,
+      entityType: "Transaction",
+      entityId:   tx._id.toString(),
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      metadata: {
+        categoryType,
+        transactionType: normalizedTxType,
+        amount:          amountNum,
+        finalAmount:     calcFinal,
+        accountType,
+        invoiceNo:       invoiceNoClean !== "NA" ? invoiceNoClean : null,
+        sourceAccount:   sourceAccount || null,
+        destination:     destination || null,
+      },
+    });
+    // ─────────
+
     res.status(201).json({
       success: true,
       data: tx,
@@ -748,6 +770,15 @@ router.post("/", async (req, res) => {
     console.log("=== [TRANSACTION POST] ERROR ===", error.message);
     await session.abortTransaction();
     session.endSession();
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.TRANSACTION_CREATED,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+      metadata: { categoryType: req.body?.categoryType },
+    });
+    // ─────────
     res.status(400).json({ success: false, message: error.message });
   }
 });
@@ -1118,6 +1149,7 @@ router.post("/import/test", upload.single("file"), async (req, res) => {
 router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const _startMs = Date.now(); // ── NEW ──
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -1281,6 +1313,24 @@ router.put("/:id", async (req, res) => {
       description: `Transaction updated. Category: ${newCategoryType}, Amount: $${newAmount}, Account: ${updated.accountType}${updated.invoiceNo !== "NA" ? `, Invoice: ${updated.invoiceNo}` : ""}`,
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.TRANSACTION_UPDATED,
+      entityType: "Transaction",
+      entityId:   updated._id.toString(),
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      metadata: {
+        categoryType:    newCategoryType,
+        transactionType: newNormTxType,
+        amountBefore:    previousData.amount,
+        amountAfter:     newAmount,
+        accountType:     updated.accountType,
+        invoiceNo:       updated.invoiceNo !== "NA" ? updated.invoiceNo : null,
+      },
+    });
+    // ─────────
+
     res.json({
       success: true,
       data: updated,
@@ -1290,6 +1340,14 @@ router.put("/:id", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error("PUT /:id error:", error);
+    await emitEvent(req, { // ── NEW ──
+      eventType:    EVENT_TYPES.TRANSACTION_UPDATED,
+      entityType:   "Transaction",
+      entityId:     req.params.id,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+    });
     res.status(400).json({
       success: false,
       message: error.message || "Update failed",
@@ -1304,6 +1362,7 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const _startMs = Date.now(); // ── NEW ──
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -1348,6 +1407,24 @@ router.delete("/:id", async (req, res) => {
       description: `Transaction deleted. Category: ${previousData.categoryType}, Amount: $${previousData.amount}, Account: ${previousData.accountType}${previousData.invoiceNo !== "NA" ? `, Invoice: ${previousData.invoiceNo}` : ""}`,
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.TRANSACTION_DELETED,
+      entityType: "Transaction",
+      entityId:   id,
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      metadata: {
+        categoryType:    previousData.categoryType,
+        transactionType: previousData.transactionType,
+        amount:          previousData.amount,
+        accountType:     previousData.accountType,
+        invoiceNo:       previousData.invoiceNo !== "NA" ? previousData.invoiceNo : null,
+        deleted:         true,
+      },
+    });
+    // ─────────
+
     res.json({
       success: true,
       message: "Transaction deleted and balances updated successfully",
@@ -1355,6 +1432,14 @@ router.delete("/:id", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    await emitEvent(req, { // ── NEW ──
+      eventType:    EVENT_TYPES.TRANSACTION_DELETED,
+      entityType:   "Transaction",
+      entityId:     req.params.id,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+    });
     res.status(500).json({
       success: false,
       message: "Failed to delete transaction",
@@ -1373,6 +1458,7 @@ router.delete("/", async (req, res) => {
 
   const session = await mongoose.startSession();
   session.startTransaction();
+  const _startMs = Date.now(); // ── NEW ──
   try {
     const invalid = ids.filter((i) => !mongoose.Types.ObjectId.isValid(i));
     if (invalid.length) {
@@ -1417,6 +1503,20 @@ router.delete("/", async (req, res) => {
       description: `Deleted ${result.deletedCount} transactions. Balances and sale records updated.`,
     });
 
+    // ── NEW ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.TRANSACTION_DELETED,
+      entityType: "Transaction",
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      metadata: {
+        deletedCount: result.deletedCount,
+        ids,
+        bulk: true,
+      },
+    });
+    // ─────────
+
     res.json({
       success: true,
       message: `${result.deletedCount} transaction(s) deleted successfully`,
@@ -1424,6 +1524,13 @@ router.delete("/", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    await emitEvent(req, { // ── NEW ──
+      eventType:    EVENT_TYPES.TRANSACTION_DELETED,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+      metadata: { bulk: true },
+    });
     res.status(500).json({
       success: false,
       message: "Failed to delete transactions",

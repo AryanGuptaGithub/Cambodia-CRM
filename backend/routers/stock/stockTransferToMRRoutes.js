@@ -29,6 +29,7 @@ import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import User from "../../models/User.js";
 import staffSchema from "../../models/staffMember/staff.js";
 import DailySampleReport from "../../models/reports/dailysample.js";
+import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1310,6 +1311,32 @@ router.post(
 
       await session.commitTransaction();
 
+      //   ── NEW ──
+await emitEvent(req, {
+  eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+  entityType: "StockTransferToMR",
+  entityId:   newTransfer._id.toString(),
+  status:     "SUCCESS",
+  durationMs: Date.now() - _postStartMs,
+  changes: [{
+    module: "StockInMRHand",
+    action: "MR_STOCK_RECEIVED_BACK",
+    before: null,
+    after:  { mrName, itemCount: receiveItems.length },
+    status: "SUCCESS",
+  }],
+  metadata: {
+    invoiceNo,
+    transferType: "receive",
+    mrName,
+    mrId,
+    itemCount: receiveItems.length,
+    totalBoxes: receiveItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
+  },
+});
+
+
+
       res.status(201).json({
         success: true,
         message: `Stock transfer created from Excel. ${items.length} product(s) imported.`,
@@ -1344,6 +1371,13 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
   session.startTransaction();
 
   try {
+
+    //   ── NEW ──
+const _postTraceId = req.traceId;
+const _postStartMs = Date.now();
+const _postChanges = [];
+//   ─────────
+
     const data = req.body;
     let invoiceNo = data.invoiceNo;
     if (!invoiceNo || invoiceNo === "ST-0001") {
@@ -1379,6 +1413,40 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
       await recomputeMRStock(mrId, mrName, session);
 
       await session.commitTransaction();
+
+      // ── RECEIVE emitEvent ──
+      await emitEvent(req, {
+        eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+        entityType: "StockTransferToMR",
+        entityId:   newTransfer._id.toString(),
+        status:     "SUCCESS",
+        durationMs: Date.now() - _postStartMs,
+        changes: receiveItems.map(item => ({
+          module: "StockInMRHand",
+          action: "MR_STOCK_RETURNED_TO_WAREHOUSE",
+          field:  item.productName,
+          before: item.boxQuantity,
+          after:  0,
+          status: "SUCCESS",
+        })),
+        metadata: {
+          invoiceNo,
+          transferType:  "receive",
+          mrName,
+          mrId:          mrId?.toString(),
+          itemCount:     receiveItems.length,
+          totalBoxes:    receiveItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
+          totalAmount:   receiveItems.reduce((s, i) => s + (i.amount || 0), 0),
+          products: receiveItems.map(i => ({
+            productName: i.productName,
+            qty:         i.boxQuantity,
+            lc:          i.lc,
+            amount:      i.amount,
+          })),
+        },
+      });
+      // ──────────────────────
+
       return res.status(201).json({
         success: true,
         message: "Stock received back to warehouse successfully!",
@@ -1466,6 +1534,40 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     await recomputeMRStock(mrId, mrName, session);
 
     await session.commitTransaction();
+
+    // ── SEND emitEvent ──
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+      entityType: "StockTransferToMR",
+      entityId:   newTransfer._id.toString(),
+      status:     "SUCCESS",
+      durationMs: Date.now() - _postStartMs,
+      changes: mergedItems.map(item => ({
+        module: "ReportInHand",
+        action: "WAREHOUSE_STOCK_DEDUCTED_TO_MR",
+        field:  item.productName,
+        before: null,
+        after:  item.boxQuantity,
+        status: "SUCCESS",
+      })),
+      metadata: {
+        invoiceNo,
+        transferType:  "send",
+        mrName,
+        mrId:          mrId?.toString(),
+        itemCount:     mergedItems.length,
+        totalBoxes:    mergedItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
+        totalAmount:   mergedItems.reduce((s, i) => s + (i.amount || 0), 0),
+        products: mergedItems.map(i => ({
+          productName: i.productName,
+          qty:         i.boxQuantity,
+          lc:          i.lc,
+          amount:      i.amount,
+        })),
+      },
+    });
+    // ──────────────────
+
     res.status(201).json({
       success: true,
       message: "Stock transfer created successfully!",
@@ -1473,6 +1575,15 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
+    //   ── NEW ──
+await emitEvent(req, {
+  eventType:    EVENT_TYPES.STOCK_TRANSFERRED,
+  status:       "FAILED",
+  durationMs:   Date.now() - _postStartMs,
+  errorMessage: error.message,
+  metadata: { transferType: data.transferType, mrName, mrId },
+});
+//  
     console.error("TRANSFER CREATE ERROR →", error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
@@ -1486,8 +1597,9 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
+   const _putStartMs = Date.now();
   try {
+ 
     const { id } = req.params;
     const existing = await StockTransferToMR.findById(id).session(session);
     if (!existing) {
@@ -1548,6 +1660,26 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       await recomputeMRStock(newMrId, newMrName, session);
 
       await session.commitTransaction();
+
+
+// ── NEW ──
+await emitEvent(req, {
+  eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+  entityType: "StockTransferToMR",
+  entityId:   id,
+  status:     "SUCCESS",
+  durationMs: Date.now() - _putStartMs,
+  metadata: {
+    invoiceNo:    updated.invoiceNo,
+    transferType: data.transferType || existing.transferType,
+    mrName:       newMrName,
+    mrChanged:    (oldMrId?.toString() || "") !== (newMrId?.toString() || "") ||
+                  oldMrName.toLowerCase() !== newMrName.toLowerCase(),
+    itemCount:    receiveItems?.length || 0,
+  },
+});
+// ─────────
+
       return res.json({
         success: true,
         message: "Receive transfer updated successfully",
@@ -1683,6 +1815,25 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     }
 
     await session.commitTransaction();
+
+
+// ── NEW ──
+await emitEvent(req, {
+  eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+  entityType: "StockTransferToMR",
+  entityId:   id,
+  status:     "SUCCESS",
+  durationMs: Date.now() - _putStartMs,
+  metadata: {
+    invoiceNo:    updated.invoiceNo,
+    transferType: data.transferType || existing.transferType,
+    mrName:       newMrName,
+    mrChanged,
+    itemCount:    mergedNewItems?.length || 0,
+  },
+});
+// ─────────
+
     res.json({
       success: true,
       message: "Transfer updated successfully",
@@ -1690,6 +1841,20 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     });
   } catch (error) {
     await session.abortTransaction();
+
+
+  // ── NEW ──
+  await emitEvent(req, {
+    eventType:    EVENT_TYPES.STOCK_TRANSFERRED,
+    entityType:   "StockTransferToMR",
+    entityId:     req.params.id,
+    status:       "FAILED",
+    durationMs:   Date.now() - _putStartMs,
+    errorMessage: error.message,
+  });
+  // ─────────
+
+
     console.error("TRANSFER UPDATE ERROR →", error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
@@ -1703,6 +1868,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const _delStartMs = Date.now();
 
   try {
     const transfer = await StockTransferToMR.findById(req.params.id).session(
@@ -1751,12 +1917,38 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     if (mrId || mrName) await recomputeMRStock(mrId, mrName, session);
 
     await session.commitTransaction();
+
+    //   ── NEW ──
+await emitEvent(req, {
+  eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+  entityType: "StockTransferToMR",
+  status:     "SUCCESS",
+  durationMs: Date.now() - _delInvStartMs,
+  metadata: {
+    invoiceNo,
+    transferType: transfer.transferType,
+    mrName,
+    deleted: true,
+  },
+});
+//   ─────────
+
     res.json({
       success: true,
       message: "Transfer deleted and stock reverted successfully!",
     });
   } catch (error) {
     await session.abortTransaction();
+    // ── NEW ──
+  await emitEvent(req, {
+    eventType:    EVENT_TYPES.STOCK_TRANSFERRED,
+    entityType:   "StockTransferToMR",
+    entityId:     req.params.id,
+    status:       "FAILED",
+    durationMs:   Date.now() - _delStartMs,
+    errorMessage: error.message,
+  });
+  // ─────────
     console.error("DELETE ERROR →", error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
