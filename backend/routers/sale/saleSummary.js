@@ -3727,8 +3727,10 @@ router.get("/payment-status", async (req, res) => {
 });
 
 router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
+  const snapshotBefore = await captureSnapshotBefore();
   const session = await mongoose.startSession();
   session.startTransaction();
+  const _startMs = Date.now();
   try {
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0)
@@ -3759,6 +3761,18 @@ router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
     invalidateReportCaches("pl:", "province:", "outstanding:");
     // ─────────────────────────────────────────────────────────────────────
 
+    await emitEvent(req, {
+      eventType:  EVENT_TYPES.SALE_DELETED,
+      entityType: "SaleSummary",
+      status:     "SUCCESS",
+      durationMs: Date.now() - _startMs,
+      metadata: {
+        action:        "BATCH_DELETE",
+        deletedCount:  result.deletedCount,
+        snapshotBefore,
+      },
+    });
+
     res.status(200).json({
       success: true,
       message: `${result.deletedCount} sale(s) deleted successfully`,
@@ -3767,6 +3781,13 @@ router.post("/batch-delete", protect, allowAdminOnly, async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    await emitEvent(req, {
+      eventType:    EVENT_TYPES.SALE_DELETED,
+      status:       "FAILED",
+      durationMs:   Date.now() - _startMs,
+      errorMessage: error.message,
+      metadata:     { action: "BATCH_DELETE" },
+    });
     res.status(500).json({ error: error.message || "Batch delete failed" });
   }
 });

@@ -29,7 +29,7 @@ import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import User from "../../models/User.js";
 import staffSchema from "../../models/staffMember/staff.js";
 import DailySampleReport from "../../models/reports/dailysample.js";
-import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1317,24 +1317,15 @@ await emitEvent(req, {
   entityType: "StockTransferToMR",
   entityId:   newTransfer._id.toString(),
   status:     "SUCCESS",
-  durationMs: Date.now() - _postStartMs,
-  changes: [{
-    module: "StockInMRHand",
-    action: "MR_STOCK_RECEIVED_BACK",
-    before: null,
-    after:  { mrName, itemCount: receiveItems.length },
-    status: "SUCCESS",
-  }],
   metadata: {
     invoiceNo,
-    transferType: "receive",
+    transferType: "send",
     mrName,
     mrId,
-    itemCount: receiveItems.length,
-    totalBoxes: receiveItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
+    itemCount:  transferItems.length,
+    totalBoxes: transferItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
   },
 });
-
 
 
       res.status(201).json({
@@ -1369,13 +1360,13 @@ await emitEvent(req, {
 router.post("/", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+  const _postStartMs = Date.now();
+  const snapshotBefore = await captureSnapshotBefore(); 
 
   try {
 
     //   ── NEW ──
-const _postTraceId = req.traceId;
-const _postStartMs = Date.now();
-const _postChanges = [];
+
 //   ─────────
 
     const data = req.body;
@@ -1414,38 +1405,38 @@ const _postChanges = [];
 
       await session.commitTransaction();
 
-      // ── RECEIVE emitEvent ──
-      await emitEvent(req, {
-        eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
-        entityType: "StockTransferToMR",
-        entityId:   newTransfer._id.toString(),
-        status:     "SUCCESS",
-        durationMs: Date.now() - _postStartMs,
-        changes: receiveItems.map(item => ({
-          module: "StockInMRHand",
-          action: "MR_STOCK_RETURNED_TO_WAREHOUSE",
-          field:  item.productName,
-          before: item.boxQuantity,
-          after:  0,
-          status: "SUCCESS",
-        })),
-        metadata: {
-          invoiceNo,
-          transferType:  "receive",
-          mrName,
-          mrId:          mrId?.toString(),
-          itemCount:     receiveItems.length,
-          totalBoxes:    receiveItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
-          totalAmount:   receiveItems.reduce((s, i) => s + (i.amount || 0), 0),
-          products: receiveItems.map(i => ({
-            productName: i.productName,
-            qty:         i.boxQuantity,
-            lc:          i.lc,
-            amount:      i.amount,
-          })),
-        },
-      });
-      // ──────────────────────
+// ── RECEIVE emitEvent ──
+await emitEvent(req, {
+  eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+  entityType: "StockTransferToMR",
+  entityId:   newTransfer._id.toString(),   // ← was req.params.id (undefined in POST)
+  status:     "SUCCESS",
+  durationMs: Date.now() - _postStartMs,    // ← was _delStartMs (wrong var)
+  changes: receiveItems.map(item => ({
+    module: "StockInMRHand",
+    action: "MR_STOCK_RETURNED_TO_WAREHOUSE",
+    field:  item.productName,
+    before: item.boxQuantity,
+    after:  0,
+    status: "SUCCESS",
+  })),
+  metadata: {
+    invoiceNo,                               // ← was transfer.invoiceNo (wrong var)
+    transferType:  "receive",
+    mrName,
+    mrId:          mrId?.toString(),
+    itemCount:     receiveItems.length,
+    totalBoxes:    receiveItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
+    totalAmount:   receiveItems.reduce((s, i) => s + (i.amount || 0), 0),
+    snapshotBefore,
+    products: receiveItems.map(i => ({
+      productName: i.productName,
+      qty:         i.boxQuantity,
+      lc:          i.lc,
+      amount:      i.amount,
+    })),
+  },
+});
 
       return res.status(201).json({
         success: true,
@@ -1536,36 +1527,38 @@ const _postChanges = [];
     await session.commitTransaction();
 
     // ── SEND emitEvent ──
-    await emitEvent(req, {
-      eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
-      entityType: "StockTransferToMR",
-      entityId:   newTransfer._id.toString(),
-      status:     "SUCCESS",
-      durationMs: Date.now() - _postStartMs,
-      changes: mergedItems.map(item => ({
-        module: "ReportInHand",
-        action: "WAREHOUSE_STOCK_DEDUCTED_TO_MR",
-        field:  item.productName,
-        before: null,
-        after:  item.boxQuantity,
-        status: "SUCCESS",
-      })),
-      metadata: {
-        invoiceNo,
-        transferType:  "send",
-        mrName,
-        mrId:          mrId?.toString(),
-        itemCount:     mergedItems.length,
-        totalBoxes:    mergedItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
-        totalAmount:   mergedItems.reduce((s, i) => s + (i.amount || 0), 0),
-        products: mergedItems.map(i => ({
-          productName: i.productName,
-          qty:         i.boxQuantity,
-          lc:          i.lc,
-          amount:      i.amount,
-        })),
-      },
-    });
+  // ── SEND emitEvent ──
+await emitEvent(req, {
+  eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
+  entityType: "StockTransferToMR",
+  entityId:   newTransfer._id.toString(),
+  status:     "SUCCESS",
+  durationMs: Date.now() - _postStartMs,
+  changes: mergedItems.map(item => ({
+    module: "ReportInHand",
+    action: "WAREHOUSE_STOCK_DEDUCTED_TO_MR",
+    field:  item.productName,
+    before: null,
+    after:  item.boxQuantity,
+    status: "SUCCESS",
+  })),
+  metadata: {
+    invoiceNo,
+    transferType:  "send",
+    mrName,
+    mrId:          mrId?.toString(),
+    itemCount:     mergedItems.length,
+    totalBoxes:    mergedItems.reduce((s, i) => s + (i.boxQuantity || 0), 0),
+    totalAmount:   mergedItems.reduce((s, i) => s + (i.amount || 0), 0),
+    snapshotBefore,          // ← ADD THIS
+    products: mergedItems.map(i => ({
+      productName: i.productName,
+      qty:         i.boxQuantity,
+      lc:          i.lc,
+      amount:      i.amount,
+    })),
+  },
+});
     // ──────────────────
 
     res.status(201).json({
@@ -1577,12 +1570,16 @@ const _postChanges = [];
     await session.abortTransaction();
     //   ── NEW ──
 await emitEvent(req, {
-  eventType:    EVENT_TYPES.STOCK_TRANSFERRED,
-  status:       "FAILED",
-  durationMs:   Date.now() - _postStartMs,
-  errorMessage: error.message,
-  metadata: { transferType: data.transferType, mrName, mrId },
-});
+    eventType:    EVENT_TYPES.STOCK_TRANSFERRED,
+    status:       "FAILED",
+    durationMs:   Date.now() - _postStartMs,
+    errorMessage: error.message,
+    metadata: {
+      transferType: req.body?.transferType,   // ← use req.body, not data
+      mrName:       req.body?.stockTransferToMr || req.body?.mrName,
+      mrId:         req.body?.mrId,
+    },
+  });
 //  
     console.error("TRANSFER CREATE ERROR →", error);
     res.status(500).json({ success: false, error: error.message });
@@ -1598,6 +1595,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
    const _putStartMs = Date.now();
+    const snapshotBefore = await captureSnapshotBefore();
   try {
  
     const { id } = req.params;
@@ -1676,6 +1674,7 @@ await emitEvent(req, {
     mrChanged:    (oldMrId?.toString() || "") !== (newMrId?.toString() || "") ||
                   oldMrName.toLowerCase() !== newMrName.toLowerCase(),
     itemCount:    receiveItems?.length || 0,
+    snapshotBefore,
   },
 });
 // ─────────
@@ -1830,6 +1829,7 @@ await emitEvent(req, {
     mrName:       newMrName,
     mrChanged,
     itemCount:    mergedNewItems?.length || 0,
+    snapshotBefore,
   },
 });
 // ─────────
@@ -1869,7 +1869,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   const _delStartMs = Date.now();
-
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     const transfer = await StockTransferToMR.findById(req.params.id).session(
       session,
@@ -1922,13 +1922,15 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 await emitEvent(req, {
   eventType:  EVENT_TYPES.STOCK_TRANSFERRED,
   entityType: "StockTransferToMR",
+  entityId:   req.params.id,               // ← add entityId
   status:     "SUCCESS",
-  durationMs: Date.now() - _delInvStartMs,
+  durationMs: Date.now() - _delStartMs,    // ← was _delInvStartMs (undefined)
   metadata: {
-    invoiceNo,
+    invoiceNo:    transfer.invoiceNo,       // ← was bare `invoiceNo` (undefined)
     transferType: transfer.transferType,
     mrName,
     deleted: true,
+    snapshotBefore,
   },
 });
 //   ─────────

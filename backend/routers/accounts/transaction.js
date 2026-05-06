@@ -8,7 +8,7 @@ import mongoose from "mongoose";
 import ExcelJS from "exceljs";
 import multer from "multer";
 import { logActivity } from "../activity/activityLog.js";
-import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -544,7 +544,7 @@ router.get("/:id", async (req, res) => {
 router.post("/", async (req, res) => {
   console.log("=== [TRANSACTION POST] Request received ===");
   const _startMs = Date.now(); // ── NEW ──
-
+  const snapshotBefore = await captureSnapshotBefore(); 
   const session = await mongoose.startSession();
   console.log("[SESSION] MongoDB session started");
 
@@ -757,6 +757,7 @@ router.post("/", async (req, res) => {
         invoiceNo:       invoiceNoClean !== "NA" ? invoiceNoClean : null,
         sourceAccount:   sourceAccount || null,
         destination:     destination || null,
+        snapshotBefore,
       },
     });
     // ─────────
@@ -1150,6 +1151,7 @@ router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   const _startMs = Date.now(); // ── NEW ──
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -1327,6 +1329,7 @@ router.put("/:id", async (req, res) => {
         amountAfter:     newAmount,
         accountType:     updated.accountType,
         invoiceNo:       updated.invoiceNo !== "NA" ? updated.invoiceNo : null,
+        snapshotBefore,
       },
     });
     // ─────────
@@ -1363,6 +1366,7 @@ router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   const _startMs = Date.now(); // ── NEW ──
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -1421,6 +1425,7 @@ router.delete("/:id", async (req, res) => {
         accountType:     previousData.accountType,
         invoiceNo:       previousData.invoiceNo !== "NA" ? previousData.invoiceNo : null,
         deleted:         true,
+        snapshotBefore,
       },
     });
     // ─────────
@@ -1456,6 +1461,7 @@ router.delete("/", async (req, res) => {
   if (!Array.isArray(ids) || ids.length === 0)
     return res.status(400).json({ success: false, message: "No IDs provided" });
 
+  const snapshotBefore = await captureSnapshotBefore();
   const session = await mongoose.startSession();
   session.startTransaction();
   const _startMs = Date.now(); // ── NEW ──
@@ -1513,6 +1519,7 @@ router.delete("/", async (req, res) => {
         deletedCount: result.deletedCount,
         ids,
         bulk: true,
+        snapshotBefore,
       },
     });
     // ─────────

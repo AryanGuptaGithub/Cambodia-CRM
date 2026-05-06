@@ -8,7 +8,7 @@ import ExcelJS from "exceljs";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
-import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -294,6 +294,8 @@ const updateStockQuantityDifference = async (
 router.post("/", protect, async (req, res) => {
   console.log("🚀 [START] POST /sales-return endpoint called");
   const _startMs = Date.now(); // ── NEW ──
+    const snapshotBefore = await captureSnapshotBefore();
+    console.log('🔴 [saleReturn DEBUG] snapshotBefore captured:', !!snapshotBefore, snapshotBefore?.totalSales);
 
   try {
     const data = req.body;
@@ -528,6 +530,7 @@ router.post("/", protect, async (req, res) => {
             before: 0,
             after:  p.returnQuantity,
             status: "SUCCESS",
+             
           }))
       ),
       metadata: {
@@ -538,6 +541,8 @@ router.post("/", protect, async (req, res) => {
         mrName:        savedReturns[0]?.mrName,
         saleType:      savedReturns[0]?.saleType,
         totalReturnAmount: savedReturns.reduce((s, r) => s + (r.totalAmount || 0), 0),
+        snapshotBefore,
+        
         products: savedReturns.flatMap(r =>
           r.products
             .filter(p => p.returnQuantity > 0)
@@ -862,6 +867,7 @@ router.put("/update-product", protect, allowAdminOnly, async (req, res) => {
 // ================== PUT /:id ==================
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const _startMs = Date.now(); // ── NEW ──
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     const { id } = req.params;
     const updatedData = req.body;
@@ -1048,6 +1054,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
         invoiceNo:          updatedReturn.invoiceNumber,
         totalAmountBefore:  previousRecord.totalAmount,
         totalAmountAfter:   updatedReturn.totalAmount,
+        snapshotBefore, 
       },
     });
     // ─────────
@@ -1079,6 +1086,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const { id } = req.params;
   const _startMs = Date.now(); // ── NEW ──
+  const snapshotBefore = await captureSnapshotBefore();
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({
@@ -1165,6 +1173,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
         customerName: recordToDelete.customerName,
         totalAmount:  recordToDelete.totalAmount,
         deleted:      true,
+        snapshotBefore,
       },
     });
     // ─────────

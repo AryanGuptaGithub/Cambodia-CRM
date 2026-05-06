@@ -7,7 +7,7 @@ import Product from "../../models/projectManger/product.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js"; // ✅ activity logger
-import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -351,6 +351,7 @@ router.get("/", async (req, res) => {
 // POST /  –  Create purchase return                          ✅ LOGGED
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
+  const snapshotBefore = await captureSnapshotBefore(); // ← ADD
   try {
     const data = req.body;
     const { invoiceNumber, products, supplierName } = data;
@@ -535,10 +536,12 @@ router.post("/", async (req, res) => {
         totalReturnQty,
         totalReturnAmount,
         productCount:     processedProducts.length,
+        snapshotBefore,
         products: processedProducts.map(p => ({
           productName:    p.productName,
           returnQty:      p.returnQuantity,
           returnAmount:   p.returnAmount || (p.returnQuantity * (p.unitCost || p.lc || 0)),
+          
         })),
       },
     });
@@ -573,6 +576,7 @@ router.post("/", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const _startMs = Date.now(); // ── NEW ──
+  const snapshotBefore = await captureSnapshotBefore(); // ← ADD
   try {
     const { id } = req.params;
     const updatedData = req.body;
@@ -645,6 +649,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       metadata: {
         invoiceNo:    updated.invoiceNumber,
         supplierName: updated.supplierName,
+        snapshotBefore
       },
     });
     // ─────────
@@ -682,6 +687,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const _startMs = Date.now(); // ── NEW ──
+  const snapshotBefore = await captureSnapshotBefore(); // ← ADD
   try {
     const { id } = req.params;
     const purchaseReturn = await PurchaseReturn.findById(id);
@@ -736,6 +742,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
         totalReturnQty,
         totalReturnAmount,
         deleted: true,
+        snapshotBefore
       },
     });
     // ─────────

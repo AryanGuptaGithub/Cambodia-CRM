@@ -7,7 +7,7 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
-import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -294,7 +294,7 @@ router.get("/:id", async (req, res) => {
 router.post("/", protect, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
+  const snapshotBefore = await captureSnapshotBefore(); 
   try {
     const {
       invoiceNo,
@@ -477,6 +477,7 @@ router.post("/", protect, async (req, res) => {
         itemsCount:  items.length,
         grandTotal:  parseFloat(grandTotal) || 0,
         destination: destination || source,
+        snapshotBefore,
       },
     });
 
@@ -515,7 +516,7 @@ router.post("/", protect, async (req, res) => {
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -695,7 +696,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       entityType: 'StockTransfer',
       entityId:   updatedTransfer._id?.toString(),
       status:     'SUCCESS',
-      metadata:   { invoiceNo, transferType, action: 'UPDATE' },
+      metadata:   { invoiceNo, transferType, action: 'UPDATE', snapshotBefore, },
     });
 
     res.json({
@@ -720,7 +721,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -785,7 +786,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       entityType: 'StockTransfer',
       entityId:   req.params.id,
       status:     'SUCCESS',
-      metadata:   { invoiceNo: transfer.invoiceNo, action: 'DELETE' },
+      metadata:   { invoiceNo: transfer.invoiceNo, action: 'DELETE', snapshotBefore, },
     });
 
     res.status(200).json({

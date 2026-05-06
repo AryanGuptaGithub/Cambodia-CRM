@@ -6,7 +6,7 @@ import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";
 import { logActivity } from "../activity/activityLog.js";
-import { emitEvent, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -268,6 +268,7 @@ router.get("/:id", async (req, res) => {
 
 // ==================== CREATE adjustment ====================
 router.post("/", protect, async (req, res) => {
+  const snapshotBefore = await captureSnapshotBefore(); 
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -438,6 +439,7 @@ router.post("/", protect, async (req, res) => {
         stockAfter:     reportItem.totalBoxes,
         delta:          adjustmentType === "add" ? adjustmentQty : -adjustmentQty,
         remarks:        remarks || null,
+         snapshotBefore,
       },
     });
 
@@ -495,6 +497,7 @@ router.post("/", protect, async (req, res) => {
 
 // ==================== UPDATE adjustment ====================
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+   const snapshotBefore = await captureSnapshotBefore();  
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -663,13 +666,32 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
     ]);
     const warehouseSummary = await getWarehouseInventorySummary(overrideMap);
 
-    await emitEvent(req, {
-      eventType:  EVENT_TYPES.STOCK_ADJUSTED,
-      entityType: 'StockAdjustment',
-      entityId:   existingAdjustment._id?.toString(),
-      status:     'SUCCESS',
-      metadata:   { productName: product.productName, adjustmentType, boxQuantity: newQty },
-    });
+      await emitEvent(req, {
+    eventType:  EVENT_TYPES.STOCK_ADJUSTED,
+    entityType: 'StockAdjustment',
+    entityId:   existingAdjustment._id?.toString(),
+    status:     'SUCCESS',
+    changes: [{
+      module: "ReportInHand",
+      action: adjustmentType === "add" ? "STOCK_ADDED" : "STOCK_REMOVED",
+      field:  product.productName,
+      before: currentStockAfterRemovingOld,
+      after:  reportItem.totalBoxes,
+      status: "SUCCESS",
+    }],
+    metadata: {
+      productName:    product.productName,
+      adjustmentType,
+      boxQuantity:    newQty,
+      costPerBox,
+      amount:         adjustmentAmount,
+      stockBefore:    currentStockAfterRemovingOld,
+      stockAfter:     reportItem.totalBoxes,
+      remarks:        remarks || null,
+      snapshotBefore,   // ← ADD
+    },
+  });
+
 
     res.json({
       success: true,
@@ -706,6 +728,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 
 // ==================== DELETE single adjustment ====================
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
+  const snapshotBefore = await captureSnapshotBefore();
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -792,12 +815,27 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
     const warehouseSummary = await getWarehouseInventorySummary(overrideMap);
 
     await emitEvent(req, {
-      eventType:  EVENT_TYPES.STOCK_ADJUSTED,
-      entityType: 'StockAdjustment',
-      entityId:   id,
-      status:     'SUCCESS',
-      metadata:   { action: 'DELETE', productName: product.productName },
-    });
+    eventType:  EVENT_TYPES.STOCK_ADJUSTED,
+    entityType: 'StockAdjustment',
+    entityId:   id,
+    status:     'SUCCESS',
+    changes: [{
+      module: "ReportInHand",
+      action: "STOCK_ADJUSTMENT_DELETED",
+      field:  product.productName,
+      before: previousData.boxQuantity,
+      after:  reportItem?.totalBoxes ?? null,
+      status: "SUCCESS",
+    }],
+    metadata: {
+      action:         'DELETE',
+      productName:    product.productName,
+      adjustmentType: previousData.adjustmentType,
+      boxQuantity:    previousData.boxQuantity,
+      amount:         previousData.amount || 0,
+      snapshotBefore,   // ← ADD
+    },
+  });
 
     res.json({
       success: true,
@@ -815,6 +853,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
 
 // ==================== BULK DELETE ====================
 router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
+  const snapshotBefore = await captureSnapshotBefore(); 
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -900,12 +939,16 @@ router.delete("/bulk", protect, allowAdminOnly, async (req, res) => {
     const warehouseSummary = await getWarehouseInventorySummary(
       overrideMap.size > 0 ? overrideMap : null,
     );
-    await emitEvent(req, {
-      eventType:  EVENT_TYPES.STOCK_ADJUSTED,
-      entityType: 'StockAdjustment',
-      status:     'SUCCESS',
-      metadata:   { action: 'BULK_DELETE', deletedCount: result.deletedCount },
-    });
+     await emitEvent(req, {
+    eventType:  EVENT_TYPES.STOCK_ADJUSTED,
+    entityType: 'StockAdjustment',
+    status:     'SUCCESS',
+    metadata: {
+      action:        'BULK_DELETE',
+      deletedCount:  result.deletedCount,
+      snapshotBefore,   // ← ADD
+    },
+  });
 
     res.json({
       success: true,

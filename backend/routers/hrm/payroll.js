@@ -13,7 +13,7 @@ import Transaction from "../../models/accounts/Transaction.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
-import { emitEvent, auditChange, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, auditChange, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -1028,6 +1028,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
   console.log("=".repeat(80));
 
   const session = await mongoose.startSession();
+   const snapshotBefore = await captureSnapshotBefore();
   try {
     await session.startTransaction();
 
@@ -1302,6 +1303,7 @@ router.post("/", protect, allowAdminOnly, async (req, res) => {
         employeeId:  employeeId?.toString(),
         period,
         netSalary:   calculatedNetSalary,
+        snapshotBefore,
       },
     });
 
@@ -1618,6 +1620,7 @@ router.post("/bulk", protect, allowAdminOnly, async (req, res) => {
 // ─────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     await session.startTransaction();
     const {
@@ -1712,7 +1715,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       entityType: 'Payroll',
       entityId:   req.params.id,
       status:     'SUCCESS',
-      metadata:   { action: 'UPDATE', period: previousRecord?.period },
+      metadata:   { action: 'UPDATE', period: previousRecord?.period, snapshotBefore, },
     });
 
     res.status(200).json({
@@ -1750,6 +1753,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 // ─────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
   const session = await mongoose.startSession();
+  const snapshotBefore = await captureSnapshotBefore();
   try {
     await session.startTransaction();
 
@@ -1830,6 +1834,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
         payrollCode:     payroll.payrollCode,
         period:          payroll.period,
         restoredAmount:  totalRestored,
+        snapshotBefore,
       },
     });
   } catch (error) {

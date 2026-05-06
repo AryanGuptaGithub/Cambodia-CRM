@@ -98,10 +98,8 @@ export const emitEvent = async (req, payload) => {
   }
   try {
     const snapshotAfter = await captureDashboardSnapshot();
-
-
-
-
+    // console.log('[auditLogger DEBUG] snapshotAfter captured:', !!snapshotAfter); // ← ADD
+    // console.log('[auditLogger DEBUG] snapshotBefore in payload:', !!payload.metadata?.snapshotBefore); // ← ADD
     await SystemEvent.record({
       traceId:     req.traceId || null,
       triggeredBy: await extractUser(req),

@@ -10,7 +10,7 @@ import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
 import { logActivity } from "../activity/activityLog.js";
 import Supplier from "../../models/master/supplier.js";
-import { emitEvent, auditChange, EVENT_TYPES } from "../../observability/auditLogger.js";
+import { emitEvent, auditChange, EVENT_TYPES, captureSnapshotBefore } from "../../observability/auditLogger.js";
 
 const router = express.Router();
 
@@ -916,7 +916,7 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
+  const snapshotBefore = await captureSnapshotBefore();
   try {
       const data = req.body;
 
@@ -1015,6 +1015,7 @@ router.post("/", async (req, res) => {
         supplierName:   invoice[0].supplierName,
         totalAmount:    invoice[0].totalAmount,
         productCount:   products.length,
+        snapshotBefore,
         products: products.map(p => ({
           productName: p.productName,
           qty:         p.quantity || p.boxes || p.boxQuantity,
@@ -1062,6 +1063,7 @@ router.post("/", async (req, res) => {
 // PUT /:id  –  Update purchase invoice
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:id", protect, allowAdminOnly, async (req, res) => {
+  const snapshotBefore = await captureSnapshotBefore(); // ← ADD
   try {
     const id = req.params.id;
     const oldInvoice = await purchaseInventory.findById(id).lean();
@@ -1179,7 +1181,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
       entityType: 'PurchaseInventory',
       entityId:   updated._id?.toString(),
       status:     'SUCCESS',
-      metadata:   { invoiceNumber: updated.invoiceNumber, supplierName: updated.supplierName },
+      metadata:   { invoiceNumber: updated.invoiceNumber, supplierName: updated.supplierName, snapshotBefore },
     });
 
     await auditChange(req, {
@@ -1209,6 +1211,7 @@ router.put("/:id", protect, allowAdminOnly, async (req, res) => {
 // DELETE /:id  –  Delete single invoice
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
+  const snapshotBefore = await captureSnapshotBefore(); // ← ADD
   try {
     const invoice = await purchaseInventory.findById(req.params.id);
 
@@ -1268,7 +1271,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       entityType: 'PurchaseInventory',
       entityId:   invoice._id?.toString(),
       status:     'SUCCESS',
-      metadata:   { invoiceNumber: invoice.invoiceNumber },
+      metadata:   { invoiceNumber: invoice.invoiceNumber, snapshotBefore },
     });
 
     await auditChange(req, {

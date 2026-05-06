@@ -975,8 +975,7 @@ router.delete("/:id", protect, allowAdminOnly, async (req, res) => {
       entityType: 'Expense',
       entityId:   req.params.id,
       status:     'SUCCESS',
-      metadata:   { category: expense.category?.category, amount: expense.amount },
-       snapshotBefore,
+      metadata:   { category: expense.category?.category, amount: expense.amount, snapshotBefore },
     });
 
     return res.json({
