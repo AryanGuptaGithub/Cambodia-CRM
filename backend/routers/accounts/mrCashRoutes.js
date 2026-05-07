@@ -8,7 +8,7 @@ import User from "../../models/User.js";
 import Transaction from "../../models/accounts/Transaction.js";
 import CategoryType from "../../models/accounts/CategoryType.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
-import stockInMRHand from "../../models/stock/stockInMRHand.js";
+import stockInMRHand from "../../models/stock/StockInMRHand.js";
 import Product from "../../models/projectManger/product.js";
 import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import Sale from "../../models/sale/saleSummary.js";

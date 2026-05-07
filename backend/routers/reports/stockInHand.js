@@ -1,6 +1,6 @@
 import express from "express";
 import ReportInHand from "../../models/reports/reportsInHand.js";
-import StockInMRHand from "../../models/stock/stockInMRHand.js";
+import StockInMRHand from "../../models/stock/StockInMRHand.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();

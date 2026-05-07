@@ -19,7 +19,7 @@
 import express from "express";
 import multer from "multer";
 import * as XLSX from "xlsx";
-import stockInMRHand from "../../models/stock/stockInMRHand.js";
+import stockInMRHand from "../../models/stock/StockInMRHand.js";
 import StockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";

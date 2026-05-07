@@ -7,7 +7,7 @@ import Staff from "../../models/staffMember/staff.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import PaymentStatus from "../../models/paymentStatus.js";
 import Product from "../../models/projectManger/product.js";
-import stockInMRHand from "../../models/stock/stockInMRHand.js";
+import stockInMRHand from "../../models/stock/StockInMRHand.js";
 import StockAdjustment from "../../models/stock/stockAdjustment.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
