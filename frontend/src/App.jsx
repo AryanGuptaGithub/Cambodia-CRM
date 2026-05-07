@@ -11,7 +11,7 @@ import SettingsLayout from "./pages/SettingsLayout";
 import ProductManagerLayout from "./pages/ProductManagerLayout";
 import PurchaseLayout from "./pages/PurchaseLayout";
 import SaleLayout from "./pages/SaleLayout";
-import ExpenseLayout from "./pages/ExepenseLayout";
+import ExpenseLayout from "./pages/ExpenseLayout";
 import ReportsLayout from "./pages/ReportsLayout";
 import UtilityLayout from "./pages/UtilityLayout";
 import HrmLayout from "./pages/HrmLayout";
@@ -29,7 +29,7 @@ import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
 import StockAdjustment from "./pages/StockAdjustment";
 import StockTransfer from "./pages/StockTransfer";
-import Graph from "./pages/graph";
+import Graph from "./pages/Graph";
 
 // Master pages
 import Customer from "./pages/Master/Customer";
