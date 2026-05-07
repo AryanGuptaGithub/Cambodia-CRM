@@ -22,7 +22,7 @@ import * as XLSX from "xlsx";
 import stockInMRHand from "../../models/stock/StockInMRHand.js";
 import StockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
-import Product from "../../models/projectManger/product.js";
+import Product from "../../models/projectManager/product.js";
 import mongoose from "mongoose";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";

@@ -10,16 +10,16 @@ const TABLE_MODEL_MAP = {
   customers: () => import("../../models/master/customer.js"),
   suppliers: () => import("../../models/master/supplier.js"),
   sales: () => import("../../models/sale/saleSummary.js"),
-  purchase: () => import("../../models/purcharsing/purchaseInventory.js"),
-  products: () => import("../../models/projectManger/product.js"),
+  purchase: () => import("../../models/purchasing/purchaseInventory.js"),
+  products: () => import("../../models/projectManager/product.js"),
   expenses: () => import("../../models/expenses/addExpense.js"),
   staff: () => import("../../models/staffMember/staff.js"),
   StockAdjustment: () => import("../../models/stock/stockAdjustment.js"),
   stockadjustments: () => import("../../models/stock/stockAdjustment.js"),
   stockTransfer: () => import("../../models/stock/stockTransfer.js"),
   stocktransfers: () => import("../../models/stock/stockTransfer.js"),
-  purchaseReturn: () => import("../../models/purcharsing/purchaseReturns.js"),
-  paymentsOut: () => import("../../models/purcharsing/purchaseOut.js"),
+  purchaseReturn: () => import("../../models/purchasing/purchaseReturns.js"),
+  paymentsOut: () => import("../../models/purchasing/purchaseOut.js"),
   salesReturn: () => import("../../models/sale/saleReturn.js"),
   transactions: () => import("../../models/accounts/Transaction.js"),
   mrcashes: () => import("../../models/accounts/MRCash.js"),
@@ -199,7 +199,7 @@ const resolveProductNameFromAdjustmentDoc = async (doc) => {
 
   if (doc.productId) {
     try {
-      const Product = (await import("../../models/projectManger/product.js"))
+       const Product = (await import("../../models/projectManager/product.js"))
         .default;
       const idToQuery = mongoose.Types.ObjectId.isValid(String(doc.productId))
         ? doc.productId

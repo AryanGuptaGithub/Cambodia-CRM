@@ -1,6 +1,6 @@
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
-import PurchaseInventory from "../../models/purcharsing/purchaseInventory.js";
+import PurchaseInventory from "../../models/purchasing/purchaseInventory.js";
 import Expense from "../../models/expenses/addExpense.js";
 import Payroll from "../../models/Hrm/Payroll.js";
 import ExcelJS from "exceljs";

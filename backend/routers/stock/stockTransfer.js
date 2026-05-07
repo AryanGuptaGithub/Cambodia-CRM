@@ -2,7 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import StockTransfer from "../../models/stock/stockTransfer.js";
 import StockTransferToMR from "../../models/stock/stockTransferToMR.js";
-import Product from "../../models/projectManger/product.js";
+import Product from "../../models/projectManager/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";

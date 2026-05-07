@@ -1,4 +1,4 @@
-import ProductType from "../../models/projectManger/productType.js"
+import ProductType from "../../models/projectManager/productType.js";
 import express from "express";
 const router = express.Router();
 

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 
-import PurchaseInventory from "../models/purcharsing/purchaseInventory.js";
+import PurchaseInventory from "../models/purchasing/purchaseInventory.js";
 import Supplier from "../models/master/supplier.js";
 
 dotenv.config();

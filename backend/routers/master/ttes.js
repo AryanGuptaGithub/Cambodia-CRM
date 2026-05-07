@@ -6,7 +6,7 @@ import MRCash from "../../models/accounts/MRCash.js";
 import Staff from "../../models/staffMember/staff.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import PaymentStatus from "../../models/paymentStatus.js";
-import Product from "../../models/projectManger/product.js";
+import Product from "../../models/projectManager/product.js";
 import StockAdjustment from "../../models/stock/stockAdjustment.js";
 
 const router = express.Router();

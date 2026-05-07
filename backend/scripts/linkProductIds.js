@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 
-import PurchaseInventory from "../models/purcharsing/purchaseInventory.js";
+import PurchaseInventory from "../models/purchasing/purchaseInventory.js";
 import SaleSummary from "../models/sale/saleSummary.js";
-import Product from "../models/projectManger/product.js";
+import Product from "../models/projectManager/product.js";
 
 dotenv.config();
 

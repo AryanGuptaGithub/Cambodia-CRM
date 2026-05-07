@@ -1,9 +1,9 @@
 import express from "express";
 import ExcelJS from "exceljs";
-import Product from "../../models/projectManger/product.js";
+import Product from "../../models/projectManager/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
-import Purchase from "../../models/purcharsing/purchaseInventory.js";
+import Purchase from "../../models/purchasing/purchaseInventory.js";
 import DailySampleReport from "../../models/reports/dailysample.js";
 
 const router = express.Router();

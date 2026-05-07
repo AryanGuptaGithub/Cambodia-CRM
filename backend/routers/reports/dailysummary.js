@@ -1,6 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
-import Product from "../../models/projectManger/product.js";
+import Product from "../../models/projectManager/product.js";
 import { DailySummary } from "../../models/reports/dailysummary.js";
 
 const router = express.Router();

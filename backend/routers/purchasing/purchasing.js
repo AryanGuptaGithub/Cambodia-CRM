@@ -1,9 +1,9 @@
 // routes/purcharsing/purcharsing.js  –  full file with activity logging
 import express from "express";
 import mongoose from "mongoose";
-import purchaseInventory from "../../models/purcharsing/purchaseInventory.js";
+import purchaseInventory from "../../models/purchasing/purchaseInventory.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
-import Product from "../../models/projectManger/product.js";
+import Product from "../../models/projectManager/product.js";
 import ExcelJS from "exceljs";
 import dayjs from "dayjs";
 import { protect } from "../../middleware/auth.js";

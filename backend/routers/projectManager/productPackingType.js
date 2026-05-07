@@ -1,5 +1,5 @@
 import express from "express";
-import ProductPackingType from "../../models/projectManger/ProductPackingType.js"; 
+import ProductPackingType from "../../models/projectManager/ProductPackingType.js"; 
 
 const router = express.Router();
 

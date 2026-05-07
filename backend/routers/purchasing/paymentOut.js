@@ -1,6 +1,6 @@
 // routes/purcharsing/purchaseOut.js  –  full file with activity logging
 import express from "express";
-import PaymentsOut from "../../models/purcharsing/purchaseOut.js";
+import PaymentsOut from "../../models/purchasing/purchaseOut.js";
 import CompanyAccount from "../../models/accounts/Destination.js";
 import { protect } from "../../middleware/auth.js";
 import { allowAdminOnly } from "../../middleware/allowAdminOnly.js";
