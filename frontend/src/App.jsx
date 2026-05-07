@@ -119,7 +119,7 @@ import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
 import AddPayroll from "./pages/HRM/addPayroll";
 import AddMrBasicPayroll from "./pages/HRM/AddMrBasicPayroll";
-import MrBasicPayroll from "./pages/HRM/MRBasicPayroll";
+import MrBasicPayroll from "./pages/HRM/MrBasicPayroll";
 
 // Account pages
 import CashAndBank from "./pages/Account/CashAndBank";
@@ -447,7 +447,7 @@ function App() {
           </Route>
 
 
-           {/* Observability routes */}
+          {/* Observability routes */}
           <Route path="observabilitylayout" element={<ObservabilityLayout />}>
             <Route index element={<ObservabilityDashboard />} />
             <Route path="events" element={<ObservabilityDashboard tab="events" />} />
@@ -456,7 +456,7 @@ function App() {
             <Route path="logs" element={<LogViewer />} />
           </Route>
 
-          
+
 
         </Route>
       </Routes>
