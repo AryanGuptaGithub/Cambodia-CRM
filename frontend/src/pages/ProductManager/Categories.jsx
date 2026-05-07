@@ -1,26 +1,26 @@
 import React, { useState } from "react";
 import { Search, Plus, Upload, Edit, Trash2, X } from "lucide-react";
-import parenteralLogo from "../../../public/categories/parenteral.jpg";
-import liquidLogo from "../../../public/categories/liquid.jpg";
-import solidLogo from "../../../public/categories/solid.jpg";
-import("../ProductManager/categories.css");
+// import parenteralLogo from "../../../public/categories/parenteral.jpg";
+// import liquidLogo from "../../../public/categories/liquid.jpg";
+// import solidLogo from "../../../public/categories/solid.jpg";
+import "./Categories.css";
 import SampleExcelDownloadProduct from "../../excels/SampleExcelDownloadProduct";
 
 const initialCategories = [
   {
     id: 1,
     name: "Parenteral",
-    logo: parenteralLogo,
+    logo: "/categories/parenteral.jpg",
   },
   {
     id: 2,
     name: "Liquid",
-    logo: liquidLogo,
+    logo: "/categories/liquid.jpg",
   },
   {
     id: 3,
     name: "Solid",
-    logo: solidLogo,
+    logo: "/categories/solid.jpg",
   },
 ];
 
