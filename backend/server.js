@@ -209,6 +209,10 @@ connectDB(process.env.MONGODB_URI)
 //  ROUTES
 // ============================================================
 
+app.get("/", (req, res) => {
+  res.json({ status: "API running" });
+});
+
 // ── Health check ─────────────────────────────────────────────
 app.get("/health",  (req, res) => {
   res.json({
