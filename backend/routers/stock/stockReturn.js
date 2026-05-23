@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import StockReturn from "../../models/stock/StockReturn.js";
-import StockInMrHand from "../../models/stock/stockInMRHand.js";
+import StockInMrHand from "../../models/stock/StockInMRHand.js";
 import MRCash from "../../models/accounts/MRCash.js";
 import MR from "../../models/staffMember/staff.js";
 import { protect } from "../../middleware/auth.js";
