@@ -6,7 +6,7 @@ import Expense from "../../models/expenses/addExpense.js";
 import ExpenseCategory from "../../models/expenses/addExpenseCategary.js";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
-import stockinmrhands from "../../models/stock/stockInMRHand.js";
+import stockinmrhands from "../../models/stock/StockInMRHand.js";
 
 const router = express.Router();
 
